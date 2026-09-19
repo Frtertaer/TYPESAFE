@@ -1,0 +1,40 @@
+{
+  "state": {
+    "task": "Add JWT access tokens plus refresh tokens",
+    "stack": "existing Node API with cookie session middleware",
+    "excerpts": {
+      "middleware": "app.use(session({ ... }))",
+      "routes": "router.post('/login', ...)"
+    }
+  },
+  "irreversible": false,
+  "questions": {
+    "where": {
+      "type": "choice",
+      "instructions": "Where should auth token logic live?",
+      "criteria": {
+        "new_module": "New auth module, keep session middleware as-is for now",
+        "extend_session": "Extend the existing session middleware",
+        "none": "Do not add auth in this change"
+      }
+    },
+    "touch_middleware": {
+      "type": "noul",
+      "instructions": "Should existing session middleware be modified in this change?",
+      "criteria": {
+        "true": "Session middleware must change for JWT+refresh to be correct",
+        "false": "Can land JWT+refresh without editing that middleware now"
+      }
+    },
+    "risk": {
+      "type": "score",
+      "instructions": "How risky is changing the current auth scheme?",
+      "criteria": [
+        "Safe and localized",
+        "Localized risk",
+        "Cross-cutting risk",
+        "High blast radius"
+      ]
+    }
+  }
+}

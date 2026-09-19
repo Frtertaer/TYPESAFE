@@ -9,10 +9,11 @@ Install copies `skills/jev-consult/` into **user** skill dirs so the mode works 
 | Codex | `%USERPROFILE%\.codex\skills\jev-consult` and `%USERPROFILE%\.agents\skills\jev-consult` | Append-only marked block in `%USERPROFILE%\.codex\AGENTS.md` |
 | Grok Build | `%USERPROFILE%\.grok\skills\jev-consult` | `%USERPROFILE%\.grok\AGENTS.md` (created if missing) |
 
-Repo-local (this git tree, no install needed while cwd is the repo):
+Repo-local (committed; clone/open needs no copy):
 
-- `AGENTS.md` / `CLAUDE.md` at the root
+- `AGENTS.md` / `CLAUDE.md` / `.hermes.md` at the root
 - CLI: `python skills/jev-consult/scripts/jev.py`
+- One command after clone: `python scripts/install.py` (`install.cmd` / `install.sh`)
 
 Grok also reads `AGENTS.md` and `CLAUDE.md`. Codex user skills are documented as `%USERPROFILE%\.agents\skills`; some builds also scan `%USERPROFILE%\.codex\skills`. The installer writes both.
 

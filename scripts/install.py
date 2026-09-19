@@ -47,7 +47,65 @@ def hermes_home() -> Path:
     env = os.environ.get("HERMES_HOME", "").strip()
     if env:
         return Path(env)
-    return Path("D:/Hermes/home")
+    home = user_home()
+    for candidate in (home / ".hermes", Path("D:/Hermes/home")):
+        if (candidate / "skills").is_dir():
+            return candidate
+    return home / ".hermes"
+
+
+def env_file_has_key(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        if key.strip() == "TYPESAFE_API_KEY" and value.strip().strip("\"'"):
+            return True
+    return False
+
+
+def key_is_set() -> bool:
+    if os.environ.get("TYPESAFE_API_KEY", "").strip():
+        return True
+    root = repo_root()
+    hermes = hermes_home()
+    for path in (root / ".env", hermes / ".env", user_home() / ".env"):
+        if env_file_has_key(path):
+            return True
+    return False
+
+
+def report_key() -> None:
+    if key_is_set():
+        sys.stdout.write("TYPESAFE_API_KEY: set\n")
+    else:
+        sys.stdout.write(
+            "TYPESAFE_API_KEY: missing (copy .env.example to .env or export it; never commit the key)\n"
+        )
+
+
+REPO_FILES = ("AGENTS.md", "CLAUDE.md", ".hermes.md")
+REPO_SNIPPET = """<!-- jev-consult:start -->
+# jev-consult
+
+User gives a plan. You inspect this repo. At architecture, deleting code, refactor vs rewrite, library choice, or "is this good enough", load `skills/jev-consult/SKILL.md` and run:
+
+```text
+python skills/jev-consult/scripts/jev.py ask request.json
+```
+
+Thresholds live only in `skills/jev-consult/policy.json`. Do not ask Jev for facts a tool can check. Never print `TYPESAFE_API_KEY`.
+
+After clone, one command wires user-scope Hermes / Claude Code / Codex / Grok Build:
+
+```text
+python scripts/install.py
+```
+<!-- jev-consult:end -->
+"""
 
 
 def targets(home: Path | None = None, hermes: Path | None = None) -> dict[str, dict[str, list[Path]]]:
@@ -100,12 +158,12 @@ def copy_skill(src: Path, dest_parent: Path, dry_run: bool) -> Path:
     return dest
 
 
-def upsert_snippet(path: Path, dry_run: bool) -> str:
+def upsert_snippet(path: Path, dry_run: bool, snippet: str | None = None) -> str:
     if dry_run:
         return "upsert " + str(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     text = path.read_text(encoding="utf-8") if path.exists() else ""
-    block = SNIPPET.strip() + "\n"
+    block = (snippet or SNIPPET).strip() + "\n"
     if MARKER_START in text and MARKER_END in text:
         pre = text.split(MARKER_START)[0]
         post = text.split(MARKER_END, 1)[1]
@@ -147,7 +205,17 @@ def install(agents: list[str], dry_run: bool) -> int:
             sys.stdout.write("%s skill -> %s\n" % (name, dest))
         for instruction in spec["instructions"]:
             sys.stdout.write("%s %s\n" % (name, upsert_snippet(instruction, dry_run)))
+    write_repo_instructions(dry_run)
+    if not dry_run:
+        report_key()
     return 0
+
+
+def write_repo_instructions(dry_run: bool) -> None:
+    root = repo_root()
+    for name in REPO_FILES:
+        path = root / name
+        sys.stdout.write("repo %s\n" % upsert_snippet(path, dry_run, REPO_SNIPPET))
 
 
 def uninstall(agents: list[str], dry_run: bool) -> int:
@@ -174,7 +242,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--uninstall", action="store_true")
+    parser.add_argument(
+        "--check-key",
+        action="store_true",
+        help="Print whether TYPESAFE_API_KEY is set (never the value).",
+    )
     args = parser.parse_args(argv)
+    if args.check_key:
+        report_key()
+        return 0 if key_is_set() else 1
     agents = parse_agents(args.agents)
     if args.uninstall:
         return uninstall(agents, args.dry_run)

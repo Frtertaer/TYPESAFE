@@ -2,37 +2,44 @@
 
 Режим: ты даёшь только задачу/план. ИИ-кодер сам смотрит проект и на развилках спрашивает **Jev** (TypeSafe System One). Jev не пишет «сделай вот это» текстом — только Choice / Noul / Score. Кодер переводит ответ в действие или эскалирует тебе.
 
-Работает в любой сессии **Hermes**, **Claude Code (desktop)**, **Codex**, **Grok Build** после `install.py`. В другие агенты (Cursor, Gemini, …) установщик не ставит.
+После clone **одна команда** подключает режим в любой сессии **Hermes**, **Claude Code (desktop)**, **Codex**, **Grok Build**. В Cursor / Gemini / прочие установщик не ставит.
+
+```text
+python scripts/install.py
+```
+
+Windows: `install.cmd`. Unix: `sh install.sh`. То же самое, что команда выше.
+
+Ключ `TYPESAFE_API_KEY` человек кладёт сам (`.env.example` → локальный `.env` или env харнесса). В git ключа нет. Инсталлятор пишет `TYPESAFE_API_KEY: set` или `missing`, значение не печатает.
+
+Открыл этот репозиторий как проект — копировать ничего не нужно: `AGENTS.md`, `CLAUDE.md` и `.hermes.md` уже в git.
 
 ## Что в репозитории
 
 | Путь | Зачем |
 | --- | --- |
-| `skills/jev-consult/SKILL.md` | Скилл для агента |
-| `skills/jev-consult/policy.json` | Единственный файл порогов и шаблонов вопросов |
+| `AGENTS.md` / `CLAUDE.md` / `.hermes.md` | Инструкции агенту из коробки |
+| `skills/jev-consult/SKILL.md` | Скилл |
+| `skills/jev-consult/policy.json` | Единственный файл порогов и шаблонов |
 | `skills/jev-consult/scripts/jev.py` | CLI без зависимостей: `ask` / `decide` / `ping` |
 | `scripts/install.py` | Копия скилла только в 4 харнесса |
-| `docs/for-agents.md` | Короткий текст для `AGENTS.md` / `CLAUDE.md` |
+| `install.cmd` / `install.sh` | Обёртки одной команды |
 | `tests/test_jev.py` | Юнит-тесты без живого API |
 
-Jev не помнит прошлые вызовы. В `state` — факты и куски кода, не одни имена файлов. Не спрашивать то, что проверяется инструментом (файл есть, тесты красные, grep).
+Jev не помнит прошлые вызовы. В `state` — факты и куски кода. Не спрашивать то, что проверяется инструментом.
 
-Политика: высокий confidence / однозначный Choice → делать. Noul `0.5` = «да и нет одинаково», не «средне». На необратимом шаге при низкой уверенности — спросить человека. «Лучший вариант» = max probability, не порог на все опции.
+Политика: высокий confidence / однозначный Choice → делать. Noul `0.5` = «да и нет одинаково», не «средне». На необратимом шаге при низкой уверенности — спросить человека. «Лучший вариант» = max probability.
 
-## Установка на этой машине
-
-Ключ только в окружении или локальном `.env`, **не в git**. Для Hermes он уже в `%HERMES_HOME%\.env` как `TYPESAFE_API_KEY`.
+## После установки
 
 ```text
 python tests/test_jev.py
-python scripts/install.py --dry-run
-python scripts/install.py
 python skills/jev-consult/scripts/jev.py ping
 ```
 
 Куда копируется скилл: `skills/jev-consult/references/harnesses.md`.
 
-После правки `policy.json` снова запусти `python scripts/install.py`.
+После правки `policy.json` снова `python scripts/install.py`.
 
 Снять:
 
@@ -40,18 +47,12 @@ python skills/jev-consult/scripts/jev.py ping
 python scripts/install.py --uninstall
 ```
 
-## Ключ в другом харнессе
+## Новая сессия
 
-Скопируй `.env.example` → `.env` рядом с проектом **или** задай `TYPESAFE_API_KEY` в окружении того агента. Не клади ключ в чат и не коммить `.env`.
+Jev — не демон. Он не стартует сам. Новая сессия подхватит режим, если:
 
-## Сохранить в git
+1. скилл лежит в user-dir харнесса (это делает `install.py`), **или** агент открыл этот репозиторий (`AGENTS.md` / `CLAUDE.md` / `.hermes.md`);
+2. задача похожа на код/архитектуру (описание скилла);
+3. для живого вызова задан `TYPESAFE_API_KEY` в env этого харнесса.
 
-```text
-cd Desktop/jev-consult
-git init
-git add .
-git status
-git commit -m "Add jev-consult portable coder-Jev mode"
-```
-
-Потом `git remote add origin <url>` и push. Проверь, что `.env` в `.gitignore` и в индексе нет ключа.
+Hermes на этой машине читает ключ из `%HERMES_HOME%\\.env`. Claude / Codex / Grok без своего ключа скилл увидят, API не вызовут.

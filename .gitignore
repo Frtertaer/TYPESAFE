@@ -10,3 +10,6 @@ __pycache__/
 Thumbs.db
 *.log
 .jev-consult-source
+.verify-out.txt
+.listing.txt
+.session-*.txt

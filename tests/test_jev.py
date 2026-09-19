@@ -183,6 +183,36 @@ class InstallTests(unittest.TestCase):
         self.assertNotIn(".gemini", gemini_paths)
         self.assertNotIn(".cursor", gemini_paths)
 
+    def test_repo_instruction_files_exist(self) -> None:
+        for name in ("AGENTS.md", "CLAUDE.md", ".hermes.md"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            self.assertIn("<!-- jev-consult:start -->", text)
+            self.assertIn("skills/jev-consult/SKILL.md", text)
+
+    def test_wrappers_exist(self) -> None:
+        self.assertTrue((ROOT / "install.cmd").is_file())
+        self.assertTrue((ROOT / "install.sh").is_file())
+
+    def test_report_key_never_prints_value(self) -> None:
+        old = os.environ.pop("TYPESAFE_API_KEY", None)
+        try:
+            os.environ["TYPESAFE_API_KEY"] = "apikey_SHOULD_NOT_APPEAR"
+            self.assertTrue(install.key_is_set())
+            from io import StringIO
+            from contextlib import redirect_stdout
+
+            buf = StringIO()
+            with redirect_stdout(buf):
+                install.report_key()
+            out = buf.getvalue()
+            self.assertIn("TYPESAFE_API_KEY: set", out)
+            self.assertNotIn("apikey_SHOULD_NOT_APPEAR", out)
+        finally:
+            if old is None:
+                os.environ.pop("TYPESAFE_API_KEY", None)
+            else:
+                os.environ["TYPESAFE_API_KEY"] = old
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

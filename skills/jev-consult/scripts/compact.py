@@ -1220,6 +1220,12 @@ def cmd_compact(args: argparse.Namespace) -> int:
     else:
         asker = jev_asker
     result = compact_or_keep(messages, asker, options)
+    if getattr(args, "dry_run", False):
+        result["messages"] = messages
+        stats = result.setdefault("stats", {})
+        stats["messagesAfter"] = stats.get("messagesBefore")
+        stats["charsAfter"] = stats.get("charsBefore")
+        stats["dry_run"] = True
     text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     if args.output:
         Path(args.output).write_text(text, encoding="utf-8")
@@ -1302,6 +1308,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--preserve-recent", type=int, default=PRESERVE_RECENT)
     parser.add_argument("--truncate-head-chars", type=int, default=TRUNCATE_HEAD_CHARS)
     parser.add_argument("--min-reduction", type=float, default=MIN_REDUCTION)
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Compute decisions and stats but emit the original messages unchanged.",
+    )
     parser.add_argument(
         "--keep-text",
         default="",

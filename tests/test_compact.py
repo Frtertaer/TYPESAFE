@@ -1379,5 +1379,41 @@ class KeepTextTests(unittest.TestCase):
         self.assertNotIn("k1", self._kept_ids(out))
 
 
+class DryRunTests(unittest.TestCase):
+    def setUp(self):
+        self._spill_env = patch.dict(os.environ, {"JEV_CONSULT_SPILL": "0"})
+        self._spill_env.start()
+        self.addCleanup(self._spill_env.stop)
+
+    def test_dry_run_returns_original_messages(self):
+        import io
+        import json as _json
+        from contextlib import redirect_stdout
+
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "ok"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.json"
+            path.write_text(_json.dumps(messages), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = C.main(
+                    [
+                        str(path),
+                        "--history",
+                        "--fake",
+                        "--min-reduction",
+                        "0",
+                        "--dry-run",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            out = _json.loads(buf.getvalue())
+            self.assertTrue(out["stats"]["dry_run"])
+            self.assertEqual(len(out["messages"]), len(messages))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

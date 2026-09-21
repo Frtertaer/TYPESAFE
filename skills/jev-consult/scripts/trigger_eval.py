@@ -610,8 +610,20 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0 if result["ok"] else 1
     if args.json:
-        payload = dict(result)
-        payload["cases"] = _rows()
+        if args.summary:
+            payload = {
+                "ok": result["ok"],
+                "margin": result["margin"],
+                "worst_positive": result["worst_positive"],
+                "best_negative": result["best_negative"],
+                "n_positives": result["n_positives"],
+                "n_negatives": result["n_negatives"],
+                "coverage": result["coverage"],
+                "hits": result["hits"],
+            }
+        else:
+            payload = dict(result)
+            payload["cases"] = _rows()
         sys.stdout.write(json.dumps(payload, indent=2) + "\n")
     else:
         if not args.quiet and not args.summary:

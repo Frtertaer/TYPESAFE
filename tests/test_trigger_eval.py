@@ -485,6 +485,16 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertIn("positives=", out)
         self.assertIn("negatives=", out)
         self.assertNotIn("should_trigger=", out)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--summary", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertIn("n_positives", payload)
+        self.assertIn("margin", payload)
+        self.assertIn("coverage", payload)
+        self.assertNotIn("cases", payload)
 
     def test_desc_tokens_prints_token_set(self) -> None:
         buf = io.StringIO()

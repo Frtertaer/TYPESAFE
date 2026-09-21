@@ -179,6 +179,29 @@ def cmd_record(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_prune(args: argparse.Namespace) -> int:
+    """Delete the trace file when its mtime is older than --older-than seconds."""
+    path = Path(args.file) if args.file else default_path()
+    if not path.is_file():
+        emit({"path": str(path), "removed": False, "reason": "missing"})
+        return 0
+    try:
+        age = time.time() - path.stat().st_mtime
+    except OSError as exc:
+        emit({"path": str(path), "removed": False, "reason": "stat failed: %s" % exc})
+        return 0
+    if age < float(args.older_than):
+        emit({"path": str(path), "removed": False, "reason": "fresh", "age_seconds": round(age, 3)})
+        return 0
+    try:
+        path.unlink()
+    except OSError as exc:
+        emit({"path": str(path), "removed": False, "reason": "unlink failed: %s" % exc})
+        return 1
+    emit({"path": str(path), "removed": True, "age_seconds": round(age, 3)})
+    return 0
+
+
 def cmd_state(args: argparse.Namespace) -> int:
     """Emit the trace as a bare state dict for `jev.py scaffold --state`."""
     path = Path(args.file) if args.file else default_path()
@@ -221,6 +244,16 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--kind", default="")
     rec.add_argument("--step", default="")
     rec.set_defaults(func=cmd_record)
+    prune_cmd = sub.add_parser(
+        "prune", help="Delete the trace file when older than --older-than seconds"
+    )
+    prune_cmd.add_argument(
+        "--older-than",
+        type=float,
+        required=True,
+        help="Age in seconds before the trace may be removed",
+    )
+    prune_cmd.set_defaults(func=cmd_prune)
     state_cmd = sub.add_parser(
         "state", help="Emit trace as a bare state dict (scaffold --state input)"
     )

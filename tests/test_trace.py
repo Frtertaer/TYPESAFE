@@ -273,6 +273,44 @@ class TraceTests(unittest.TestCase):
             self.assertIn("(missing)", buf.getvalue())
             self.assertNotIn("age:", buf.getvalue())
 
+    def test_prune_removes_only_stale(self) -> None:
+        import io
+        import os
+        import time
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                tr.main(["--file", str(path), "init", "--plan", "P"])
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "prune", "--older-than", "3600"])
+            self.assertEqual(rc, 0)
+            self.assertFalse(json.loads(buf.getvalue())["removed"])
+            self.assertTrue(path.is_file())
+            old = time.time() - 7200
+            os.utime(path, (old, old))
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "prune", "--older-than", "3600"])
+            self.assertEqual(rc, 0)
+            self.assertTrue(json.loads(buf.getvalue())["removed"])
+            self.assertFalse(path.exists())
+
+    def test_prune_missing_file_ok(self) -> None:
+        import io
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(
+                    ["--file", str(Path(tmp) / "none.json"), "prune", "--older-than", "1"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue())["reason"], "missing")
+
     def test_state_missing_file_empty(self) -> None:
         import io
         from unittest.mock import patch

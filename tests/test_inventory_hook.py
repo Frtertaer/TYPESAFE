@@ -85,6 +85,23 @@ class InventoryHookTests(unittest.TestCase):
             self.assertTrue(HOOK.LAST_DECISION["explicit"])
             self.assertEqual(HOOK.LAST_DECISION["jev_status"], "winner")
 
+    def test_no_sidecar_env_skips_sidecar_write(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_NOSIDECAR": "1"}):
+                out = HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "Add JWT access tokens in Python",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            self.assertIn("jwt-auth", out["hookSpecificOutput"]["additionalContext"])
+            self.assertFalse((Path(tmp) / ".jev-tools.json").exists())
+
     def test_hook_off_env_short_circuits(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

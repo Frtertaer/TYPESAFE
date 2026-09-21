@@ -325,7 +325,8 @@ def handle(
         "stale_sidecar": stale_match,
     }
     append_decision(LAST_DECISION)
-    if cwd is not None:
+    no_sidecar = os.environ.get("JEV_HOOK_NOSIDECAR", "").strip() in {"1", "true", "yes"}
+    if cwd is not None and not no_sidecar:
         try:
             write_sidecar(cwd / SIDECAR_NAME, harness, prompt, picked, extra)
         except OSError:

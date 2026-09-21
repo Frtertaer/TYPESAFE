@@ -6,6 +6,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -307,6 +308,41 @@ class CatalogFillTests(unittest.TestCase):
             self.assertEqual(
                 rows, [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
             )
+            self.assertFalse((base / INV.SIDECAR_NAME).exists())
+
+    def test_watch_emits_hits_ticks(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hits = [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                FILL, "read_catalog_cache", return_value=hits
+            ), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--cwd",
+                    str(base),
+                    "--watch",
+                    "0.01",
+                ],
+            ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "2"}), patch(
+                "sys.stdout", buf
+            ):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(t["hits"] == 1 and t["cached"] for t in ticks))
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
 
     def test_json_no_task_emits_object(self) -> None:

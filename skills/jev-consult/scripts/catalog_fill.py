@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -419,6 +420,13 @@ def main() -> int:
         metavar="NAME",
         help="Print one catalog hit's full JSON record by name and exit.",
     )
+    parser.add_argument(
+        "--watch",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Re-run the catalog search for --task every S seconds, printing {ts,hits,cached} ticks (read-only; JEV_CATALOG_WATCH_MAX caps ticks).",
+    )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     task = args.task
@@ -435,6 +443,26 @@ def main() -> int:
         return 0
     home = Path(args.home) if args.home else user_home()
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home()
+    if args.watch and args.watch > 0:
+        try:
+            max_ticks = int(os.environ.get("JEV_CATALOG_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        while max_ticks <= 0 or ticks < max_ticks:
+            tick = {"ts": int(time.time())}
+            try:
+                hits = search_hits(task) or []
+                tick["hits"] = len(hits)
+                tick["cached"] = read_catalog_cache(task) is not None
+            except Exception:
+                tick["hits"] = 0
+                tick["cached"] = False
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            time.sleep(args.watch)
+        return 0
     if dest == "auto":
         dest = detect_harness(Path(__file__))
     if args.list:

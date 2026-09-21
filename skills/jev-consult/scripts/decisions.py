@@ -481,7 +481,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="With --prune: report what would be dropped without rewriting the log",
+        help="With --prune/--drop-bad: report what would be dropped without rewriting the log",
+    )
+    parser.add_argument(
+        "--drop-bad",
+        action="store_true",
+        help="Rewrite the log dropping unparseable lines (keeps all well-formed entries)",
     )
     parser.add_argument("--json", action="store_true", help="Machine-readable stats")
     parser.add_argument(
@@ -515,6 +520,16 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("no decisions log at %s\n" % path)
         return 1
     entries, bad = load_entries(path)
+    if getattr(args, "drop_bad", False):
+        if getattr(args, "dry_run", False):
+            sys.stderr.write("dry-run: would drop %d bad line(s)\n" % bad)
+        elif bad:
+            try:
+                prune_entries(path, entries)
+                sys.stderr.write("dropped %d bad line(s)\n" % bad)
+            except OSError as exc:
+                sys.stderr.write("drop-bad failed: %s\n" % exc)
+                return 1
     try:
         since = _ts_arg(args.since)
         until = _ts_arg(args.until)

@@ -242,6 +242,31 @@ class CliTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("1", proc.stdout)
 
+    def test_drop_bad_rewrites_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text(
+                '{"ts":1,"jev_status":"winner","prompt_head":"a"}\n'
+                "not json\n"
+                '[1,2]\n'
+                '{"ts":2,"jev_status":"none","prompt_head":"b"}\n',
+                encoding="utf-8",
+            )
+            proc = self.run_cli("--file", str(path), "--drop-bad", "--count")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("dropped 2 bad line(s)", proc.stderr)
+            lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all(json.loads(l) for l in lines))
+            _, bad = decisions.load_entries(path)
+            self.assertEqual(bad, 0)
+            # dry-run does not rewrite
+            path.write_text("bad line\n{\"ts\":1}\n", encoding="utf-8")
+            proc = self.run_cli("--file", str(path), "--drop-bad", "--dry-run")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("dry-run: would drop 1 bad line(s)", proc.stderr)
+            self.assertIn("bad line", path.read_text(encoding="utf-8"))
+
     def test_min_latency_filters_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

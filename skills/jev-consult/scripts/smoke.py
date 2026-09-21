@@ -157,6 +157,32 @@ def step_trace(tmp: Path) -> dict:
     return _step("trace", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 
+def step_skill_lint(tmp: Path) -> dict:
+    rc, out = _run([str(SCRIPTS / "skill_lint.py"), str(SKILL_DIR / "SKILL.md")])
+    return _step("skill_lint", rc == 0, out.strip()[:160] or "rc=%d" % rc)
+
+
+def step_question_lint(tmp: Path) -> dict:
+    req = tmp / "req.json"
+    req.write_text(
+        json.dumps(
+            {
+                "questions": {
+                    "q": {
+                        "type": "noul",
+                        "instructions": "Should the coder proceed with the plan?",
+                        "criteria": {"true": "plan is sound", "false": "plan is risky"},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    rc, out = _run([str(SCRIPTS / "question_lint.py"), str(req)])
+    ok = rc == 0 and "lint:" in out
+    return _step("question_lint", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
+
+
 def step_doctor(tmp: Path) -> dict:
     rc, out = _run(
         [
@@ -190,6 +216,8 @@ def main(argv: list[str] | None = None) -> int:
             step_compact_fake,
             step_decisions,
             step_trace,
+            step_skill_lint,
+            step_question_lint,
             step_doctor,
         ):
             try:

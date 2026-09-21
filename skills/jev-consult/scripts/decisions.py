@@ -260,6 +260,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print unique outcome values with counts, sorted desc",
     )
     parser.add_argument(
+        "--fills",
+        action="store_true",
+        help="Print unique fill kind values with counts, sorted desc",
+    )
+    parser.add_argument(
         "--prune",
         action="store_true",
         help="Rewrite the log keeping only entries matching --days/--since/--harness/--status filters",
@@ -313,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
             "pruned %d of %d entries (kept %d)\n"
             % (len(total) - len(entries), len(total), len(entries))
         )
-    if args.statuses or args.harnesses or args.winners or args.outcomes:
+    if args.statuses or args.harnesses or args.winners or args.outcomes or args.fills:
         counts: dict[str, int] = {}
         if args.winners:
             for item in entries:
@@ -324,6 +329,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if args.outcomes:
                 field = "outcome"
+            elif args.fills:
+                field = "fill"
             elif args.harnesses:
                 field = "harness"
             else:

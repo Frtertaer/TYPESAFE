@@ -194,13 +194,14 @@ def cmd_record(args: argparse.Namespace) -> int:
     data = record(load(path), pick=args.pick, kind=args.kind or "")
     if args.step:
         data["current_step"] = args.step
-    if args.note:
+    note_text = sys.stdin.read().strip() if args.note == "-" else args.note
+    if note_text:
         notes = data.get("notes")
         if not isinstance(notes, list):
             notes = []
         now = time.time()
         iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
-        notes.append({"ts": now, "iso": iso, "text": args.note})
+        notes.append({"ts": now, "iso": iso, "text": note_text})
         data["notes"] = notes[-50:]
     save(data, path)
     emit({"path": str(path), "trace": data})
@@ -317,7 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--pick", required=True)
     rec.add_argument("--kind", default="")
     rec.add_argument("--step", default="")
-    rec.add_argument("--note", default="", help="Append a freeform note to trace.notes")
+    rec.add_argument("--note", default="", help="Append a freeform note to trace.notes ('-' reads stdin)")
     rec.set_defaults(func=cmd_record)
     prune_cmd = sub.add_parser(
         "prune", help="Delete the trace file when older than --older-than seconds"

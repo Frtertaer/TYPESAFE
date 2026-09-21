@@ -318,6 +318,16 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(rows[0]["text"], "n1")
             self.assertIn("iso", rows[0])
 
+    def test_cli_record_note_stdin_dash(self) -> None:
+        import io
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with patch("sys.stdin", io.StringIO("from stdin\n")):
+                tr.main(["--file", str(path), "record", "--pick", "x", "--note", "-"])
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["notes"][0]["text"], "from stdin")
+
     def test_cli_record_no_note_no_notes_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "trace.json"

@@ -212,6 +212,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Override the scorer's margin factor (default 1.15) for the verdict.",
     )
     parser.add_argument(
+        "--env",
+        action="store_true",
+        help="Print the resolved config (paths, margin, scorer) as JSON and exit.",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help=(
@@ -232,6 +237,24 @@ def main(argv: list[str] | None = None) -> int:
         help="Write a markdown eval report (verdict, stats, per-case table) to PATH.",
     )
     args = parser.parse_args(argv)
+    if args.env:
+        scorer_margin = None
+        if VENDORED_SCORER.is_file():
+            scorer_margin = getattr(
+                _load_scorer(VENDORED_SCORER), "MARGIN", 1.15
+            )
+        report = {
+            "cases": args.cases,
+            "cases_exists": Path(args.cases).is_file(),
+            "skill": args.skill,
+            "scorer": str(VENDORED_SCORER),
+            "scorer_exists": VENDORED_SCORER.is_file(),
+            "margin": args.margin if args.margin is not None else scorer_margin,
+            "margin_default": scorer_margin,
+            "desc_override": bool(args.desc),
+        }
+        sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        return 0
     if args.desc_tokens:
         if not VENDORED_SCORER.is_file():
             sys.stderr.write("missing vendored scorer (%s)\n" % VENDORED_SCORER)

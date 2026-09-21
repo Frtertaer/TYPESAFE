@@ -416,6 +416,22 @@ class TriggerEvalTests(unittest.TestCase):
         ]
         self.assertEqual(missing, [])
 
+    def test_env_reports_resolved_config(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--env"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertTrue(payload["cases_exists"])
+        self.assertTrue(payload["scorer_exists"])
+        self.assertEqual(payload["margin"], payload["margin_default"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            te.main(["--env", "--margin", "2.5", "--desc", "x"])
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["margin"], 2.5)
+        self.assertTrue(payload["desc_override"])
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

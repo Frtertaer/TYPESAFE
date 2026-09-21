@@ -1115,6 +1115,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
+    parser.add_argument(
+        "--diff",
+        metavar="OLD.json",
+        default="",
+        help="Compare the current scan's item ids against a payload saved via --out (uses installed_names when present, else shortlist ids); prints {added,removed} JSON and exits.",
+    )
     args = parser.parse_args(argv)
     if args.check_sidecar or args.check_miss:
         target = Path(args.check_sidecar or args.check_miss)
@@ -1196,6 +1202,32 @@ def main(argv: list[str] | None = None) -> int:
         "shortlist": picked,
         "catalogs": [{"name": name, "url": url} for name, url in catalogs()],
     }
+    if args.diff:
+        try:
+            old = json.loads(Path(args.diff).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            sys.stderr.write("cannot read %s: %s\n" % (args.diff, exc))
+            return 1
+        old_names = old.get("installed_names") if isinstance(old, dict) else None
+        if isinstance(old_names, list) and old_names:
+            old_ids = {str(x) for x in old_names}
+            cur_ids = {"%s:%s" % (i["kind"], i["name"]) for i in items}
+        else:
+            old_short = old.get("shortlist") if isinstance(old, dict) else None
+            old_short = old_short if isinstance(old_short, list) else []
+            old_ids = {str(i.get("id")) for i in old_short if isinstance(i, dict)}
+            cur_ids = {str(i.get("id")) for i in picked}
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "added": sorted(cur_ids - old_ids),
+                    "removed": sorted(old_ids - cur_ids),
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+        return 0
     if args.all_names:
         payload["installed_names"] = ["%s:%s" % (item["kind"], item["name"]) for item in items]
     if args.scores:

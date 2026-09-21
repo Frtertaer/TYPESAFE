@@ -229,6 +229,89 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(ticks[1]["added"], [])
         self.assertEqual(ticks[1]["removed"], ["b", "c"])
 
+    def test_diff_reports_added_removed_names(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        items = [
+            {"id": "s1", "kind": "skill", "name": "a"},
+            {"id": "m1", "kind": "mcp", "name": "c"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            old = Path(tmp) / "old.json"
+            old.write_text(
+                json.dumps({"installed_names": ["skill:a", "plugin:b"]}),
+                encoding="utf-8",
+            )
+            buf = StringIO()
+            with patch.object(inv, "scan", return_value=items):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness",
+                            "hermes",
+                            "--hermes-home",
+                            str(FIXTURE),
+                            "--diff",
+                            str(old),
+                        ]
+                    )
+            self.assertEqual(code, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["added"], ["mcp:c"])
+            self.assertEqual(out["removed"], ["plugin:b"])
+
+    def test_diff_falls_back_to_shortlist_ids(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        items = [{"id": "x", "kind": "skill", "name": "x"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            old = Path(tmp) / "old.json"
+            old.write_text(
+                json.dumps({"shortlist": [{"id": "x"}, {"id": "y"}]}),
+                encoding="utf-8",
+            )
+            buf = StringIO()
+            with patch.object(inv, "scan", return_value=items):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness",
+                            "hermes",
+                            "--hermes-home",
+                            str(FIXTURE),
+                            "--include",
+                            "x",
+                            "--diff",
+                            str(old),
+                        ]
+                    )
+            self.assertEqual(code, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["added"], [])
+            self.assertEqual(out["removed"], ["y"])
+
+    def test_diff_missing_file_rc1(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--diff",
+                    "no-such-file-12345.json",
+                ]
+            )
+        self.assertEqual(code, 1)
+
     def test_cli_json_shortlist(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

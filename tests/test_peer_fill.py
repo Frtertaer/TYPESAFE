@@ -349,5 +349,71 @@ class ReadMissPruneTests(unittest.TestCase):
             self.assertTrue(path.exists())  # unparseable files left alone
 
 
+class PeerFillE2ETests(unittest.TestCase):
+    """Subprocess: no_task / already_enough / no_peer tags."""
+
+    SCRIPT = SCRIPTS / "peer_fill.py"
+
+    def _run(self, argv: list[str], cwd: str, home: str):
+        import os
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        env["USERPROFILE"] = home
+        env["HOME"] = home
+        proc = subprocess.run(
+            [sys.executable, str(self.SCRIPT)] + argv,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            env=env,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stdout.strip()
+
+    def test_no_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self._run([], tmp, tmp), "no_task")
+
+    def test_no_peer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / ".codex" / "skills").mkdir(parents=True)
+            out = self._run(
+                ["--task", "jwt tokens", "--harness", "codex", "--home", str(home)],
+                tmp,
+                tmp,
+            )
+            self.assertEqual(out, "no_peer")
+
+    def test_already_enough_when_local_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            skill = home / ".codex" / "skills" / "jwt-auth"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: jwt-auth\ndescription: jwt\n---\n", encoding="utf-8"
+            )
+            out = self._run(
+                [
+                    "--task",
+                    "jwt tokens",
+                    "--harness",
+                    "codex",
+                    "--home",
+                    str(home),
+                    "--cwd",
+                    tmp,
+                ],
+                tmp,
+                tmp,
+            )
+            self.assertEqual(out, "already_enough")
+            self.assertTrue((Path(tmp) / ".jev-tools.json").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

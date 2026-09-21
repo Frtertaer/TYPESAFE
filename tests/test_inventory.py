@@ -161,6 +161,32 @@ class InventoryTests(unittest.TestCase):
         self.assertIn("https://skills.sh", out)
         self.assertIn("smithery", out)
 
+    def test_watch_ticks_emit_jsonl(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        buf = StringIO()
+        with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(FIXTURE),
+                        "--watch",
+                        "0.01",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        lines = buf.getvalue().splitlines()
+        ticks = [json.loads(l) for l in lines[1:] if l.startswith('{"ts"')]
+        self.assertEqual(len(ticks), 2)
+        self.assertIn("counts", ticks[0])
+        self.assertGreater(ticks[0]["counts"]["skill"], 0)
+        self.assertIn("shortlist", ticks[0])
+
     def test_cli_json_shortlist(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

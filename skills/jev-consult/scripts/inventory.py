@@ -1090,6 +1090,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--paths", action="store_true", help="Print bare shortlist item paths, one per line (for piping).")
     parser.add_argument("--count", action="store_true", help="Print only PICKED/SCANNED counts instead of the payload.")
     parser.add_argument("--kinds", action="store_true", help="Print per-kind counts (kind N per line) and exit.")
+    parser.add_argument(
+        "--watch",
+        metavar="SECONDS",
+        type=float,
+        default=0.0,
+        help="Rescan and reprint the JSON payload every SECONDS until interrupted.",
+    )
     parser.add_argument("--id", metavar="NAME", default="", help="Print the single matching item's JSON (matches id or name).")
     parser.add_argument(
         "--explain",
@@ -1265,6 +1272,31 @@ def main(argv: list[str] | None = None) -> int:
         write_ask(Path(args.write_ask), args.task, harness, picked)
     if args.sidecar:
         write_sidecar(Path(args.sidecar), harness, args.task, picked)
+    watch_seconds = getattr(args, "watch", 0.0) or 0.0
+    if watch_seconds <= 0:
+        return 0
+    try:
+        max_ticks = int(os.environ.get("JEV_INV_WATCH_MAX", "") or 0)
+    except ValueError:
+        max_ticks = 0
+    ticks = 0
+    while max_ticks <= 0 or ticks < max_ticks:
+        time.sleep(watch_seconds)
+        fresh = scan(harness, home=home, hermes=hermes)
+        if kinds:
+            fresh = [item for item in fresh if item["kind"] in kinds]
+        tick = {
+            "ts": int(time.time()),
+            "counts": {
+                "skill": sum(1 for i in fresh if i["kind"] == KIND_SKILL),
+                "plugin": sum(1 for i in fresh if i["kind"] == KIND_PLUGIN),
+                "mcp": sum(1 for i in fresh if i["kind"] == KIND_MCP),
+            },
+            "shortlist": [item.get("id") for item in shortlist(fresh, args.task, limit, extra)],
+        }
+        sys.stdout.write(json.dumps(tick) + "\n")
+        sys.stdout.flush()
+        ticks += 1
     return 0
 
 

@@ -1822,6 +1822,20 @@ class PruneTest(unittest.TestCase):
             )
             self.assertEqual(len(proc.stdout.strip().splitlines()), 2)
 
+    def test_harness_accepts_comma_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "harness": "claude", "jev_status": "ok"},
+                    {"ts": 2, "harness": "codex", "jev_status": "ok"},
+                    {"ts": 3, "harness": "grok", "jev_status": "ok"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--harness", "claude,grok", "--count")
+            self.assertEqual(proc.stdout.strip(), "2")
+
     def test_oldest_prints_oldest_entry(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

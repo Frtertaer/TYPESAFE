@@ -242,7 +242,8 @@ def filter_status(entries: list[dict], status: str | None) -> list[dict]:
 def filter_harness(entries: list[dict], harness: str | None) -> list[dict]:
     if not harness:
         return entries
-    return [item for item in entries if str(item.get("harness") or "") == harness]
+    wanted = {part.strip() for part in harness.split(",") if part.strip()}
+    return [item for item in entries if str(item.get("harness") or "") in wanted]
 
 
 def filter_outcome(entries: list[dict], outcome: str | None) -> list[dict]:

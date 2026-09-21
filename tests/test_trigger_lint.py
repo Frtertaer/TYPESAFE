@@ -155,6 +155,21 @@ class CliTests(unittest.TestCase):
                 rc = trigger_lint.main([str(path), "--out"])
             self.assertEqual(rc, 2)
 
+    def test_policy_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            policy = Path(tmp) / "policy.json"
+            policy.write_text(json.dumps({"must_ask": ["approach"]}), encoding="utf-8")
+            path = write_cases(tmp, [dict(GOOD_CASE)])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main([str(path), "--policy", str(policy)])
+            self.assertEqual(rc, 0)
+            self.assertNotIn("T011", buf.getvalue())
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main([str(path), "--policy"])
+            self.assertEqual(rc, 2)
+
     def test_severity_env_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = write_cases(

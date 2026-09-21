@@ -133,12 +133,20 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         out_path = argv[idx + 1].strip()
         argv = argv[:idx] + argv[idx + 2 :]
+    policy_path = DEFAULT_POLICY
+    if "--policy" in argv:
+        idx = argv.index("--policy")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--policy needs a PATH value\n")
+            return 2
+        policy_path = Path(argv[idx + 1].strip())
+        argv = argv[:idx] + argv[idx + 2 :]
     argv = [a for a in argv if a not in ("--json", "--quiet")]
     if len(argv) > 1:
-        sys.stderr.write("usage: trigger_lint.py [CASES.json] [--json] [--quiet] [--severity L] [--out PATH]\n")
+        sys.stderr.write("usage: trigger_lint.py [CASES.json] [--json] [--quiet] [--severity L] [--out PATH] [--policy PATH]\n")
         return 2
     path = Path(argv[0]) if argv else DEFAULT_CASES
-    findings = lint_cases(path)
+    findings = lint_cases(path, policy_path=policy_path)
     shown = [
         f
         for f in findings

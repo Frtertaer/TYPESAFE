@@ -89,6 +89,22 @@ class SummarizeTest(unittest.TestCase):
         self.assertEqual(stats["first_ts"], 1000.0)
         self.assertEqual(stats["last_ts"], 3000.0)
 
+    def test_span_line_humanizes_duration(self):
+        stats = decisions.summarize(
+            [
+                {"ts": 1000.0, "jev_status": "winner"},
+                {"ts": 1000.0 + 3 * 86400, "jev_status": "winner"},
+            ]
+        )
+        self.assertIn("3.0d", decisions.format_stats(stats))
+        short = decisions.summarize(
+            [
+                {"ts": 1000.0, "jev_status": "winner"},
+                {"ts": 1000.0 + 7200, "jev_status": "winner"},
+            ]
+        )
+        self.assertIn("2.0h", decisions.format_stats(short))
+
     def test_empty(self):
         stats = decisions.summarize([])
         self.assertEqual(stats["total"], 0)

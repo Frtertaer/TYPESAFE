@@ -129,8 +129,11 @@ def format_stats(stats: dict) -> str:
         "explicit: %d  strong_pick: %d" % (stats["explicit"], stats["strong_pick"]),
     ]
     if stats.get("first_ts") is not None:
+        duration = max(0.0, stats["last_ts"] - stats["first_ts"])
+        days = duration / 86400
+        human = "%.1fd" % days if days >= 1 else "%.1fh" % (duration / 3600)
         lines.append(
-            "span: first_ts=%s last_ts=%s" % (stats["first_ts"], stats["last_ts"])
+            "span: first_ts=%s last_ts=%s (%s)" % (stats["first_ts"], stats["last_ts"], human)
         )
     need = stats["need_skill"]
     if need["n"]:

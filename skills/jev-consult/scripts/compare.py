@@ -139,6 +139,30 @@ def format_table(rows: list[dict[str, Any]], live: bool) -> str:
     return "\n".join(lines) + "\n"
 
 
+def strict_failures(rows: list[dict[str, Any]], live: bool) -> list[str]:
+    """CI gate: the guarded (after) side must have called Jev and, when live,
+    scored at least noul_yes on the case's question."""
+    failures: list[str] = []
+    noul_yes = 0.7
+    try:
+        jev = load_jev()
+        policy = jev.load_policy()
+        noul_yes = float(policy.get("noul_yes", 0.7))
+    except Exception:
+        pass
+    for row in rows:
+        cid = str(row.get("id") or "?")
+        after = row.get("after") or {}
+        if not after.get("called_jev"):
+            failures.append("%s: guarded side did not call Jev" % cid)
+            continue
+        if live:
+            an = after.get("noul")
+            if an is not None and an < noul_yes:
+                failures.append("%s: after noul %.2f < %.2f" % (cid, an, noul_yes))
+    return failures
+
+
 def run(live: bool, as_json: bool, path: Path | None = None) -> dict[str, Any]:
     blob = load_cases(path)
     rows = [row_offline(case) for case in blob["cases"]]
@@ -167,6 +191,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--live", action="store_true", help="Call Jev Noul for each side")
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--cases", help="Path to compare-cases.json")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit 1 when any case's guarded side skipped Jev (or scored below noul_yes with --live).",
+    )
     args = parser.parse_args(argv)
     result = run(live=args.live, as_json=args.as_json, path=Path(args.cases) if args.cases else None)
     if args.as_json:
@@ -174,6 +203,11 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("\n")
     else:
         sys.stdout.write(format_table(result["rows"], live=args.live))
+    if args.strict:
+        failures = strict_failures(result["rows"], args.live)
+        for failure in failures:
+            sys.stderr.write("strict: %s\n" % failure)
+        return 1 if failures else 0
     return 0
 
 

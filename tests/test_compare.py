@@ -214,5 +214,54 @@ class CliTest(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
 
 
+class StrictGateTest(unittest.TestCase):
+    def run_cli(self, *argv: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, "-m", "compare", *argv],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT / "skills" / "jev-consult" / "scripts"),
+        )
+
+    def test_strict_failures_offline(self) -> None:
+        good = [{"id": "a", "after": {"called_jev": True}}]
+        bad = [{"id": "b", "after": {"called_jev": False}}]
+        self.assertEqual(compare.strict_failures(good, False), [])
+        self.assertEqual(len(compare.strict_failures(bad, False)), 1)
+        self.assertIn("did not call Jev", compare.strict_failures(bad, False)[0])
+
+    def test_strict_failures_live_noul(self) -> None:
+        rows = [
+            {"id": "ok", "after": {"called_jev": True, "noul": 0.9}},
+            {"id": "low", "after": {"called_jev": True, "noul": 0.4}},
+            {"id": "none", "after": {"called_jev": True}},  # no noul: skip check
+        ]
+        failures = compare.strict_failures(rows, True)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("low", failures[0])
+
+    def test_cli_strict_rc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            good = Path(tmp) / "good.json"
+            good.write_text(json.dumps(CASES), encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(ROOT / "skills" / "jev-consult" / "scripts" / "compare.py"),
+                 "--strict", "--cases", str(good)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            bad_cases = json.loads(json.dumps(CASES))
+            bad_cases["cases"][0]["after"]["called_jev"] = False
+            bad = Path(tmp) / "bad.json"
+            bad.write_text(json.dumps(bad_cases), encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(ROOT / "skills" / "jev-consult" / "scripts" / "compare.py"),
+                 "--strict", "--cases", str(bad)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("strict:", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

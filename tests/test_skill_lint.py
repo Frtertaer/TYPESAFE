@@ -111,6 +111,23 @@ class CliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("S001", proc.stdout)
 
+    def test_dir_arg_lints_all_skills(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_skill(tmp, "a", GOOD.format(name="a"))
+            write_skill(tmp, "b", "# no frontmatter\n")
+            proc = self._run(tmp)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("S002", proc.stdout)
+            self.assertIn(str(Path(tmp) / "b" / "SKILL.md"), proc.stdout)
+
+    def test_dir_arg_all_clean_rc0(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_skill(tmp, "a", GOOD.format(name="a"))
+            write_skill(tmp, "b", GOOD.format(name="b"))
+            proc = self._run(tmp)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip(), "")
+
     def test_multiple_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             good = write_skill(tmp, "ok", GOOD.format(name="ok"))

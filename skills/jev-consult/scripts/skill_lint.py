@@ -84,8 +84,14 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("usage: skill_lint.py SKILL.md [more.md ...]\n")
         return 2
     rc = 0
+    paths: list[Path] = []
     for arg in argv:
         path = Path(arg)
+        if path.is_dir():
+            paths.extend(sorted(path.rglob("SKILL.md")))
+        else:
+            paths.append(path)
+    for path in paths:
         for f in lint_skill(path):
             sys.stdout.write("%s %s %s: %s\n" % (f["severity"], f["rule"], path, f["message"]))
             if f["severity"] == "error":

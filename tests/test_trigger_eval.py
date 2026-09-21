@@ -298,6 +298,23 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertIn("matched", row)
         self.assertTrue(row["matched"])
 
+    def test_unmatched_shows_missed_tokens(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--id", "pos-approach", "--unmatched"])
+        self.assertEqual(rc, 0)
+        self.assertIn("missed=", buf.getvalue())
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            te.main(["--id", "pos-approach", "--unmatched", "--json"])
+        row = json.loads(buf.getvalue())["cases"][0]
+        self.assertIn("unmatched", row)
+        self.assertNotIn("zzz", row["matched"])
+        self.assertEqual(
+            set(row["matched"]) | set(row["unmatched"]),
+            set(row["matched"] + row["unmatched"]),
+        )
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

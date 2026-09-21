@@ -63,12 +63,14 @@ def evaluate(
         expected = bool(case.get("should_trigger"))
         score = None
         matched: list[str] = []
+        row_unmatched: list[str] = []
         if lexical:
             prompt_tokens = scorer.tokens(case.get("prompt", ""))
             score = scorer.score(prompt_tokens, desc_tokens)
             (pos if expected else neg).append(score)
             if include_tokens:
                 matched = sorted(set(prompt_tokens) & set(desc_tokens))
+                row_unmatched = sorted(set(prompt_tokens) - set(desc_tokens))
         row = {
             "id": case.get("id"),
             "should_trigger": expected,
@@ -79,6 +81,7 @@ def evaluate(
         }
         if include_tokens:
             row["matched"] = matched
+            row["unmatched"] = row_unmatched
         rows.append(row)
     worst_pos = min(pos) if pos else 0.0
     best_neg = max(neg) if neg else 0.0
@@ -158,6 +161,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Show which prompt tokens matched the description per row.",
     )
     parser.add_argument(
+        "--unmatched",
+        action="store_true",
+        help="Show which prompt tokens missed the description per row.",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help=(
@@ -200,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.skill),
             case_id=args.id,
             desc_text=args.desc,
-            include_tokens=args.tokens,
+            include_tokens=args.tokens or args.unmatched,
         )
     except (OSError, ValueError, KeyError) as exc:
         sys.stderr.write("trigger_eval failed: %s\n" % exc)
@@ -292,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if args.tokens:
                     line += "  tokens=%s" % ",".join(row["matched"])
+                if args.unmatched:
+                    line += "  missed=%s" % ",".join(row["unmatched"])
                 sys.stdout.write(line + "\n")
         sys.stdout.write(
             "margin: %s (worst positive %.3f vs best negative %.3f x %.2f)\n"

@@ -41,6 +41,7 @@ def evaluate(
     case_id: str = "",
     desc_text: str = "",
     include_tokens: bool = False,
+    margin_override: float | None = None,
 ) -> dict | None:
     """Per-case scores plus the aggregate margin verdict; None on missing inputs.
     With `case_id`, only that case is evaluated (margin still computed across it).
@@ -54,7 +55,11 @@ def evaluate(
     desc_tokens = scorer.tokens(
         desc_text if desc_text else scorer.description_of(str(skill_dir))
     )
-    margin = getattr(scorer, "MARGIN", 1.15)
+    margin = (
+        getattr(scorer, "MARGIN", 1.15)
+        if margin_override is None
+        else margin_override
+    )
     rows: list[dict] = []
     pos: list[float] = []
     neg: list[float] = []
@@ -183,6 +188,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the scored description token set (or --desc tokens) and exit.",
     )
     parser.add_argument(
+        "--margin",
+        metavar="F",
+        type=float,
+        default=None,
+        help="Override the scorer's margin factor (default 1.15) for the verdict.",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help=(
@@ -239,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
             case_id=args.id,
             desc_text=args.desc,
             include_tokens=args.tokens or args.unmatched,
+            margin_override=args.margin,
         )
     except (OSError, ValueError, KeyError) as exc:
         sys.stderr.write("trigger_eval failed: %s\n" % exc)

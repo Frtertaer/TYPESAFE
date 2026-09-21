@@ -348,6 +348,17 @@ class TriggerEvalTests(unittest.TestCase):
             te.main(["--desc-tokens", "--desc", "pick between two options"])
         self.assertEqual(buf.getvalue().splitlines(), ["between", "option", "pick", "two"])
 
+    def test_margin_override_flips_verdict(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--summary"])
+        self.assertEqual(rc, 0)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--summary", "--margin", "5"])
+        self.assertEqual(rc, 1)
+        self.assertIn("x 5.00", buf.getvalue())
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

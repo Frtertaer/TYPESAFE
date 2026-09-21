@@ -1093,6 +1093,74 @@ class InventoryInternalsTests(unittest.TestCase):
             self.assertEqual(INV.catalogs(), INV.CATALOGS)
 
 
+class HookE2ETests(unittest.TestCase):
+    """main() over real stdin/stdout in a subprocess (no Jev key => fail-open)."""
+
+    HOOK_PATH = ROOT / "skills" / "jev-consult" / "scripts" / "inventory_hook.py"
+
+    def _run(self, stdin_text: str, cwd: str | None = None, home: str | None = None):
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        if home:
+            env["USERPROFILE"] = home
+            env["HOME"] = home
+        proc = subprocess.run(
+            [sys.executable, str(self.HOOK_PATH)],
+            input=stdin_text,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            env=env,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stdout.strip()
+
+    def test_empty_stdin(self) -> None:
+        self.assertEqual(json.loads(self._run("")), {})
+
+    def test_bad_json(self) -> None:
+        self.assertEqual(json.loads(self._run("not json")), {})
+        self.assertEqual(json.loads(self._run("[1,2]")), {})
+
+    def test_valid_prompt_fail_open(self) -> None:
+        # no key in env -> pick_with_jev fails open; still emits context note
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            skill = home / ".hermes" / "skills" / "jwt-stuff"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: jwt-stuff\ndescription: jwt\n---\n", encoding="utf-8"
+            )
+            cwd = Path(tmp) / "work"
+            cwd.mkdir()
+            out = json.loads(
+                self._run(
+                    json.dumps(
+                        {
+                            "event": "UserPromptSubmit",
+                            "prompt": "jwt stuff please",
+                            "cwd": str(cwd),
+                        }
+                    ),
+                    home=str(home),
+                )
+            )
+        # hermes path detect via __file__ -> default hermes; emits {"context": ...}
+        if "hookSpecificOutput" in out:
+            ctx = out["hookSpecificOutput"]["additionalContext"]
+        else:
+            ctx = out.get("context", "")
+        self.assertIn("jwt-stuff", ctx)
+
+    def test_unknown_event(self) -> None:
+        out = json.loads(self._run(json.dumps({"event": "PostToolUse", "prompt": "x"})))
+        self.assertEqual(out, {})
+
+
 class ScanMergeTests(unittest.TestCase):
     def _tree(self, tmp: str):
         home = Path(tmp) / "home"

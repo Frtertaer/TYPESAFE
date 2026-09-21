@@ -1585,6 +1585,28 @@ class DedupeTests(unittest.TestCase):
             )
         self.assertEqual(len(calls), 2)
 
+    def test_whitespace_variant_prompt_dedupes(self) -> None:
+        calls = []
+
+        def counting_pick(prompt, harness, picked):
+            calls.append(prompt)
+            return skip_pick(prompt, harness, picked)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            HOOK.handle(
+                self._payload("Add JWT access tokens in Python", tmp),
+                items=self._items(),
+                harness="claude-code",
+                pick_fn=counting_pick,
+            )
+            HOOK.handle(
+                self._payload("  Add   JWT access  tokens in\nPython  ", tmp),
+                items=self._items(),
+                harness="claude-code",
+                pick_fn=counting_pick,
+            )
+        self.assertEqual(len(calls), 1)
+
     def test_corrupt_sidecar_does_not_dedupe(self) -> None:
         calls = []
 

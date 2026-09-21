@@ -144,6 +144,25 @@ class TraceTests(unittest.TestCase):
             self.assertTrue(payload["exists"])
             self.assertIn("wrote", err.getvalue())
 
+    def test_notes_reverse_lists_newest_first(self) -> None:
+        import time
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            now = time.time()
+            tr.save(
+                {"notes": [{"ts": now - 10, "text": "old"}, {"ts": now, "text": "new"}]},
+                path,
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--json", "--reverse"])
+            self.assertEqual(rc, 0)
+            notes = json.loads(buf.getvalue())
+            self.assertEqual([n["text"] for n in notes], ["new", "old"])
+
     def test_load_missing_is_empty(self) -> None:
         data = tr.load(Path("definitely-missing-jev-trace.json"))
         self.assertEqual(data["plan"], "")

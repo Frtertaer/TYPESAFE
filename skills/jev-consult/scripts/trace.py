@@ -378,6 +378,8 @@ def cmd_notes(args: argparse.Namespace) -> int:
     limit = getattr(args, "limit", None)
     if isinstance(limit, int) and limit >= 0:
         notes = notes[-limit:] if limit else []
+    if getattr(args, "reverse", False):
+        notes = notes[::-1]
     field = getattr(args, "field", "") or ""
     if field:
         values = [_dig(n, field) for n in notes if isinstance(n, dict)]
@@ -524,6 +526,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--harness", default="", help="Only notes tagged with this harness")
     notes_cmd.add_argument("--out", default="", help="Write the notes output to PATH instead of stdout")
     notes_cmd.add_argument("--field", default="", help="Print only this field per note (a.b digs into nested objects)")
+    notes_cmd.add_argument("--reverse", action="store_true", help="List notes newest-first")
     notes_cmd.set_defaults(func=cmd_notes)
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")

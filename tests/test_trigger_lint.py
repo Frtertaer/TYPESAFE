@@ -8,7 +8,7 @@ import os
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -124,6 +124,23 @@ class CliTests(unittest.TestCase):
             with redirect_stdout(buf):
                 trigger_lint.main([str(path), "--severity", "warn"])
             self.assertIn("T009", buf.getvalue())
+
+    def test_out_writes_findings_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(tmp, [{"id": "pos-x", "should_trigger": True}])
+            out_path = Path(tmp) / "tlint.json"
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = trigger_lint.main([str(path), "--out", str(out_path)])
+            self.assertEqual(rc, 1)
+            self.assertIn("wrote", err.getvalue())
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["errors"], 1)
+            self.assertTrue(any(f["rule"] == "T003" for f in payload["findings"]))
+            err = io.StringIO()
+            with redirect_stderr(err):
+                rc = trigger_lint.main([str(path), "--out"])
+            self.assertEqual(rc, 2)
 
     def test_severity_env_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

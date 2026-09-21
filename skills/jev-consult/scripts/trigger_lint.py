@@ -113,9 +113,17 @@ def main(argv: list[str] | None = None) -> int:
         env_sev = os.environ.get("JEV_TLINT_SEVERITY", "").strip().lower()
         if env_sev in SEVERITIES:
             severity = env_sev
+    out_path = ""
+    if "--out" in argv:
+        idx = argv.index("--out")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--out needs a PATH value\n")
+            return 2
+        out_path = argv[idx + 1].strip()
+        argv = argv[:idx] + argv[idx + 2 :]
     argv = [a for a in argv if a not in ("--json", "--quiet")]
     if len(argv) > 1:
-        sys.stderr.write("usage: trigger_lint.py [CASES.json] [--json] [--quiet] [--severity L]\n")
+        sys.stderr.write("usage: trigger_lint.py [CASES.json] [--json] [--quiet] [--severity L] [--out PATH]\n")
         return 2
     path = Path(argv[0]) if argv else DEFAULT_CASES
     findings = lint_cases(path)
@@ -128,6 +136,26 @@ def main(argv: list[str] | None = None) -> int:
     n_err = sum(1 for f in findings if f["severity"] == "error")
     n_warn = sum(1 for f in findings if f["severity"] == "warn")
     n_info = sum(1 for f in findings if f["severity"] == "info")
+    if out_path:
+        try:
+            Path(out_path).write_text(
+                json.dumps(
+                    {
+                        "path": str(path),
+                        "findings": shown,
+                        "errors": n_err,
+                        "warnings": n_warn,
+                        "infos": n_info,
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+        sys.stderr.write("wrote %d finding(s) to %s\n" % (len(shown), out_path))
     if as_json:
         sys.stdout.write(
             json.dumps(

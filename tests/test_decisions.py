@@ -79,6 +79,21 @@ class SummarizeTest(unittest.TestCase):
         self.assertIsNone(stats["need_skill"]["mean"])
         self.assertIsNone(stats["latency_ms"]["p50"])
 
+    def test_top_prompts_counted(self):
+        entries = [
+            {"prompt_head": "fix the flaky test", "jev_status": "winner"},
+            {"prompt_head": "fix the flaky test", "jev_status": "none"},
+            {"prompt_head": "other task", "jev_status": "winner"},
+            {"prompt_head": "", "jev_status": "idf"},
+            {"jev_status": "idf"},
+        ]
+        stats = decisions.summarize(entries)
+        self.assertEqual(stats["top_prompts"], {"fix the flaky test": 2, "other task": 1})
+        text = decisions.format_stats(stats)
+        self.assertIn("top prompts:", text)
+        self.assertIn("fix the flaky test", text)
+        self.assertEqual(decisions.summarize([])["top_prompts"], {})
+
     def test_malformed_fields_tolerated(self):
         entries = [
             {"jev_status": "winner", "winner": "just-a-string", "need": "high", "latency_ms": "fast"},

@@ -57,6 +57,7 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
     winners: dict[str, int] = {}
     needs: list[float] = []
     latencies: list[float] = []
+    prompts: dict[str, int] = {}
     explicit = strong = 0
     for item in entries:
         status = str(item.get("jev_status") or "unknown")
@@ -67,6 +68,9 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
             explicit += 1
         if item.get("strong_pick"):
             strong += 1
+        head = str(item.get("prompt_head") or "").strip()[:120]
+        if head:
+            prompts[head] = prompts.get(head, 0) + 1
         winner = item.get("winner")
         if isinstance(winner, dict) and winner.get("name"):
             key = "%s:%s" % (winner.get("kind") or "?", winner["name"])
@@ -98,6 +102,9 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
         },
         "top_winners": dict(
             sorted(winners.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+        ),
+        "top_prompts": dict(
+            sorted(prompts.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
         ),
     }
 
@@ -131,6 +138,12 @@ def format_stats(stats: dict) -> str:
             + ", ".join(
                 "%s=%d" % (k, v) for k, v in stats["top_winners"].items()
             )
+        )
+    if stats["top_prompts"]:
+        lines.append("top prompts:")
+        lines.extend(
+            "  %3d  %s" % (count, head)
+            for head, count in stats["top_prompts"].items()
         )
     return "\n".join(lines)
 

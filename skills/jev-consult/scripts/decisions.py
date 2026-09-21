@@ -786,11 +786,12 @@ def main(argv: list[str] | None = None) -> int:
         if "=" not in pair:
             continue
         wkey, wval = pair.split("=", 1)
-        wkey, wval = wkey.strip(), wval.strip().lower()
+        wkey = wkey.strip()
+        wvals = {part.strip().lower() for part in wval.split(",") if part.strip()} or {""}
         entries = [
             item
             for item in entries
-            if str(_dig(item, wkey) if _dig(item, wkey) is not None else "").lower() == wval
+            if str(_dig(item, wkey) if _dig(item, wkey) is not None else "").lower() in wvals
         ]
     missing_field = getattr(args, "missing", "") or ""
     if missing_field:
@@ -799,11 +800,12 @@ def main(argv: list[str] | None = None) -> int:
         if "=" not in pair:
             continue
         wkey, wval = pair.split("=", 1)
-        wkey, wval = wkey.strip(), wval.strip().lower()
+        wkey = wkey.strip()
+        wvals = {part.strip().lower() for part in wval.split(",") if part.strip()} or {""}
         entries = [
             item
             for item in entries
-            if str(_dig(item, wkey) if _dig(item, wkey) is not None else "").lower() != wval
+            if str(_dig(item, wkey) if _dig(item, wkey) is not None else "").lower() not in wvals
         ]
     if args.prompt:
         needle = args.prompt.lower()

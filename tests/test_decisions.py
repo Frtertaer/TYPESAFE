@@ -1759,6 +1759,27 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0)
             self.assertIn("1", proc.stdout)
 
+    def test_where_accepts_comma_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "harness": "claude", "jev_status": "ok"},
+                    {"ts": 2, "harness": "codex", "jev_status": "ok"},
+                    {"ts": 3, "harness": "grok", "jev_status": "ok"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--where", "harness=claude,grok", "--count")
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(proc.stdout.strip(), "2")
+            proc = self.run_cli("--file", str(path), "--where-not", "harness=claude,grok", "--count")
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(proc.stdout.strip(), "1")
+            proc = self.run_cli("--file", str(path), "--where", "missing_field=", "--count")
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(proc.stdout.strip(), "3")
+
     def test_out_honors_csv_and_md(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

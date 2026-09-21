@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -344,7 +345,8 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         out = {}
     sys.stdout.write(json.dumps(out) + "\n")
-    if _debug_enabled(argv) and LAST_DECISION is not None:
+    debug_file = os.environ.get("JEV_HOOK_DEBUG_FILE", "").strip()
+    if (_debug_enabled(argv) or debug_file) and LAST_DECISION is not None:
         parts = {
             "jev_status": LAST_DECISION.get("jev_status"),
             "winner": (LAST_DECISION.get("winner") or {}).get("name"),
@@ -352,9 +354,15 @@ def main(argv: list[str] | None = None) -> int:
             "shortlist": len(LAST_DECISION.get("shortlist") or []),
             "latency_ms": LAST_DECISION.get("latency_ms"),
         }
-        sys.stderr.write(
-            " ".join("%s=%s" % (k, v) for k, v in parts.items() if v is not None) + "\n"
-        )
+        line = " ".join("%s=%s" % (k, v) for k, v in parts.items() if v is not None)
+        if _debug_enabled(argv):
+            sys.stderr.write(line + "\n")
+        if debug_file:
+            try:
+                with open(debug_file, "a", encoding="utf-8") as fh:
+                    fh.write(line + "\n")
+            except OSError:
+                pass
     return 0
 
 

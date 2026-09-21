@@ -686,6 +686,33 @@ class MainLoopTests(unittest.TestCase):
             out = self.run_main('{"prompt": "x"}')
         self.assertEqual(json.loads(out), {})
 
+    def test_debug_file_writes_last_decision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "hook-debug.log"
+            decision = {
+                "jev_status": "idf",
+                "winner": {"name": "jwt-auth"},
+                "dedupe": False,
+                "shortlist": ["a", "b"],
+                "latency_ms": 3,
+            }
+            with patch.object(HOOK, "LAST_DECISION", decision), patch.object(
+                HOOK, "handle", lambda _p: {}
+            ), patch.dict(os.environ, {"JEV_HOOK_DEBUG_FILE": str(log_path)}):
+                self.run_main('{"prompt": "x", "cwd": "%s"}' % tmp.replace("\\", "\\\\"))
+            text = log_path.read_text(encoding="utf-8")
+            self.assertIn("jev_status=idf", text)
+            self.assertIn("winner=jwt-auth", text)
+
+    def test_debug_file_bad_path_fails_open(self) -> None:
+        decision = {"jev_status": "idf"}
+        with patch.object(HOOK, "LAST_DECISION", decision), patch.object(
+            HOOK, "handle", lambda _p: {}
+        ), patch.dict(
+            os.environ, {"JEV_HOOK_DEBUG_FILE": "N:\\no\\such\\dir\\x.log"}
+        ):
+            self.assertEqual(self.run_main('{"prompt": "x"}').strip(), "{}")
+
 
 class HandleBranchTests(unittest.TestCase):
     def setUp(self) -> None:

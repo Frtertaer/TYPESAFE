@@ -285,19 +285,22 @@ def main(argv: list[str] | None = None) -> int:
                     str(item.get("jev_status") or "unknown"),
                     str(winner_name or ""),
                     str(bool(item.get("dedupe"))),
+                    str(item.get("fill") or ""),
+                    str(item.get("outcome") or ""),
                     str(item.get("prompt_head") or "").strip()[:120],
                 ]
             )
+        header = ["ts", "harness", "jev_status", "winner", "dedupe", "fill", "outcome", "prompt_head"]
         if args.csv:
             writer = csv.writer(sys.stdout, lineterminator="\n")
-            writer.writerow(["ts", "harness", "jev_status", "winner", "dedupe", "prompt_head"])
+            writer.writerow(header)
             writer.writerows(rows)
         else:
             def _cell(value: str) -> str:
                 return value.replace("|", "\\|").replace("\n", " ")
 
-            sys.stdout.write("| ts | harness | jev_status | winner | dedupe | prompt_head |\n")
-            sys.stdout.write("| --- | --- | --- | --- | --- | --- |\n")
+            sys.stdout.write("| " + " | ".join(header) + " |\n")
+            sys.stdout.write("|" + " --- |" * len(header) + "\n")
             for row in rows:
                 sys.stdout.write("| " + " | ".join(_cell(c) for c in row) + " |\n")
         return 0

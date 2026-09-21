@@ -58,6 +58,7 @@ POSITIVE_INT_FIELDS = ("version", "question_soft_max", "question_hard_max", "cho
 NONNEG_NUM_FIELDS = (
     "catalog_cache_seconds",
     "hook_budget_seconds",
+    "hook_jev_retries",
     "hook_jev_timeout_seconds",
     "sidecar_ttl_seconds",
 )
@@ -69,6 +70,7 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "catalogs",
     "hallucination",
     "hook_budget_seconds",
+    "hook_jev_retries",
     "hook_jev_timeout_seconds",
     "stop_words",
 )

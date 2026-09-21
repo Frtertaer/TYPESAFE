@@ -30,6 +30,7 @@ from inventory import (  # noqa: E402
     format_note,
     format_winner_note,
     hook_budget_seconds,
+    hook_jev_retries,
     hook_jev_timeout_seconds,
     picker_request,
     read_sidecar,
@@ -119,7 +120,7 @@ def pick_with_jev(
             request["questions"],
             policy,
             timeout=timeout,
-            retries=0,
+            retries=hook_jev_retries(),
         )
         latency_ms = int((time.perf_counter() - start) * 1000)
         answers = result.get("answers") or {}

@@ -727,6 +727,18 @@ def hook_jev_timeout_seconds() -> float:
     return _policy_float_key(HOOK_JEV_TIMEOUT_KEY, DEFAULT_HOOK_JEV_TIMEOUT_SECONDS)
 
 
+HOOK_JEV_RETRIES_KEY = "hook_jev_retries"
+DEFAULT_HOOK_JEV_RETRIES = 0
+
+
+def hook_jev_retries() -> int:
+    """Retry count for the hook's Jev call (0 = single attempt, fail fast)."""
+    try:
+        return max(0, int(_policy_dict().get(HOOK_JEV_RETRIES_KEY, DEFAULT_HOOK_JEV_RETRIES)))
+    except (TypeError, ValueError):
+        return DEFAULT_HOOK_JEV_RETRIES
+
+
 def stop_words() -> set:
     """IDF stop-words. Tunable in policy.json (stop_words); falls back to STOP."""
     words = _policy_dict().get("stop_words")

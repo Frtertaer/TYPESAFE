@@ -616,6 +616,31 @@ class PickWithJevTests(unittest.TestCase):
         HOOK.pick_with_jev("t", "hermes", PICKED)
         self.assertEqual(seen.get("timeout"), INV.hook_jev_timeout_seconds())
 
+    def test_retries_defaults_to_policy_value(self) -> None:
+        seen = {}
+
+        class FakeJev:
+            @staticmethod
+            def load_api_key():
+                return "k"
+
+            @staticmethod
+            def load_policy(path=None):
+                return {}
+
+            @staticmethod
+            def post_systemone(state, questions, policy, **kwargs):
+                seen.update(kwargs)
+                return {"answers": {}, "model": "fake-0"}
+
+            @staticmethod
+            def decide(ans, policy, irreversible=False):
+                return {"action": "proceed", "picks": {}, "probabilities": {}}
+
+        sys.modules["jev"] = FakeJev
+        HOOK.pick_with_jev("t", "hermes", PICKED)
+        self.assertEqual(seen.get("retries"), INV.hook_jev_retries())
+
     def test_non_numeric_need_still_attached_as_none(self) -> None:
         sys.modules["jev"] = fake_jev(
             decide_ret={
@@ -941,6 +966,15 @@ class BudgetGuardTests(unittest.TestCase):
             self.assertEqual(INV.hook_jev_timeout_seconds(), INV.DEFAULT_HOOK_JEV_TIMEOUT_SECONDS)
         with patch.object(INV.json, "loads", return_value={"hook_jev_timeout_seconds": 2.5}):
             self.assertEqual(INV.hook_jev_timeout_seconds(), 2.5)
+
+    def test_hook_jev_retries_policy(self) -> None:
+        self.assertEqual(INV.hook_jev_retries(), 0)
+        with patch.object(INV.json, "loads", side_effect=ValueError):
+            self.assertEqual(INV.hook_jev_retries(), INV.DEFAULT_HOOK_JEV_RETRIES)
+        with patch.object(INV.json, "loads", return_value={"hook_jev_retries": 3}):
+            self.assertEqual(INV.hook_jev_retries(), 3)
+        with patch.object(INV.json, "loads", return_value={"hook_jev_retries": -2}):
+            self.assertEqual(INV.hook_jev_retries(), 0)
 
 
 class InventoryInternalsTests(unittest.TestCase):

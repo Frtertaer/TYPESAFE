@@ -1,0 +1,287 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""Copy one already-local skill into the current harness.
+
+Does not install marketplace items. Does not call Jev from a prompt hook.
+Fail open.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+from inventory import (  # noqa: E402
+    HARNESSES,
+    KIND_SKILL,
+    MISS_NAME,
+    SIDECAR_NAME,
+    clear_miss,
+    clear_scan_cache,
+    detect_harness,
+    hermes_home,
+    iter_skills,
+    roots_for,
+    shortlist,
+    tokens,
+    user_home,
+    write_sidecar,
+)
+
+SKIP_NAMES = {"jev-consult"}
+COPY_SKIP = {".git", "node_modules", "__pycache__", ".venv", ".mypy_cache"}
+PEER_LIMIT = 12
+ASK_NAME = ".jev-peer-fill.request.json"
+
+
+def skill_dirs(harness: str, home: Path, hermes: Path) -> list[Path]:
+    return list(roots_for(harness, home, hermes)["skills"])
+
+
+def skill_items(harness: str, home: Path, hermes: Path) -> list[dict]:
+    return iter_skills(skill_dirs(harness, home, hermes))
+
+
+def names_in(items: list[dict]) -> set[str]:
+    return {str(item.get("name") or "").lower() for item in items}
+
+
+def allowed_roots(home: Path, hermes: Path) -> list[Path]:
+    roots: list[Path] = []
+    for harness in HARNESSES:
+        roots.extend(skill_dirs(harness, home, hermes))
+    return roots
+
+
+def under_any(path: Path, roots: list[Path]) -> bool:
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    for root in roots:
+        try:
+            resolved.relative_to(root.resolve())
+            return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def peer_skills(dest: str, home: Path, hermes: Path) -> list[dict]:
+    skip = names_in(skill_items(dest, home, hermes)) | SKIP_NAMES
+    out: list[dict] = []
+    for harness in HARNESSES:
+        if harness == dest:
+            continue
+        for item in skill_items(harness, home, hermes):
+            name = str(item.get("name") or "").lower()
+            if item.get("kind") != KIND_SKILL or name in skip:
+                continue
+            copy = dict(item)
+            copy["source_harness"] = harness
+            out.append(copy)
+            skip.add(name)
+    return out
+
+
+def write_peer_ask(path: Path, task: str, dest: str, picked: list[dict]) -> None:
+    criteria: dict[str, str] = {}
+    for item in picked:
+        label = "%s from %s" % (item.get("name"), item.get("source_harness") or "?")
+        desc = (item.get("description") or "").strip()
+        if desc:
+            label = "%s: %s" % (label, desc[:160])
+        ident = str(item.get("id") or item.get("name"))
+        criteria[ident] = label
+    criteria["none"] = "none of these; do not copy anything"
+    payload = {
+        "state": {
+            "task": task,
+            "harness": dest,
+            "note": (
+                "Current harness has no installed match. These skills exist on another "
+                "local harness. Pick one to copy here. Do not install marketplace items."
+            ),
+        },
+        "questions": {
+            "load_tools": {
+                "type": "choice",
+                "instructions": "Which local skill should the coder copy into this harness?",
+                "criteria": criteria,
+            }
+        },
+    }
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def run_jev(ask_path: Path) -> dict | None:
+    script = _SCRIPTS / "jev.py"
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(script), "ask", str(ask_path)],
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def item_for_pick(pick: str, candidates: list[dict]) -> dict | None:
+    if not pick or pick == "none":
+        return None
+    for item in candidates:
+        if item.get("id") == pick or item.get("name") == pick:
+            return item
+    return None
+
+
+def ignore(_directory: str, names: list[str]) -> set[str]:
+    return {n for n in names if n in COPY_SKIP or n.endswith(".pyc")}
+
+
+def copy_one(src: Path, dest_parent: Path, dry_run: bool) -> Path | None:
+    dest = dest_parent / src.name
+    if dest.exists():
+        return None
+    if dry_run:
+        return dest
+    dest_parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, dest, ignore=ignore, symlinks=False)
+    return dest
+
+
+def read_miss(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def fill(
+    task: str,
+    dest: str,
+    home: Path,
+    hermes: Path,
+    cwd: Path,
+    pick: str | None,
+    dry_run: bool,
+    ask_path: Path,
+) -> int:
+    local = skill_items(dest, home, hermes)
+    if tokens(task) and shortlist(local, task, PEER_LIMIT, []):
+        write_sidecar(cwd / SIDECAR_NAME, dest, task, shortlist(local, task, 6, []))
+        sys.stdout.write("already_enough\n")
+        return 0
+    peers = peer_skills(dest, home, hermes)
+    chosen = None
+    if pick:
+        chosen = item_for_pick(pick, peers)
+    else:
+        candidates = shortlist(peers, task, PEER_LIMIT, [])
+        if not candidates:
+            sys.stdout.write("no_peer\n")
+            return 0
+        write_peer_ask(ask_path, task, dest, candidates)
+        data = run_jev(ask_path)
+        if not data:
+            sys.stdout.write("jev_skip\n")
+            return 0
+        decision = data.get("decision") or {}
+        if decision.get("action") != "proceed":
+            sys.stdout.write("jev_skip\n")
+            return 0
+        chosen = item_for_pick(
+            str((decision.get("picks") or {}).get("load_tools") or ""),
+            candidates,
+        )
+    if chosen is None:
+        sys.stdout.write("none\n")
+        return 0
+    src = Path(str(chosen.get("path") or ""))
+    if (
+        not src.is_dir()
+        or not (src / "SKILL.md").is_file()
+        or src.name.lower() in SKIP_NAMES
+        or not under_any(src, allowed_roots(home, hermes))
+    ):
+        sys.stdout.write("bad_source\n")
+        return 0
+    copied: list[str] = []
+    for parent in skill_dirs(dest, home, hermes):
+        dest_path = copy_one(src, parent, dry_run)
+        if dest_path is not None:
+            copied.append(str(dest_path))
+    if not copied:
+        sys.stdout.write("exists\n")
+        return 0
+    if not dry_run:
+        write_sidecar(cwd / SIDECAR_NAME, dest, task, [chosen])
+        clear_miss(cwd / MISS_NAME)
+        clear_scan_cache()
+    tag = "dry " if dry_run else ""
+    sys.stdout.write("%scopied %s -> %s\n" % (tag, src, ";".join(copied)))
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--task", default="")
+    parser.add_argument("--harness", default="auto")
+    parser.add_argument("--home", default="")
+    parser.add_argument("--hermes-home", default="")
+    parser.add_argument("--cwd", default="")
+    parser.add_argument("--pick", default="")
+    parser.add_argument("--from-miss", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--ask-file", default="")
+    args = parser.parse_args()
+    cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
+    task = args.task
+    dest = args.harness
+    if args.from_miss:
+        miss = read_miss(cwd / MISS_NAME)
+        task = task or str(miss.get("task") or "")
+        if dest == "auto":
+            dest = str(miss.get("harness") or "auto")
+    if not task.strip():
+        sys.stdout.write("no_task\n")
+        return 0
+    home = Path(args.home) if args.home else user_home()
+    hermes = Path(args.hermes_home) if args.hermes_home else hermes_home()
+    if dest == "auto":
+        dest = detect_harness(Path(__file__))
+    ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+    try:
+        return fill(
+            task,
+            dest,
+            home,
+            hermes,
+            cwd,
+            args.pick.strip() or None,
+            args.dry_run,
+            ask_path,
+        )
+    except Exception:
+        sys.stdout.write("fail_open\n")
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,23 @@
+{
+  "state": {
+    "task": "Add JWT access tokens in Python",
+    "harness": "hermes",
+    "note": "Shortlist is keyword-filtered installed items. Native harness tools are already in session. Do not auto-install."
+  },
+  "questions": {
+    "load_tools": {
+      "type": "choice",
+      "instructions": "Which installed skill, plugin, or MCP should the coder load for this task?",
+      "criteria": {
+        "skill_jev_consult": "skill jev-consult: Jev decides keep vs change",
+        "skill_security_and_hardening": "skill security-and-hardening: harden code against vulnerabilities",
+        "mcp_context7": "mcp context7: library docs lookup",
+        "none": "none of these; the installed set is wrong or unneeded for this turn"
+      }
+    },
+    "installed_enough": {
+      "type": "noul",
+      "instructions": "Is the installed shortlist enough for this task, so the coder can skip the marketplace search?"
+    }
+  }
+}

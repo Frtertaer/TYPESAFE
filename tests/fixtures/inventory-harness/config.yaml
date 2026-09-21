@@ -1,0 +1,7 @@
+mcp_servers:
+  context7:
+    url: http://127.0.0.1:9
+  composio:
+    command: npx
+env:
+  TYPESAFE_API_KEY: should-not-appear

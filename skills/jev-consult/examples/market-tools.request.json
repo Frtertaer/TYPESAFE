@@ -1,0 +1,18 @@
+{
+  "state": {
+    "task": "Need an MCP to query Postgres from this harness",
+    "installed_enough": "no",
+    "searched": ["https://github.com/modelcontextprotocol/servers", "https://smithery.ai"]
+  },
+  "questions": {
+    "market_tools": {
+      "type": "choice",
+      "instructions": "The installed set falls short. Which marketplace candidate should the coder propose to the human for approval?",
+      "criteria": {
+        "mcp_postgres": "official postgres MCP from modelcontextprotocol/servers",
+        "mcp_generic_sql": "generic SQL MCP, not postgres-specific",
+        "none": "none of these; propose nothing"
+      }
+    }
+  }
+}

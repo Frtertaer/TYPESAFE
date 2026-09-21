@@ -1,0 +1,28 @@
+[
+  {
+    "role": "user",
+    "text": "Fix the failing test. Never edit src/generated.",
+    "toolUses": []
+  },
+  {
+    "role": "assistant",
+    "text": "",
+    "toolUses": [
+      {
+        "tool_use_id": "toolu_1",
+        "tool": "Read",
+        "input": { "file_path": "src/a.ts" }
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "text": "",
+    "toolResults": [
+      {
+        "tool_use_id": "toolu_1",
+        "text": "export const unused = 1;\n"
+      }
+    ]
+  }
+]

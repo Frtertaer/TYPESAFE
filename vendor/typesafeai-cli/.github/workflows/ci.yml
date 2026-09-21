@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: uv sync --group dev
+      - name: Tests
+        run: uv run python -m pytest -v
+      - name: Console script
+        run: uv run typesafe --help
+      - name: install.sh syntax
+        run: bash -n install.sh
+
+  build:
+    name: Build sdist and wheel
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: uv build
+      - name: Check dist
+        run: |
+          ls -l dist
+          uv run --with hatchling python -c "import pathlib; files=list(pathlib.Path('dist').iterdir()); assert any(p.suffix=='.whl' for p in files); assert any(p.name.endswith('.tar.gz') for p in files)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  ship:
+    name: Ship (tag and publish)
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      !startsWith(github.event.head_commit.message, 'chore(release):') &&
+      !startsWith(github.event.head_commit.message, '[skip release]')
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: Trigger patch release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run release-prepare.yml --repo "${GITHUB_REPOSITORY}" --ref main -f bump=patch
+          echo "Dispatched Prepare Release (patch). That tags and starts Release (GitHub + PyPI)."

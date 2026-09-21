@@ -1,0 +1,22 @@
+{
+  "state": {
+    "task": "Add JWT auth to this Python API.",
+    "unknown": "which library and which first file to touch",
+    "inspected": [
+      "no auth module in the repo",
+      "requirements.txt has no jwt package"
+    ]
+  },
+  "questions": {
+    "unknown_move": {
+      "type": "choice",
+      "instructions": "The coder is unsure what to do next. Which move?",
+      "criteria": {
+        "inspect_more": "read more of this repo before picking a library",
+        "pyjwt": "use PyJWT and add a small auth module",
+        "ask_human": "stop and ask the human",
+        "none": "none of these"
+      }
+    }
+  }
+}

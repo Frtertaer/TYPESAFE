@@ -1,0 +1,24 @@
+{
+  "refund_requested": {
+    "type": "noul",
+    "instructions": "Does `message` request a refund?"
+  },
+  "intent": {
+    "type": "choice",
+    "instructions": "What does `message` ask for?",
+    "criteria": {
+      "refund": "The customer wants money returned",
+      "information": "The customer wants an explanation only",
+      "other": "Something else"
+    }
+  },
+  "frustration": {
+    "type": "score",
+    "instructions": "How frustrated does the customer sound in `message`?",
+    "criteria": [
+      "Calm and factual",
+      "Annoyed but civil",
+      "Very angry"
+    ]
+  }
+}

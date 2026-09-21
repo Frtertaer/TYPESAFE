@@ -1,0 +1,86 @@
+{
+  "goal": "Cut stall, invented next step, drift, loop, and forgotten plan. Not IQ.",
+  "cases": [
+    {
+      "id": "off_track",
+      "defect": "drift",
+      "score": "on_track",
+      "prompt": "Add a unit test for load_api_key in tests/test_jev.py. Do not rename it. Do not edit install.py.",
+      "before": {
+        "plan": "Add a unit test for load_api_key in tests/test_jev.py. Do not rename it. Do not edit install.py.",
+        "current_step": "Rewriting install.py to add Cursor and rename load_api_key.",
+        "called_jev": false,
+        "invented": "the user also wants Cursor"
+      },
+      "after": {
+        "plan": "Add a unit test for load_api_key in tests/test_jev.py. Do not rename it. Do not edit install.py.",
+        "current_step": "Add test_load_api_key in tests/test_jev.py.",
+        "called_jev": true,
+        "last_pick": "return_to_plan"
+      }
+    },
+    {
+      "id": "unknown",
+      "defect": "invented_next_step",
+      "score": "grounded_enough",
+      "prompt": "Add JWT auth to this Python API.",
+      "before": {
+        "task": "Add JWT auth to this Python API.",
+        "current_step": "pip install fastapi-jwt-auth and rewrite the app without reading requirements.txt",
+        "called_jev": false,
+        "invented": "fastapi-jwt-auth"
+      },
+      "after": {
+        "task": "Add JWT auth to this Python API.",
+        "unknown": "which library and which first file to touch",
+        "inspected": [
+          "no auth module",
+          "requirements.txt has no jwt package"
+        ],
+        "current_step": "ask Jev unknown_move with real library options",
+        "called_jev": true,
+        "last_pick": "pyjwt"
+      }
+    },
+    {
+      "id": "stuck",
+      "defect": "loop",
+      "score": "on_track",
+      "prompt": "Make inventory.py parse Hermes config.yaml MCP names. Do not rewrite the file.",
+      "before": {
+        "plan": "Make inventory.py parse Hermes config.yaml MCP names. Do not rewrite the file.",
+        "current_step": "Retry the same Path patch a fourth time, then rewrite inventory.py from scratch.",
+        "attempt_count": 4,
+        "last_error": "same AttributeError on Path",
+        "called_jev": false
+      },
+      "after": {
+        "plan": "Make inventory.py parse Hermes config.yaml MCP names. Do not rewrite the file.",
+        "current_step": "Stop retrying; add a smaller yaml helper for MCP names.",
+        "attempt_count": 4,
+        "last_error": "same AttributeError on Path",
+        "called_jev": true,
+        "last_pick": "change_approach"
+      }
+    },
+    {
+      "id": "forget",
+      "defect": "no_memory",
+      "score": "grounded_enough",
+      "prompt": "Continue the JWT work from last session.",
+      "before": {
+        "task": "Continue the JWT work from last session.",
+        "current_step": "Guess we were adding OAuth and start a new auth stack.",
+        "called_jev": false,
+        "invented": "OAuth"
+      },
+      "after": {
+        "task": "Continue the JWT work from last session.",
+        "plan": "Add JWT auth with PyJWT; first file auth.py",
+        "current_step": "loaded .jev-trace.json (plan + last_pick pyjwt) and continue auth.py",
+        "called_jev": true,
+        "last_pick": "pyjwt"
+      }
+    }
+  ]
+}

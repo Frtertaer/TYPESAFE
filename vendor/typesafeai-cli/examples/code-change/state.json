@@ -1,0 +1,10 @@
+{
+  "task": "An agent is about to call Jev on a pull request. Decide whether the typesafe-cli skill tells that agent to attach real code, or only a file path.",
+  "files": [
+    {
+      "path": "src/typesafe_cli/data/typesafe-cli/SKILL.md",
+      "line_range": "50-74",
+      "hunk": "### 2. Name the decision, then write the questions\n\nDo not start by dumping context. TypeSafe's contract is the questions: they name the fields Jev is allowed to look at.\n\nThen write `$WORKDIR/questions.json`. Each question's `instructions` must point at named paths with backticks (`task`, `files[0].hunk`, `tools`). Those paths **are** the collection list.\n\n### 3. Fill only those fields\n\nIf a path is code (`files[0].hunk`), the value must be the slice (path + line range + body), not a filename and not \"see the PR.\" Prefer under ~8k tokens of code. Do not send the tree.\n"
+    }
+  ]
+}

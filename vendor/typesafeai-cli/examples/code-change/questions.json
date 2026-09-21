@@ -1,0 +1,25 @@
+{
+  "enough_code_in_state": {
+    "type": "noul",
+    "instructions": "Does `files[0].hunk` require the agent to put the actual code slice into state when a question path is code, rather than a path or 'see the PR'?"
+  },
+  "what_to_do": {
+    "type": "choice",
+    "instructions": "Given `task` and `files[0].hunk`, what should we do with this skill?",
+    "criteria": {
+      "keep": "Keep questions-first collection; do not add a job catalog",
+      "thin": "Cut the skill down to command examples only",
+      "expand": "Add per-job recipes (diff, CI, routing, …)",
+      "abstain": "Not enough in state to decide"
+    }
+  },
+  "clarity": {
+    "type": "score",
+    "instructions": "How clearly does `files[0].hunk` tell an agent to attach real code when the judgment is about a change?",
+    "criteria": [
+      "Silent; agents would send only a path",
+      "Mentions code but easy to skip the hunk",
+      "Clear: a code path must contain the slice"
+    ]
+  }
+}

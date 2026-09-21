@@ -1,0 +1,15 @@
+.env.local
+.env
+PLAN.md
+plan.md
+PHASE3.md
+docs/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+uv.lock

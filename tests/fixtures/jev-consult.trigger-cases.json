@@ -1,0 +1,18 @@
+{
+  "skill": "jev-consult",
+  "cases": [
+    {"id": "pos-approach", "prompt": "Decide the approach before I start: keep the current auth module or change it?", "should_trigger": true},
+    {"id": "pos-library", "prompt": "Pick a library for HTTP retries in this coding task, which one should we use", "should_trigger": true},
+    {"id": "pos-stuck", "prompt": "I am stuck, the same test fails twice, decide the next move", "should_trigger": true},
+    {"id": "pos-loop", "prompt": "I keep looping on the same fix and it is not working, what now", "should_trigger": true},
+    {"id": "pos-plan", "prompt": "Planning task: decide the architecture for the cache layer", "should_trigger": true},
+    {"id": "pos-remember", "prompt": "I do not remember the plan from the last session, which step are we on", "should_trigger": true},
+    {"id": "pos-tools", "prompt": "Which of the installed skills or MCP servers should I load for this task", "should_trigger": true},
+    {"id": "neg-format", "prompt": "Format this file with black", "should_trigger": false},
+    {"id": "neg-regex", "prompt": "What does this regex match", "should_trigger": false},
+    {"id": "neg-run-tests", "prompt": "Run the unit tests and show me the output", "should_trigger": false},
+    {"id": "neg-summarize", "prompt": "Summarize this README in two sentences", "should_trigger": false},
+    {"id": "neg-convert", "prompt": "Convert this CSV file to JSON", "should_trigger": false},
+    {"id": "neg-git", "prompt": "Show the git log for the last ten commits", "should_trigger": false}
+  ]
+}

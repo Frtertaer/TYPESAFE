@@ -13,3 +13,9 @@ Thumbs.db
 .verify-out.txt
 .listing.txt
 .session-*.txt
+.session-*.json
+.jev-*.json
+.jev-*.txt
+.jev-*.out
+.jev-*.err
+.tmp-jev*

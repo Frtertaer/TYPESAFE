@@ -1,0 +1,146 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --group dev
+      - run: uv run python -m pytest -v
+      - run: bash -n install.sh
+
+  build:
+    name: Build package
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Resolve version from tag
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="$(git describe --tags --abbrev=0)"
+          fi
+          WANT="${TAG#v}"
+          HAVE="$(python3 -c "import pathlib,re; t=pathlib.Path('pyproject.toml').read_text(); print(re.search(r'^version = \"([^\"]+)\"', t, re.M).group(1))")"
+          INIT="$(python3 -c "import pathlib,re; t=pathlib.Path('src/typesafe_cli/__init__.py').read_text(); print(re.search(r'__version__ = \"([^\"]+)\"', t).group(1))")"
+          echo "tag=${TAG} pyproject=${HAVE} init=${INIT}"
+          if [ "$WANT" != "$HAVE" ] || [ "$WANT" != "$INIT" ]; then
+            echo "::error::Tag ${TAG} does not match version ${HAVE} / ${INIT}."
+            exit 1
+          fi
+          echo "version=${HAVE}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: uv build
+      - name: Collect assets
+        run: |
+          mkdir -p release-assets
+          cp dist/*.whl dist/*.tar.gz install.sh LICENSE README.md release-assets/
+          cd release-assets
+          sha256sum * > "typesafeai-cli_${{ steps.version.outputs.version }}_checksums.txt"
+          ls -la
+          cat "typesafeai-cli_${{ steps.version.outputs.version }}_checksums.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets/*
+          retention-days: 1
+
+  finalize:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<EOF
+          ## typesafe ${VERSION}
+
+          ### Installation
+
+          \`\`\`bash
+          curl -fsSL https://github.com/maddygoround/typesafeai-cli/releases/download/${TAG}/install.sh | bash
+          \`\`\`
+
+          That script downloads this release's wheel and installs \`typesafe\` (via pipx, uv, or pip --user). From PyPI instead:
+
+          \`\`\`bash
+          pipx install typesafeai-cli
+          # or: pip install typesafeai-cli
+          # or: uv tool install typesafeai-cli
+          \`\`\`
+
+          ### Verifying
+
+          \`\`\`bash
+          sha256sum -c typesafeai-cli_${VERSION}_checksums.txt
+          \`\`\`
+          EOF
+
+          gh release create "$TAG" \
+            --title "Release ${VERSION}" \
+            --notes-file release-notes.md \
+            --generate-notes \
+            release-assets/*
+
+  pypi:
+    name: Publish to PyPI
+    needs: [build, finalize]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/typesafeai-cli
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+      - name: Keep only sdist and wheel
+        run: |
+          mkdir -p upload
+          mv dist/*.whl dist/*.tar.gz upload/
+          ls -l upload
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: upload

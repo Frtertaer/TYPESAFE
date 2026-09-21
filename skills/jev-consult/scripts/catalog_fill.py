@@ -1,0 +1,345 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""Install one catalog skill after Jev pick + inspect.
+
+Sidecar after miss. Does not run from a prompt hook. Never --force.
+Never plugins, MCP, or npx. Fail open.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+from inventory import (  # noqa: E402
+    MISS_NAME,
+    SIDECAR_NAME,
+    UNTRUSTED_RULE,
+    clear_miss,
+    clear_scan_cache,
+    detect_harness,
+    hermes_home,
+    shortlist,
+    tokens,
+    user_home,
+    write_sidecar,
+)
+from peer_fill import copy_one, read_miss, run_jev, skill_dirs  # noqa: E402
+
+ASK_NAME = ".jev-catalog-fill.request.json"
+SEARCH_LIMIT = 8
+BLOCK_RE = re.compile(
+    r"(exploit|attack|hack|malware|phishing|privesc|ransom|payload|\bcve\b|weapon)",
+    re.I,
+)
+BLOCKED_INSPECT = ("blocked scan", "verdict: blocked", "scan blocked", "install blocked")
+
+
+def hermes_bin() -> str | None:
+    return shutil.which("hermes") or shutil.which("hermes.exe")
+
+
+def run_hermes(argv: list[str], timeout: int = 120) -> tuple[int, str]:
+    binary = hermes_bin()
+    if not binary:
+        return 127, ""
+    try:
+        proc = subprocess.run(
+            [binary, *argv],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 1, ""
+    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+
+def slug_id(identifier: str) -> str:
+    text = re.sub(r"[^a-zA-Z0-9]+", "_", identifier or "").strip("_")
+    return (text or "item")[:80]
+
+
+def blocked_text(*parts: str) -> bool:
+    blob = " ".join(parts)
+    return bool(BLOCK_RE.search(blob))
+
+
+def drop_blocked(hits: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    seen: set[str] = set()
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
+        ident = str(hit.get("identifier") or "").strip()
+        name = str(hit.get("name") or "").strip()
+        if not ident or ident in seen:
+            continue
+        if blocked_text(
+            name,
+            ident,
+            str(hit.get("description") or ""),
+            str(hit.get("source") or ""),
+        ):
+            continue
+        seen.add(ident)
+        copy = dict(hit)
+        copy["id"] = slug_id(ident)
+        copy["kind"] = "skill"
+        out.append(copy)
+    return out
+
+
+def parse_search(raw: str) -> list[dict]:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    return []
+
+
+def search_hits(task: str) -> list[dict] | None:
+    query = " ".join(sorted(tokens(task))[:8]) or task[:80]
+    if not query.strip():
+        return []
+    code, out = run_hermes(
+        ["skills", "search", query, "--json", "--limit", str(SEARCH_LIMIT)]
+    )
+    if code == 127:
+        return None
+    if code != 0:
+        return []
+    return drop_blocked(parse_search(out))
+
+
+def inspect_ok(identifier: str) -> bool:
+    code, out = run_hermes(["skills", "inspect", identifier])
+    if code != 0:
+        return False
+    low = out.lower()
+    return not any(marker in low for marker in BLOCKED_INSPECT)
+
+
+def install_argv(identifier: str) -> list[str]:
+    return ["skills", "install", identifier, "--yes"]
+
+
+def install_one(identifier: str, dry_run: bool) -> bool:
+    if dry_run:
+        return True
+    argv = install_argv(identifier)
+    if "--force" in argv:
+        return False
+    code, _out = run_hermes(argv, timeout=180)
+    return code == 0
+
+
+def installed_dir(hermes: Path, hit: dict) -> Path | None:
+    ident = str(hit.get("identifier") or "")
+    name = str(hit.get("name") or "")
+    leaf = ident.rstrip("/").split("/")[-1]
+    skills = hermes / "skills"
+    for candidate in (name, name.lower(), leaf, leaf.lower()):
+        if not candidate:
+            continue
+        path = skills / candidate
+        if (path / "SKILL.md").is_file():
+            return path
+    if not skills.is_dir():
+        return None
+    try:
+        children = list(skills.iterdir())
+    except OSError:
+        return None
+    for child in children:
+        if not child.is_dir() or not (child / "SKILL.md").is_file():
+            continue
+        if child.name.lower() in {name.lower(), leaf.lower()}:
+            return child
+    return None
+
+
+def scan_critical(src: Path) -> int | None:
+    try:
+        import skill_scanner
+
+        findings = skill_scanner.scan_skill(str(src))
+    except Exception:
+        return None
+    return sum(1 for f in findings if f.severity == "CRITICAL")
+
+
+def write_catalog_ask(path: Path, task: str, dest: str, hits: list[dict]) -> None:
+    criteria: dict[str, str] = {}
+    for hit in hits:
+        label = "%s (%s)" % (hit.get("name"), hit.get("identifier"))
+        desc = (hit.get("description") or "").strip()
+        if desc:
+            label = "%s: %s" % (label, desc[:160])
+        criteria[str(hit["id"])] = label
+    criteria["none"] = "none of these; skip the install"
+    payload = {
+        "state": {
+            "task": task,
+            "harness": dest,
+            "note": (
+                "Local harness is empty. These are catalog skills from hermes skills search. "
+                "Pick one. Coder will inspect then hermes skills install --yes. Never --force. "
+                "Never plugins, MCP, or npx."
+            ),
+        },
+        "questions": {
+            "load_tools": {
+                "type": "choice",
+                "instructions": UNTRUSTED_RULE
+                + " Which one catalog skill should the coder inspect and install?",
+                "criteria": criteria,
+            }
+        },
+    }
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def item_for_pick(pick: str, hits: list[dict]) -> dict | None:
+    if not pick or pick == "none":
+        return None
+    for hit in hits:
+        if hit.get("id") == pick or hit.get("identifier") == pick or hit.get("name") == pick:
+            return hit
+    return None
+
+
+def fill(
+    task: str,
+    dest: str,
+    home: Path,
+    hermes: Path,
+    cwd: Path,
+    pick: str | None,
+    dry_run: bool,
+    ask_path: Path,
+) -> int:
+    if pick:
+        if blocked_text(pick):
+            sys.stdout.write("blocked\n")
+            return 0
+        chosen = {
+            "id": slug_id(pick),
+            "identifier": pick,
+            "name": pick.split("/")[-1],
+            "kind": "skill",
+        }
+    else:
+        hits = search_hits(task)
+        if hits is None:
+            sys.stdout.write("no_hermes\n")
+            return 0
+        ranked = shortlist(hits, task, SEARCH_LIMIT, []) if hits else []
+        if not ranked:
+            sys.stdout.write("no_catalog\n")
+            return 0
+        write_catalog_ask(ask_path, task, dest, ranked)
+        data = run_jev(ask_path)
+        if not data:
+            sys.stdout.write("jev_skip\n")
+            return 0
+        decision = data.get("decision") or {}
+        if decision.get("action") != "proceed":
+            sys.stdout.write("jev_skip\n")
+            return 0
+        chosen = item_for_pick(str((decision.get("picks") or {}).get("load_tools") or ""), ranked)
+    if chosen is None:
+        sys.stdout.write("none\n")
+        return 0
+    ident = str(chosen.get("identifier") or "").strip()
+    if not ident or blocked_text(ident, str(chosen.get("name") or "")):
+        sys.stdout.write("blocked\n")
+        return 0
+    if not inspect_ok(ident):
+        sys.stdout.write("inspect_fail\n")
+        return 0
+    if not install_one(ident, dry_run):
+        sys.stdout.write("install_fail\n")
+        return 0
+    tag = "dry " if dry_run else ""
+    if dry_run:
+        sys.stdout.write("%swould_install %s\n" % (tag, ident))
+        return 0
+    src = installed_dir(hermes, chosen)
+    if src is not None:
+        critical = scan_critical(src)
+        if critical is not None and critical > 0:
+            sys.stdout.write("scan_fail %s\n" % ident)
+            return 0
+    copied: list[str] = []
+    if dest != "hermes" and src is not None:
+        for parent in skill_dirs(dest, home, hermes):
+            dest_path = copy_one(src, parent, False)
+            if dest_path is not None:
+                copied.append(str(dest_path))
+    write_sidecar(cwd / SIDECAR_NAME, dest, task, [chosen])
+    clear_miss(cwd / MISS_NAME)
+    clear_scan_cache()
+    if copied:
+        sys.stdout.write("installed %s -> %s\n" % (ident, ";".join(copied)))
+    else:
+        sys.stdout.write("installed %s\n" % ident)
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--task", default="")
+    parser.add_argument("--harness", default="auto")
+    parser.add_argument("--home", default="")
+    parser.add_argument("--hermes-home", default="")
+    parser.add_argument("--cwd", default="")
+    parser.add_argument("--pick", default="")
+    parser.add_argument("--from-miss", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--ask-file", default="")
+    args = parser.parse_args()
+    cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
+    task = args.task
+    dest = args.harness
+    if args.from_miss:
+        miss = read_miss(cwd / MISS_NAME)
+        task = task or str(miss.get("task") or "")
+        if dest == "auto":
+            dest = str(miss.get("harness") or "auto")
+    if not task.strip():
+        sys.stdout.write("no_task\n")
+        return 0
+    home = Path(args.home) if args.home else user_home()
+    hermes = Path(args.hermes_home) if args.hermes_home else hermes_home()
+    if dest == "auto":
+        dest = detect_harness(Path(__file__))
+    ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+    try:
+        return fill(
+            task,
+            dest,
+            home,
+            hermes,
+            cwd,
+            args.pick.strip() or None,
+            args.dry_run,
+            ask_path,
+        )
+    except Exception:
+        sys.stdout.write("fail_open\n")
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

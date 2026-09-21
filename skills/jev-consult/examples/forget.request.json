@@ -1,0 +1,19 @@
+{
+  "state": {
+    "unknown": "plan and next step; this session has no memory",
+    "inspected": [
+      ".jev-trace.json missing"
+    ]
+  },
+  "questions": {
+    "unknown_move": {
+      "type": "choice",
+      "instructions": "The coder does not remember the plan. Which move?",
+      "criteria": {
+        "reload_trace": "read .jev-trace.json if it exists, then continue that plan",
+        "ask_human": "stop and ask the human for the plan",
+        "none": "none of these"
+      }
+    }
+  }
+}

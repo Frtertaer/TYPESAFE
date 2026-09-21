@@ -1,0 +1,79 @@
+This directory is an MIT snapshot of
+
+    https://github.com/tamaratran/fast-jev-compaction
+
+Copyright (c) 2025 the upstream authors. See LICENSE in this folder.
+
+jev-consult does **not** run this TypeScript package and does **not** install
+the Claude Code plugin. The runtime in this pack is the Python port:
+
+    skills/jev-consult/scripts/compact.py
+
+Do not `claude plugin install` or `npx` this tree from the pack. Never put
+TYPESAFE_API_KEY in this snapshot.
+
+---
+
+The `awesome-llm-apps-skill-evals` directory is an Apache-2.0 snapshot of
+
+    https://github.com/Shubhamsaboo/awesome-llm-apps
+
+path `agent_skills/evals/`, commit 9e860951aaf5c82801779e43e748dcf92042879a.
+Copyright the upstream authors. See `awesome-llm-apps-skill-evals/LICENSE`.
+
+Only the evals tools are vendored (`skill_lint.py`, `skill_scanner.py`,
+`run_trigger_evals.py`); the tree is inspect-only. The runtime copy is:
+
+    skills/jev-consult/scripts/skill_scanner.py
+
+---
+
+The `jev-skill-suggester` directory is an MIT snapshot of the upstream
+jev-skill-suggester repository
+
+    https://github.com/win4r/jev-skill-suggester
+
+commit 05fbd7ce9ec74a2f193c09276a8d4d077d9d5e5c.
+Copyright (c) the upstream authors. See `jev-skill-suggester/LICENSE`.
+
+jev-consult does **not** run this CLI. Only individual functions were ported
+into the pack's own scripts (response validation, no-redirect retry, secret
+guard, untrusted-metadata rule, block-scalar frontmatter, explicit-only,
+explicit mention).
+
+---
+
+The `jevcal` directory is an MIT snapshot of the upstream jevcal repository,
+commit ae8f3144d69c9cb0e5e0a2c17f70b9d14714cb9f.
+Copyright (c) the upstream authors. See `jevcal/LICENSE`.
+
+Only `src/jevcal/lint.py` is vendored (inspect-only). The runtime port is:
+
+    skills/jev-consult/scripts/question_lint.py
+
+---
+
+The `skill-router` directory is an MIT snapshot of
+
+    https://github.com/lomeshdutta/skill-router
+
+commit 4c538d8be575d5dee09a220c3304bd311ed97903.
+Copyright (c) the upstream authors. See `skill-router/LICENSE`.
+
+Only `questions.py`, `router.py`, `hook.py`, and `evals/cases.json` are
+vendored (inspect-only). Ported pieces: `decide` probabilities passthrough,
+the `strong_pick` threshold in `resolve_picker`, and the `decisions.jsonl`
+append-only log in `inventory.py` / `inventory_hook.py`.
+
+---
+
+The `omp-jev-compaction` directory is an MIT snapshot of the upstream
+omp-jev-compaction repository,
+commit 3719495ceb109c0d6e40d29053675f0d6ecb2e9f.
+Copyright (c) the upstream authors. See `omp-jev-compaction/LICENSE`.
+
+Only `src/spill.ts` and `src/cache-guard.ts` are vendored (inspect-only;
+TypeScript, never run from this pack). The runtime port is `spill()` and the
+spill-aware markers in:
+
+    skills/jev-consult/scripts/compact.py

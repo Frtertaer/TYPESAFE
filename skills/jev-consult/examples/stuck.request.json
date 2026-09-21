@@ -1,0 +1,21 @@
+{
+  "state": {
+    "task": "Make inventory.py parse Hermes config.yaml MCP names.",
+    "attempt_count": 3,
+    "last_error": "same AttributeError on Path after two patches",
+    "what_did_not_change": "test_inventory still fails on the same line"
+  },
+  "questions": {
+    "stuck_move": {
+      "type": "choice",
+      "instructions": "The coder is stuck: looping, hitting the same error, or making no progress. Which move next?",
+      "criteria": {
+        "change_approach": "stop repeating; switch approach",
+        "narrower_scope": "cut the task to a smaller verified slice",
+        "ask_human": "stop and ask the human",
+        "stop": "stop; make no further edits",
+        "none": "none of these"
+      }
+    }
+  }
+}

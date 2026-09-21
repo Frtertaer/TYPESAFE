@@ -1,88 +1,153 @@
 {
-  "version": 1,
+  "version": 3,
   "model": "jev-latest",
   "endpoint": "https://api.typesafe.ai/v1/systemone",
-  "hard_max_questions": 32,
-  "soft_max_questions": 8,
+  "role": "decision_maker",
+  "coder_role": "inspect_and_implement",
+  "default": "ask_jev",
+  "question_soft_max": 8,
+  "question_hard_max": 32,
+  "choice_option_hard_max": 255,
+  "confidence_floor": 0.55,
+  "noul_yes": 0.7,
+  "strong_pick": 0.85,
+  "noul_no": 0.3,
+  "noul_unsure": 0.5,
+  "tight_gap": 0.08,
   "must_ask": [
-    "architecture_change",
-    "delete_code",
+    "approach",
+    "keep_vs_change",
+    "architecture",
+    "library",
+    "delete",
     "refactor_vs_rewrite",
-    "library_choice",
-    "good_enough"
+    "naming",
+    "good_enough",
+    "on_track",
+    "stuck_move",
+    "unknown_move",
+    "load_tools",
+    "installed_enough",
+    "market_tools"
   ],
   "never_ask": [
-    "file_exists",
-    "tests_fail",
-    "syntax",
-    "grep_facts",
-    "compiler_errors"
+    "tool_checkable_fact",
+    "file_contents",
+    "command_output",
+    "secret_value"
   ],
-  "choice": {
-    "act_on": "max_probability",
-    "escalate_if_confidence_below": 0.55,
-    "escalate_if_top_two_gap_below": 0.15,
-    "require_hatch": true,
-    "hatch_ids": ["none", "other"]
+  "require_hatch": true,
+  "escalate_if": {
+    "confidence_below": 0.55,
+    "noul_near": 0.5,
+    "choice_gap_below": 0.08,
+    "irreversible": true
   },
-  "noul": {
-    "yes_above": 0.7,
-    "no_below": 0.3,
-    "note": "0.5 means yes and no are equally likely, not medium strength",
-    "escalate_uncertain_if_irreversible": true
-  },
-  "score": {
-    "escalate_if_confidence_below": 0.55
+  "hallucination": {
+    "claim": "Jev cannot fact-check invented claims. It only picks among typed options. 0% invalid-type rate is not 0% wrong answer. Do not tell the user Jev maximally eliminates hallucinations."
   },
   "templates": {
-    "where_to_put": {
+    "approach": {
       "type": "choice",
-      "instructions": "Where should this new logic live in the current codebase?",
+      "instructions": "Which approach should the coder take?",
+      "criteria": {}
+    },
+    "keep_vs_change": {
+      "type": "choice",
+      "instructions": "Keep the current code or change it?",
       "criteria": {
-        "none": "Do not add this logic yet"
+        "keep": "leave behavior as-is",
+        "change": "edit it",
+        "none": "none of these; stop and ask the human"
       }
     },
-    "touch_existing": {
+    "architecture": {
+      "type": "choice",
+      "instructions": "Which architecture should the coder implement?",
+      "criteria": {}
+    },
+    "library": {
+      "type": "choice",
+      "instructions": "Which library should the coder use?",
+      "criteria": {}
+    },
+    "delete": {
       "type": "noul",
-      "instructions": "Should existing related middleware or modules be modified in this change?",
-      "criteria": {
-        "true": "Existing code must change for the task to be correct",
-        "false": "The task can be done without touching that existing code now"
-      }
-    },
-    "change_risk": {
-      "type": "score",
-      "instructions": "How risky is this change to existing behavior?",
-      "criteria": [
-        "Safe and localized",
-        "Localized risk",
-        "Cross-cutting risk",
-        "High blast radius"
-      ]
+      "instructions": "Should the coder delete this?"
     },
     "refactor_vs_rewrite": {
       "type": "choice",
-      "instructions": "How should the existing module be changed?",
+      "instructions": "Refactor in place or rewrite?",
       "criteria": {
-        "refactor": "Edit in place",
-        "rewrite": "Replace the module",
-        "none": "Do not change it yet"
+        "refactor": "edit the existing code",
+        "rewrite": "replace it",
+        "none": "none of these; stop and ask the human"
       }
+    },
+    "naming": {
+      "type": "choice",
+      "instructions": "Which name should the coder use?",
+      "criteria": {}
     },
     "good_enough": {
       "type": "noul",
-      "instructions": "Is the current change sufficient for the stated task?",
+      "instructions": "Is this good enough to stop?"
+    },
+    "on_track": {
+      "type": "noul",
+      "instructions": "Given the human plan and the coder's current step in state, is the coder still on the requested path?"
+    },
+    "next_move": {
+      "type": "choice",
+      "instructions": "The coder may be off the human plan. Which move next?",
       "criteria": {
-        "true": "Ship or stop; remaining work is out of scope",
-        "false": "Required work for the stated task is still missing"
+        "return_to_plan": "drop the detour and continue the human plan",
+        "change_approach": "keep going but switch approach",
+        "ask_human": "stop and ask the human",
+        "none": "none of these; escalate"
       }
     },
-    "library_choice": {
+    "stuck_move": {
       "type": "choice",
-      "instructions": "Which library should be used?",
+      "instructions": "The coder is stuck: looping, hitting the same error, or making no progress. Which move next?",
       "criteria": {
-        "none": "Use no new library; stay with the current stack"
+        "change_approach": "stop repeating; switch approach",
+        "narrower_scope": "cut the task to a smaller verified slice",
+        "ask_human": "stop and ask the human",
+        "stop": "stop; make no further edits",
+        "none": "none of these"
       }
+    },
+    "unknown_move": {
+      "type": "choice",
+      "instructions": "The coder is unsure what to do next. Which move?",
+      "criteria": {
+        "inspect_more": "inspect more files or docs before deciding",
+        "ask_human": "stop and ask the human",
+        "none": "none of these"
+      }
+    },
+    "load_tools": {
+      "type": "choice",
+      "instructions": "Which installed skill, plugin, or MCP should the coder load for this task?",
+      "criteria": {
+        "none": "none of these"
+      }
+    },
+    "installed_enough": {
+      "type": "noul",
+      "instructions": "Is the installed shortlist enough for this task, so the coder can skip the marketplace search?"
+    },
+    "market_tools": {
+      "type": "choice",
+      "instructions": "The installed set falls short. Which marketplace candidate should the coder propose to the human for approval?",
+      "criteria": {
+        "none": "none of these; propose nothing"
+      }
+    },
+    "grounded_enough": {
+      "type": "noul",
+      "instructions": "Does state contain enough inspected evidence that the next fact and the next step are grounded rather than invented?"
     }
   }
 }

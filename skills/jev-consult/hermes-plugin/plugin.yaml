@@ -1,0 +1,7 @@
+name: jev-compact
+version: "0.1.0"
+description: "Abridge fat tool results and inject an installed-tools shortlist. Not a watchdog. No second LLM."
+author: jev-consult
+hooks:
+  - transform_tool_result
+  - pre_llm_call

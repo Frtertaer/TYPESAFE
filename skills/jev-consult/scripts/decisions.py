@@ -422,6 +422,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--question", default=os.environ.get("JEV_DECISIONS_QUESTION", ""), help="Only entries with this question kind (e.g. load_tools, explicit, env, dedupe)")
     env_dedupe = os.environ.get("JEV_DECISIONS_DEDUPE", "").strip().lower() in ("1", "true", "yes")
     parser.add_argument("--dedupe-only", dest="dedupe_only", action="store_true", default=env_dedupe, help="Only entries with dedupe=true")
+    env_stale = os.environ.get("JEV_DECISIONS_STALE", "").strip().lower() in ("1", "true", "yes")
+    parser.add_argument("--stale", action="store_true", default=env_stale, help="Only entries with stale_sidecar=true")
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -571,6 +573,8 @@ def main(argv: list[str] | None = None) -> int:
         entries = [item for item in entries if item.get("explicit") is True]
     if getattr(args, "dedupe_only", False):
         entries = [item for item in entries if item.get("dedupe") is True]
+    if getattr(args, "stale", False):
+        entries = [item for item in entries if item.get("stale_sidecar") is True]
     if args.question:
         want_q = args.question.strip().lower()
         entries = [
@@ -623,10 +627,11 @@ def main(argv: list[str] | None = None) -> int:
             or args.winner
             or getattr(args, "explicit", False)
             or getattr(args, "dedupe_only", False)
+            or getattr(args, "stale", False)
             or args.question
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, or --prompt\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, or --prompt\n"
             )
             return 2
         total, total_bad = load_entries(path)

@@ -358,6 +358,19 @@ class TriggerEvalTests(unittest.TestCase):
             with redirect_stdout(buf):
                 rc = te.main(["--cases", str(path), "--strict"])
             self.assertEqual(rc, 1)
+            # capped watch rc honors --strict too
+            with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
+                with redirect_stdout(buf):
+                    rc = te.main(
+                        ["--cases", str(path), "--watch", "0.01", "--strict"]
+                    )
+            self.assertEqual(rc, 1)
+            with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
+                with redirect_stdout(buf):
+                    rc = te.main(
+                        ["--cases", str(path), "--watch", "0.01"]
+                    )
+            self.assertEqual(rc, 0)
 
     def test_strict_coverage_requires_all_hits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

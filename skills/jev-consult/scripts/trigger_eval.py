@@ -458,6 +458,12 @@ def main(argv: list[str] | None = None) -> int:
                     counts[tag] = counts.get(tag, 0) + 1
             if any(n < args.min_covers for n in counts.values()):
                 return 1
+        if args.strict and any(
+            not row["ok"]
+            or (not row["should_trigger"] and (row["score"] or 0) > 0)
+            for row in cur["cases"]
+        ):
+            return 1
         return 0
     if args.report:
         if args.json:

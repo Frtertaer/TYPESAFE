@@ -404,6 +404,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fill", default=os.environ.get("JEV_DECISIONS_FILL", ""), help="Only entries with this fill kind (apply, catalog, peer)")
     parser.add_argument("--field", default=os.environ.get("JEV_DECISIONS_FIELD", ""), help="Generic filter: KEY=VALUE equality on any entry field (a.b digs into nested objects)")
     parser.add_argument("--prompt", default=os.environ.get("JEV_DECISIONS_PROMPT", ""), help="Only entries whose prompt_head/prompt_tail contain this substring (case-insensitive)")
+    env_min_need = os.environ.get("JEV_DECISIONS_MIN_NEED", "").strip()
+    try:
+        env_min_need = float(env_min_need) if env_min_need else None
+    except ValueError:
+        env_min_need = None
+    parser.add_argument("--min-need", type=float, default=env_min_need, help="Only entries with numeric need >= F")
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -526,6 +532,14 @@ def main(argv: list[str] | None = None) -> int:
         entries = filter_fill(entries, args.fill)
     if args.field:
         entries = filter_field(entries, args.field)
+    if args.min_need is not None:
+        entries = [
+            item
+            for item in entries
+            if isinstance(item.get("need"), (int, float))
+            and not isinstance(item.get("need"), bool)
+            and float(item.get("need")) >= args.min_need
+        ]
     if args.prompt:
         needle = args.prompt.lower()
         entries = [
@@ -536,10 +550,16 @@ def main(argv: list[str] | None = None) -> int:
         ]
     if args.prune:
         if since is None and until is None and not (
-            args.harness or args.status or args.outcome or args.fill or args.field or args.prompt
+            args.harness
+            or args.status
+            or args.outcome
+            or args.fill
+            or args.field
+            or args.prompt
+            or args.min_need is not None
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, or --prompt\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, or --prompt\n"
             )
             return 2
         total, total_bad = load_entries(path)

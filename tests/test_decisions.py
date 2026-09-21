@@ -214,6 +214,34 @@ class CliTest(unittest.TestCase):
             self.assertIn("beta", proc.stdout)
             self.assertIn("fix the flaky test", proc.stdout)
 
+    def test_min_need_filters_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1700000000, "harness": "codex", "jev_status": "winner", "prompt_head": "high", "need": 0.9},
+                    {"ts": 1700000001, "harness": "codex", "jev_status": "winner", "prompt_head": "low", "need": 0.2},
+                    {"ts": 1700000002, "harness": "codex", "jev_status": "winner", "prompt_head": "noneed"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--min-need", "0.5", "--count")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("1", proc.stdout)
+            proc = self.run_cli(
+                "--file", str(path), "--min-need", "0.5", "--jsonl"
+            )
+            lines = [l for l in proc.stdout.splitlines() if l.strip()]
+            self.assertEqual(len(lines), 1)
+            self.assertIn("high", lines[0])
+            # env default
+            proc = self.run_cli(
+                "--file", str(path), "--count",
+                env={"JEV_DECISIONS_MIN_NEED": "0.85"},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("1", proc.stdout)
+
     def test_count_prints_filtered_total(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

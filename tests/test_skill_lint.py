@@ -72,6 +72,24 @@ class LintSkillTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(buf.getvalue(), "")
 
+    def test_severity_filters_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            warn_path = write_skill(tmp, "x", "---\nname: x\n---\n")
+            bad = Path(tmp) / "nope" / "SKILL.md"
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = skill_lint.main(
+                    [str(warn_path), str(bad), "--severity", "warn"]
+                )
+            out = buf.getvalue()
+            self.assertEqual(rc, 1)  # error still counts for rc
+            self.assertIn("S004", out)
+            self.assertNotIn("S001", out)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = skill_lint.main([str(bad), "--severity", "bogus"])
+            self.assertEqual(rc, 2)
+
     def test_quiet_still_prints_errors(self):
         with tempfile.TemporaryDirectory() as tmp:
             bad = Path(tmp) / "nope" / "SKILL.md"

@@ -28,6 +28,7 @@ python skills/jev-consult/scripts/jev.py ask request.json --trace
 python skills/jev-consult/scripts/jev.py scaffold keep_vs_change --out request.json --plan "<task>"
 python skills/jev-consult/scripts/jev.py lint request.json  # standalone question_lint.py adds --severity LEVEL (error|warn|info)
 python skills/jev-consult/scripts/policy_lint.py  # validate policy.json before editing thresholds/templates
+python skills/jev-consult/scripts/skill_lint.py SKILL.md  # lint skill frontmatter; --severity LEVEL filters shown findings
 ```
 
 Repo copy: `python skills/jev-consult/scripts/jev.py`. Installed user copy: `scripts/jev.py` next to this skill.

@@ -162,6 +162,17 @@ def main(argv: list[str] | None = None) -> int:
     as_json = "--json" in argv
     strict = "--strict" in argv
     quiet = "--quiet" in argv
+    severity = ""
+    if "--severity" in argv:
+        idx = argv.index("--severity")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--severity needs a value (error|warn|info)\n")
+            return 2
+        severity = argv[idx + 1].strip().lower()
+        if severity not in ("error", "warn", "info"):
+            sys.stderr.write("bad --severity %r (want error|warn|info)\n" % severity)
+            return 2
+        argv = argv[:idx] + argv[idx + 2 :]
     argv = [a for a in argv if a not in ("--fix", "--json", "--strict", "--quiet")]
     if not argv:
         sys.stderr.write(
@@ -187,14 +198,15 @@ def main(argv: list[str] | None = None) -> int:
     if as_json:
         import json as _json
 
-        rows = [
+        all_rows = [
             {"path": str(path), **f} for path in paths for f in lint_skill(path)
         ]
+        rows = [r for r in all_rows if not severity or r["severity"] == severity]
         def bad(r: dict) -> bool:
             return r["severity"] == "error" or (strict and r["severity"] == "warn")
 
         sys.stdout.write(_json.dumps({"findings": rows}, indent=2) + "\n")
-        return 1 if any(bad(r) for r in rows) else 0
+        return 1 if any(bad(r) for r in all_rows) else 0
     n_err = 0
     n_warn = 0
     for path in paths:
@@ -205,6 +217,8 @@ def main(argv: list[str] | None = None) -> int:
                 n_warn += 1
             if f["severity"] == "error" or (strict and f["severity"] == "warn"):
                 rc = 1
+            if severity and f["severity"] != severity:
+                continue
             if quiet and f["severity"] != "error":
                 continue
             sys.stdout.write("%s %s %s: %s\n" % (f["severity"], f["rule"], path, f["message"]))

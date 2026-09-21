@@ -122,6 +122,8 @@ Native harness tools are already in the session. A hook IDF-shortlists **already
 
 Hook may call Jev **once** on the IDF shortlist (`load_tools` + `need_skill`). Timeout fail-open. Winner injects one `<skill_relevance>` line; `none` injects nothing. A choice with `load_tools` probability ≥ `strong_pick` (0.85 in `policy.json`) wins even when `need_skill` is unsure. Every hook decision is appended to `~/.cache/jev-consult/decisions.jsonl` (`JEV_CONSULT_LOG=0` disables). Hook never installs. Never `--force`. Never npx.
 
+`.jev-tools.json` and `.jev-tools-miss.json` sidecars carry `written_at`. They are fresh for `sidecar_ttl_seconds` (policy.json, 4h default). Check with `python scripts/inventory.py --check-sidecar` (`fresh` / `stale` / `missing` / `invalid`). Stale sidecar → ignore it and re-run `inventory.py`; `read_miss` already returns `{}` on stale miss files.
+
 If `.jev-tools-miss.json` exists, do not ask the user. Run:
 
 ```text

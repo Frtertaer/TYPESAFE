@@ -28,8 +28,10 @@ from inventory import (  # noqa: E402
     detect_harness,
     hermes_home,
     iter_skills,
+    read_sidecar,
     roots_for,
     shortlist,
+    sidecar_fresh,
     tokens,
     user_home,
     write_sidecar,
@@ -165,12 +167,13 @@ def copy_one(src: Path, dest_parent: Path, dry_run: bool) -> Path | None:
     return dest
 
 
-def read_miss(path: Path) -> dict:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+def read_miss(path: Path, ttl_seconds: float | None = None, now: float | None = None) -> dict:
+    data = read_sidecar(path)
+    if not data:
         return {}
-    return data if isinstance(data, dict) else {}
+    if not sidecar_fresh(data, ttl_seconds, now):
+        return {}
+    return data
 
 
 def fill(

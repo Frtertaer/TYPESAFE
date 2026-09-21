@@ -76,6 +76,8 @@ SIDECAR_NAME = ".jev-tools.json"
 MISS_NAME = ".jev-tools-miss.json"
 HARNESSES = ("hermes", "claude-code", "codex", "grok")
 CACHE_TTL = 45.0
+SIDECAR_TTL_KEY = "sidecar_ttl_seconds"
+DEFAULT_SIDECAR_TTL_SECONDS = 14400.0
 _SCAN_CACHE: dict[str, tuple[float, list[dict]]] = {}
 
 
@@ -587,7 +589,12 @@ def format_miss_note(script: Path) -> str:
 
 
 def write_miss(path: Path, harness: str, task: str) -> None:
-    payload = {"harness": harness, "task": (task or "")[:500], "empty": True}
+    payload = {
+        "harness": harness,
+        "task": (task or "")[:500],
+        "empty": True,
+        "written_at": int(time.time()),
+    }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
@@ -638,11 +645,60 @@ def write_sidecar(
     payload = {
         "harness": harness,
         "task": (task or "")[:500],
+        "written_at": int(time.time()),
         "names": [{"kind": item["kind"], "name": item["name"]} for item in picked],
     }
     if extra:
         payload.update(extra)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def sidecar_ttl_seconds() -> float:
+    """TTL for .jev-tools*.json sidecars. Threshold lives in policy.json."""
+    try:
+        policy_path = Path(__file__).resolve().parent.parent / "policy.json"
+        data = json.loads(policy_path.read_text(encoding="utf-8"))
+        return max(0.0, float(data.get(SIDECAR_TTL_KEY, DEFAULT_SIDECAR_TTL_SECONDS)))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return DEFAULT_SIDECAR_TTL_SECONDS
+
+
+def read_sidecar(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def sidecar_fresh(
+    payload: dict,
+    ttl_seconds: float | None = None,
+    now: float | None = None,
+) -> bool:
+    """True when written_at is within ttl. Missing/invalid written_at -> stale.
+
+    Negative age (clock skew) counts as fresh.
+    """
+    written = payload.get("written_at")
+    if not isinstance(written, (int, float)) or isinstance(written, bool):
+        return False
+    ttl = sidecar_ttl_seconds() if ttl_seconds is None else float(ttl_seconds)
+    age = (time.time() if now is None else float(now)) - float(written)
+    return age <= ttl
+
+
+def sidecar_status(
+    path: Path,
+    ttl_seconds: float | None = None,
+    now: float | None = None,
+) -> str:
+    if not path.is_file():
+        return "missing"
+    payload = read_sidecar(path)
+    if not payload:
+        return "invalid"
+    return "fresh" if sidecar_fresh(payload, ttl_seconds, now) else "stale"
 
 
 def picker_request(task: str, harness: str, picked: list[dict]) -> dict:
@@ -753,11 +809,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--include", default="", help="Comma names to force onto the shortlist.")
     parser.add_argument("--write-ask", help="Write a Jev ask JSON with load_tools + installed_enough.")
     parser.add_argument("--sidecar", help="Write %s-style JSON of the shortlist names." % SIDECAR_NAME)
+    parser.add_argument(
+        "--check-sidecar",
+        nargs="?",
+        const=SIDECAR_NAME,
+        help="Print fresh/stale/missing/invalid for a sidecar file and exit.",
+    )
     parser.add_argument("--catalogs", action="store_true", help="Print marketplace URLs and exit.")
     parser.add_argument("--all-names", action="store_true", help="Include every installed name (no descriptions).")
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
     args = parser.parse_args(argv)
+    if args.check_sidecar:
+        sys.stdout.write(sidecar_status(Path(args.check_sidecar)) + "\n")
+        return 0
     if args.catalogs:
         for name, url in CATALOGS:
             sys.stdout.write("%s\t%s\n" % (name, url))

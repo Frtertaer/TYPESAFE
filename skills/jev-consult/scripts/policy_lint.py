@@ -347,13 +347,17 @@ def format_finding(finding: dict) -> str:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     strict = "--strict" in argv
-    argv = [a for a in argv if a != "--strict"]
+    show = "--show" in argv
+    argv = [a for a in argv if a not in {"--strict", "--show"}]
     path = Path(argv[0]) if argv else DEFAULT_POLICY
     try:
         policy = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (path, exc))
         return 2
+    if show:
+        sys.stdout.write(json.dumps({"path": str(path), "policy": policy}, indent=2) + "\n")
+        return 0
     findings = lint_policy(policy)
     for finding in findings:
         sys.stdout.write(format_finding(finding) + "\n")

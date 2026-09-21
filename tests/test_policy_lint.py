@@ -259,5 +259,22 @@ class PolicyLintTests(unittest.TestCase):
         self.assertIn("0 error(s)", buf.getvalue())
 
 
+class ShowFlagTests(unittest.TestCase):
+    def test_show_prints_resolved_policy(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = policy_lint.main(["--show"])
+        self.assertEqual(rc, 0)
+        data = json.loads(buf.getvalue())
+        self.assertIn("policy", data)
+        self.assertIn("confidence_floor", data["policy"])
+
+    def test_show_bad_path_rc2(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = policy_lint.main(["--show", "no-such-policy.json"])
+        self.assertEqual(rc, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -172,6 +172,10 @@ def read_miss(path: Path, ttl_seconds: float | None = None, now: float | None = 
     if not data:
         return {}
     if not sidecar_fresh(data, ttl_seconds, now):
+        try:
+            path.unlink()
+        except OSError:
+            pass
         return {}
     return data
 

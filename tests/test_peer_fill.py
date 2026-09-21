@@ -309,5 +309,45 @@ class PeerFillInternalsTests(unittest.TestCase):
             self.assertIsNone(FILL.run_jev(Path("ask.json")))
 
 
+class ReadMissPruneTests(unittest.TestCase):
+    def _miss(self, path: Path, age: float) -> None:
+        import time as _time
+
+        path.write_text(
+            json.dumps(
+                {
+                    "harness": "hermes",
+                    "task": "x",
+                    "empty": True,
+                    "written_at": int(_time.time() - age),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_stale_miss_is_unlinked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools-miss.json"
+            self._miss(path, age=999999)
+            self.assertEqual(FILL.read_miss(path), {})
+            self.assertFalse(path.exists())  # stale marker pruned
+
+    def test_fresh_miss_kept(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools-miss.json"
+            self._miss(path, age=10)
+            data = FILL.read_miss(path)
+            self.assertEqual(data["harness"], "hermes")
+            self.assertTrue(path.exists())
+
+    def test_missing_or_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools-miss.json"
+            self.assertEqual(FILL.read_miss(path), {})
+            path.write_text("not json", encoding="utf-8")
+            self.assertEqual(FILL.read_miss(path), {})
+            self.assertTrue(path.exists())  # unparseable files left alone
+
+
 if __name__ == "__main__":
     unittest.main()

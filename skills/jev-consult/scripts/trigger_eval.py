@@ -85,6 +85,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skill", default=str(SKILL_DIR))
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--quiet", action="store_true", help="Print only the verdict line.")
+    parser.add_argument(
+        "--out",
+        metavar="PATH",
+        default="",
+        help="Also write the result JSON to PATH.",
+    )
     args = parser.parse_args(argv)
     try:
         result = evaluate(Path(args.cases), Path(args.skill))
@@ -96,6 +102,15 @@ def main(argv: list[str] | None = None) -> int:
             "missing cases file or vendored scorer (%s)\n" % VENDORED_SCORER
         )
         return 2
+    if args.out:
+        try:
+            Path(args.out).write_text(
+                json.dumps(result, indent=2) + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            sys.stderr.write("--out failed: %s\n" % exc)
+            return 1
+        sys.stderr.write("wrote %s\n" % args.out)
     if args.json:
         sys.stdout.write(json.dumps(result, indent=2) + "\n")
     else:

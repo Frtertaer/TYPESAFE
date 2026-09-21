@@ -91,6 +91,17 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertIn("margin:", buf.getvalue())
         self.assertNotIn("should_trigger=", buf.getvalue())
 
+    def test_out_writes_result_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "eval.json"
+            buf = io.StringIO()
+            with redirect_stdout(buf), patch("sys.stderr", io.StringIO()):
+                rc = te.main(["--quiet", "--out", str(target)])
+            self.assertEqual(rc, 0)
+            payload = json.loads(target.read_text(encoding="utf-8"))
+            self.assertTrue(payload["ok"])
+            self.assertEqual(len(payload["cases"]), len(payload["cases"]))
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

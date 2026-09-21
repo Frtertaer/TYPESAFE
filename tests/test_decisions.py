@@ -509,6 +509,49 @@ class CliTest(unittest.TestCase):
             self.assertEqual(len(lines), 1)
             self.assertEqual(json.loads(lines[0])["harness"], "a")
 
+    def test_until_filters_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"harness": "old", "ts": 100},
+                    {"harness": "new", "ts": 200},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--until", "150", "--json"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["filtered"], 1)
+            self.assertEqual(stats["until"], 150.0)
+
+    def test_until_with_since_is_range(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [{"harness": "a", "ts": 100}, {"harness": "b", "ts": 200}, {"harness": "c", "ts": 300}],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--since", "150", "--until", "250", "--json"
+            )
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["filtered"], 1)
+
+    def test_prune_by_until(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"harness": "a", "ts": 100}, {"harness": "b", "ts": 300}])
+            proc = self.run_cli(
+                "--file", str(path), "--prune", "--until", "200"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            kept = [json.loads(l) for l in path.read_text().splitlines()]
+            self.assertEqual(len(kept), 1)
+            self.assertEqual(kept[0]["harness"], "a")
+
     def test_fields_lists_all_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

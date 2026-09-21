@@ -220,6 +220,20 @@ def filter_since(entries: list[dict], since: float | None) -> list[dict]:
     return out
 
 
+def filter_until(entries: list[dict], until: float | None) -> list[dict]:
+    if until is None:
+        return entries
+    out = []
+    for item in entries:
+        try:
+            ts = float(item.get("ts"))
+        except (TypeError, ValueError):
+            continue
+        if ts <= until:
+            out.append(item)
+    return out
+
+
 def prune_entries(path: Path, entries: list[dict]) -> None:
     fd, tmp = tempfile.mkstemp(
         prefix=path.name + ".", dir=str(path.parent), suffix=".tmp"
@@ -245,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tail", type=int, default=0, help="Print last N entries")
     parser.add_argument("--days", type=float, default=0.0, help="Only entries from the last N days")
     parser.add_argument("--since", type=float, default=0.0, help="Only entries with ts >= epoch seconds")
+    parser.add_argument("--until", type=float, default=0.0, help="Only entries with ts <= epoch seconds")
     parser.add_argument("--harness", default="", help="Only entries for this harness")
     parser.add_argument("--status", default="", help="Only entries with this jev_status")
     parser.add_argument("--outcome", default="", help="Only entries with this outcome (e.g. human, blocked)")
@@ -283,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--prune",
         action="store_true",
-        help="Rewrite the log keeping only entries matching --days/--since/--harness/--status filters",
+        help="Rewrite the log keeping only entries matching the time/status filters",
     )
     parser.add_argument("--json", action="store_true", help="Machine-readable stats")
     parser.add_argument(
@@ -313,8 +328,11 @@ def main(argv: list[str] | None = None) -> int:
     since = args.since or None
     if args.days > 0:
         since = time.time() - args.days * 86400
+    until = args.until or None
     if since is not None:
         entries = filter_since(entries, since)
+    if until is not None:
+        entries = filter_until(entries, until)
     if args.harness:
         entries = filter_harness(entries, args.harness)
     if args.status:
@@ -326,11 +344,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.field:
         entries = filter_field(entries, args.field)
     if args.prune:
-        if since is None and not (
+        if since is None and until is None and not (
             args.harness or args.status or args.outcome or args.fill or args.field
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --harness, --status, --outcome, --fill, or --field\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, or --field\n"
             )
             return 2
         total, _ = load_entries(path)
@@ -417,6 +435,7 @@ def main(argv: list[str] | None = None) -> int:
     stats = summarize(entries, bad)
     stats["filtered"] = len(entries)
     stats["since"] = since
+    stats["until"] = until
     if args.json:
         sys.stdout.write(json.dumps(stats, indent=2) + "\n")
     else:

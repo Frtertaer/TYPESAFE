@@ -64,6 +64,53 @@ class TraceTests(unittest.TestCase):
                 else:
                     os.environ["JEV_TRACE"] = old
 
+    def test_stats_missing_file(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(Path(tmp) / "none.json"), "stats"])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertFalse(out["exists"])
+            self.assertEqual(out["attempt_count"], 0)
+            self.assertEqual(out["history"], 0)
+            self.assertNotIn("age_seconds", out)
+
+    def test_stats_filled_trace(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.save(
+                {
+                    "plan": "p",
+                    "attempt_count": 3,
+                    "last_pick": "jwt-auth",
+                    "last_error": "boom",
+                    "unknown": "x",
+                    "inspected": ["a", "b"],
+                    "history": [{"pick": "jwt-auth"}],
+                },
+                path,
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "stats"])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertTrue(out["exists"])
+            self.assertEqual(out["attempt_count"], 3)
+            self.assertEqual(out["last_pick"], "jwt-auth")
+            self.assertEqual(out["inspected"], 2)
+            self.assertEqual(out["history"], 1)
+            self.assertTrue(out["has_error"])
+            self.assertTrue(out["has_unknown"])
+            self.assertGreaterEqual(out["age_seconds"], 0)
+
     def test_load_missing_is_empty(self) -> None:
         data = tr.load(Path("definitely-missing-jev-trace.json"))
         self.assertEqual(data["plan"], "")

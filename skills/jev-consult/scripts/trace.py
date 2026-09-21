@@ -212,6 +212,28 @@ def cmd_prune(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_stats(args: argparse.Namespace) -> int:
+    """One-shot summary: attempts, history/inspected counts, last pick, file age."""
+    path = Path(args.file) if args.file else default_path()
+    data = load(path)
+    out: dict[str, Any] = {
+        "exists": path.is_file(),
+        "attempt_count": int(data.get("attempt_count") or 0),
+        "history": len(data.get("history") or []),
+        "inspected": len(data.get("inspected") or []),
+        "last_pick": data.get("last_pick") or "",
+        "has_error": bool(data.get("last_error")),
+        "has_unknown": bool(data.get("unknown")),
+    }
+    if path.is_file():
+        try:
+            out["age_seconds"] = int(time.time() - path.stat().st_mtime)
+        except OSError:
+            pass
+    emit(out)
+    return 0
+
+
 def cmd_state(args: argparse.Namespace) -> int:
     """Emit the trace as a bare state dict for `jev.py scaffold --state`."""
     path = Path(args.file) if args.file else default_path()
@@ -270,6 +292,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     state_cmd.add_argument("--out", help="Write JSON here instead of stdout")
     state_cmd.set_defaults(func=cmd_state)
+    stats_cmd = sub.add_parser("stats", help="Summary: counts, last pick, file age")
+    stats_cmd.set_defaults(func=cmd_stats)
     return parser
 
 

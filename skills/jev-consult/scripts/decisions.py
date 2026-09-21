@@ -203,7 +203,18 @@ def filter_field(entries: list[dict], spec: str | None) -> list[dict]:
     if "=" not in spec:
         return []
     key, _, value = spec.partition("=")
-    return [item for item in entries if str(item.get(key.strip()) or "") == value.strip()]
+    key = key.strip()
+    value = value.strip()
+
+    def dig(item: dict):
+        node = item
+        for part in key.split("."):
+            if not isinstance(node, dict):
+                return None
+            node = node.get(part)
+        return node
+
+    return [item for item in entries if str(dig(item) or "") == value]
 
 
 def filter_since(entries: list[dict], since: float | None) -> list[dict]:
@@ -271,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--status", default="", help="Only entries with this jev_status")
     parser.add_argument("--outcome", default="", help="Only entries with this outcome (e.g. human, blocked)")
     parser.add_argument("--fill", default="", help="Only entries with this fill kind (apply, catalog, peer)")
-    parser.add_argument("--field", default="", help="Generic filter: KEY=VALUE equality on any entry field")
+    parser.add_argument("--field", default="", help="Generic filter: KEY=VALUE equality on any entry field (a.b digs into nested objects)")
     parser.add_argument(
         "--statuses",
         action="store_true",

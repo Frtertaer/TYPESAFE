@@ -746,6 +746,34 @@ class FilterSinceTest(unittest.TestCase):
             out = json.loads(proc.stdout)
             self.assertEqual(out, {"counts": {"winner": 2, "idf": 1}})
 
+    def test_field_dotted_digs_nested(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "winner", "winner": {"kind": "skill", "name": "jwt-auth"}},
+                    {"ts": 2, "jev_status": "winner", "winner": {"kind": "skill", "name": "ascii-art"}},
+                    {"ts": 3, "jev_status": "none"},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--field", "winner.name=jwt-auth", "--json"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 1)
+
+    def test_field_dotted_missing_leaf_no_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1, "jev_status": "none"}])
+            proc = self.run_cli(
+                "--file", str(path), "--field", "winner.name=x", "--json"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout)["total"], 0)
+
     def test_days_overrides_week(self):
         import time as _time
         with tempfile.TemporaryDirectory() as tmp:

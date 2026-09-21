@@ -315,6 +315,15 @@ class TriggerEvalTests(unittest.TestCase):
             set(row["matched"] + row["unmatched"]),
         )
 
+    def test_prompts_lists_case_prompts(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--prompts"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertTrue(lines[0].startswith("pos-approach: "))
+        self.assertTrue(any(l.startswith("neg-format: ") for l in lines))
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

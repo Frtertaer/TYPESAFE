@@ -61,6 +61,7 @@ def evaluate(
     for case in cases:
         lexical = case.get("lexical") is not False
         expected = bool(case.get("should_trigger"))
+        prompt_text = case.get("prompt", "")
         score = None
         matched: list[str] = []
         row_unmatched: list[str] = []
@@ -73,6 +74,7 @@ def evaluate(
                 row_unmatched = sorted(set(prompt_tokens) - set(desc_tokens))
         row = {
             "id": case.get("id"),
+            "prompt": prompt_text,
             "should_trigger": expected,
             "lexical": lexical,
             "score": score,
@@ -135,6 +137,11 @@ def main(argv: list[str] | None = None) -> int:
         "--ids",
         action="store_true",
         help="Print only the case ids, one per line (with --fail: failing ids only).",
+    )
+    parser.add_argument(
+        "--prompts",
+        action="store_true",
+        help="Print each case id and its prompt text, one per line.",
     )
     parser.add_argument(
         "--id",
@@ -266,6 +273,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.ids:
         for row in _rows():
             sys.stdout.write("%s\n" % row["id"])
+        return 0 if result["ok"] else 1
+    if args.prompts:
+        for row in _rows():
+            sys.stdout.write("%s: %s\n" % (row["id"], row["prompt"]))
         return 0 if result["ok"] else 1
     if args.csv:
         sys.stdout.write("id,should_trigger,lexical,score,ok\n")

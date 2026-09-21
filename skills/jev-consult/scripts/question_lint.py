@@ -235,3 +235,38 @@ def format_finding(f: dict) -> str:
         f["message"],
         f["fix"],
     )
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Standalone CLI: python question_lint.py request.json [--json]"""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    as_json = "--json" in argv
+    argv = [a for a in argv if a != "--json"]
+    if not argv:
+        sys.stderr.write("usage: question_lint.py FILE [--json]\n")
+        return 2
+    try:
+        text = Path(argv[0]).read_text(encoding="utf-8")
+    except OSError as exc:
+        sys.stderr.write("cannot read %s (%s)\n" % (argv[0], exc))
+        return 2
+    try:
+        request = json.loads(text)
+    except ValueError as exc:
+        sys.stderr.write("cannot parse %s (%s)\n" % (argv[0], exc))
+        return 2
+    if not isinstance(request, dict):
+        sys.stderr.write("request JSON must be an object\n")
+        return 2
+    findings = lint_request(request)
+    if as_json:
+        sys.stdout.write(json.dumps({"findings": findings}, indent=2) + "\n")
+    else:
+        for f in findings:
+            sys.stdout.write(format_finding(f) + "\n")
+        sys.stdout.write("lint: %d finding(s)\n" % len(findings))
+    return 1 if any(f["severity"] == "error" for f in findings) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

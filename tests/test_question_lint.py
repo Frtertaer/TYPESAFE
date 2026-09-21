@@ -400,5 +400,60 @@ class RemainingRulesTests(unittest.TestCase):
         self.assertEqual(findings, [])
 
 
+class StandaloneCliTests(unittest.TestCase):
+    QLINT_PATH = SCRIPTS / "question_lint.py"
+
+    def _run(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(self.QLINT_PATH), *args],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+        )
+
+    def test_no_args_rc2(self) -> None:
+        self.assertEqual(self._run().returncode, 2)
+
+    def test_clean_request_rc0(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Should the coder proceed with the plan?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            proc = self._run(str(path))
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("lint: 1 finding(s)", proc.stdout)
+
+    def test_error_request_rc1(self) -> None:
+        request = {
+            "state": "1" * 100000,
+            "questions": {"q": noul("Should the coder proceed with the plan?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            proc = self._run(str(path))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("error J020", proc.stdout)
+
+    def test_json_flag(self) -> None:
+        request = {
+            "state": "1" * 100000,
+            "questions": {"q": noul("Should the coder proceed with the plan?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            proc = self._run(str(path), "--json")
+        self.assertEqual(proc.returncode, 1)
+        findings = json.loads(proc.stdout)["findings"]
+        self.assertTrue(any(f["severity"] == "error" for f in findings))
+
+    def test_missing_file_rc2(self) -> None:
+        self.assertEqual(self._run("nonexistent.json").returncode, 2)
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

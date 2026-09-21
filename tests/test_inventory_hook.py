@@ -112,6 +112,20 @@ class InventoryHookTests(unittest.TestCase):
             )
             self.assertIn("jwt-auth", fresh["hookSpecificOutput"]["additionalContext"])
 
+    def test_prompt_env_supplies_missing_prompt(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(
+                os.environ, {"JEV_HOOK_PROMPT": "Add JWT access tokens in Python"}
+            ):
+                out = HOOK.handle(
+                    {"hook_event_name": "UserPromptSubmit", "cwd": tmp},
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            self.assertIn("jwt-auth", out["hookSpecificOutput"]["additionalContext"])
+
     def test_last_decision_records_prompt_len(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

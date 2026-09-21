@@ -232,7 +232,7 @@ def handle(
         ts = payload_ts(payload)
         if ts is not None and time.time() - ts > max_age:
             return {}
-    prompt = extract_prompt(payload)
+    prompt = extract_prompt(payload) or os.environ.get("JEV_HOOK_PROMPT", "").strip()
     if not prompt:
         return {}
     harness = (

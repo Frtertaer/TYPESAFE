@@ -158,11 +158,22 @@ def main(argv: list[str] | None = None) -> int:
 
         sys.stdout.write(_json.dumps({"findings": rows}, indent=2) + "\n")
         return 1 if any(bad(r) for r in rows) else 0
+    n_err = 0
+    n_warn = 0
     for path in paths:
         for f in lint_skill(path):
             sys.stdout.write("%s %s %s: %s\n" % (f["severity"], f["rule"], path, f["message"]))
+            if f["severity"] == "error":
+                n_err += 1
+            else:
+                n_warn += 1
             if f["severity"] == "error" or (strict and f["severity"] == "warn"):
                 rc = 1
+    if n_err + n_warn and len(paths) > 1:
+        sys.stdout.write(
+            "%d findings (%d errors, %d warns) in %d files\n"
+            % (n_err + n_warn, n_err, n_warn, len(paths))
+        )
     return rc
 
 

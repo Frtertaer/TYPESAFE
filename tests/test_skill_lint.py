@@ -216,6 +216,29 @@ class CliTests(unittest.TestCase):
             proc = self._run(str(path), "--strict")
             self.assertEqual(proc.returncode, 0, proc.stderr)
 
+    def test_summary_line_on_multiple_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad1 = write_skill(tmp, "bad1", "# nope\n")
+            bad2 = write_skill(tmp, "bad2", "# nope\n")
+            proc = self._run(str(bad1), str(bad2))
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("2 findings (2 errors, 0 warns) in 2 files", proc.stdout)
+
+    def test_no_summary_single_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_skill(tmp, "bad", "# nope\n")
+            proc = self._run(str(bad))
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("findings (", proc.stdout)
+
+    def test_no_summary_when_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a = write_skill(tmp, "a", GOOD.format(name="a"))
+            b = write_skill(tmp, "b", GOOD.format(name="b"))
+            proc = self._run(str(a), str(b))
+            self.assertEqual(proc.returncode, 0)
+            self.assertNotIn("findings", proc.stdout)
+
     def test_json_clean_rc0_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
             good = write_skill(tmp, "ok", GOOD.format(name="ok"))

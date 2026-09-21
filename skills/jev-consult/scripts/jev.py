@@ -268,6 +268,18 @@ def validate_response(parsed: dict, questions: dict) -> dict:
     return result
 
 
+def env_timeout() -> float | None:
+    """JEV_TIMEOUT seconds override; None when unset/invalid/non-positive."""
+    raw = os.environ.get("JEV_TIMEOUT", "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
 def post_systemone(
     state: Any,
     questions: dict[str, Any],
@@ -484,7 +496,13 @@ def cmd_ask(args: argparse.Namespace) -> int:
             }
         )
         return 0
-    result = post_systemone(state, questions, policy, model=request.get("model"))
+    result = post_systemone(
+        state,
+        questions,
+        policy,
+        model=request.get("model"),
+        timeout=args.timeout or env_timeout() or 60,
+    )
     answers = result.get("answers") or {}
     if not isinstance(answers, dict):
         raise SystemExit("Jev answers must be an object")
@@ -572,6 +590,7 @@ def cmd_ping(args: argparse.Namespace) -> int:
             }
         },
         policy=policy,
+        timeout=args.timeout or env_timeout() or 60,
     )
     answer = (result.get("answers") or {}).get("ok") or {}
     sys.stdout.write(
@@ -717,6 +736,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Validate and print the resolved request; no API call, no key needed.",
     )
+    ask.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help="HTTP timeout seconds (default JEV_TIMEOUT env or 60)",
+    )
     ask.set_defaults(func=cmd_ask)
     decide_cmd = sub.add_parser("decide", help="Apply policy to an answers object")
     decide_cmd.add_argument("file", help="JSON file or - for stdin")
@@ -738,6 +763,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     lint_cmd.set_defaults(func=cmd_lint)
     ping = sub.add_parser("ping", help="Live connectivity check; prints model and noul only")
+    ping.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help="HTTP timeout seconds (default JEV_TIMEOUT env or 60)",
+    )
     ping.set_defaults(func=cmd_ping)
     scaffold = sub.add_parser(
         "scaffold",

@@ -705,6 +705,36 @@ class JevInternalsTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("ok model=m1 noul=0.95", buf.getvalue())
 
+    def test_ping_timeout_env_and_flag(self) -> None:
+        calls = []
+
+        def fake_post(state, questions, policy, model=None, timeout=60, retries=1):
+            calls.append(timeout)
+            return {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
+
+        buf = io.StringIO()
+        with patch.object(jev, "post_systemone", side_effect=fake_post), patch.object(
+            sys, "stdout", buf
+        ), patch.dict(os.environ, {"JEV_TIMEOUT": "7.5"}):
+            rc = jev.main(["ping"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls, [7.5])
+        calls.clear()
+        with patch.object(jev, "post_systemone", side_effect=fake_post), patch.object(
+            sys, "stdout", buf
+        ), patch.dict(os.environ, {"JEV_TIMEOUT": "bogus"}):
+            rc = jev.main(["ping", "--timeout", "3"])
+        self.assertEqual(calls, [3])
+
+    def test_env_timeout_helper(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("JEV_TIMEOUT", None)
+            self.assertIsNone(jev.env_timeout())
+        with patch.dict(os.environ, {"JEV_TIMEOUT": "0"}):
+            self.assertIsNone(jev.env_timeout())
+        with patch.dict(os.environ, {"JEV_TIMEOUT": "2.5"}):
+            self.assertEqual(jev.env_timeout(), 2.5)
+
     def test_main_requires_command(self) -> None:
         with self.assertRaises(SystemExit):
             jev.main([])

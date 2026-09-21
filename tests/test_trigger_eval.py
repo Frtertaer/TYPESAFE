@@ -427,6 +427,14 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertIn("approach: pos-approach, pos-remember\n", out)
         self.assertIn("keep_vs_change: ", out)
         self.assertIn("uncovered: neg-format\n", out)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--covers", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["covers"]["approach"], 2)
+        self.assertIn("neg-format", payload["uncovered"])
+        self.assertTrue(payload["ok"])
 
     def test_tokens_shows_matched_tokens(self) -> None:
         buf = io.StringIO()

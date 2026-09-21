@@ -516,16 +516,28 @@ def main(argv: list[str] | None = None) -> int:
                 id_map.setdefault(tag, []).append(row["id"])
             if not tags:
                 uncovered.append(row["id"])
-        for tag in sorted(counts):
-            low = "  <-- below --min-covers" if (
-                args.min_covers and counts[tag] < args.min_covers
-            ) else ""
-            if args.covers_map:
-                sys.stdout.write("%s: %s%s\n" % (tag, ", ".join(id_map[tag]), low))
-            else:
-                sys.stdout.write("%s %d%s\n" % (tag, counts[tag], low))
-        for cid in uncovered:
-            sys.stdout.write("uncovered: %s\n" % cid)
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "covers": {t: counts[t] for t in sorted(counts)},
+                        "uncovered": uncovered,
+                        "ok": result["ok"] and _covers_ok(),
+                    }
+                )
+                + "\n"
+            )
+        else:
+            for tag in sorted(counts):
+                low = "  <-- below --min-covers" if (
+                    args.min_covers and counts[tag] < args.min_covers
+                ) else ""
+                if args.covers_map:
+                    sys.stdout.write("%s: %s%s\n" % (tag, ", ".join(id_map[tag]), low))
+                else:
+                    sys.stdout.write("%s %d%s\n" % (tag, counts[tag], low))
+            for cid in uncovered:
+                sys.stdout.write("uncovered: %s\n" % cid)
         return 0 if (result["ok"] and _covers_ok()) else 1
     if args.dist:
         buckets: dict[int, int] = {}

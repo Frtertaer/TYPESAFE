@@ -288,6 +288,29 @@ class CliTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("1", proc.stdout)
 
+    def test_winner_filters_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "winner", "winner": {"kind": "skill", "name": "jwt-auth"}, "prompt_head": "a"},
+                    {"ts": 2, "jev_status": "winner", "winner": {"kind": "mcp", "name": "postgres"}, "prompt_head": "b"},
+                    {"ts": 3, "jev_status": "none", "prompt_head": "c"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--winner", "jwt-auth", "--count")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("1", proc.stdout)
+            proc = self.run_cli("--file", str(path), "--winner", "mcp:postgres", "--count")
+            self.assertIn("1", proc.stdout)
+            proc = self.run_cli(
+                "--file", str(path), "--count",
+                env={"JEV_DECISIONS_WINNER": "jwt-auth"},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("1", proc.stdout)
+
     def test_count_prints_filtered_total(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

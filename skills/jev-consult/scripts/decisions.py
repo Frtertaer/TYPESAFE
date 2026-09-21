@@ -416,6 +416,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         env_min_lat = None
     parser.add_argument("--min-latency", type=float, default=env_min_lat, help="Only entries with numeric latency_ms >= MS")
+    parser.add_argument("--winner", default=os.environ.get("JEV_DECISIONS_WINNER", ""), help="Only entries whose winner name or kind:name equals NAME")
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -561,6 +562,22 @@ def main(argv: list[str] | None = None) -> int:
             and not isinstance(item.get("need"), bool)
             and float(item.get("need")) >= args.min_need
         ]
+    if args.winner:
+        want = args.winner.strip().lower()
+        entries = [
+            item
+            for item in entries
+            if isinstance(item.get("winner"), dict)
+            and (
+                str(item["winner"].get("name") or "").lower() == want
+                or "%s:%s"
+                % (
+                    str(item["winner"].get("kind") or "").lower(),
+                    str(item["winner"].get("name") or "").lower(),
+                )
+                == want
+            )
+        ]
     if args.min_latency is not None:
         entries = [
             item
@@ -587,9 +604,10 @@ def main(argv: list[str] | None = None) -> int:
             or args.prompt
             or args.min_need is not None
             or args.min_latency is not None
+            or args.winner
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, or --prompt\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, or --prompt\n"
             )
             return 2
         total, total_bad = load_entries(path)

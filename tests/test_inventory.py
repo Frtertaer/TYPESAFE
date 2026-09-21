@@ -324,6 +324,31 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(out["status"], "missing")
             self.assertNotIn("age_seconds", out)
 
+    def test_prune_sidecars_dry_run_keeps_files(self) -> None:
+        import time as time_mod
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            stale = d / ".jev-tools.json"
+            stale.write_text(
+                json.dumps({"written_at": time_mod.time() - 999999}), encoding="utf-8"
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--prune-sidecars", str(d), "--dry-run"])
+            self.assertEqual(code, 0)
+            self.assertTrue(stale.is_file())
+            self.assertIn("would prune", buf.getvalue())
+
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--prune-sidecars", str(d)])
+            self.assertEqual(code, 0)
+            self.assertFalse(stale.exists())
+            self.assertIn("pruned 1 stale sidecars", buf.getvalue())
+
     def test_picker_request_has_untrusted_rule(self) -> None:
         payload = inv.picker_request(
             "task", "hermes", [{"id": "x", "kind": "skill", "name": "jwt-auth"}]

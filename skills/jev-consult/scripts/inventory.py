@@ -804,11 +804,12 @@ def prune_stale_sidecars(
     directory: Path,
     ttl_seconds: float | None = None,
     now: float | None = None,
+    dry_run: bool = False,
 ) -> list[Path]:
     """Unlink stale/invalid .jev-tools*.json sidecars under directory.
 
     Recurses the tree; files that fail to parse or lack written_at count as
-    stale. Returns the paths that were removed.
+    stale. Returns the paths that were (or with dry_run would be) removed.
     """
     base = Path(directory)
     if not base.is_dir():
@@ -818,10 +819,11 @@ def prune_stale_sidecars(
         if not path.is_file():
             continue
         if sidecar_status(path, ttl_seconds, now) in ("stale", "invalid"):
-            try:
-                path.unlink()
-            except OSError:
-                continue
+            if not dry_run:
+                try:
+                    path.unlink()
+                except OSError:
+                    continue
             removed.append(path)
     return removed
 
@@ -953,6 +955,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Unlink stale/invalid .jev-tools*.json under DIR and exit.",
     )
     parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --prune-sidecars: list what would be removed without unlinking.",
+    )
+    parser.add_argument(
         "--show",
         metavar="FILE",
         nargs="?",
@@ -974,10 +981,11 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(status + suffix + "\n")
         return 0
     if args.prune_sidecars:
-        removed = prune_stale_sidecars(Path(args.prune_sidecars))
+        removed = prune_stale_sidecars(Path(args.prune_sidecars), dry_run=args.dry_run)
+        tag = "would prune" if args.dry_run else "pruned"
         for path in removed:
-            sys.stdout.write("pruned: %s\n" % path)
-        sys.stdout.write("pruned %d stale sidecars\n" % len(removed))
+            sys.stdout.write("%s: %s\n" % (tag, path))
+        sys.stdout.write("%s %d stale sidecars\n" % (tag, len(removed)))
         return 0
     if args.show:
         path = Path(args.show)

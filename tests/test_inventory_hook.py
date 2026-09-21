@@ -369,6 +369,14 @@ class InventoryHookTests(unittest.TestCase):
                 rc = HOOK.main(["--events"])
         self.assertEqual(rc, 0)
         self.assertEqual(buf.getvalue().split(), ["a_event", "b_event"])
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_EVENTS": ""}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--events", "--json"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            json.loads(buf.getvalue()), ["UserPromptSubmit", "pre_llm_call"]
+        )
 
     def test_env_flag_reports_resolved_config(self) -> None:
         buf = io.StringIO()

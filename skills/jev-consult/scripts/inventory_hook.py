@@ -524,8 +524,12 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["JEV_HOOK_NOMISS"] = "1"
         argv = [a for a in argv if a != "--dry-run"]
     if "--events" in argv:
-        for name in sorted(allowed_events()):
-            sys.stdout.write(name + "\n")
+        names = sorted(allowed_events())
+        if "--json" in argv:
+            sys.stdout.write(json.dumps(names) + "\n")
+        else:
+            for name in names:
+                sys.stdout.write(name + "\n")
         return 0
     if "--env" in argv:
         text = json.dumps(env_report(), indent=2, sort_keys=True) + "\n"

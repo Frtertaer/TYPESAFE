@@ -2051,6 +2051,27 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(buf.getvalue().split(), ["b", "c"])
 
+    def test_sample_prints_n_random_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": i, "winner": {"name": "w%d" % i}} for i in range(5)])
+            import io
+            from unittest.mock import patch
+
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = decisions.main(["--file", str(path), "--sample", "2"])
+            self.assertEqual(rc, 0)
+            lines = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("ts" in e for e in lines))
+
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = decisions.main(["--file", str(path), "--sample", "99"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(buf.getvalue().splitlines()), 5)
+
     def test_status_outcome_fill_winner_accept_comma_lists(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

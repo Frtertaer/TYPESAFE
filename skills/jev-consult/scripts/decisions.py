@@ -637,6 +637,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Drop the first N matching entries (after filters, before --first/--tail/--jq)",
     )
     parser.add_argument(
+        "--sample",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Emit N randomly picked matching entries as JSON lines (honors --reverse; combines with --out/--jsonl/--csv/--md)",
+    )
+    parser.add_argument(
         "--out",
         metavar="PATH",
         default="",
@@ -1102,6 +1109,13 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write("%s %d\n" % (value, n))
         return 0
     emit_entries = entries[::-1] if getattr(args, "reverse", False) else entries
+    sample_n = getattr(args, "sample", 0) or 0
+    if sample_n > 0:
+        import random as _random
+
+        emit_entries = _random.sample(
+            emit_entries, min(sample_n, len(emit_entries))
+        )
     if getattr(args, "last", False):
         if emit_entries:
             sys.stdout.write(json.dumps(entries[-1], indent=2, sort_keys=True) + "\n")
@@ -1117,6 +1131,10 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         sys.stdout.write(json.dumps(emit_entries[args.nth - 1], indent=2, sort_keys=True) + "\n")
+        return 0
+    if sample_n > 0 and not (args.out or args.jsonl or args.csv or args.md):
+        for item in emit_entries:
+            sys.stdout.write(json.dumps(item, sort_keys=True) + "\n")
         return 0
 
     def _cell(value: str) -> str:

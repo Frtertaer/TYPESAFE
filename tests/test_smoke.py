@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -92,6 +93,21 @@ class SmokeTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 2)
         self.assertIn("unknown step", proc.stderr)
+
+    def test_out_writes_results_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "smoke.json"
+            proc = subprocess.run(
+                [sys.executable, str(SMOKE), "--only", "policy", "--out", str(out_path)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("wrote", proc.stderr)
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertTrue(payload["ok"])
+            self.assertEqual({s["name"] for s in payload["steps"]}, {"policy"})
 
     def test_only_doctor_json_uses_emitted_name(self) -> None:
         proc = subprocess.run(

@@ -309,6 +309,12 @@ def main(argv: list[str] | None = None) -> int:
         metavar="SECONDS",
         help="Per-step subprocess timeout (default 60; JEV_SMOKE_TIMEOUT overrides).",
     )
+    parser.add_argument(
+        "--out",
+        metavar="PATH",
+        default="",
+        help="Also write the results JSON to PATH.",
+    )
     args = parser.parse_args(argv)
     names = {name for name, _ in STEPS}
     if args.list:
@@ -346,7 +352,15 @@ def main(argv: list[str] | None = None) -> int:
             if args.fail_fast and not steps[-1]["ok"]:
                 break
     ok = all(s["ok"] for s in steps)
-    sys.stdout.write(json.dumps({"ok": ok, "steps": steps}, indent=2) + "\n")
+    text = json.dumps({"ok": ok, "steps": steps}, indent=2) + "\n"
+    sys.stdout.write(text)
+    if args.out:
+        try:
+            Path(args.out).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % args.out)
     return 0 if ok else 1
 
 

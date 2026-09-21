@@ -23,7 +23,7 @@ python skills/jev-consult/scripts/policy_lint.py [--strict|--show|--diff other.j
 python skills/jev-consult/scripts/question_lint.py request.json [--json|--fix]        # lint a request file standalone
 python skills/jev-consult/scripts/skill_lint.py skills/*/SKILL.md       # SKILL.md sanity; [--strict] warns fail, [--fix] rewrites name, [--json]
 python skills/jev-consult/scripts/doctor.py                             # verify per-harness install; exit 0 = all ok
-python skills/jev-consult/scripts/smoke.py                              # offline e2e sanity, no API calls
+python skills/jev-consult/scripts/smoke.py                              # offline e2e sanity, no API calls; --only/--list/--fail-fast/--out PATH
 python skills/jev-consult/scripts/decisions.py                          # stats + --days/--since/--harness/--status/--outcome/--fill
                                                                         # filters, --tail/--json/--csv/--md, count lists
                                                                         # --statuses/--harnesses/--winners/--outcomes/--fills/--fields,

@@ -17,7 +17,7 @@ python skills/jev-consult/scripts/inventory.py --task "<task>" --harness auto --
 python skills/jev-consult/scripts/inventory.py --check-sidecar [path]   # fresh/stale/missing/invalid
 python skills/jev-consult/scripts/inventory.py --check-miss [path]      # same statuses for .jev-tools-miss.json
 python skills/jev-consult/scripts/inventory.py --prune-sidecars DIR     # unlink stale/invalid .jev-tools*.json (--dry-run lists)
-python skills/jev-consult/scripts/inventory.py --show FILE              # sidecar payload + status + age_seconds
+python skills/jev-consult/scripts/inventory.py --show FILE              # sidecar payload + status + age_seconds + valid/issues
 python skills/jev-consult/scripts/inventory.py --show-policy            # effective policy.json contents
 python skills/jev-consult/scripts/inventory.py --out PATH               # write the payload JSON to a file instead of stdout
 python skills/jev-consult/scripts/inventory.py --names                 # bare shortlist ids, one per line

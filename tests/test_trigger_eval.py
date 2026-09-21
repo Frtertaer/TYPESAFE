@@ -567,6 +567,7 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertIn("- positives: 16", text)
             self.assertIn("- coverage: 23/25 (92%)", text)
             self.assertIn("| pos-approach | True | True |", text)
+            self.assertIn("- uncovered:", text)
 
     def test_report_notes_gate_results(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

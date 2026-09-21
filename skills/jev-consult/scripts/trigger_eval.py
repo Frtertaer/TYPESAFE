@@ -442,6 +442,23 @@ def main(argv: list[str] | None = None) -> int:
                 "- min-covers gate: %d -> %s"
                 % (args.min_covers, "PASS" if _covers_ok() else "FAIL")
             )
+        uncovered_ids = [
+            row["id"]
+            for row in result["cases"]
+            if not (
+                (
+                    row["should_trigger"]
+                    and row["score"] is not None
+                    and row["score"] > 0
+                )
+                or (
+                    not row["should_trigger"]
+                    and (not row["lexical"] or not row["score"])
+                )
+            )
+        ]
+        if uncovered_ids:
+            lines.append("- uncovered: %s" % ", ".join(str(i) for i in uncovered_ids))
         lines += [
             "",
             "| id | should_trigger | lexical | score | ok |",

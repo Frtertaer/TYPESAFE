@@ -979,6 +979,26 @@ class HookRetriesEnvTests(unittest.TestCase):
         with patch.dict(os.environ, {"JEV_HOOK_RETRIES": "bogus"}):
             self.assertGreaterEqual(inv.hook_jev_retries(), 0)
 
+    def test_cli_count_prints_picked_over_scanned(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--task",
+                    "jwt tokens",
+                    "--count",
+                ]
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(buf.getvalue().strip(), "1/6")
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

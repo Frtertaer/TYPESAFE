@@ -392,5 +392,51 @@ class CatalogCacheTests(unittest.TestCase):
             self.assertNotIn("q0", data)
 
 
+class CatalogFillE2ETests(unittest.TestCase):
+    """Subprocess: fail-open tags, no network."""
+
+    SCRIPT = SCRIPTS / "catalog_fill.py"
+
+    def _run(self, argv: list[str], cwd: str, home: str):
+        import os
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        env["USERPROFILE"] = home
+        env["HOME"] = home
+        proc = subprocess.run(
+            [sys.executable, str(self.SCRIPT)] + argv,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            env=env,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stdout.strip()
+
+    def test_no_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self._run([], tmp, tmp), "no_task")
+
+    def test_from_miss_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self._run(["--from-miss"], tmp, tmp), "no_task")
+
+    def test_blocked_pick(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(
+                ["--task", "x", "--pick", "exploit-pack"], tmp, tmp
+            )
+            self.assertEqual(out, "blocked")
+
+    def test_no_hermes_when_binary_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(["--task", "jwt tokens"], tmp, tmp)
+            self.assertIn(out, ("no_hermes", "no_catalog", "jev_skip"))
+
+
 if __name__ == "__main__":
     unittest.main()

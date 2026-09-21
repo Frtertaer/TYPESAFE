@@ -101,6 +101,11 @@ def extract_cwd(payload: dict) -> Path | None:
             path = Path(value)
             if path.is_dir():
                 return path
+    env_cwd = os.environ.get("JEV_HOOK_CWD", "").strip()
+    if env_cwd:
+        path = Path(env_cwd)
+        if path.is_dir():
+            return path
     return None
 
 

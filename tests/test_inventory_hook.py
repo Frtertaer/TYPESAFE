@@ -733,6 +733,13 @@ class HandleBranchTests(unittest.TestCase):
             "deep dive",
         )
         self.assertEqual(HOOK.extract_prompt({"userMessage": "m"}), "m")
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_CWD": tmp}):
+                self.assertEqual(HOOK.extract_cwd({}), Path(tmp))
+            with patch.dict(os.environ, {"JEV_HOOK_CWD": tmp}):
+                self.assertEqual(HOOK.extract_cwd({"cwd": "/no/such/dir"}), Path(tmp))
+            with patch.dict(os.environ, {"JEV_HOOK_CWD": "/no/such/dir"}):
+                self.assertIsNone(HOOK.extract_cwd({}))
         self.assertEqual(
             HOOK.extract_prompt(
                 {

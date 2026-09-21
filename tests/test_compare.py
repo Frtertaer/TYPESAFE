@@ -148,6 +148,21 @@ class RowAndTableTest(unittest.TestCase):
         self.assertIn("0.93", table)
         self.assertIn("-", table)  # second case has no noul
 
+    def test_format_md_offline(self) -> None:
+        rows = [compare.row_offline(c) for c in CASES["cases"]]
+        md = compare.format_md(rows, live=False)
+        self.assertIn("| case | defect | before_jev | after_jev | after_pick |", md)
+        self.assertIn("| drift_case |", md)
+        self.assertIn("return_to_plan", md)
+
+    def test_format_md_live(self) -> None:
+        rows = [compare.row_offline(c) for c in CASES["cases"]]
+        rows[0]["before"]["noul"] = 0.12
+        rows[0]["after"]["noul"] = 0.93
+        md = compare.format_md(rows, live=True)
+        self.assertIn("| case | defect | called_jev | before_noul | after_noul |", md)
+        self.assertIn("0.93", md)
+
 
 class RunTest(unittest.TestCase):
     def write_cases(self, tmp: str) -> Path:
@@ -243,6 +258,15 @@ class CliTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             payload = json.loads(proc.stdout)
             self.assertEqual([r["id"] for r in payload["rows"]], ["drift_case"])
+
+    def test_cli_md_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            proc = self.run_cli("--cases", str(path), "--md")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("| case | defect | before_jev |", proc.stdout)
+        self.assertIn("drift_case", proc.stdout)
 
     def test_cli_bad_cases_exits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

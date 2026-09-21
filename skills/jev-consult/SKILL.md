@@ -97,7 +97,7 @@ python skills/jev-consult/scripts/trace.py notes  # list notes (--json for the a
 Same sticky prompts, unguarded vs trace+Jev. Offline lists defects; `--live` scores `on_track` / `grounded_enough`. This does not raise IQ.
 
 ```text
-python skills/jev-consult/scripts/compare.py  # --only id1,id2 runs a subset; --cases PATH picks the cases file
+python skills/jev-consult/scripts/compare.py  # --only id1,id2 runs a subset; --cases PATH picks the cases file; --md prints a Markdown table
 python skills/jev-consult/scripts/compare.py --live
 ```
 

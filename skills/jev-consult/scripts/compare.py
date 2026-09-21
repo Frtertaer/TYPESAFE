@@ -140,6 +140,38 @@ def format_table(rows: list[dict[str, Any]], live: bool) -> str:
     return "\n".join(lines) + "\n"
 
 
+def format_md(rows: list[dict[str, Any]], live: bool) -> str:
+    if live:
+        header = ["case", "defect", "called_jev", "before_noul", "after_noul"]
+    else:
+        header = ["case", "defect", "before_jev", "after_jev", "after_pick"]
+    lines = ["| " + " | ".join(header) + " |", "|" + " --- |" * len(header)]
+    for row in rows:
+        before = row.get("before") or {}
+        after = row.get("after") or {}
+        if live:
+            bn = before.get("noul")
+            an = after.get("noul")
+            cells = [
+                str(row.get("id") or ""),
+                str(row.get("defect") or ""),
+                "yes" if after.get("called_jev") else "no",
+                "-" if bn is None else "%.2f" % bn,
+                "-" if an is None else "%.2f" % an,
+            ]
+        else:
+            cells = [
+                str(row.get("id") or ""),
+                str(row.get("defect") or ""),
+                "yes" if before.get("called_jev") else "no",
+                "yes" if after.get("called_jev") else "no",
+                str(after.get("last_pick") or "-"),
+            ]
+        cells = [c.replace("|", "\\|").replace("\n", " ") for c in cells]
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines) + "\n"
+
+
 def strict_failures(rows: list[dict[str, Any]], live: bool) -> list[str]:
     """CI gate: the guarded (after) side must have called Jev and, when live,
     scored at least noul_yes on the case's question."""
@@ -199,6 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--live", action="store_true", help="Call Jev Noul for each side")
     parser.add_argument("--json", action="store_true", dest="as_json")
+    parser.add_argument("--md", action="store_true", help="Print rows as a Markdown table")
     parser.add_argument("--cases", default=os.environ.get("JEV_COMPARE_CASES", "") or None, help="Path to compare-cases.json")
     parser.add_argument(
         "--only",
@@ -221,6 +254,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.as_json:
         json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
         sys.stdout.write("\n")
+    elif args.md:
+        sys.stdout.write(format_md(result["rows"], live=args.live))
     else:
         sys.stdout.write(format_table(result["rows"], live=args.live))
     if args.strict:

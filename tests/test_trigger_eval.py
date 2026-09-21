@@ -805,6 +805,34 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertTrue(all(t["ok"] for t in lines))
             self.assertEqual(len(buf.getvalue().splitlines()), 2)
 
+    def test_watch_rc_reflects_last_verdict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = write_cases(
+                tmp,
+                [
+                    {
+                        "id": "pos-dead",
+                        "prompt": "zzz qqq xxx",
+                        "should_trigger": True,
+                    },
+                    {
+                        "id": "neg-x",
+                        "prompt": "unrelated words here",
+                        "should_trigger": False,
+                    },
+                ],
+            )
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
+                with redirect_stdout(buf):
+                    rc = te.main(["--cases", str(cases), "--watch", "0.01"])
+            self.assertEqual(rc, 1)
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
+                with redirect_stdout(buf):
+                    rc = te.main(["--watch", "0.01"])
+            self.assertEqual(rc, 0)
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

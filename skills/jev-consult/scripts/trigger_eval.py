@@ -446,7 +446,7 @@ def main(argv: list[str] | None = None) -> int:
                         pass
                 ticks += 1
                 cur = result
-        return 0
+        return 0 if (cur is not None and cur["ok"]) else 1
     if args.report:
         if args.json:
             uncovered_ids = _uncovered()

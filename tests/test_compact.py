@@ -641,5 +641,219 @@ class CompactTests(unittest.TestCase):
         self.assertEqual(C.main(["missing.json"]), 2)
 
 
+def _call(**kw):
+    base = dict(
+        id="t1",
+        tool_use_id="u1",
+        tool="Read",
+        input={},
+        call_index=0,
+        result_index=1,
+        result_chars=10,
+        is_error=False,
+        pinned=False,
+    )
+    base.update(kw)
+    return C.ToolCall(**base)
+
+
+class InternalsTests(unittest.TestCase):
+    def setUp(self):
+        self._spill_env = patch.dict(os.environ, {"JEV_CONSULT_SPILL": "0"})
+        self._spill_env.start()
+        self.addCleanup(self._spill_env.stop)
+
+    # --- merge_call_runs -------------------------------------------------
+    def test_merge_call_runs_folds_adjacent_same_role(self):
+        history = [
+            {"i": 1, "role": "assistant", "tool_calls": ["t1 Read a.py -> ok 10ch"]},
+            {"i": 2, "role": "assistant", "tool_calls": ["t2 Read b.py -> ok 9ch"]},
+            {"i": 3, "role": "user", "text": "next"},
+        ]
+        out = C.merge_call_runs(history, lambda e: False)
+        self.assertEqual(len(out), 2)
+        self.assertEqual(len(out[0]["tool_calls"]), 2)
+        self.assertEqual(out[1]["role"], "user")
+
+    def test_merge_call_runs_stops_on_text_pinned_role(self):
+        base = {"i": 1, "role": "assistant", "tool_calls": ["t1 Read a.py -> ok 10ch"]}
+        cases = [
+            # second entry carries text -> not foldable
+            [{"i": 2, "role": "assistant", "text": "note", "tool_calls": ["t2 x"]}],
+            # different role -> no merge
+            [{"i": 2, "role": "user", "tool_calls": ["t2 x"]}],
+            # calls not a list of str (foldable requires calls[0] str)
+            [{"i": 2, "role": "assistant", "tool_calls": [{"id": "t2"}]}],
+        ]
+        for extra in cases:
+            out = C.merge_call_runs([dict(base)] + extra, lambda e: False)
+            self.assertEqual(len(out), 2, extra)
+        pinned = C.merge_call_runs(
+            [dict(base), {"i": 2, "role": "assistant", "tool_calls": ["t2 x"]}],
+            lambda e: e["i"] == 1,
+        )
+        self.assertEqual(len(pinned), 2)
+
+    # --- trace_needles / pin_errors_and_trace ----------------------------
+    def test_trace_needles_sources(self):
+        self.assertEqual(C.trace_needles(None), [])
+        self.assertEqual(C.trace_needles("x"), [])
+        trace = {
+            "plan": "fix auth",
+            "current_step": "edit src/auth.py",
+            "last_error": "",
+            "last_pick": "return_to_plan",
+            "inspected": ["src/main.py", {"file_path": "src/x.py"}, 42, ""],
+        }
+        needles = C.trace_needles(trace)
+        self.assertIn("fix auth", needles)
+        self.assertIn("edit src/auth.py", needles)
+        self.assertIn("return_to_plan", needles)
+        self.assertIn("src/main.py", needles)
+        self.assertIn("src/x.py", needles)
+
+    def test_pin_errors_and_trace(self):
+        calls = [
+            _call(is_error=True),
+            _call(id="t2", input={"file_path": "src/auth.py"}),
+            _call(id="t3", input={"file_path": "src/other.py"}),
+            _call(id="t4", input={"cmd": "ls"}),
+            _call(id="t5", pinned=True),
+        ]
+        C.pin_errors_and_trace(calls, {"current_step": "editing src/auth.py"})
+        self.assertTrue(all(c.pinned for c in calls[:2]))
+        self.assertFalse(calls[2].pinned)
+        self.assertFalse(calls[3].pinned)
+        self.assertTrue(calls[4].pinned)
+
+    def test_pin_errors_needle_inside_path(self):
+        calls = [_call(input={"file_path": "src/pkg/sub/auth.py"})]
+        C.pin_errors_and_trace(calls, {"plan": "src/auth.py"})
+        self.assertFalse(calls[0].pinned)
+        C.pin_errors_and_trace(calls, {"plan": "auth.py"})
+        self.assertTrue(calls[0].pinned)
+
+    # --- goal_from_messages ----------------------------------------------
+    def test_goal_from_messages_last_three_user_texts(self):
+        messages = [
+            msg("user", "first"),
+            msg("assistant", "ack"),
+            msg("user", "second"),
+            msg("user", "", results=[result("u1", "out")]),  # tool carrier, not user text
+            msg("user", "third"),
+            msg("user", "fourth"),
+        ]
+        goal = C.goal_from_messages(messages)
+        self.assertNotIn("first", goal)
+        self.assertEqual(goal, "second\nthird\nfourth")
+
+    # --- questions_for ----------------------------------------------------
+    def test_questions_for_shape(self):
+        call = _call(id="t7", tool="Bash")
+        qs = C.questions_for(call)
+        self.assertEqual(set(qs), {"call_t7", "result_t7"})
+        self.assertEqual(qs["call_t7"]["type"], "noul")
+        self.assertIn("Bash", qs["call_t7"]["instructions"])
+        self.assertIn("t7", qs["call_t7"]["instructions"])
+
+    # --- calls_by_message / history_entries -------------------------------
+    def test_calls_by_message_groups(self):
+        grouped = C.calls_by_message([_call(call_index=0), _call(id="t2", call_index=2), _call(id="t3", call_index=0)])
+        self.assertEqual(sorted(grouped), [0, 2])
+        self.assertEqual(len(grouped[0]), 2)
+
+    def test_history_entries_skips_empty_and_attaches_calls(self):
+        messages = [
+            msg("user", "hello"),
+            msg("assistant", "", uses=[use("u1")]),
+            msg("assistant", ""),  # empty, no calls -> skipped
+            msg("tool", "result delivered", results=[result("u1", "x" * 42)]),
+        ]
+        call = _call(call_index=1, result_index=3, result_chars=42, is_error=True)
+        entries = C.history_entries(messages, [call], input_chars=100)
+        self.assertEqual(len(entries), 3)
+        self.assertEqual(entries[0]["i"], 0)
+        self.assertEqual(entries[1]["tool_calls"][0]["result"], "error, 42 chars (omitted)")
+        self.assertNotIn("tool_calls", entries[2])
+
+    # --- small formatters --------------------------------------------------
+    def test_input_text_unserializable(self):
+        self.assertEqual(C.input_text({"x": object()}, 50), "[unserializable input]")
+
+    def test_result_note_and_compact_call(self):
+        ok = _call(tool="Edit", input={"file_path": "a.py", "old": "x\ny"}, result_chars=7)
+        self.assertEqual(C.result_note(ok), "ok, 7 chars (omitted)")
+        err = _call(is_error=True, result_chars=5)
+        self.assertEqual(C.result_note(err), "error, 5 chars (omitted)")
+        line = C.compact_call(ok)
+        self.assertIn("t1", line)
+        self.assertIn("Edit", line)
+        self.assertIn("file_path=a.py", line)
+        self.assertNotIn("\n", line)
+        self.assertTrue(line.endswith("ok 7ch"))
+
+    # --- fit_state ----------------------------------------------------------
+    def test_fit_state_full_when_small(self):
+        messages = [msg("user", "tiny task")]
+        out = C.fit_state(messages, [], {"goal": "g"})
+        self.assertEqual(out["stage"], "full")
+        self.assertEqual(out["state"]["goal"], "g")
+        self.assertEqual(out["state"]["history"][0]["text"], "tiny task")
+
+    def test_fit_state_goal_fallback_to_messages(self):
+        out = C.fit_state([msg("user", "the real goal")], [], {})
+        self.assertEqual(out["state"]["goal"], "the real goal")
+
+    def test_fit_state_progresses_through_stages(self):
+        # PRESERVE_RECENT pins index 0 and the last 6, so the bulky text
+        # must sit in the shrinkable middle (i = 1..5 of 12 messages).
+        big = "x" * 40000
+        messages = (
+            [msg("user", "plan")]
+            + [msg("assistant", big) for _ in range(5)]
+            + [msg("user", "recent %d" % i) for i in range(6)]
+        )
+        out = C.fit_state(messages, [], {"max_state_tokens": 400})
+        self.assertNotEqual(out["stage"], "full")
+        self.assertLessEqual(out["tokens"], 400)
+
+    def test_fit_state_raises_when_unfittable(self):
+        messages = [
+            msg("user", "pinned huge " + "z" * 20000),
+            msg("user", "tail"),
+        ]
+        with self.assertRaises(RuntimeError):
+            C.fit_state(messages, [], {"max_state_tokens": 50})
+
+    # --- load_trace / jev_asker ---------------------------------------------
+    def test_load_trace(self):
+        self.assertIsNone(C.load_trace(None))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.json"
+            path.write_text(json.dumps({"plan": "x"}), encoding="utf-8")
+            self.assertEqual(C.load_trace(str(path)), {"plan": "x"})
+            path.write_text("[1,2]", encoding="utf-8")
+            self.assertIsNone(C.load_trace(str(path)))
+
+    def test_jev_asker_uses_pack_policy(self):
+        seen = {}
+
+        class FakeJev:
+            @staticmethod
+            def load_policy(path):
+                seen["policy_path"] = path
+                return {"fake": True}
+
+            @staticmethod
+            def post_systemone(state, questions, policy, **kw):
+                seen["policy"] = policy
+                return {"answers": {}}
+
+        with patch.object(C, "load_jev", return_value=FakeJev):
+            C.jev_asker({"a": 1}, {"q": {}})
+        self.assertTrue(str(seen["policy_path"]).endswith("policy.json"))
+        self.assertEqual(seen["policy"], {"fake": True})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

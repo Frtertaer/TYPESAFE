@@ -337,6 +337,25 @@ class TraceTests(unittest.TestCase):
             self.assertIn("c", out)
             self.assertIn("2 note(s)", out)
 
+    def test_cli_notes_out_writes_file(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            tr.main(["--file", str(path), "record", "--pick", "x", "--note", "hello"])
+            out_path = Path(tmp) / "notes.txt"
+            buf, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = tr.main(["--file", str(path), "notes", "--out", str(out_path)])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue(), "")
+            self.assertIn("wrote 1 note(s)", err.getvalue())
+            written = out_path.read_text(encoding="utf-8")
+            self.assertIn("hello", written)
+            self.assertIn("1 note(s)", written)
+
     def test_cli_notes_since_filters_old(self) -> None:
         import io
         from contextlib import redirect_stdout

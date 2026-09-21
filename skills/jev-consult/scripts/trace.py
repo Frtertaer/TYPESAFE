@@ -294,14 +294,26 @@ def cmd_notes(args: argparse.Namespace) -> int:
     if isinstance(limit, int) and limit >= 0:
         notes = notes[-limit:] if limit else []
     if getattr(args, "json", False):
-        sys.stdout.write(json.dumps(notes, ensure_ascii=False, indent=2) + "\n")
+        out_text = json.dumps(notes, ensure_ascii=False, indent=2) + "\n"
+    else:
+        lines = []
+        for note in notes:
+            if isinstance(note, dict):
+                stamp = str(note.get("iso") or int(note.get("ts") or 0))
+                text = str(note.get("text") or "")
+                lines.append("%s %s" % (stamp, text))
+        lines.append("%d note(s)" % len(notes))
+        out_text = "\n".join(lines) + "\n"
+    out_path = getattr(args, "out", "") or ""
+    if out_path:
+        try:
+            Path(out_path).write_text(out_text, encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+        sys.stderr.write("wrote %d note(s) to %s\n" % (len(notes), out_path))
         return 0
-    for note in notes:
-        if isinstance(note, dict):
-            stamp = str(note.get("iso") or int(note.get("ts") or 0))
-            text = str(note.get("text") or "")
-            sys.stdout.write("%s %s\n" % (stamp, text))
-    sys.stdout.write("%d note(s)\n" % len(notes))
+    sys.stdout.write(out_text)
     return 0
 
 
@@ -401,6 +413,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--prune", type=int, help="Rewrite the trace keeping only the last N notes")
     notes_cmd.add_argument("--since", default=None, help="Only notes with ts >= epoch seconds or ISO8601")
     notes_cmd.add_argument("--harness", default="", help="Only notes tagged with this harness")
+    notes_cmd.add_argument("--out", default="", help="Write the notes output to PATH instead of stdout")
     notes_cmd.set_defaults(func=cmd_notes)
     return parser
 

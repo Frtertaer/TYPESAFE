@@ -1052,6 +1052,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--all-names", action="store_true", help="Include every installed name (no descriptions).")
     parser.add_argument("--scores", action="store_true", help="Add IDF score to each shortlist item.")
     parser.add_argument("--csv", action="store_true", help="Emit the shortlist as CSV rows instead of JSON.")
+    parser.add_argument("--out", metavar="PATH", default="", help="Write the payload JSON to PATH instead of stdout.")
     parser.add_argument(
         "--explain",
         action="store_true",
@@ -1162,7 +1163,17 @@ def main(argv: list[str] | None = None) -> int:
                 row.append("%.4f" % (item.get("score") or 0))
             writer.writerow(row)
     else:
-        sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+        text = json.dumps(payload, indent=2) + "\n"
+        if getattr(args, "out", ""):
+            out_path = Path(args.out)
+            try:
+                out_path.write_text(text, encoding="utf-8")
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                return 1
+            sys.stderr.write("wrote %s\n" % out_path)
+        else:
+            sys.stdout.write(text)
     if args.write_ask:
         write_ask(Path(args.write_ask), args.task, harness, picked)
     if args.sidecar:

@@ -212,6 +212,32 @@ class InventoryTests(unittest.TestCase):
         self.assertIn("jwt-auth", names)
         self.assertNotIn("ascii-art", names)
 
+    def test_cli_out_writes_payload_file(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "payload.json"
+            with redirect_stdout(StringIO()):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(FIXTURE),
+                        "--task",
+                        "jwt tokens",
+                        "--limit",
+                        "8",
+                        "--out",
+                        str(out_path),
+                    ]
+                )
+            self.assertEqual(code, 0)
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            names = [item["name"] for item in payload["shortlist"]]
+            self.assertIn("jwt-auth", names)
+
     def test_cli_kind_filter(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

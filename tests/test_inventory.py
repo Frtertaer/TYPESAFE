@@ -258,6 +258,30 @@ class InventoryTests(unittest.TestCase):
         names = [item["name"] for item in payload["shortlist"]]
         self.assertIn("jwt-auth", names)
 
+    def test_cli_explain_adds_matched_tokens(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--task",
+                    "jwt tokens",
+                    "--limit",
+                    "8",
+                    "--explain",
+                ]
+            )
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        by_name = {item["name"]: item for item in payload["shortlist"]}
+        self.assertIn("jwt", by_name["jwt-auth"]["matched"])
+
     def _write_skill(self, tmp: str, name: str, frontmatter: str) -> Path:
         skill = Path(tmp) / name
         skill.mkdir(parents=True)

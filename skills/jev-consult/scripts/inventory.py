@@ -1045,6 +1045,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scores", action="store_true", help="Add IDF score to each shortlist item.")
     parser.add_argument("--csv", action="store_true", help="Emit the shortlist as CSV rows instead of JSON.")
     parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="Add the matched task tokens to each shortlist item",
+    )
+    parser.add_argument(
         "--kind",
         default="",
         help="Comma filter: only shortlist these kinds (skill,plugin,mcp).",
@@ -1125,6 +1130,16 @@ def main(argv: list[str] | None = None) -> int:
         payload["shortlist"] = [
             {**item, "score": score_item(item, query, df)} for item in picked
         ]
+    if getattr(args, "explain", False):
+        query = tokens(args.task)
+        explained = []
+        for item in payload["shortlist"]:
+            matched = sorted(
+                query
+                & (tokens(item.get("name") or "") | tokens(item.get("description") or ""))
+            )
+            explained.append({**item, "matched": matched})
+        payload["shortlist"] = explained
     if getattr(args, "csv", False):
         import csv as _csv
 

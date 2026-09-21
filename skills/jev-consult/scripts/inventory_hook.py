@@ -232,7 +232,12 @@ def handle(
         return {}
     t0 = time.monotonic()
     event = event_name(payload)
-    if event and event not in {"UserPromptSubmit", "pre_llm_call"}:
+    allowed_raw = os.environ.get("JEV_HOOK_EVENTS", "").strip()
+    if allowed_raw:
+        allowed = {part.strip() for part in allowed_raw.split(",") if part.strip()}
+    else:
+        allowed = {"UserPromptSubmit", "pre_llm_call"}
+    if event and event not in allowed:
         return {}
     max_age = hook_max_age()
     if max_age > 0:

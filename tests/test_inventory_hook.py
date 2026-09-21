@@ -237,6 +237,34 @@ class InventoryHookTests(unittest.TestCase):
             self.assertEqual(HOOK.LAST_DECISION["budget_ms"], 12000)
             self.assertTrue(HOOK.LAST_DECISION["over_budget"])
 
+    def test_hook_events_env_overrides_allowed_events(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_EVENTS": "pre_llm_call"}):
+                out = HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "Add JWT access tokens in Python",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+                self.assertEqual(out, {})
+            with patch.dict(os.environ, {"JEV_HOOK_EVENTS": "CustomEvent"}):
+                out = HOOK.handle(
+                    {
+                        "hook_event_name": "CustomEvent",
+                        "prompt": "Add JWT access tokens in Python",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+                self.assertIn("hookSpecificOutput", out)
+
     def test_no_sidecar_env_skips_sidecar_write(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

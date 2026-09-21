@@ -352,10 +352,38 @@ def format_finding(finding: dict) -> str:
     )
 
 
+def diff_policy(a: dict, b: dict) -> list[str]:
+    """Shallow top-level key diff of two policy dicts. Returns line list."""
+    lines: list[str] = []
+    for key in sorted(set(a) | set(b)):
+        if key not in b:
+            lines.append("- %s = %s" % (key, json.dumps(a[key], sort_keys=True)[:120]))
+        elif key not in a:
+            lines.append("+ %s = %s" % (key, json.dumps(b[key], sort_keys=True)[:120]))
+        elif a[key] != b[key]:
+            lines.append(
+                "~ %s: %s -> %s"
+                % (
+                    key,
+                    json.dumps(a[key], sort_keys=True)[:60],
+                    json.dumps(b[key], sort_keys=True)[:60],
+                )
+            )
+    return lines
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     strict = "--strict" in argv
     show = "--show" in argv
+    diff_path = None
+    if "--diff" in argv:
+        i = argv.index("--diff")
+        if i + 1 >= len(argv):
+            sys.stderr.write("--diff requires a policy file to compare against\n")
+            return 2
+        diff_path = argv[i + 1]
+        del argv[i : i + 2]
     argv = [a for a in argv if a not in {"--strict", "--show"}]
     path = Path(argv[0]) if argv else DEFAULT_POLICY
     try:
@@ -363,6 +391,18 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (path, exc))
         return 2
+    if diff_path is not None:
+        try:
+            other = json.loads(Path(diff_path).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (diff_path, exc))
+            return 2
+        lines = diff_policy(other, policy)
+        sys.stdout.write("diff %s -> %s\n" % (diff_path, path))
+        for line in lines:
+            sys.stdout.write(line + "\n")
+        sys.stdout.write("%d difference(s)\n" % len(lines))
+        return 0
     if show:
         sys.stdout.write(json.dumps({"path": str(path), "policy": policy}, indent=2) + "\n")
         return 0

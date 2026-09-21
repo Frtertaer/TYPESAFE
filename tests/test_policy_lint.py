@@ -276,5 +276,49 @@ class ShowFlagTests(unittest.TestCase):
         self.assertEqual(rc, 2)
 
 
+class DiffFlagTests(unittest.TestCase):
+    def _write(self, tmp: str, data: dict) -> Path:
+        path = Path(tmp) / "other.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return path
+
+    def test_diff_identical_zero(self) -> None:
+        policy = json.loads(policy_lint.DEFAULT_POLICY.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as tmp:
+            other = self._write(tmp, policy)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = policy_lint.main(["--diff", str(other)])
+        self.assertEqual(rc, 0)
+        self.assertIn("0 difference(s)", buf.getvalue())
+
+    def test_diff_reports_add_remove_change(self) -> None:
+        policy = json.loads(policy_lint.DEFAULT_POLICY.read_text(encoding="utf-8"))
+        other = dict(policy)
+        other.pop("model")
+        other["brand_new"] = 1
+        other["confidence_floor"] = 0.99
+        with tempfile.TemporaryDirectory() as tmp:
+            other_path = self._write(tmp, other)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = policy_lint.main(["--diff", str(other_path)])
+        out = buf.getvalue()
+        self.assertEqual(rc, 0)
+        self.assertIn("- brand_new = 1", out)
+        self.assertIn("+ model =", out)
+        self.assertIn("~ confidence_floor: 0.99 -> 0.55", out)
+
+    def test_diff_bad_file_rc2(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = policy_lint.main(["--diff", "no-such.json"])
+        self.assertEqual(rc, 2)
+
+    def test_diff_missing_arg_rc2(self) -> None:
+        rc = policy_lint.main(["--diff"])
+        self.assertEqual(rc, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,19 +16,22 @@ python skills/jev-consult/scripts/jev.py scaffold keep_vs_change --out request.j
 python skills/jev-consult/scripts/inventory.py --task "<task>" --harness auto --write-ask tools.request.json
 python skills/jev-consult/scripts/inventory.py --check-sidecar [path]   # fresh/stale/missing/invalid
 python skills/jev-consult/scripts/inventory.py --check-miss [path]      # same statuses for .jev-tools-miss.json
-python skills/jev-consult/scripts/inventory.py --prune-sidecars DIR     # unlink stale/invalid .jev-tools*.json
+python skills/jev-consult/scripts/inventory.py --prune-sidecars DIR     # unlink stale/invalid .jev-tools*.json (--dry-run lists)
+python skills/jev-consult/scripts/inventory.py --show FILE              # sidecar payload + status + age_seconds
+python skills/jev-consult/scripts/inventory.py --show-policy            # effective policy.json contents
 python skills/jev-consult/scripts/policy_lint.py [--strict|--show|--diff other.json]  # validates policy.json
 python skills/jev-consult/scripts/question_lint.py request.json [--json|--fix]        # lint a request file standalone
-python skills/jev-consult/scripts/skill_lint.py skills/*/SKILL.md                     # SKILL.md frontmatter sanity
+python skills/jev-consult/scripts/skill_lint.py skills/*/SKILL.md       # SKILL.md sanity; [--strict] warns fail, [--fix] rewrites name, [--json]
 python skills/jev-consult/scripts/doctor.py                             # verify per-harness install; exit 0 = all ok
 python skills/jev-consult/scripts/smoke.py                              # offline e2e sanity, no API calls
 python skills/jev-consult/scripts/decisions.py                          # stats + --days/--since/--harness/--status/--outcome/--fill
                                                                         # filters, --tail/--json/--csv/--md, count lists
-                                                                        # --statuses/--harnesses/--winners/--outcomes,
-                                                                        # --prune keeps only filtered entries
+                                                                        # --statuses/--harnesses/--winners/--outcomes/--fills/--fields,
+                                                                        # --jsonl raw entries; --prune keeps only filtered
 python skills/jev-consult/scripts/compare.py --live
 python skills/jev-consult/scripts/compact.py transcript.json --history --fake   # --dir DIR for batch, --prune-spill S
 python skills/jev-consult/scripts/trace.py show --key plan                      # single field from .jev-trace.json
+python skills/jev-consult/scripts/trace.py stats                                # counts, last_pick, file age
 python tests/test_jev.py
 python tests/test_inventory.py
 python tests/test_trace.py

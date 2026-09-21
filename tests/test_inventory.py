@@ -533,5 +533,37 @@ class InventoryTests(unittest.TestCase):
         self.assertTrue((Path(jwt["path"]) / "SKILL.md").is_file())
 
 
+class TtlEnvOverrideTests(unittest.TestCase):
+    def test_env_override_wins(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"JEV_HOOK_TTL": "30"}):
+            self.assertEqual(inv.sidecar_ttl_seconds(), 30.0)
+
+    def test_env_invalid_falls_back_to_policy(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"JEV_HOOK_TTL": "bogus"}):
+            self.assertNotEqual(inv.sidecar_ttl_seconds(), 0.0)
+
+    def test_env_negative_ignored(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"JEV_HOOK_TTL": "-5"}):
+            self.assertEqual(inv.sidecar_ttl_seconds(), inv._policy_float_key("sidecar_ttl_seconds", 0.0))
+
+    def test_env_zero_disables_freshness(self) -> None:
+        import os
+        import time as time_mod
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"JEV_HOOK_TTL": "0"}):
+            prior = {"written_at": time_mod.time() - 99999}
+            self.assertFalse(inv.sidecar_fresh(prior))
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

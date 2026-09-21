@@ -705,7 +705,16 @@ def _policy_float_key(key: str, default: float) -> float:
 
 
 def sidecar_ttl_seconds() -> float:
-    """TTL for .jev-tools*.json sidecars. Threshold lives in policy.json."""
+    """TTL for .jev-tools*.json sidecars. Threshold lives in policy.json;
+    JEV_HOOK_TTL env var (seconds) overrides when set to a valid number."""
+    override = os.environ.get("JEV_HOOK_TTL", "").strip()
+    if override:
+        try:
+            value = float(override)
+        except ValueError:
+            value = -1.0
+        if value >= 0:
+            return value
     return _policy_float_key(SIDECAR_TTL_KEY, DEFAULT_SIDECAR_TTL_SECONDS)
 
 

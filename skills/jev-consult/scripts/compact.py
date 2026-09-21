@@ -1207,11 +1207,37 @@ def cmd_compact(args: argparse.Namespace) -> int:
     return 0
 
 
+def prune_spill(
+    directory: Path | None = None,
+    older_than: float = 0.0,
+    now: float | None = None,
+) -> list[Path]:
+    """Unlink spill files older than `older_than` seconds. Returns removed paths."""
+    target = directory if directory is not None else spill_dir_default()
+    if target is None or not target.is_dir():
+        return []
+    cutoff = (time.time() if now is None else float(now)) - float(older_than)
+    removed: list[Path] = []
+    for candidate in sorted(target.iterdir()):
+        try:
+            info = candidate.stat()
+        except OSError:
+            continue
+        if not stat.S_ISREG(info.st_mode) or info.st_mtime > cutoff:
+            continue
+        try:
+            candidate.unlink()
+        except OSError:
+            continue
+        removed.append(candidate)
+    return removed
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="LIVE_FAT is the default. Session-history drop needs --history."
     )
-    parser.add_argument("file", help="Transcript JSON/JSONL (list, {messages}, OpenAI/Claude/Hermes). '-' = stdin.")
+    parser.add_argument("file", nargs="?", help="Transcript JSON/JSONL (list, {messages}, OpenAI/Claude/Hermes). '-' = stdin.")
     parser.add_argument("-o", "--output", help="Write result JSON here instead of stdout.")
     parser.add_argument("--trace", help="Optional .jev-trace.json; matching file_path stays.")
     parser.add_argument("--goal", default="")
@@ -1229,7 +1255,23 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Do not call Jev; drop every non-pinned result (for tests).",
     )
+    parser.add_argument(
+        "--prune-spill",
+        type=float,
+        metavar="SECONDS",
+        help="Unlink spill files older than SECONDS in the spill dir (or --spill-dir) and exit.",
+    )
+    parser.add_argument("--spill-dir", help="Override spill directory for --prune-spill.")
     args = parser.parse_args(argv)
+    if args.prune_spill is not None:
+        directory = Path(args.spill_dir) if args.spill_dir else None
+        removed = prune_spill(directory, args.prune_spill)
+        for path in removed:
+            sys.stdout.write("pruned: %s\n" % path)
+        sys.stdout.write("pruned %d spill files\n" % len(removed))
+        return 0
+    if args.file is None:
+        parser.error("file is required unless --prune-spill is given")
     if not args.history:
         sys.stderr.write(
             "history drop is not the default (Hermes eval: do not adopt Tamara retention). "

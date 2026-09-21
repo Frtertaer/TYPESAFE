@@ -1161,5 +1161,42 @@ class CompactCliTests(unittest.TestCase):
             C.parse_transcript("")
 
 
+class PruneSpillTests(unittest.TestCase):
+    def _spill_dir(self, tmp: str) -> Path:
+        target = Path(tmp) / "spill"
+        target.mkdir()
+        return target
+
+    def test_prunes_only_old_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self._spill_dir(tmp)
+            old = target / "old.txt"
+            new = target / "new.txt"
+            old.write_text("x", encoding="utf-8")
+            new.write_text("y", encoding="utf-8")
+            old_ts = os.stat(old).st_mtime - 7200
+            os.utime(old, (old_ts, old_ts))
+            removed = C.prune_spill(target, older_than=3600.0)
+            self.assertEqual(removed, [old])
+            self.assertTrue(new.is_file())
+
+    def test_missing_dir_returns_empty(self) -> None:
+        self.assertEqual(C.prune_spill(Path("no-such-spill-dir"), 60.0), [])
+
+    def test_cli_prune_spill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self._spill_dir(tmp)
+            stale = target / "stale.txt"
+            stale.write_text("x", encoding="utf-8")
+            old_ts = os.stat(stale).st_mtime - 7200
+            os.utime(stale, (old_ts, old_ts))
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--prune-spill", "3600", "--spill-dir", str(target)])
+            self.assertEqual(rc, 0)
+            self.assertIn("pruned 1 spill files", buf.getvalue())
+            self.assertFalse(stale.exists())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

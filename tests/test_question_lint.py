@@ -523,6 +523,38 @@ class StandaloneCliTests(unittest.TestCase):
         self.assertNotIn("fixed J", proc.stderr)
 
 
+class LintStateEdgeTests(unittest.TestCase):
+    def test_dict_state_over_limit_is_j020(self) -> None:
+        request = {
+            "state": {"blob": "1" * 100000},
+            "questions": {"q": noul("Should the coder proceed with the plan?")},
+        }
+        findings = question_lint.lint_request(request)
+        self.assertIn(("J020", "error"), rules(findings))
+
+    def test_missing_state_no_state_finding(self) -> None:
+        request = {"questions": {"q": noul("Should the coder proceed with the plan?")}}
+        findings = question_lint.lint_request(request)
+        self.assertNotIn(("J020", "error"), rules(findings))
+        self.assertNotIn(("J021", "warn"), rules(findings))
+
+    def test_none_state_is_tiny(self) -> None:
+        request = {
+            "state": None,
+            "questions": {"q": noul("Should the coder proceed with the plan?")},
+        }
+        findings = question_lint.lint_request(request)
+        self.assertNotIn(("J020", "error"), rules(findings))
+
+    def test_list_state_serializes(self) -> None:
+        request = {
+            "state": ["1" * 50000, "1" * 60000],
+            "questions": {"q": noul("Should the coder proceed with the plan?")},
+        }
+        findings = question_lint.lint_request(request)
+        self.assertIn(("J020", "error"), rules(findings))
+
+
 class ApplyFixesTests(unittest.TestCase):
     def test_no_questions_dict(self) -> None:
         self.assertEqual(question_lint.apply_fixes({}), [])

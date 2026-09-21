@@ -144,6 +144,25 @@ class TraceTests(unittest.TestCase):
             self.assertTrue(payload["exists"])
             self.assertIn("wrote", err.getvalue())
 
+    def test_record_note_stamps_sha(self) -> None:
+        import hashlib
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            from io import StringIO
+            from contextlib import redirect_stdout
+
+            with redirect_stdout(StringIO()):
+                code = tr.main(["--file", str(path), "record", "--note", "first", "--pick", "a"])
+                self.assertEqual(code, 0)
+                tr.main(["--file", str(path), "record", "--note", "first", "--pick", "b"])
+            data = tr.load(path)
+            notes = data["notes"]
+            want = hashlib.sha256("first".encode("utf-8")).hexdigest()[:12]
+            self.assertEqual(notes[0]["sha"], want)
+            self.assertEqual(notes[1]["sha"], want)
+
     def test_notes_reverse_lists_newest_first(self) -> None:
         import time
         from io import StringIO

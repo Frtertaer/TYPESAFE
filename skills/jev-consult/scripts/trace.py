@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -253,7 +254,12 @@ def cmd_record(args: argparse.Namespace) -> int:
             notes = []
         now = time.time()
         iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
-        entry = {"ts": now, "iso": iso, "text": note_text}
+        entry = {
+            "ts": now,
+            "iso": iso,
+            "text": note_text,
+            "sha": hashlib.sha256(note_text.encode("utf-8")).hexdigest()[:12],
+        }
         harness = args.harness or os.environ.get("JEV_TRACE_HARNESS", "")
         if harness:
             entry["harness"] = harness

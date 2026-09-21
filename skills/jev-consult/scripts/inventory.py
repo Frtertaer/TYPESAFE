@@ -725,6 +725,12 @@ DEFAULT_HOOK_BUDGET_SECONDS = 12.0
 
 def hook_budget_seconds() -> float:
     """Max seconds handle() may spend before skipping the Jev pick."""
+    try:
+        env = float(os.environ.get("JEV_HOOK_BUDGET", "") or -1)
+        if env >= 0:
+            return env
+    except ValueError:
+        pass
     return _policy_float_key(HOOK_BUDGET_KEY, DEFAULT_HOOK_BUDGET_SECONDS)
 
 

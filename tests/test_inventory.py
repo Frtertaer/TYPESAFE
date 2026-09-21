@@ -686,6 +686,23 @@ class LimitEnvTests(unittest.TestCase):
         self.assertGreaterEqual(len(out["shortlist"]), 1)
 
 
+class HookBudgetEnvTests(unittest.TestCase):
+    def test_env_override_wins(self) -> None:
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"JEV_HOOK_BUDGET": "2.5"}):
+            self.assertEqual(inv.hook_budget_seconds(), 2.5)
+
+    def test_env_invalid_falls_back(self) -> None:
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"JEV_HOOK_BUDGET": "bogus"}):
+            self.assertEqual(
+                inv.hook_budget_seconds(),
+                inv._policy_float_key("hook_budget_seconds", 12.0),
+            )
+
+
 class HookRetriesEnvTests(unittest.TestCase):
     def test_env_override_wins(self) -> None:
         import os

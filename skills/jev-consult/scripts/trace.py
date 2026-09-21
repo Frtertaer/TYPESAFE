@@ -237,6 +237,16 @@ def cmd_notes(args: argparse.Namespace) -> int:
     data = load(path)
     notes = data.get("notes")
     notes = notes if isinstance(notes, list) else []
+    prune = getattr(args, "prune", None)
+    if isinstance(prune, int) and prune >= 0:
+        data["notes"] = notes[-prune:] if prune else []
+        try:
+            save(data, path)
+            sys.stderr.write("notes pruned to %d\n" % len(data["notes"]))
+        except OSError as exc:
+            sys.stderr.write("prune failed: %s\n" % exc)
+            return 1
+        notes = data["notes"]
     limit = getattr(args, "limit", None)
     if isinstance(limit, int) and limit >= 0:
         notes = notes[-limit:] if limit else []
@@ -344,6 +354,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd = sub.add_parser("notes", help="List recorded notes (iso + text)")
     notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")
     notes_cmd.add_argument("--limit", type=int, help="Show only the last N notes")
+    notes_cmd.add_argument("--prune", type=int, help="Rewrite the trace keeping only the last N notes")
     notes_cmd.set_defaults(func=cmd_notes)
     return parser
 

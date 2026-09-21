@@ -337,6 +337,22 @@ class TraceTests(unittest.TestCase):
             self.assertIn("c", out)
             self.assertIn("2 note(s)", out)
 
+    def test_cli_notes_prune_rewrites_file(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            for text in ("a", "b", "c"):
+                tr.main(["--file", str(path), "record", "--pick", "x", "--note", text])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--prune", "1"])
+            self.assertEqual(rc, 0)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual([n["text"] for n in data["notes"]], ["c"])
+
     def test_cli_record_note_stdin_dash(self) -> None:
         import io
         from unittest.mock import patch

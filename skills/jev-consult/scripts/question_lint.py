@@ -289,6 +289,14 @@ def main(argv: list[str] | None = None) -> int:
         env_sev = os.environ.get("JEV_QLINT_SEVERITY", "").strip().lower()
         if env_sev and env_sev in SEVERITIES:
             severity = env_sev
+    out_path = ""
+    if "--out" in argv:
+        idx = argv.index("--out")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--out needs a PATH value\n")
+            return 2
+        out_path = argv[idx + 1].strip()
+        argv = argv[:idx] + argv[idx + 2 :]
     argv = [a for a in argv if a not in ("--json", "--fix", "--strict", "--quiet")]
     if not argv:
         sys.stderr.write("usage: question_lint.py FILE [--json] [--fix] [--strict]\n")
@@ -313,6 +321,16 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("fixed %s\n" % rule)
     findings = lint_request(request)
     shown = [f for f in findings if not severity or f["severity"] == severity]
+    if out_path:
+        try:
+            Path(out_path).write_text(
+                json.dumps({"findings": shown}, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+        sys.stderr.write("wrote %d finding(s) to %s\n" % (len(shown), out_path))
     if as_json:
         sys.stdout.write(json.dumps({"findings": shown}, indent=2) + "\n")
     else:

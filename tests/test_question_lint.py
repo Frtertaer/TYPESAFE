@@ -266,6 +266,32 @@ class LintCliTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 2)
 
+    def test_out_writes_findings_json(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {
+                "a": noul("Should the coder not proceed?"),
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, request)
+            out_path = Path(tmp) / "findings.json"
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--out", str(out_path)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("wrote", proc.stderr)
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertIn("findings", payload)
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--out"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 2)
+
     def test_severity_env_default(self) -> None:
         import os as _os
 

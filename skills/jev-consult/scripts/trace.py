@@ -191,6 +191,18 @@ def cmd_show(args: argparse.Namespace) -> int:
                 lines.append("%s: %s" % (key, value))
         sys.stdout.write("\n".join(lines) + "\n")
         return 0
+    out_path = getattr(args, "out", "") or ""
+    if out_path:
+        try:
+            Path(out_path).write_text(
+                json.dumps({"path": str(path), "exists": exists, "age_seconds": age_seconds, "trace": data}, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % out_path)
+        return 0
     emit({"path": str(path), "exists": exists, "age_seconds": age_seconds, "trace": data})
     return 0
 
@@ -460,6 +472,7 @@ def build_parser() -> argparse.ArgumentParser:
     show = sub.add_parser("show", help="Print the trace (empty object if missing)")
     show.add_argument("--pretty", action="store_true", help="Key fields as text lines.")
     show.add_argument("--key", default="", help="Print only this field's value")
+    show.add_argument("--out", default="", help="Write the show JSON to PATH instead of stdout (ignored with --key/--pretty)")
     show.set_defaults(func=cmd_show)
     setter = sub.add_parser("set", help="Update fields")
     setter.add_argument("--plan")

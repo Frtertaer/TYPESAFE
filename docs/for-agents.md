@@ -35,7 +35,7 @@ python skills/jev-consult/scripts/decisions.py                          # stats 
                                                                         # --jsonl raw entries; --prune keeps only filtered
 python skills/jev-consult/scripts/compare.py --live
 python skills/jev-consult/scripts/compact.py transcript.json --history --fake   # --dir DIR for batch, --prune-spill S, --list-spill
-python skills/jev-consult/scripts/trace.py show --key plan                      # single field from .jev-trace.json
+python skills/jev-consult/scripts/trace.py show --key plan                      # single field from .jev-trace.json (--out PATH writes JSON to a file)
 python skills/jev-consult/scripts/trace.py stats                                # counts, last_pick, file age (--out PATH writes JSON to a file)
 python tests/test_jev.py
 python tests/test_inventory.py

@@ -733,6 +733,12 @@ DEFAULT_HOOK_JEV_TIMEOUT_SECONDS = 8.0
 
 def hook_jev_timeout_seconds() -> float:
     """HTTP timeout for the one Jev call inside the prompt hook."""
+    try:
+        env = float(os.environ.get("JEV_HOOK_TIMEOUT", "") or -1)
+        if env >= 0:
+            return env
+    except ValueError:
+        pass
     return _policy_float_key(HOOK_JEV_TIMEOUT_KEY, DEFAULT_HOOK_JEV_TIMEOUT_SECONDS)
 
 

@@ -606,5 +606,34 @@ class TtlEnvOverrideTests(unittest.TestCase):
             self.assertFalse(inv.sidecar_fresh(prior))
 
 
+class JevTimeoutEnvTests(unittest.TestCase):
+    def test_env_override_wins(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"JEV_HOOK_TIMEOUT": "1.5"}):
+            self.assertEqual(inv.hook_jev_timeout_seconds(), 1.5)
+
+    def test_env_invalid_falls_back(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"JEV_HOOK_TIMEOUT": "bogus"}):
+            self.assertEqual(
+                inv.hook_jev_timeout_seconds(),
+                inv._policy_float_key("hook_jev_timeout_seconds", 8.0),
+            )
+
+    def test_env_negative_ignored(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"JEV_HOOK_TIMEOUT": "-2"}):
+            self.assertEqual(
+                inv.hook_jev_timeout_seconds(),
+                inv._policy_float_key("hook_jev_timeout_seconds", 8.0),
+            )
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

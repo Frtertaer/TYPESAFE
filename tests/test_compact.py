@@ -1460,6 +1460,48 @@ class ListSpillTests(unittest.TestCase):
                 rc = C.main(["--orphan-spill", str(Path(tmp) / "nope.txt")])
             self.assertEqual(rc, 2)
 
+    def test_cli_verify_spill_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            existing = Path(tmp) / "a.txt"
+            existing.write_text("x", encoding="utf-8")
+            gone = Path(tmp) / "gone.txt"
+            doc = Path(tmp) / "out.txt"
+            doc.write_text(
+                "[full output saved: %s] [full output saved: %s]"
+                % (existing, gone),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--verify-spill", str(doc), "--json"])
+            self.assertEqual(rc, 1)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(len(payload["refs"]), 2)
+            self.assertEqual(payload["missing"], [str(gone)])
+            self.assertFalse(payload["ok"])
+
+    def test_cli_orphan_spill_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            used = target / "used.txt"
+            free = target / "free.txt"
+            used.write_text("u", encoding="utf-8")
+            free.write_text("f", encoding="utf-8")
+            doc = Path(tmp) / "out.txt"
+            doc.write_text(
+                "[full output saved: %s]" % used, encoding="utf-8"
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(
+                    ["--orphan-spill", str(doc), "--spill-dir", str(target), "--json"]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["count"], 1)
+            self.assertEqual(payload["orphans"], [str(free)])
+
     def test_cli_list_spill_out_writes_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "spill"

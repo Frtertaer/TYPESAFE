@@ -1402,6 +1402,11 @@ def main(argv: list[str] | None = None) -> int:
         help="List spill files not referenced by FILE (uses --spill-dir for the dir).",
     )
     parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit --verify-spill/--orphan-spill results as JSON.",
+    )
+    parser.add_argument(
         "--stats",
         action="store_true",
         help="Print a one-line compaction summary to stderr after the result.",
@@ -1444,11 +1449,24 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         refs = re.findall(r"full output saved: (\S+?)\]", text)
         missing = [ref for ref in refs if not Path(ref).is_file()]
-        for ref in refs:
+        if args.json:
             sys.stdout.write(
-                "%s %s\n" % ("ok" if Path(ref).is_file() else "missing", ref)
+                json.dumps(
+                    {
+                        "refs": refs,
+                        "missing": missing,
+                        "ok": not missing,
+                    },
+                    indent=2,
+                )
+                + "\n"
             )
-        sys.stdout.write("%d refs, %d missing\n" % (len(refs), len(missing)))
+        else:
+            for ref in refs:
+                sys.stdout.write(
+                    "%s %s\n" % ("ok" if Path(ref).is_file() else "missing", ref)
+                )
+            sys.stdout.write("%d refs, %d missing\n" % (len(refs), len(missing)))
         return 1 if missing else 0
     if args.orphan_spill:
         try:
@@ -1462,9 +1480,18 @@ def main(argv: list[str] | None = None) -> int:
             path for path, _size, _mtime in list_spill(directory)
             if str(path) not in referenced
         ]
-        for path in orphans:
-            sys.stdout.write("orphan: %s\n" % path)
-        sys.stdout.write("%d orphans\n" % len(orphans))
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {"orphans": [str(path) for path in orphans], "count": len(orphans)},
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            for path in orphans:
+                sys.stdout.write("orphan: %s\n" % path)
+            sys.stdout.write("%d orphans\n" % len(orphans))
         return 0
     if args.list_spill:
         directory = Path(args.spill_dir) if args.spill_dir else None

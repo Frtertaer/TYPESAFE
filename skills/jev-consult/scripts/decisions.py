@@ -526,6 +526,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print counts of dedupe true/false, sorted desc",
     )
     parser.add_argument(
+        "--daily",
+        action="store_true",
+        help="Print per-day entry counts (UTC YYYY-MM-DD), sorted desc",
+    )
+    parser.add_argument(
         "--count",
         action="store_true",
         help="Print only the number of entries matching the filters",
@@ -950,9 +955,20 @@ def main(argv: list[str] | None = None) -> int:
         or args.fills
         or args.fields
         or args.dedupes
+        or args.daily
     ):
         counts: dict[str, int] = {}
-        if args.winners:
+        if args.daily:
+            for item in entries:
+                ts = item.get("ts")
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+                    day = datetime.datetime.fromtimestamp(
+                        float(ts), tz=datetime.timezone.utc
+                    ).strftime("%Y-%m-%d")
+                else:
+                    day = "unknown"
+                counts[day] = counts.get(day, 0) + 1
+        elif args.winners:
             for item in entries:
                 winner = item.get("winner")
                 if isinstance(winner, dict) and winner.get("name"):

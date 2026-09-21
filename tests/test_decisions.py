@@ -2002,6 +2002,29 @@ class PruneTest(unittest.TestCase):
             proc = self.run_cli("--file", str(path), "--missing", "winner.name", "--count")
             self.assertIn("2", proc.stdout)
 
+    def test_daily_buckets_by_day(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1_700_000_000, "jev_status": "ok"},
+                    {"ts": 1_700_000_100, "jev_status": "ok"},
+                    {"ts": 1_700_100_000, "jev_status": "ok"},
+                    {"jev_status": "ok"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--daily")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = proc.stdout.strip().splitlines()
+            self.assertEqual(
+                sorted(lines),
+                ["2023-11-14 2", "2023-11-16 1", "unknown 1"],
+            )
+            proc = self.run_cli("--file", str(path), "--daily", "--json")
+            counts = json.loads(proc.stdout)["counts"]
+            self.assertEqual(counts["unknown"], 1)
+
     def test_missing_accepts_comma_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

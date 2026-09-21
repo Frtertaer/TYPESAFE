@@ -222,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
     parser.add_argument("--quiet", action="store_true", help="Report only failing checks")
+    parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH")
     args = parser.parse_args(argv)
     agents = [a.strip() for a in args.agents.split(",") if a.strip()]
     bad = [a for a in agents if a not in ALLOWED]
@@ -246,7 +247,15 @@ def main(argv: list[str] | None = None) -> int:
             if hint:
                 check["hint"] = hint.replace("<agent>", check["agent"])
     shown = checks if not args.quiet else [c for c in checks if not c["ok"]]
-    sys.stdout.write(json.dumps({"ok": ok, "checks": shown}, indent=2) + "\n")
+    text = json.dumps({"ok": ok, "checks": shown}, indent=2) + "\n"
+    sys.stdout.write(text)
+    if args.out:
+        try:
+            Path(args.out).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % args.out)
     return 0 if ok else 1
 
 

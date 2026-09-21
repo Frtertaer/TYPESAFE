@@ -246,6 +246,29 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("cursor", buf.getvalue())
 
+    def test_out_writes_result_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "doctor.json"
+            err = io.StringIO()
+            with patch.object(sys, "stderr", err):
+                rc, out, _ = run_main(
+                    [
+                        "--agents",
+                        "hermes",
+                        "--home",
+                        tmp,
+                        "--hermes-home",
+                        str(Path(tmp) / "h"),
+                        "--out",
+                        str(out_path),
+                    ],
+                )
+            self.assertIn(rc, (0, 1))
+            self.assertIn("wrote", err.getvalue())
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertIn("checks", payload)
+            self.assertIsNotNone(check_of(payload, "api_key"))
+
     def test_api_key_from_env_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rc, out, _ = run_main(

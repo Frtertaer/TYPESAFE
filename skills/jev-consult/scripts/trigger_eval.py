@@ -144,6 +144,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Sort rows by score ascending (weakest first, unscored last).",
     )
     parser.add_argument(
+        "--top",
+        metavar="N",
+        type=int,
+        default=0,
+        help="Print only the N weakest rows (implies score-ascending order).",
+    )
+    parser.add_argument(
         "--min-covers",
         metavar="N",
         type=int,
@@ -410,8 +417,10 @@ def main(argv: list[str] | None = None) -> int:
                 for r in rows
                 if r["score"] is not None and r["score"] >= args.min_score
             ]
-        if args.sort:
+        if args.sort or args.top > 0:
             rows = sorted(rows, key=lambda r: (r["score"] is None, r["score"]))
+        if args.top > 0:
+            rows = rows[: args.top]
         return rows
 
     def _covers_counts() -> dict[str, int]:

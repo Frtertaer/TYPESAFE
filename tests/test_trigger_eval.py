@@ -386,6 +386,34 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(scored, sorted(scored))
         self.assertTrue(all(s is None for s in scores[len(scored):]))
 
+    def test_top_limits_to_weakest_n(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--top", "3", "--json"])
+        self.assertEqual(rc, 0)
+        cases = json.loads(buf.getvalue())["cases"]
+        self.assertEqual(len(cases), 3)
+        scores = [r["score"] for r in cases]
+        scored = [s for s in scores if s is not None]
+        self.assertEqual(scored, sorted(scored))
+        self.assertTrue(all(s is None for s in scores[len(scored):]))
+
+        buf2 = io.StringIO()
+        with redirect_stdout(buf2):
+            te.main(["--top", "2", "--sort", "--json"])
+        all_scores = [
+            r["score"] for r in json.loads(buf2.getvalue())["cases"] if r["score"] is not None
+        ]
+        full = io.StringIO()
+        with redirect_stdout(full):
+            te.main(["--sort", "--json"])
+        full_scores = [
+            s
+            for s in (r["score"] for r in json.loads(full.getvalue())["cases"])
+            if s is not None
+        ]
+        self.assertEqual(all_scores, full_scores[:2])
+
     def test_min_covers_fails_thin_tags(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

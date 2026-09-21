@@ -363,6 +363,21 @@ class TraceTests(unittest.TestCase):
             data = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(data["notes"][0]["text"], "from stdin")
 
+    def test_cli_record_note_env_default(self) -> None:
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with patch.dict(os.environ, {"JEV_TRACE_NOTE": "env-note"}):
+                tr.main(["--file", str(path), "record", "--pick", "x"])
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["notes"][0]["text"], "env-note")
+            with patch.dict(os.environ, {"JEV_TRACE_NOTE": "env-note"}):
+                tr.main(
+                    ["--file", str(path), "record", "--pick", "y", "--note", "cli-note"]
+                )
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["notes"][-1]["text"], "cli-note")
+
     def test_cli_record_no_note_no_notes_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "trace.json"

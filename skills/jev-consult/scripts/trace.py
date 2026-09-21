@@ -195,7 +195,8 @@ def cmd_record(args: argparse.Namespace) -> int:
     data = record(load(path), pick=args.pick, kind=args.kind or "")
     if args.step:
         data["current_step"] = args.step
-    note_text = sys.stdin.read().strip() if args.note == "-" else args.note
+    note_arg = args.note if args.note is not None else os.environ.get("JEV_TRACE_NOTE", "")
+    note_text = sys.stdin.read().strip() if note_arg == "-" else note_arg
     if note_text:
         notes = data.get("notes")
         if not isinstance(notes, list):
@@ -332,7 +333,7 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--pick", required=True)
     rec.add_argument("--kind", default="")
     rec.add_argument("--step", default="")
-    rec.add_argument("--note", default="", help="Append a freeform note to trace.notes ('-' reads stdin)")
+    rec.add_argument("--note", default=None, help="Append a freeform note to trace.notes ('-' reads stdin; default JEV_TRACE_NOTE)")
     rec.set_defaults(func=cmd_record)
     prune_cmd = sub.add_parser(
         "prune", help="Delete the trace file when older than --older-than seconds"

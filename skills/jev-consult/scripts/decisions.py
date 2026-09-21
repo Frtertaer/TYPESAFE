@@ -459,15 +459,15 @@ def main(argv: list[str] | None = None) -> int:
                 "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, or --field\n"
             )
             return 2
-        total, _ = load_entries(path)
+        total, total_bad = load_entries(path)
         try:
             prune_entries(path, entries)
         except OSError as exc:
             sys.stderr.write("prune failed: %s\n" % exc)
             return 1
         sys.stderr.write(
-            "pruned %d of %d entries (kept %d)\n"
-            % (len(total) - len(entries), len(total), len(entries))
+            "pruned %d of %d entries (kept %d, dropped %d bad line(s))\n"
+            % (len(total) - len(entries), len(total), len(entries), total_bad)
         )
     if args.errors:
         for lineno, raw in load_bad_lines(path):

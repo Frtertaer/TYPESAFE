@@ -355,6 +355,20 @@ class CliTest(unittest.TestCase):
             kept = [json.loads(l) for l in lines]
             self.assertTrue(all(e["harness"] == "codex" for e in kept))
 
+    def test_prune_drops_bad_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text(
+                '{"harness": "codex", "jev_status": "winner"}\nnot json\n{"harness": "grok", "jev_status": "idf"}\n',
+                encoding="utf-8",
+            )
+            proc = self.run_cli("--file", str(path), "--prune", "--harness", "codex")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("dropped 1 bad line(s)", proc.stderr)
+            lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            self.assertEqual(len(lines), 1)
+            self.assertEqual(json.loads(lines[0])["harness"], "codex")
+
     def test_statuses_sorted_desc(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

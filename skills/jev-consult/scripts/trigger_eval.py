@@ -111,6 +111,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print per-tag coverage counts and ids of cases with no covers field.",
     )
+    parser.add_argument(
+        "--covers-map",
+        action="store_true",
+        help="Print each covers tag followed by the case ids that carry it.",
+    )
     parser.add_argument("--quiet", action="store_true", help="Print only the verdict line.")
     parser.add_argument(
         "--fail",
@@ -216,17 +221,22 @@ def main(argv: list[str] | None = None) -> int:
             ]
         return rows
 
-    if args.covers:
+    if args.covers or args.covers_map:
         counts: dict[str, int] = {}
+        id_map: dict[str, list[str]] = {}
         uncovered: list[str] = []
         for row in _rows():
             tags = row["covers"] or []
             for tag in tags:
                 counts[tag] = counts.get(tag, 0) + 1
+                id_map.setdefault(tag, []).append(row["id"])
             if not tags:
                 uncovered.append(row["id"])
         for tag in sorted(counts):
-            sys.stdout.write("%s %d\n" % (tag, counts[tag]))
+            if args.covers_map:
+                sys.stdout.write("%s: %s\n" % (tag, ", ".join(id_map[tag])))
+            else:
+                sys.stdout.write("%s %d\n" % (tag, counts[tag]))
         for cid in uncovered:
             sys.stdout.write("uncovered: %s\n" % cid)
         return 0 if result["ok"] else 1

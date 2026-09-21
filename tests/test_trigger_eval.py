@@ -275,6 +275,16 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertIn("approach 1\n", out)
         self.assertIn("uncovered: neg-format\n", out)
 
+    def test_covers_map_lists_ids_per_tag(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--covers-map"])
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertIn("approach: pos-approach\n", out)
+        self.assertIn("keep_vs_change: ", out)
+        self.assertIn("uncovered: neg-format\n", out)
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

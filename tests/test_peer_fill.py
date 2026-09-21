@@ -514,6 +514,31 @@ class PeerFillInternalsTests(unittest.TestCase):
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("jev", 90)):
             self.assertIsNone(FILL.run_jev(Path("ask.json")))
 
+    def test_fill_timeout_env_override(self) -> None:
+        import os
+
+        self.assertEqual(FILL.fill_timeout_seconds(), 90.0)
+        with patch.dict(os.environ, {"JEV_FILL_TIMEOUT": "12.5"}):
+            self.assertEqual(FILL.fill_timeout_seconds(), 12.5)
+        with patch.dict(os.environ, {"JEV_FILL_TIMEOUT": "bogus"}):
+            self.assertEqual(FILL.fill_timeout_seconds(), 90.0)
+        with patch.dict(os.environ, {"JEV_FILL_TIMEOUT": "-3"}):
+            self.assertEqual(FILL.fill_timeout_seconds(), 90.0)
+        captured = {}
+
+        class FakeProc:
+            returncode = 0
+            stdout = "{}"
+
+        def fake_run(argv, **kw):
+            captured.update(kw)
+            return FakeProc()
+
+        with patch.dict(os.environ, {"JEV_FILL_TIMEOUT": "7"}):
+            with patch("subprocess.run", side_effect=fake_run):
+                FILL.run_jev(Path("ask.json"))
+        self.assertEqual(captured.get("timeout"), 7.0)
+
 
 class ReadMissPruneTests(unittest.TestCase):
     def _miss(self, path: Path, age: float) -> None:

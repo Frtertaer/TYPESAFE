@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -125,6 +126,17 @@ def write_peer_ask(path: Path, task: str, dest: str, picked: list[dict]) -> None
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def fill_timeout_seconds() -> float:
+    """JEV_FILL_TIMEOUT env overrides the default 90s Jev ask timeout."""
+    try:
+        env = float(os.environ.get("JEV_FILL_TIMEOUT", "") or 0)
+        if env > 0:
+            return env
+    except ValueError:
+        pass
+    return 90.0
+
+
 def run_jev(ask_path: Path) -> dict | None:
     script = _SCRIPTS / "jev.py"
     try:
@@ -132,7 +144,7 @@ def run_jev(ask_path: Path) -> dict | None:
             [sys.executable, str(script), "ask", str(ask_path)],
             capture_output=True,
             text=True,
-            timeout=90,
+            timeout=fill_timeout_seconds(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return None

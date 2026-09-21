@@ -161,7 +161,8 @@ def main(argv: list[str] | None = None) -> int:
     do_fix = "--fix" in argv
     as_json = "--json" in argv
     strict = "--strict" in argv
-    argv = [a for a in argv if a not in ("--fix", "--json", "--strict")]
+    quiet = "--quiet" in argv
+    argv = [a for a in argv if a not in ("--fix", "--json", "--strict", "--quiet")]
     if not argv:
         sys.stderr.write(
             "usage: skill_lint.py SKILL.md [more.md ...] [--fix] [--strict]\n"
@@ -198,14 +199,16 @@ def main(argv: list[str] | None = None) -> int:
     n_warn = 0
     for path in paths:
         for f in lint_skill(path):
-            sys.stdout.write("%s %s %s: %s\n" % (f["severity"], f["rule"], path, f["message"]))
             if f["severity"] == "error":
                 n_err += 1
             else:
                 n_warn += 1
             if f["severity"] == "error" or (strict and f["severity"] == "warn"):
                 rc = 1
-    if n_err + n_warn and len(paths) > 1:
+            if quiet and f["severity"] != "error":
+                continue
+            sys.stdout.write("%s %s %s: %s\n" % (f["severity"], f["rule"], path, f["message"]))
+    if not quiet and n_err + n_warn and len(paths) > 1:
         sys.stdout.write(
             "%d findings (%d errors, %d warns) in %d files\n"
             % (n_err + n_warn, n_err, n_warn, len(paths))

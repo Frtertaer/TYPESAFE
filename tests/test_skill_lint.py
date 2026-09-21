@@ -63,6 +63,24 @@ class LintSkillTests(unittest.TestCase):
                 any(f["rule"] == "S004" and f["severity"] == "warn" for f in findings)
             )
 
+    def test_quiet_suppresses_warn_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            warn_path = write_skill(tmp, "x", "---\nname: x\n---\n")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = skill_lint.main([str(warn_path), "--quiet"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue(), "")
+
+    def test_quiet_still_prints_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "nope" / "SKILL.md"
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = skill_lint.main([str(bad), "--quiet"])
+            self.assertEqual(rc, 1)
+            self.assertIn("S001", buf.getvalue())
+
     def test_name_dir_mismatch_warn(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = write_skill(tmp, "actual-dir", GOOD.format(name="other-name"))

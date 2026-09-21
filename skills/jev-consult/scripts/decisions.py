@@ -453,6 +453,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         env_min_cat = None
     parser.add_argument("--min-catalog", type=float, default=env_min_cat, help="Only entries with numeric n_catalog >= N")
+    parser.add_argument("--reverse", action="store_true", help="Print listed entries newest-first (--out/--jsonl/--csv/--md/--jq/--tail/--first)")
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -710,7 +711,7 @@ def main(argv: list[str] | None = None) -> int:
             or getattr(args, "min_catalog", None) is not None
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, --min-catalog, or --prompt\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, --min-catalog, or --prompt (--reverse does not affect --prune)\n"
             )
             return 2
         total, total_bad = load_entries(path)
@@ -737,7 +738,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("%d\n" % len(entries))
         return 0
     if args.jq:
-        values = [_dig(item, args.jq) for item in entries]
+        values = [_dig(item, args.jq) for item in (entries[::-1] if getattr(args, "reverse", False) else entries)]
         if args.json:
             sys.stdout.write(json.dumps({"field": args.jq, "values": values}, indent=2) + "\n")
         else:
@@ -804,11 +805,12 @@ def main(argv: list[str] | None = None) -> int:
             for value, n in rows:
                 sys.stdout.write("%s %d\n" % (value, n))
         return 0
+    emit_entries = entries[::-1] if getattr(args, "reverse", False) else entries
     if args.out:
         out_path = Path(args.out)
         try:
             with out_path.open("w", encoding="utf-8") as fh:
-                for item in entries:
+                for item in emit_entries:
                     fh.write(json.dumps(item, sort_keys=True) + "\n")
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
@@ -816,12 +818,12 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("wrote %d entries to %s\n" % (len(entries), out_path))
         return 0
     if args.jsonl:
-        for item in entries:
+        for item in emit_entries:
             sys.stdout.write(json.dumps(item, sort_keys=True) + "\n")
         return 0
     if args.csv or args.md:
         rows = []
-        for item in entries:
+        for item in emit_entries:
             winner = item.get("winner")
             winner_name = winner.get("name") if isinstance(winner, dict) else ""
             rows.append(
@@ -859,6 +861,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         sys.stdout.write(format_stats(stats) + "\n")
     shown = entries[: args.first] if args.first > 0 else entries[-args.tail :]
+    if getattr(args, "reverse", False):
+        shown = shown[::-1]
     if args.first > 0 or args.tail > 0:
         for item in shown:
             sys.stdout.write(format_entry(item) + "\n")

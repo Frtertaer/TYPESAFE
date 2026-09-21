@@ -542,6 +542,25 @@ class CliTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("1", proc.stdout)
 
+    def test_reverse_lists_newest_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "winner", "prompt_head": "first"},
+                    {"ts": 2, "jev_status": "winner", "prompt_head": "last"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--jsonl")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = [json.loads(ln) for ln in proc.stdout.splitlines() if ln.strip()]
+            self.assertEqual([r["prompt_head"] for r in rows], ["first", "last"])
+            proc = self.run_cli("--file", str(path), "--jsonl", "--reverse")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = [json.loads(ln) for ln in proc.stdout.splitlines() if ln.strip()]
+            self.assertEqual([r["prompt_head"] for r in rows], ["last", "first"])
+
     def test_count_prints_filtered_total(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

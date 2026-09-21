@@ -1020,6 +1020,26 @@ class HookRetriesEnvTests(unittest.TestCase):
         self.assertTrue(payload["valid"])
         self.assertEqual(payload["issues"], [])
 
+    def test_cli_jsonl_emits_one_item_per_line(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness", "hermes",
+                    "--hermes-home", str(FIXTURE),
+                    "--task", "jwt",
+                    "--jsonl",
+                ]
+            )
+        self.assertEqual(code, 0)
+        rows = [json.loads(line) for line in buf.getvalue().strip().splitlines()]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], "skill_jwt_auth")
+        self.assertEqual(rows[0]["name"], "jwt-auth")
+
     def test_cli_kinds_prints_per_kind_counts(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

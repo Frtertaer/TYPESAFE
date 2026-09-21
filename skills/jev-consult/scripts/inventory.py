@@ -1069,6 +1069,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--all-names", action="store_true", help="Include every installed name (no descriptions).")
     parser.add_argument("--scores", action="store_true", help="Add IDF score to each shortlist item.")
     parser.add_argument("--csv", action="store_true", help="Emit the shortlist as CSV rows instead of JSON.")
+    parser.add_argument("--jsonl", action="store_true", help="Emit the shortlist as JSON lines, one item per row (for piping).")
     parser.add_argument("--out", metavar="PATH", default="", help="Write the payload JSON to PATH instead of stdout.")
     parser.add_argument("--names", action="store_true", help="Print bare shortlist ids, one per line (for piping).")
     parser.add_argument("--paths", action="store_true", help="Print bare shortlist item paths, one per line (for piping).")
@@ -1217,6 +1218,9 @@ def main(argv: list[str] | None = None) -> int:
     elif getattr(args, "names", False):
         for item in payload["shortlist"]:
             sys.stdout.write("%s\n" % item.get("id"))
+    elif getattr(args, "jsonl", False):
+        for item in payload["shortlist"]:
+            sys.stdout.write(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n")
     elif getattr(args, "csv", False):
         import csv as _csv
 

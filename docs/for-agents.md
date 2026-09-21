@@ -24,6 +24,7 @@ python skills/jev-consult/scripts/inventory.py --names                 # bare sh
 python skills/jev-consult/scripts/inventory.py --paths                 # bare shortlist item paths, one per line
 python skills/jev-consult/scripts/inventory.py --id NAME               # print the matching item JSON (rc 1 when absent)
 python skills/jev-consult/scripts/inventory.py --count                  # print PICKED/SCANNED counts
+python skills/jev-consult/scripts/inventory.py --jsonl                  # shortlist as JSON lines
 python skills/jev-consult/scripts/inventory.py --kinds                  # per-kind counts
 python skills/jev-consult/scripts/inventory.py --grep SUBSTR            # keep items whose name/desc/id contains SUBSTR
 python skills/jev-consult/scripts/policy_lint.py [--strict|--show|--diff other.json|--out PATH]  # validates policy.json

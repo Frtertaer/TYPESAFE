@@ -292,6 +292,37 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertTrue(buf.getvalue().strip().startswith("stale (age "))
 
+    def test_check_sidecar_dir_lists_all(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        import time as time_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a").mkdir()
+            (root / "a" / ".jev-tools.json").write_text(
+                json.dumps({"written_at": time_mod.time()}), encoding="utf-8"
+            )
+            (root / ".jev-tools-miss.json").write_text("{bad", encoding="utf-8")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--check-sidecar", str(root)])
+            self.assertEqual(code, 0)
+            out = buf.getvalue()
+            self.assertIn("fresh:", out)
+            self.assertIn("invalid:", out)
+
+    def test_check_sidecar_dir_empty(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--check-sidecar", tmp])
+            self.assertEqual(code, 0)
+            self.assertIn("no sidecars under", buf.getvalue())
+
     def test_show_policy_prints_policy_json(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

@@ -977,6 +977,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.check_sidecar or args.check_miss:
         target = Path(args.check_sidecar or args.check_miss)
+        if target.is_dir():
+            found = sorted(target.rglob(".jev-tools*.json"))
+            for path in found:
+                sys.stdout.write("%s: %s\n" % (sidecar_status(path), path))
+            if not found:
+                sys.stdout.write("no sidecars under %s\n" % target)
+            return 0
         status = sidecar_status(target)
         suffix = ""
         if status in ("fresh", "stale"):

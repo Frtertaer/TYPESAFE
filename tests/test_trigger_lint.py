@@ -203,6 +203,53 @@ class CliTests(unittest.TestCase):
                     trigger_lint.main([str(path), "--severity", "error"])
             self.assertNotIn("T009", buf.getvalue())
 
+    def test_fix_rewrites_ids_and_covers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(
+                tmp,
+                [
+                    {
+                        "id": "Pick Me!",
+                        "prompt": "Decide which approach to take first",
+                        "should_trigger": True,
+                        "covers": ["approach", "approach", 42],
+                    },
+                    {
+                        "id": "Bad ID",
+                        "prompt": "unrelated negative prompt here",
+                        "should_trigger": False,
+                    },
+                ],
+            )
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = trigger_lint.main([str(path), "--fix"])
+            data = json.loads(path.read_text(encoding="utf-8"))
+            ids = [c["id"] for c in data["cases"]]
+            self.assertIn("pos-pick-me", ids)
+            self.assertIn("neg-bad-id", ids)
+            self.assertEqual(data["cases"][0]["covers"], ["approach"])
+            self.assertIn("fixed T005", err.getvalue())
+            self.assertIn("fixed T007", err.getvalue())
+            # lint now reports no T005/T007 findings
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                trigger_lint.main([str(path)])
+            self.assertNotIn("T005", buf.getvalue())
+            self.assertNotIn("T007", buf.getvalue())
+            self.assertIsNotNone(rc)
+
+    def test_fix_nothing_to_do(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(tmp, [dict(GOOD_CASE)])
+            before = path.read_text(encoding="utf-8")
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = trigger_lint.main([str(path), "--fix"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(path.read_text(encoding="utf-8"), before)
+            self.assertNotIn("fixed", err.getvalue())
+
     def test_watch_emits_ticks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = write_cases(tmp, [dict(GOOD_CASE)])

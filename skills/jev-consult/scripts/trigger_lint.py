@@ -106,6 +106,51 @@ def lint_cases(path: Path, policy_path: Path = DEFAULT_POLICY) -> list[dict]:
     return findings
 
 
+def fix_cases(data: dict) -> list[str]:
+    """Apply mechanical fixes to a cases file in place; returns rule ids fixed."""
+    cases = data.get("cases") if isinstance(data, dict) else None
+    if not isinstance(cases, list):
+        return []
+    applied: list[str] = []
+    used = {
+        str(c.get("id"))
+        for c in cases
+        if isinstance(c, dict) and isinstance(c.get("id"), str)
+    }
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        cid = case.get("id")
+        if isinstance(cid, str) and not ID_RE.match(cid):
+            want = "pos" if case.get("should_trigger") is True else "neg"
+            slug = re.sub(r"-+", "-", re.sub(r"[^a-z0-9-]+", "-", cid.lower())).strip("-")
+            slug = re.sub(r"^(pos|neg)-", "", slug)
+            if slug:
+                new_id = "%s-%s" % (want, slug)
+                n = 2
+                while new_id in used and new_id != cid:
+                    new_id = "%s-%s-%d" % (want, slug, n)
+                    n += 1
+                if new_id != cid:
+                    used.discard(cid)
+                    used.add(new_id)
+                    case["id"] = new_id
+                    applied.append("T005")
+        covers = case.get("covers")
+        if isinstance(covers, list):
+            cleaned: list = []
+            changed = False
+            for kind in covers:
+                if not isinstance(kind, str) or kind in cleaned:
+                    changed = True
+                    continue
+                cleaned.append(kind)
+            if changed:
+                case["covers"] = cleaned
+                applied.append("T007")
+    return applied
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     as_json = "--json" in argv
@@ -154,9 +199,10 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         argv = argv[:idx] + argv[idx + 2 :]
     strict = "--strict" in argv
-    argv = [a for a in argv if a not in ("--json", "--quiet", "--strict")]
+    do_fix = "--fix" in argv
+    argv = [a for a in argv if a not in ("--json", "--quiet", "--strict", "--fix")]
     if len(argv) > 1:
-        sys.stderr.write("usage: trigger_lint.py [CASES.json] [--json] [--quiet] [--strict] [--severity L] [--out PATH] [--policy PATH]\n")
+        sys.stderr.write("usage: trigger_lint.py [CASES.json] [--json] [--quiet] [--strict] [--fix] [--severity L] [--out PATH] [--policy PATH]\n")
         return 2
     path = Path(argv[0]) if argv else DEFAULT_CASES
     if watch_seconds > 0:
@@ -179,6 +225,24 @@ def main(argv: list[str] | None = None) -> int:
             ticks += 1
             _time.sleep(watch_seconds)
         return 0
+    if do_fix:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            sys.stderr.write("cannot fix %s: %s\n" % (path, exc))
+            return 2
+        applied = fix_cases(data) if isinstance(data, dict) else []
+        if applied:
+            try:
+                path.write_text(
+                    json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (path, exc))
+                return 1
+        for rule in sorted(set(applied)):
+            sys.stderr.write("fixed %s x%d\n" % (rule, applied.count(rule)))
     findings = lint_cases(path, policy_path=policy_path)
     shown = [
         f

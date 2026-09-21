@@ -1,4 +1,5 @@
 import csv
+import datetime
 import json
 import os
 import subprocess
@@ -713,6 +714,29 @@ class FilterSinceTest(unittest.TestCase):
             stats = json.loads(proc.stdout)
             self.assertEqual(stats["total"], 2)
             self.assertIsNone(stats["since"])
+
+    def test_since_until_accept_iso8601(self):
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            now = _time.time()
+            write_log(
+                path,
+                [
+                    {"ts": now - 7200, "jev_status": "idf"},
+                    {"ts": now - 60, "jev_status": "winner"},
+                ],
+            )
+            iso = datetime.datetime.fromtimestamp(
+                now - 3600, tz=datetime.timezone.utc
+            ).isoformat()
+            proc = self.run_cli("--file", str(path), "--json", "--since", iso)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 1)
+            self.assertEqual(stats["by_status"]["winner"], 1)
+            bad = self.run_cli("--file", str(path), "--since", "not-a-time")
+            self.assertEqual(bad.returncode, 2)
 
     def test_env_decisions_overrides_default_path(self):
         import time as _time

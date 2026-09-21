@@ -231,6 +231,24 @@ def filter_field(entries: list[dict], spec: str | None) -> list[dict]:
     return [item for item in entries if str(dig(item) or "") == value]
 
 
+def _ts_arg(raw: str) -> float | None:
+    """Parse an epoch-seconds or ISO8601 timestamp argument. Empty -> None."""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    try:
+        parsed = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        raise ValueError("bad timestamp %r (want epoch seconds or ISO8601)" % raw)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed.timestamp()
+
+
 def filter_since(entries: list[dict], since: float | None) -> list[dict]:
     if since is None:
         return entries
@@ -290,8 +308,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--week", action="store_true", help="Alias for --days 7"
     )
-    parser.add_argument("--since", type=float, default=0.0, help="Only entries with ts >= epoch seconds")
-    parser.add_argument("--until", type=float, default=0.0, help="Only entries with ts <= epoch seconds")
+    parser.add_argument("--since", default="", help="Only entries with ts >= epoch seconds or ISO8601")
+    parser.add_argument("--until", default="", help="Only entries with ts <= epoch seconds or ISO8601")
     parser.add_argument("--harness", default="", help="Only entries for this harness")
     parser.add_argument("--status", default="", help="Only entries with this jev_status")
     parser.add_argument("--outcome", default="", help="Only entries with this outcome (e.g. human, blocked)")
@@ -363,11 +381,15 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("no decisions log at %s\n" % path)
         return 1
     entries, bad = load_entries(path)
-    since = args.since or None
+    try:
+        since = _ts_arg(args.since)
+        until = _ts_arg(args.until)
+    except ValueError as exc:
+        sys.stderr.write("%s\n" % exc)
+        return 2
     days = args.days if args.days > 0 else (7.0 if args.week else 0.0)
     if days > 0:
         since = time.time() - days * 86400
-    until = args.until or None
     if since is not None:
         entries = filter_since(entries, since)
     if until is not None:

@@ -253,6 +253,44 @@ class CatalogFillTests(unittest.TestCase):
                 out = self._fill_pick(base, skill_body="---\nname: jwt-auth\n---\n\n# jwt-auth\n")
             self.assertTrue(out.startswith("installed skills-sh/acme/jwt-auth"))
 
+    def test_list_flag_prints_hits_no_writes(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hits = [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                sys,
+                "argv",
+                [
+                    "peer_fill.py",
+                    "--task",
+                    "jwt",
+                    "--harness",
+                    "claude-code",
+                    "--cwd",
+                    str(base),
+                    "--list",
+                ],
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertIn("jwt-auth", buf.getvalue())
+            self.assertFalse((base / INV.SIDECAR_NAME).exists())
+
+    def test_list_flag_hermes_down_fails_open(self) -> None:
+        import io
+
+        buf = io.StringIO()
+        with patch.object(FILL, "search_hits", return_value=None), patch.object(
+            sys,
+            "argv",
+            ["catalog_fill.py", "--task", "jwt", "--list"],
+        ), patch("sys.stdout", buf):
+            rc = FILL.main()
+        self.assertEqual(rc, 0)
+
     def test_miss_note_mentions_catalog_fill(self) -> None:
         note = INV.format_miss_note(SCRIPTS / "peer_fill.py")
         self.assertIn("peer_fill.py", note)

@@ -397,6 +397,11 @@ def main() -> int:
     parser.add_argument("--from-miss", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--ask-file", default="")
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="Print catalog hits for --task (name, identifier) and exit; no installs.",
+    )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     task = args.task
@@ -413,6 +418,17 @@ def main() -> int:
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home()
     if dest == "auto":
         dest = detect_harness(Path(__file__))
+    if args.list:
+        try:
+            hits = search_hits(task)
+            for item in (hits or []):
+                sys.stdout.write(
+                    "%s %s\n"
+                    % (item.get("name") or "?", item.get("identifier") or "")
+                )
+        except Exception:
+            pass
+        return 0
     ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
     try:
         return fill(

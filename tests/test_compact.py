@@ -1154,6 +1154,37 @@ class CompactCliTests(unittest.TestCase):
         self.assertTrue(out["stats"]["fallback"])
         self.assertEqual(out["stats"]["messagesAfter"], out["stats"]["messagesBefore"])
 
+    def test_watch_emits_stats_ticks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0",
+                         "--watch", "0.01"]
+                    )
+        self.assertEqual(rc, 0)
+        ticks = [
+            json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertTrue(all("charsBefore" in t and "reduction" in t for t in ticks))
+        self.assertTrue(all(t["fallback"] is False for t in ticks))
+
+    def test_watch_rc_1_on_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "1"}):
+                with patch.object(sys, "stdout", io.StringIO()):
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0.99",
+                         "--watch", "0.01"]
+                    )
+        self.assertEqual(rc, 1)
+
     def test_check_exits_1_below_gate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

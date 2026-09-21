@@ -1228,6 +1228,37 @@ def cmd_compact(args: argparse.Namespace) -> int:
             return {"answers": answers}
     else:
         asker = jev_asker
+    if getattr(args, "watch", None):
+        import time as _time
+
+        try:
+            max_ticks = int(os.environ.get("JEV_COMPACT_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        cur: dict[str, Any] = {}
+        while max_ticks <= 0 or ticks < max_ticks:
+            if args.file != "-":
+                try:
+                    messages = parse_transcript(Path(args.file).read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    pass
+            cur = compact_or_keep(messages, asker, options)
+            stats = cur.get("stats") or {}
+            tick = {
+                "ts": int(_time.time()),
+                "messagesBefore": stats.get("messagesBefore"),
+                "messagesAfter": stats.get("messagesAfter"),
+                "charsBefore": stats.get("charsBefore"),
+                "charsAfter": stats.get("charsAfter"),
+                "reduction": stats.get("reduction"),
+                "fallback": bool(stats.get("fallback")),
+            }
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            _time.sleep(args.watch)
+        return 1 if cur.get("stats", {}).get("fallback") else 0
     result = compact_or_keep(messages, asker, options)
     if getattr(args, "check", False):
         stats = result.get("stats") or {}
@@ -1394,6 +1425,12 @@ def main(argv: list[str] | None = None) -> int:
         "--fake",
         action="store_true",
         help="Do not call Jev; drop every non-pinned result (for tests).",
+    )
+    parser.add_argument(
+        "--watch",
+        type=float,
+        metavar="SECONDS",
+        help="Re-read the transcript file and re-run compaction every S seconds, emitting a stats tick per pass (JEV_COMPACT_WATCH_MAX caps ticks).",
     )
     parser.add_argument(
         "--prune-spill",

@@ -260,6 +260,28 @@ class InventoryTests(unittest.TestCase):
         names = [item["name"] for item in payload["shortlist"]]
         self.assertEqual(names, ["jwt-auth"])
 
+    def test_cli_paths_prints_item_paths(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--task",
+                    "jwt tokens",
+                    "--paths",
+                ]
+            )
+        self.assertEqual(code, 0)
+        lines = [ln.strip() for ln in buf.getvalue().splitlines() if ln.strip()]
+        self.assertTrue(lines)
+        self.assertTrue(any("jwt-auth" in ln for ln in lines))
+
     def test_cli_out_writes_payload_file(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

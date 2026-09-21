@@ -1054,6 +1054,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--csv", action="store_true", help="Emit the shortlist as CSV rows instead of JSON.")
     parser.add_argument("--out", metavar="PATH", default="", help="Write the payload JSON to PATH instead of stdout.")
     parser.add_argument("--names", action="store_true", help="Print bare shortlist ids, one per line (for piping).")
+    parser.add_argument("--paths", action="store_true", help="Print bare shortlist item paths, one per line (for piping).")
     parser.add_argument(
         "--explain",
         action="store_true",
@@ -1167,7 +1168,10 @@ def main(argv: list[str] | None = None) -> int:
             )
             explained.append({**item, "matched": matched})
         payload["shortlist"] = explained
-    if getattr(args, "names", False):
+    if getattr(args, "paths", False):
+        for item in payload["shortlist"]:
+            sys.stdout.write("%s\n" % (item.get("path") or item.get("id")))
+    elif getattr(args, "names", False):
         for item in payload["shortlist"]:
             sys.stdout.write("%s\n" % item.get("id"))
     elif getattr(args, "csv", False):

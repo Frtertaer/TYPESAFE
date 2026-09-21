@@ -232,10 +232,11 @@ def time_str(ts: object) -> str:
 def filter_status(entries: list[dict], status: str | None) -> list[dict]:
     if not status:
         return entries
+    wanted = {part.strip() for part in status.split(",") if part.strip()}
     return [
         item
         for item in entries
-        if str(item.get("jev_status") or "unknown") == status
+        if str(item.get("jev_status") or "unknown") in wanted
     ]
 
 
@@ -249,13 +250,15 @@ def filter_harness(entries: list[dict], harness: str | None) -> list[dict]:
 def filter_outcome(entries: list[dict], outcome: str | None) -> list[dict]:
     if not outcome:
         return entries
-    return [item for item in entries if str(item.get("outcome") or "") == outcome]
+    wanted = {part.strip() for part in outcome.split(",") if part.strip()}
+    return [item for item in entries if str(item.get("outcome") or "") in wanted]
 
 
 def filter_fill(entries: list[dict], fill: str | None) -> list[dict]:
     if not fill:
         return entries
-    return [item for item in entries if str(item.get("fill") or "") == fill]
+    wanted = {part.strip() for part in fill.split(",") if part.strip()}
+    return [item for item in entries if str(item.get("fill") or "") in wanted]
 
 
 def filter_field(entries: list[dict], spec: str | None) -> list[dict]:
@@ -734,19 +737,19 @@ def main(argv: list[str] | None = None) -> int:
             if str(item.get("question") or "").lower() == want_q
         ]
     if args.winner:
-        want = args.winner.strip().lower()
+        wants = {part.strip().lower() for part in args.winner.split(",") if part.strip()}
         entries = [
             item
             for item in entries
             if isinstance(item.get("winner"), dict)
             and (
-                str(item["winner"].get("name") or "").lower() == want
+                str(item["winner"].get("name") or "").lower() in wants
                 or "%s:%s"
                 % (
                     str(item["winner"].get("kind") or "").lower(),
                     str(item["winner"].get("name") or "").lower(),
                 )
-                == want
+                in wants
             )
         ]
     if args.max_latency is not None:

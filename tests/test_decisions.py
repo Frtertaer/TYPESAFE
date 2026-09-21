@@ -1822,6 +1822,30 @@ class PruneTest(unittest.TestCase):
             )
             self.assertEqual(len(proc.stdout.strip().splitlines()), 2)
 
+    def test_status_outcome_fill_winner_accept_comma_lists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "ok", "outcome": "hit", "fill": "apply",
+                     "winner": {"kind": "skill", "name": "a"}},
+                    {"ts": 2, "jev_status": "error", "outcome": "miss", "fill": "peer",
+                     "winner": {"kind": "skill", "name": "b"}},
+                    {"ts": 3, "jev_status": "skip", "outcome": "other", "fill": "catalog",
+                     "winner": {"kind": "mcp", "name": "c"}},
+                ],
+            )
+            for flag, value, want in (
+                ("--status", "ok,skip", 2),
+                ("--outcome", "hit,other", 2),
+                ("--fill", "apply,catalog", 2),
+                ("--winner", "a,mcp:c", 2),
+                ("--winner", "skill:a,mcp:c", 2),
+            ):
+                proc = self.run_cli("--file", str(path), flag, value, "--count")
+                self.assertEqual(proc.stdout.strip(), str(want), flag)
+
     def test_harness_accepts_comma_list(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

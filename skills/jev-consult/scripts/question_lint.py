@@ -273,6 +273,17 @@ def main(argv: list[str] | None = None) -> int:
     do_fix = "--fix" in argv
     strict = "--strict" in argv
     quiet = "--quiet" in argv
+    severity = ""
+    if "--severity" in argv:
+        idx = argv.index("--severity")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--severity needs a value (error|warn|info)\n")
+            return 2
+        severity = argv[idx + 1].strip().lower()
+        if severity not in SEVERITIES:
+            sys.stderr.write("bad --severity %r (want error|warn|info)\n" % severity)
+            return 2
+        argv = argv[:idx] + argv[idx + 2 :]
     argv = [a for a in argv if a not in ("--json", "--fix", "--strict", "--quiet")]
     if not argv:
         sys.stderr.write("usage: question_lint.py FILE [--json] [--fix] [--strict]\n")
@@ -296,15 +307,16 @@ def main(argv: list[str] | None = None) -> int:
         for rule in applied:
             sys.stderr.write("fixed %s\n" % rule)
     findings = lint_request(request)
+    shown = [f for f in findings if not severity or f["severity"] == severity]
     if as_json:
-        sys.stdout.write(json.dumps({"findings": findings}, indent=2) + "\n")
+        sys.stdout.write(json.dumps({"findings": shown}, indent=2) + "\n")
     else:
-        for f in findings:
+        for f in shown:
             if quiet and f["severity"] != "error":
                 continue
             sys.stdout.write(format_finding(f) + "\n")
         if not quiet:
-            sys.stdout.write("lint: %d finding(s)\n" % len(findings))
+            sys.stdout.write("lint: %d finding(s)\n" % len(shown))
     if any(f["severity"] == "error" for f in findings):
         return 1
     return 1 if strict and findings else 0

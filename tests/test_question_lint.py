@@ -235,6 +235,37 @@ class LintCliTests(unittest.TestCase):
         self.assertNotIn("J001", proc.stdout)
         self.assertNotIn("lint:", proc.stdout)
 
+    def test_severity_filters_findings(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {
+                "a": noul("Should the coder not proceed?"),
+                "b": noul("Is it not true that the fix cannot ship?"),
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, request)
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--severity", "warn"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("warn  J001", proc.stdout)
+            self.assertNotIn("J002", proc.stdout)
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--severity", "error"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("J002", proc.stdout)
+            self.assertNotIn("J001", proc.stdout)
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--severity", "bogus"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 2)
+
     def test_quiet_still_prints_errors(self) -> None:
         request = {
             "state": {"task": "x"},

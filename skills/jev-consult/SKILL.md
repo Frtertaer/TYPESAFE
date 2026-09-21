@@ -26,7 +26,7 @@ Never print `TYPESAFE_API_KEY`. Never auto-install marketplace items.
 ```text
 python skills/jev-consult/scripts/jev.py ask request.json --trace
 python skills/jev-consult/scripts/jev.py scaffold keep_vs_change --out request.json --plan "<task>"
-python skills/jev-consult/scripts/jev.py lint request.json
+python skills/jev-consult/scripts/jev.py lint request.json  # standalone question_lint.py adds --severity LEVEL (error|warn|info)
 python skills/jev-consult/scripts/policy_lint.py  # validate policy.json before editing thresholds/templates
 ```
 

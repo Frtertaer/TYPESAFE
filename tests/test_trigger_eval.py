@@ -324,6 +324,17 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertTrue(lines[0].startswith("pos-approach: "))
         self.assertTrue(any(l.startswith("neg-format: ") for l in lines))
 
+    def test_summary_prints_aggregate_only(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--summary"])
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertIn("margin: PASS", out)
+        self.assertIn("positives=", out)
+        self.assertIn("negatives=", out)
+        self.assertNotIn("should_trigger=", out)
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

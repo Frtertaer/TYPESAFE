@@ -129,6 +129,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--quiet", action="store_true", help="Print only the verdict line.")
     parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="Print only the aggregate stats line (counts, worst/best, margin).",
+    )
+    parser.add_argument(
         "--fail",
         action="store_true",
         help="Print only the failing case rows (positives that scored 0).",
@@ -298,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         payload["cases"] = _rows()
         sys.stdout.write(json.dumps(payload, indent=2) + "\n")
     else:
-        if not args.quiet:
+        if not args.quiet and not args.summary:
             for row in _rows():
                 score = "-" if row["score"] is None else "%.3f" % row["score"]
                 marker = "" if row["ok"] else "  <-- FAIL"
@@ -323,6 +328,11 @@ def main(argv: list[str] | None = None) -> int:
                 result["margin"],
             )
         )
+        if args.summary:
+            sys.stdout.write(
+                "positives=%d negatives=%d\n"
+                % (result["n_positives"], result["n_negatives"])
+            )
     if args.strict and any(
         not row["ok"] or (not row["should_trigger"] and (row["score"] or 0) > 0)
         for row in result["cases"]

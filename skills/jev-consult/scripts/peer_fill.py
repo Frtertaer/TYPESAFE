@@ -277,6 +277,11 @@ def main() -> int:
         action="store_true",
         help="Print shortlisted peer items (kind, name, path) and exit; no writes.",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="With --list: emit a JSON array of items instead of text lines.",
+    )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     task = args.task
@@ -294,15 +299,26 @@ def main() -> int:
         try:
             peers = peer_skills(dest, home, hermes)
             items = shortlist(peers, task, PEER_LIMIT, []) if tokens(task) else peers
-            for item in items:
-                sys.stdout.write(
-                    "%s %s %s\n"
-                    % (
-                        item.get("kind") or "skill",
-                        item.get("name") or "?",
-                        item.get("path") or "",
+            if args.json:
+                rows = [
+                    {
+                        "kind": item.get("kind") or "skill",
+                        "name": item.get("name") or "?",
+                        "path": item.get("path") or "",
+                    }
+                    for item in items
+                ]
+                sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+            else:
+                for item in items:
+                    sys.stdout.write(
+                        "%s %s %s\n"
+                        % (
+                            item.get("kind") or "skill",
+                            item.get("name") or "?",
+                            item.get("path") or "",
+                        )
                     )
-                )
         except Exception:
             pass
         return 0

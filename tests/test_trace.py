@@ -273,6 +273,50 @@ class TraceTests(unittest.TestCase):
             self.assertIn("(missing)", buf.getvalue())
             self.assertNotIn("age:", buf.getvalue())
 
+    def test_show_key_scalar(self) -> None:
+        import io
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                tr.main(["--file", str(path), "init", "--plan", "Add tests.", "--step", "writing"])
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "show", "--key", "plan"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "Add tests.")
+
+    def test_show_key_missing_blank(self) -> None:
+        import io
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                tr.main(["--file", str(path), "init", "--plan", "P"])
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "show", "--key", "nope"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue(), "\n")
+
+    def test_show_key_dict_value_json(self) -> None:
+        import io
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps({"plan": "p", "last_pick": {"name": "x", "kind": "skill"}}),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "show", "--key", "last_pick"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue())["name"], "x")
+
     def test_prune_removes_only_stale(self) -> None:
         import io
         import os

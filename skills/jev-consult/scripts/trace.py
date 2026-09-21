@@ -121,6 +121,16 @@ def cmd_show(args: argparse.Namespace) -> int:
     path = Path(args.file) if args.file else default_path()
     data = load(path)
     exists = path.is_file()
+    key = getattr(args, "key", "")
+    if key:
+        value = data.get(key)
+        if isinstance(value, (dict, list)):
+            sys.stdout.write(json.dumps(value, ensure_ascii=False) + "\n")
+        elif value is None:
+            sys.stdout.write("\n")
+        else:
+            sys.stdout.write("%s\n" % value)
+        return 0
     age_seconds = None
     if exists:
         try:
@@ -228,6 +238,7 @@ def build_parser() -> argparse.ArgumentParser:
     init.set_defaults(func=cmd_init)
     show = sub.add_parser("show", help="Print the trace (empty object if missing)")
     show.add_argument("--pretty", action="store_true", help="Key fields as text lines.")
+    show.add_argument("--key", default="", help="Print only this field's value")
     show.set_defaults(func=cmd_show)
     setter = sub.add_parser("set", help="Update fields")
     setter.add_argument("--plan")

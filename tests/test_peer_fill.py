@@ -115,6 +115,77 @@ class PeerFillTests(unittest.TestCase):
             self.assertIn("jwt-auth", proc.stdout)
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
 
+    def test_show_dumps_one_item(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hermes = base / "hermes"
+            home = base / "home"
+            write_skill(hermes / "skills", "jwt-auth", JWT_MD)
+            env = dict(__import__("os").environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env["JEV_CONSULT_LOG"] = "0"
+            env["USERPROFILE"] = str(home)
+            env["HOME"] = str(home)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--harness",
+                    "claude-code",
+                    "--home",
+                    str(home),
+                    "--hermes-home",
+                    str(hermes),
+                    "--show",
+                    "jwt-auth",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=str(base),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            out = json.loads(proc.stdout)
+            self.assertEqual(out["name"], "jwt-auth")
+            self.assertIn("path", out)
+            self.assertIn("description", out)
+
+    def test_show_missing_name_reports_not_found(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hermes = base / "hermes"
+            home = base / "home"
+            write_skill(hermes / "skills", "jwt-auth", JWT_MD)
+            env = dict(__import__("os").environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env["JEV_CONSULT_LOG"] = "0"
+            env["USERPROFILE"] = str(home)
+            env["HOME"] = str(home)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--harness",
+                    "claude-code",
+                    "--home",
+                    str(home),
+                    "--hermes-home",
+                    str(hermes),
+                    "--show",
+                    "nope",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=str(base),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("not found: nope", proc.stdout)
+
     def test_list_json_emits_array(self) -> None:
         import subprocess
 

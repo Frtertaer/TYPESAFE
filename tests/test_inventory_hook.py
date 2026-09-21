@@ -1064,6 +1064,39 @@ class InventoryInternalsTests(unittest.TestCase):
         self.assertIn("apply_fill.py", miss)
         self.assertIn("Never --force", miss)
 
+    def test_sidecar_items_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            picked = [
+                {
+                    "kind": "skill",
+                    "name": "jwt-auth",
+                    "id": "skill_jwt_auth",
+                    "description": "sign tokens",
+                    "path": "/p",
+                },
+                {"kind": "mcp", "name": "bare", "id": "mcp_bare"},  # no desc/path
+            ]
+            INV.write_sidecar(path, "codex", "task", picked, {"jev_status": "winner"})
+            payload = INV.read_sidecar(path)
+            rows = INV.sidecar_items(payload)
+            self.assertEqual(rows[0]["id"], "skill_jwt_auth")
+            self.assertEqual(rows[0]["description"], "sign tokens")
+            self.assertEqual(rows[1], {"id": "mcp_bare", "kind": "mcp", "name": "bare"})
+            self.assertEqual(INV.read_sidecar_items(path), rows)
+            # names[] preserved for back-compat
+            self.assertEqual(payload["names"], [{"kind": "skill", "name": "jwt-auth"}, {"kind": "mcp", "name": "bare"}])
+
+    def test_sidecar_items_legacy_and_bad(self) -> None:
+        legacy = {"names": [{"kind": "skill", "name": "a"}, {"kind": "mcp", "name": "b"}, "junk"]}
+        self.assertEqual(
+            INV.sidecar_items(legacy),
+            [{"kind": "skill", "name": "a"}, {"kind": "mcp", "name": "b"}],
+        )
+        self.assertEqual(INV.sidecar_items({}), [])
+        self.assertEqual(INV.sidecar_items({"items": ["x", {"name": "y"}]}), [{"name": "y"}])
+        self.assertEqual(INV.sidecar_items("nope"), [])
+
     def test_policy_float(self) -> None:
         self.assertEqual(INV._policy_float({"x": 0.9}, "x", 0.5), 0.9)
         self.assertEqual(INV._policy_float({"x": "bad"}, "x", 0.5), 0.5)

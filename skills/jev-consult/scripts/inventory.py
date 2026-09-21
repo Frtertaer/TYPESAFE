@@ -647,10 +647,41 @@ def write_sidecar(
         "task": (task or "")[:500],
         "written_at": int(time.time()),
         "names": [{"kind": item["kind"], "name": item["name"]} for item in picked],
+        "items": [
+            {
+                key: value
+                for key, value in {
+                    "id": item.get("id"),
+                    "kind": item.get("kind"),
+                    "name": item.get("name"),
+                    "description": (item.get("description") or "")[:160] or None,
+                    "path": item.get("path"),
+                }.items()
+                if value
+            }
+            for item in picked
+        ],
     }
     if extra:
         payload.update(extra)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def sidecar_items(payload: dict) -> list[dict]:
+    """Full item rows from a sidecar payload; derives from names[] for old files."""
+    if not isinstance(payload, dict):
+        return []
+    items = payload.get("items")
+    if isinstance(items, list):
+        return [item for item in items if isinstance(item, dict)]
+    names = payload.get("names")
+    if isinstance(names, list):
+        return [
+            {"kind": n.get("kind"), "name": n.get("name")}
+            for n in names
+            if isinstance(n, dict)
+        ]
+    return []
 
 
 def _policy_dict() -> dict:
@@ -700,6 +731,10 @@ def catalogs() -> tuple:
             if isinstance(entry, dict) and entry.get("name") and entry.get("url"):
                 out.append((str(entry["name"]), str(entry["url"])))
     return tuple(out) if out else CATALOGS
+
+
+def read_sidecar_items(path: Path) -> list[dict]:
+    return sidecar_items(read_sidecar(path))
 
 
 def read_sidecar(path: Path) -> dict:

@@ -128,6 +128,22 @@ class CliTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(proc.stdout.strip(), "")
 
+    def test_fix_rewrites_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(tmp, "actual", GOOD.format(name="wrong"))
+            proc = self._run(str(path), "--fix")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("fixed S005", proc.stderr)
+            self.assertIn("name: actual", path.read_text(encoding="utf-8"))
+            self.assertNotIn("S005", proc.stdout)
+
+    def test_fix_no_name_noop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(tmp, "x", "---\ndescription: d\n---\n")
+            proc = self._run(str(path), "--fix")
+            self.assertEqual(proc.returncode, 1)
+            self.assertNotIn("fixed S005", proc.stderr)
+
     def test_multiple_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             good = write_skill(tmp, "ok", GOOD.format(name="ok"))

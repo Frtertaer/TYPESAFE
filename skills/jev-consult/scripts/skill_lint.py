@@ -78,10 +78,37 @@ def lint_skill(path: Path) -> list[dict]:
     return findings
 
 
+def fix_name(path: Path) -> bool:
+    """Rewrite the frontmatter name to the parent directory name. Returns True if changed."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    start = text.index("---") + 3 if text.lstrip().startswith("---") else -1
+    end = text.find("\n---", start) if start >= 0 else -1
+    if end < 0:
+        return False
+    block = text[start:end]
+    new_block, n = re.subn(
+        r"^(name|description):\s*(.*)$",
+        lambda m: "%s: %s" % (m.group(1), path.parent.name)
+        if m.group(1) == "name"
+        else m.group(0),
+        block,
+        flags=re.M,
+    )
+    if n == 0:
+        return False
+    path.write_text(text[:start] + new_block + text[end:], encoding="utf-8")
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    do_fix = "--fix" in argv
+    argv = [a for a in argv if a != "--fix"]
     if not argv:
-        sys.stderr.write("usage: skill_lint.py SKILL.md [more.md ...]\n")
+        sys.stderr.write("usage: skill_lint.py SKILL.md [more.md ...] [--fix]\n")
         return 2
     rc = 0
     paths: list[Path] = []
@@ -91,6 +118,11 @@ def main(argv: list[str] | None = None) -> int:
             paths.extend(sorted(path.rglob("SKILL.md")))
         else:
             paths.append(path)
+    if do_fix:
+        for path in paths:
+            if any(f["rule"] == "S005" for f in lint_skill(path)):
+                if fix_name(path):
+                    sys.stderr.write("fixed S005 %s\n" % path)
     for path in paths:
         for f in lint_skill(path):
             sys.stdout.write("%s %s %s: %s\n" % (f["severity"], f["rule"], path, f["message"]))

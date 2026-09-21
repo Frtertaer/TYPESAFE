@@ -89,6 +89,39 @@ class ApplyFillTests(unittest.TestCase):
             self.assertIn("never claude plugin install", blob)
             self.assertIn("not skillbox", blob)
 
+    def test_watch_emits_readonly_ticks(self) -> None:
+        import subprocess
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / ".jev-tools-miss.json").write_text(
+                json.dumps({"task": "jwt", "harness": "hermes", "written_at": time.time()}),
+                encoding="utf-8",
+            )
+            env = dict(os.environ, JEV_APPLY_WATCH_MAX="2")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--watch", "0.01",
+                    "--cwd", str(cwd),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            ticks = [
+                json.loads(l)
+                for l in proc.stdout.splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(t["miss"] is True for t in ticks))
+            self.assertTrue(all(t["ask"] is False for t in ticks))
+
     def test_other_harness_stays_human(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)

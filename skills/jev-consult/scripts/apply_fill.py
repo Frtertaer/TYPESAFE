@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -355,8 +356,35 @@ def main() -> int:
         action="store_true",
         help="Emit the outcome as a JSON object instead of a text line.",
     )
+    parser.add_argument(
+        "--watch",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Re-scan the cwd for miss/ask files every S seconds, printing {ts,miss,ask} ticks (read-only; JEV_APPLY_WATCH_MAX caps ticks).",
+    )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
+    if args.watch and args.watch > 0:
+        try:
+            max_ticks = int(os.environ.get("JEV_APPLY_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+        miss_path = cwd / MISS_NAME
+        while max_ticks <= 0 or ticks < max_ticks:
+            miss = read_miss(miss_path)
+            tick = {
+                "ts": int(time.time()),
+                "miss": bool(miss),
+                "ask": ask_path.is_file(),
+            }
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            time.sleep(args.watch)
+        return 0
     task = args.task
     dest = args.harness
     if args.from_miss:

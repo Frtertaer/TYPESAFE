@@ -258,6 +258,36 @@ class FilterHarnessTest(unittest.TestCase):
             self.assertEqual(stats["total"], 1)
             self.assertEqual(stats["by_status"], {"none": 1})
 
+    def test_filter_status(self):
+        entries = [
+            {"jev_status": "winner"},
+            {"jev_status": "none"},
+            {},
+        ]
+        self.assertEqual(len(decisions.filter_status(entries, "winner")), 1)
+        self.assertEqual(len(decisions.filter_status(entries, "unknown")), 1)
+        self.assertIs(decisions.filter_status(entries, ""), entries)
+
+    def test_main_status_and_harness_combine(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"harness": "hermes", "jev_status": "winner"},
+                    {"harness": "hermes", "jev_status": "none"},
+                    {"harness": "codex", "jev_status": "winner"},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--json", "--harness", "hermes",
+                "--status", "winner",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 1)
+            self.assertEqual(stats["by_status"], {"winner": 1})
+
 
 class PruneTest(unittest.TestCase):
     run_cli = staticmethod(run_cli)

@@ -167,6 +167,16 @@ def time_str(ts: object) -> str:
         return "?"
 
 
+def filter_status(entries: list[dict], status: str | None) -> list[dict]:
+    if not status:
+        return entries
+    return [
+        item
+        for item in entries
+        if str(item.get("jev_status") or "unknown") == status
+    ]
+
+
 def filter_harness(entries: list[dict], harness: str | None) -> list[dict]:
     if not harness:
         return entries
@@ -213,6 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--days", type=float, default=0.0, help="Only entries from the last N days")
     parser.add_argument("--since", type=float, default=0.0, help="Only entries with ts >= epoch seconds")
     parser.add_argument("--harness", default="", help="Only entries for this harness")
+    parser.add_argument("--status", default="", help="Only entries with this jev_status")
     parser.add_argument(
         "--prune",
         action="store_true",
@@ -235,6 +246,8 @@ def main(argv: list[str] | None = None) -> int:
         entries = filter_since(entries, since)
     if args.harness:
         entries = filter_harness(entries, args.harness)
+    if args.status:
+        entries = filter_status(entries, args.status)
     if args.prune:
         if since is None:
             sys.stderr.write("--prune requires --days or --since\n")

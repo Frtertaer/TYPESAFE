@@ -163,5 +163,5 @@ Trigger evals: `trigger-cases.json` in the repo's test fixtures lists prompts th
 
 ```text
 python scripts/install.py
-python skills/jev-consult/scripts/doctor.py  # verify hooks/skill/key/policy per harness; exit 0 = all ok; failing checks carry a `hint`; `hooks_json` check fails on malformed hooks/settings files; `--quiet` reports only failures
+python skills/jev-consult/scripts/doctor.py  # verify hooks/skill/key/policy per harness; exit 0 = all ok; failing checks carry a `hint`; `hooks_json` check fails on malformed hooks/settings files; `--quiet` reports only failures; `--only A,B` runs just the named checks
 ```

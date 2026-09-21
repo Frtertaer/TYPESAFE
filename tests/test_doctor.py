@@ -239,6 +239,38 @@ class DoctorTests(unittest.TestCase):
         rc, out, _ = run_main(["--agents", "hermes", "--home", "x", "--hermes-home", "y"])
         self.assertTrue(check_of(out, "policy")["ok"])
 
+    def test_only_filters_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run_main(
+                [
+                    "--home",
+                    tmp,
+                    "--hermes-home",
+                    str(Path(tmp) / "h"),
+                    "--only",
+                    "api_key",
+                ],
+                cwd=tmp,
+            )
+        self.assertEqual(rc, 1)
+        self.assertEqual([c["check"] for c in out["checks"]], ["api_key"])
+
+    def test_only_unknown_name_empty_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run_main(
+                [
+                    "--home",
+                    tmp,
+                    "--hermes-home",
+                    str(Path(tmp) / "h"),
+                    "--only",
+                    "nonexistent_check",
+                ],
+                cwd=tmp,
+            )
+        self.assertEqual(rc, 0)
+        self.assertEqual(out["checks"], [])
+
     def test_unknown_agent_rc2(self) -> None:
         buf = io.StringIO()
         with patch.object(sys, "stderr", buf), patch.object(sys, "stdout", io.StringIO()):

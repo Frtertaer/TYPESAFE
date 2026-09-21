@@ -222,6 +222,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
     parser.add_argument("--quiet", action="store_true", help="Report only failing checks")
+    parser.add_argument(
+        "--only",
+        default="",
+        help="Comma-separated check names to run (e.g. skills,hooks_json); default: all.",
+    )
     parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH")
     args = parser.parse_args(argv)
     agents = [a.strip() for a in args.agents.split(",") if a.strip()]
@@ -240,6 +245,9 @@ def main(argv: list[str] | None = None) -> int:
         checks += check_grok(home)
     if "codex" in agents:
         checks += check_codex(home)
+    only = {n.strip() for n in args.only.split(",") if n.strip()}
+    if only:
+        checks = [c for c in checks if c["check"] in only]
     ok = all(c["ok"] for c in checks)
     for check in checks:
         if not check["ok"]:

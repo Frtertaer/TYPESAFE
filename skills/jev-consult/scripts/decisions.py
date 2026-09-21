@@ -234,7 +234,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--csv",
         action="store_true",
-        help="Print filtered entries as CSV rows (ts,harness,status,winner,prompt) and exit",
+        help="Print filtered entries as CSV",
+    )
+    parser.add_argument(
+        "--md",
+        action="store_true",
+        help="Print filtered entries as a Markdown table",
     )
     args = parser.parse_args(argv)
     path = Path(args.file) if args.file else inventory.decisions_log_path()
@@ -268,22 +273,33 @@ def main(argv: list[str] | None = None) -> int:
             "pruned %d of %d entries (kept %d)\n"
             % (len(total) - len(entries), len(total), len(entries))
         )
-    if args.csv:
-        writer = csv.writer(sys.stdout, lineterminator="\n")
-        writer.writerow(["ts", "harness", "jev_status", "winner", "dedupe", "prompt_head"])
+    if args.csv or args.md:
+        rows = []
         for item in entries:
             winner = item.get("winner")
             winner_name = winner.get("name") if isinstance(winner, dict) else ""
-            writer.writerow(
+            rows.append(
                 [
-                    item.get("ts"),
-                    item.get("harness") or "",
-                    item.get("jev_status") or "unknown",
-                    winner_name or "",
-                    bool(item.get("dedupe")),
+                    str(item.get("ts") if item.get("ts") is not None else ""),
+                    str(item.get("harness") or ""),
+                    str(item.get("jev_status") or "unknown"),
+                    str(winner_name or ""),
+                    str(bool(item.get("dedupe"))),
                     str(item.get("prompt_head") or "").strip()[:120],
                 ]
             )
+        if args.csv:
+            writer = csv.writer(sys.stdout, lineterminator="\n")
+            writer.writerow(["ts", "harness", "jev_status", "winner", "dedupe", "prompt_head"])
+            writer.writerows(rows)
+        else:
+            def _cell(value: str) -> str:
+                return value.replace("|", "\\|").replace("\n", " ")
+
+            sys.stdout.write("| ts | harness | jev_status | winner | dedupe | prompt_head |\n")
+            sys.stdout.write("| --- | --- | --- | --- | --- | --- |\n")
+            for row in rows:
+                sys.stdout.write("| " + " | ".join(_cell(c) for c in row) + " |\n")
         return 0
     stats = summarize(entries, bad)
     stats["filtered"] = len(entries)

@@ -216,6 +216,40 @@ class CliTest(unittest.TestCase):
             self.assertEqual(len(rows), 2)
             self.assertEqual(rows[1][1], "b")
 
+    def test_md_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {
+                        "ts": 1700000000,
+                        "harness": "codex",
+                        "jev_status": "winner",
+                        "winner": {"kind": "skill", "name": "beta"},
+                        "prompt_head": "a | b",
+                    },
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--md")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = proc.stdout.strip().splitlines()
+            self.assertEqual(len(lines), 3)
+            self.assertTrue(lines[0].startswith("| ts |"))
+            self.assertIn("---", lines[1])
+            self.assertIn("beta", lines[2])
+            self.assertIn("a \\| b", lines[2])
+
+    def test_md_respects_status_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"harness": "a", "jev_status": "winner"}, {"harness": "b", "jev_status": "idf"}])
+            proc = self.run_cli("--file", str(path), "--md", "--status", "idf")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = [l for l in proc.stdout.strip().splitlines() if "---" not in l]
+            self.assertEqual(len(lines), 2)
+            self.assertIn("| b |", lines[1])
+
     def test_disabled_log_fails_cleanly(self):
         proc = self.run_cli(env={"JEV_CONSULT_LOG": "0"})
         self.assertEqual(proc.returncode, 2)

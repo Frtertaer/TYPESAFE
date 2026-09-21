@@ -327,6 +327,23 @@ class InventoryHookTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(buf.getvalue().split(), ["a_event", "b_event"])
 
+    def test_env_flag_reports_resolved_config(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(
+            os.environ,
+            {"JEV_HOOK_LIMIT": "3", "JEV_HOOK_OFF": "1", "JEV_HOOK_WINNER": "ascii-art"},
+        ):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--env"])
+        self.assertEqual(rc, 0)
+        report = json.loads(buf.getvalue())
+        self.assertEqual(report["limit"], 3)
+        self.assertTrue(report["jev_hook_off"])
+        self.assertTrue(report["jev_hook_winner"])
+        self.assertFalse(report["jev_hook_nomiss"])
+        self.assertEqual(report["dedupe_ttl_seconds"], 0.0)
+        self.assertNotIn("api_key", buf.getvalue().lower())
+
     def test_hook_skip_events_excludes_events(self) -> None:
         buf = io.StringIO()
         with patch.dict(os.environ, {"JEV_HOOK_SKIP_EVENTS": "pre_llm_call"}):

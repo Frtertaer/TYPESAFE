@@ -478,11 +478,49 @@ def allowed_events() -> set[str]:
     return allowed
 
 
+def env_report() -> dict:
+    """Resolved hook configuration: effective values for every JEV_HOOK_* knob.
+    Values only — never secrets."""
+    onoff = ("JEV_HOOK_OFF", "JEV_HOOK_NOSIDECAR", "JEV_HOOK_NOMISS", "JEV_HOOK_DEBUG")
+    strings = (
+        "JEV_HOOK_HARNESS",
+        "JEV_HOOK_CWD",
+        "JEV_HOOK_PROMPT",
+        "JEV_HOOK_EVENT",
+        "JEV_HOOK_EVENTS",
+        "JEV_HOOK_SKIP_EVENTS",
+        "JEV_HOOK_WINNER",
+        "JEV_HOOK_DEBUG_FILE",
+    )
+    report = {
+        "events": sorted(allowed_events()),
+        "limit": hook_limit(),
+        "note_limit": hook_note_limit(),
+        "jev_timeout_seconds": hook_jev_timeout_seconds(),
+        "jev_retries": hook_jev_retries(),
+        "budget_seconds": hook_budget_seconds(),
+        "max_age_seconds": hook_max_age(),
+        "dedupe_ttl_seconds": hook_dedupe_ttl_seconds(),
+    }
+    for name in onoff:
+        report[name.lower()] = os.environ.get(name, "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+    for name in strings:
+        report[name.lower()] = bool(os.environ.get(name, "").strip())
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if "--events" in argv:
         for name in sorted(allowed_events()):
             sys.stdout.write(name + "\n")
+        return 0
+    if "--env" in argv:
+        sys.stdout.write(json.dumps(env_report(), indent=2, sort_keys=True) + "\n")
         return 0
     raw = sys.stdin.read()
     if not raw.strip():

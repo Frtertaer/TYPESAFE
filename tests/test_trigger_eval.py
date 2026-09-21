@@ -166,6 +166,22 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertEqual(buf.getvalue().strip(), "pos-dead")
 
+    def test_id_evaluates_single_case(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--id", "pos-approach"])
+        self.assertEqual(rc, 0)
+        self.assertIn("pos-approach", buf.getvalue())
+        self.assertEqual(buf.getvalue().count("should_trigger="), 1)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--id", "neg-git"])
+        self.assertEqual(rc, 0)
+        self.assertIn("neg-git", buf.getvalue())
+        with patch("sys.stderr", io.StringIO()):
+            rc = te.main(["--id", "nope"])
+        self.assertEqual(rc, 2)
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

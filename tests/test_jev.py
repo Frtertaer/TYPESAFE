@@ -754,6 +754,26 @@ class JevInternalsTests(unittest.TestCase):
             self.assertEqual(out["state"]["task"], "t")
             self.assertIn("q", out["questions"])
 
+    def test_scaffold_list_prints_template_ids(self) -> None:
+        buf = io.StringIO()
+        with patch.object(sys, "stdout", buf):
+            rc = jev.main(["scaffold", "--list"])
+        self.assertEqual(rc, 0)
+        names = buf.getvalue().split()
+        self.assertIn("approach", names)
+        self.assertIn("keep_vs_change", names)
+
+    def test_scaffold_missing_templates_exits_2(self) -> None:
+        buf = io.StringIO()
+        with patch.object(sys, "stdout", buf), patch.object(sys, "stderr", io.StringIO()):
+            rc = jev.main(["scaffold", "--out", "x.json"])
+        self.assertEqual(rc, jev.ASK_ESCALATE_EXIT)
+
+    def test_scaffold_missing_out_exits_2(self) -> None:
+        with patch.object(sys, "stderr", io.StringIO()):
+            rc = jev.main(["scaffold", "approach"])
+        self.assertEqual(rc, jev.ASK_ESCALATE_EXIT)
+
     def test_ask_dry_never_posts(self) -> None:
         def _boom(*a, **k):
             raise AssertionError("post called")

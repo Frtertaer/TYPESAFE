@@ -652,6 +652,17 @@ def scaffold_request(
 
 def cmd_scaffold(args: argparse.Namespace) -> int:
     policy = load_policy(args.policy)
+    if getattr(args, "list", False):
+        templates = policy.get("templates") or {}
+        for name in sorted(templates):
+            sys.stdout.write("%s\n" % name)
+        return 0
+    if not args.templates:
+        sys.stderr.write("scaffold: template id(s) required (or --list)\n")
+        return ASK_ESCALATE_EXIT
+    if not getattr(args, "out", None):
+        sys.stderr.write("scaffold: --out is required\n")
+        return ASK_ESCALATE_EXIT
     extra: dict[str, dict[str, str]] = {}
     try:
         for raw in args.option or []:
@@ -717,8 +728,11 @@ def build_parser() -> argparse.ArgumentParser:
         "scaffold",
         help="Write request.json from policy templates (does not call the API)",
     )
-    scaffold.add_argument("templates", nargs="+", help="Template ids from policy.json")
-    scaffold.add_argument("--out", required=True, help="Path to write request.json")
+    scaffold.add_argument("templates", nargs="*", help="Template ids from policy.json")
+    scaffold.add_argument(
+        "--list", action="store_true", help="Print known template ids and exit"
+    )
+    scaffold.add_argument("--out", help="Path to write request.json")
     scaffold.add_argument("--state", help="JSON file or - for stdin (object becomes state)")
     scaffold.add_argument("--plan", help="Copied into state.plan (and state.task if missing)")
     scaffold.add_argument(

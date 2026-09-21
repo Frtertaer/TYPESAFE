@@ -1252,6 +1252,28 @@ class StatsFlagTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertNotIn("stats:", err.getvalue())
 
+    def test_stats_json_prints_stats_dict_to_stderr(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._transcript_file(tmp)
+            err = io.StringIO()
+            with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", err
+            ):
+                rc = C.main(
+                    [
+                        str(path),
+                        "--history",
+                        "--fake",
+                        "--stats-json",
+                        "--min-reduction",
+                        "0",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            stats = json.loads(err.getvalue())
+            self.assertIn("charsBefore", stats)
+            self.assertIn("kept", stats)
+
 
 class PruneSpillTests(unittest.TestCase):
     def _spill_dir(self, tmp: str) -> Path:

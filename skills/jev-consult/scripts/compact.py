@@ -1233,6 +1233,9 @@ def cmd_compact(args: argparse.Namespace) -> int:
         Path(args.output).write_text(text, encoding="utf-8")
     else:
         sys.stdout.write(text)
+    if getattr(args, "stats_json", False):
+        stats = result.get("stats") if isinstance(result, dict) else {}
+        sys.stderr.write(json.dumps(stats or {}, ensure_ascii=False) + "\n")
     if args.stats:
         stats = result.get("stats") if isinstance(result, dict) else None
         stats = stats if isinstance(stats, dict) else {}
@@ -1362,6 +1365,11 @@ def main(argv: list[str] | None = None) -> int:
         "--stats",
         action="store_true",
         help="Print a one-line compaction summary to stderr after the result.",
+    )
+    parser.add_argument(
+        "--stats-json",
+        action="store_true",
+        help="Print the stats dict as JSON to stderr after the result.",
     )
     parser.add_argument(
         "--version",

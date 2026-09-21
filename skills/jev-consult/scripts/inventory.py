@@ -927,6 +927,13 @@ def main(argv: list[str] | None = None) -> int:
         metavar="DIR",
         help="Unlink stale/invalid .jev-tools*.json under DIR and exit.",
     )
+    parser.add_argument(
+        "--show",
+        metavar="FILE",
+        nargs="?",
+        const=SIDECAR_NAME,
+        help="Print parsed sidecar/miss JSON plus status and exit.",
+    )
     parser.add_argument("--all-names", action="store_true", help="Include every installed name (no descriptions).")
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
@@ -942,6 +949,15 @@ def main(argv: list[str] | None = None) -> int:
         for path in removed:
             sys.stdout.write("pruned: %s\n" % path)
         sys.stdout.write("pruned %d stale sidecars\n" % len(removed))
+        return 0
+    if args.show:
+        path = Path(args.show)
+        status = sidecar_status(path)
+        payload = read_sidecar(path) or {}
+        sys.stdout.write(
+            json.dumps({"path": str(path), "status": status, "payload": payload}, indent=2)
+            + "\n"
+        )
         return 0
     if args.catalogs:
         for name, url in catalogs():

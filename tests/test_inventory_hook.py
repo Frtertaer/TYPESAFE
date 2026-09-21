@@ -1556,6 +1556,29 @@ class CheckMissTests(unittest.TestCase):
         self.assertEqual(buf.getvalue().strip(), "missing")
 
 
+class ShowSidecarTests(unittest.TestCase):
+    def test_show_fresh_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / INV.SIDECAR_NAME
+            INV.write_sidecar(path, "codex", "task", [{"id": "s", "kind": "skill", "name": "jwt", "description": "", "path": ""}])
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = INV.main(["--show", str(path)])
+            self.assertEqual(rc, 0)
+            data = json.loads(buf.getvalue())
+            self.assertEqual(data["status"], "fresh")
+            self.assertEqual(data["payload"]["items"][0]["name"], "jwt")
+
+    def test_show_missing(self) -> None:
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            rc = INV.main(["--show", "no-such-file.json"])
+        self.assertEqual(rc, 0)
+        data = json.loads(buf.getvalue())
+        self.assertEqual(data["status"], "missing")
+        self.assertEqual(data["payload"], {})
+
+
 class DebugFlagTests(unittest.TestCase):
     def setUp(self) -> None:
         self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})

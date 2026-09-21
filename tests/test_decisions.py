@@ -1999,6 +1999,35 @@ class PruneTest(unittest.TestCase):
         self.assertEqual(ticks[2]["removed"], 1)
         self.assertEqual(ticks[2]["delta_pct"], -50.0)
 
+    def test_nth_prints_nth_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1, "winner": {"name": "a"}},
+                             {"ts": 2, "winner": {"name": "b"}},
+                             {"ts": 3, "winner": {"name": "c"}}])
+            import io
+            from unittest.mock import patch
+
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = decisions.main(["--file", str(path), "--nth", "2"])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["winner"]["name"], "b")
+
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = decisions.main(["--file", str(path), "--nth", "2", "--reverse"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue())["winner"]["name"], "b")
+
+            buf = io.StringIO()
+            err = io.StringIO()
+            with patch.object(sys, "stdout", buf), patch.object(sys, "stderr", err):
+                rc = decisions.main(["--file", str(path), "--nth", "9"])
+            self.assertEqual(rc, 2)
+            self.assertIn("out of range", err.getvalue())
+
     def test_status_outcome_fill_winner_accept_comma_lists(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

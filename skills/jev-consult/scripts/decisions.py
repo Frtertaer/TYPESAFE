@@ -623,6 +623,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Print only the oldest matching entry as JSON",
     )
     parser.add_argument(
+        "--nth",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Print only the Nth matching entry (1-based, after --reverse) as JSON",
+    )
+    parser.add_argument(
         "--out",
         metavar="PATH",
         default="",
@@ -1092,6 +1099,14 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "oldest", False):
         if emit_entries:
             sys.stdout.write(json.dumps(entries[0], indent=2, sort_keys=True) + "\n")
+        return 0
+    if getattr(args, "nth", 0):
+        if args.nth < 1 or args.nth > len(emit_entries):
+            sys.stderr.write(
+                "--nth %d out of range (%d entries)\n" % (args.nth, len(emit_entries))
+            )
+            return 2
+        sys.stdout.write(json.dumps(emit_entries[args.nth - 1], indent=2, sort_keys=True) + "\n")
         return 0
 
     def _cell(value: str) -> str:

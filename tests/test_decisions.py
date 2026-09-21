@@ -1936,6 +1936,34 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0)
             self.assertIn("0 invalid entries", proc.stdout)
 
+    def test_validate_json_lists_bad_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "ok"},
+                    {"jev_status": "ok"},
+                    {"ts": 3},
+                    {},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--validate", "--json")
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            rows = json.loads(proc.stdout)
+            self.assertEqual(
+                rows,
+                [
+                    {"index": 1, "missing": ["ts"]},
+                    {"index": 2, "missing": ["jev_status"]},
+                    {"index": 3, "missing": ["ts", "jev_status"]},
+                ],
+            )
+            write_log(path, [{"ts": 1, "jev_status": "ok"}])
+            proc = self.run_cli("--file", str(path), "--validate", "--json")
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(json.loads(proc.stdout), [])
+
     def test_missing_filters_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

@@ -627,9 +627,23 @@ def main(argv: list[str] | None = None) -> int:
                 problems.append("jev_status")
             if problems:
                 bad_rows.append((index, ",".join(problems)))
-        for index, why in bad_rows:
-            sys.stdout.write("entry[%d] missing %s\n" % (index, why))
-        sys.stdout.write("%d invalid entr%s\n" % (len(bad_rows), "y" if len(bad_rows) == 1 else "ies"))
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    [
+                        {"index": index, "missing": why.split(",")}
+                        for index, why in bad_rows
+                    ],
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            for index, why in bad_rows:
+                sys.stdout.write("entry[%d] missing %s\n" % (index, why))
+            sys.stdout.write(
+                "%d invalid entr%s\n" % (len(bad_rows), "y" if len(bad_rows) == 1 else "ies")
+            )
         return 1 if bad_rows else 0
     if getattr(args, "drop_bad", False):
         if getattr(args, "dry_run", False):

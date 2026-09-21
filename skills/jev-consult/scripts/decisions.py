@@ -116,6 +116,16 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
         "bad_lines": bad,
         "first_ts": min(stamps) if stamps else None,
         "last_ts": max(stamps) if stamps else None,
+        "first_iso": (
+            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(min(stamps)))
+            if stamps
+            else None
+        ),
+        "last_iso": (
+            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(max(stamps)))
+            if stamps
+            else None
+        ),
         "by_status": by_status,
         "by_harness": by_harness,
         "explicit": explicit,

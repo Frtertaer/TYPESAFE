@@ -233,6 +233,15 @@ class CliTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(proc.stdout.strip(), "2")
 
+    def test_stats_iso_fields(self):
+        entries = [{"ts": 1700000000}, {"ts": 1700086400}]
+        stats = decisions.summarize(entries)
+        self.assertEqual(stats["first_iso"], "2023-11-14T22:13:20Z")
+        self.assertEqual(stats["last_iso"], "2023-11-15T22:13:20Z")
+        empty = decisions.summarize([])
+        self.assertIsNone(empty["first_iso"])
+        self.assertIsNone(empty["last_iso"])
+
     def test_errors_lists_bad_lines(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

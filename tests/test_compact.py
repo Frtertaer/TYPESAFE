@@ -1405,6 +1405,34 @@ class ListSpillTests(unittest.TestCase):
             self.assertIn("%s 5 " % f, out)
             self.assertIn("1 spill files", out)
 
+    def test_cli_verify_spill_checks_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            existing = Path(tmp) / "a.txt"
+            existing.write_text("x", encoding="utf-8")
+            doc = Path(tmp) / "out.txt"
+            doc.write_text(
+                "head [fast-jev-compaction truncated 9 chars of this tool result "
+                "(error); full output saved: %s]\n"
+                "and [truncated 1; full output saved: %s]\n" % (existing, Path(tmp) / "gone.txt"),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--verify-spill", str(doc)])
+            self.assertEqual(rc, 1)
+            out = buf.getvalue()
+            self.assertIn("ok %s" % existing, out)
+            self.assertIn("missing %s" % (Path(tmp) / "gone.txt"), out)
+            self.assertIn("2 refs, 1 missing", out)
+            doc.write_text("no refs here", encoding="utf-8")
+            with patch("sys.stdout", buf):
+                rc = C.main(["--verify-spill", str(doc)])
+            self.assertEqual(rc, 0)
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = C.main(["--verify-spill", str(Path(tmp) / "nope.txt")])
+            self.assertEqual(rc, 2)
+
     def test_cli_list_spill_out_writes_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "spill"

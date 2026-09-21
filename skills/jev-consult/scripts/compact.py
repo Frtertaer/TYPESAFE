@@ -1390,6 +1390,12 @@ def main(argv: list[str] | None = None) -> int:
         help="List spill files (name, bytes, mtime) and exit.",
     )
     parser.add_argument(
+        "--verify-spill",
+        metavar="FILE",
+        default="",
+        help="Verify 'full output saved: PATH' references in FILE exist (rc 1 on missing).",
+    )
+    parser.add_argument(
         "--stats",
         action="store_true",
         help="Print a one-line compaction summary to stderr after the result.",
@@ -1424,6 +1430,20 @@ def main(argv: list[str] | None = None) -> int:
             version = "?"
         sys.stdout.write("jev-consult (policy v%s)\n" % version)
         return 0
+    if args.verify_spill:
+        try:
+            text = Path(args.verify_spill).read_text(encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("--verify-spill failed: %s\n" % exc)
+            return 2
+        refs = re.findall(r"full output saved: (\S+?)\]", text)
+        missing = [ref for ref in refs if not Path(ref).is_file()]
+        for ref in refs:
+            sys.stdout.write(
+                "%s %s\n" % ("ok" if Path(ref).is_file() else "missing", ref)
+            )
+        sys.stdout.write("%d refs, %d missing\n" % (len(refs), len(missing)))
+        return 1 if missing else 0
     if args.list_spill:
         directory = Path(args.spill_dir) if args.spill_dir else None
         rows = list_spill(directory)

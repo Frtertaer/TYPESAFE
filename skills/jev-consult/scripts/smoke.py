@@ -264,27 +264,46 @@ def step_doctor(tmp: Path) -> dict:
     return _step("doctor_json", ok_json and rc in (0, 1), "rc=%d json=%s" % (rc, ok_json))
 
 
+STEPS = (
+    ("policy", "step_policy"),
+    ("policy_lint", "step_policy_lint"),
+    ("jev_scaffold_lint", "step_jev_scaffold_lint"),
+    ("inventory", "step_inventory"),
+    ("compact_fake", "step_compact_fake"),
+    ("decisions", "step_decisions"),
+    ("trace", "step_trace"),
+    ("skill_lint", "step_skill_lint"),
+    ("question_lint", "step_question_lint"),
+    ("compare", "step_compare"),
+    ("apply_fill", "step_apply_fill"),
+    ("hook", "step_hook"),
+    ("doctor_json", "step_doctor"),
+)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Offline sanity for the jev-consult pack.")
-    parser.parse_args(argv)
+    parser.add_argument(
+        "--only",
+        default="",
+        help="Comma-separated step names to run (default: all).",
+    )
+    args = parser.parse_args(argv)
+    wanted = {s.strip() for s in args.only.split(",") if s.strip()}
+    names = {name for name, _ in STEPS}
+    unknown = wanted - names
+    if unknown:
+        sys.stderr.write(
+            "unknown step(s): %s (valid: %s)\n" % (", ".join(sorted(unknown)), ", ".join(sorted(names)))
+        )
+        return 2
     steps: list[dict] = []
     with tempfile.TemporaryDirectory() as tmp_raw:
         tmp = Path(tmp_raw)
-        for fn in (
-            step_policy,
-            step_policy_lint,
-            step_jev_scaffold_lint,
-            step_inventory,
-            step_compact_fake,
-            step_decisions,
-            step_trace,
-            step_skill_lint,
-            step_question_lint,
-            step_compare,
-            step_apply_fill,
-            step_hook,
-            step_doctor,
-        ):
+        for name, fn_name in STEPS:
+            if wanted and name not in wanted:
+                continue
+            fn = globals()[fn_name]
             try:
                 steps.append(fn(tmp))
             except Exception as exc:  # a crash is a failed step, not a crash

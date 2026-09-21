@@ -48,6 +48,38 @@ class SmokeTests(unittest.TestCase):
             },
         )
 
+    def test_only_runs_subset(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "policy,trace"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertTrue(out["ok"])
+        self.assertEqual({s["name"] for s in out["steps"]}, {"policy", "trace"})
+
+    def test_only_unknown_step_rc2(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "bogus"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("unknown step", proc.stderr)
+
+    def test_only_doctor_json_uses_emitted_name(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "doctor_json"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        out = json.loads(proc.stdout)
+        self.assertEqual({s["name"] for s in out["steps"]}, {"doctor_json"})
+
     def test_step_failure_marks_not_ok(self) -> None:
         def boom(tmp):
             raise RuntimeError("explode")

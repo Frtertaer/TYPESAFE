@@ -272,7 +272,7 @@ class TriggerEvalTests(unittest.TestCase):
             rc = te.main(["--covers"])
         self.assertEqual(rc, 0)
         out = buf.getvalue()
-        self.assertIn("approach 1\n", out)
+        self.assertIn("approach 2\n", out)
         self.assertIn("uncovered: neg-format\n", out)
 
     def test_covers_map_lists_ids_per_tag(self) -> None:
@@ -281,7 +281,7 @@ class TriggerEvalTests(unittest.TestCase):
             rc = te.main(["--covers-map"])
         self.assertEqual(rc, 0)
         out = buf.getvalue()
-        self.assertIn("approach: pos-approach\n", out)
+        self.assertIn("approach: pos-approach, pos-remember\n", out)
         self.assertIn("keep_vs_change: ", out)
         self.assertIn("uncovered: neg-format\n", out)
 
@@ -408,6 +408,13 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertIn("verdict: **PASS**", text)
             self.assertIn("- positives: 16", text)
             self.assertIn("| pos-approach | True | True |", text)
+
+    def test_positive_cases_declare_covers(self) -> None:
+        cases = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
+        missing = [
+            c["id"] for c in cases if c.get("should_trigger") and not c.get("covers")
+        ]
+        self.assertEqual(missing, [])
 
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

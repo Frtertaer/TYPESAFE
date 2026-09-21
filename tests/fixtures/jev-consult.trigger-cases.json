@@ -1,30 +1,182 @@
 {
   "skill": "jev-consult",
   "cases": [
-    {"id": "pos-approach", "prompt": "Decide the approach before I start: keep the current auth module or change it?", "should_trigger": true, "covers": ["approach", "keep_vs_change"]},
-    {"id": "pos-library", "prompt": "Pick a library for HTTP retries in this coding task, which one should we use", "should_trigger": true, "covers": ["library"]},
-    {"id": "pos-stuck", "prompt": "I am stuck, the same test fails twice, decide the next move", "should_trigger": true, "covers": ["stuck_move"]},
-    {"id": "pos-loop", "prompt": "I keep looping on the same fix and it is not working, what now", "should_trigger": true, "covers": ["stuck_move"]},
-    {"id": "pos-plan", "prompt": "Planning task: decide the architecture for the cache layer", "should_trigger": true, "covers": ["architecture"]},
-    {"id": "pos-remember", "prompt": "I do not remember the planning, which approach did we pick", "should_trigger": true},
-    {"id": "pos-tools", "prompt": "Which of the installed skills or MCP servers should I load for this task", "should_trigger": true, "covers": ["load_tools"]},
-    {"id": "pos-delete", "prompt": "Decided to delete or keep this dead code, you choose", "should_trigger": true, "covers": ["delete", "keep_vs_change"]},
-    {"id": "pos-refactor", "prompt": "Refactor this module in place or rewrite it, pick one", "should_trigger": true, "covers": ["refactor_vs_rewrite"]},
-    {"id": "pos-naming", "prompt": "Pick a name for this new module before I implement it", "should_trigger": true, "covers": ["naming"]},
-    {"id": "pos-good-enough", "prompt": "Deciding if this implementation is good enough, keep or change", "should_trigger": true, "covers": ["good_enough", "keep_vs_change"]},
-    {"id": "pos-next-move", "prompt": "I do not know the next move, you decide for me", "should_trigger": true, "covers": ["unknown_move"]},
-    {"id": "pos-offtrack", "prompt": "Decided already? Check if I drifted off track from the plan", "should_trigger": true, "covers": ["on_track"]},
-    {"id": "pos-mcp-pick", "prompt": "Decide which installed skill plugin or MCP server this task needs", "should_trigger": true, "covers": ["load_tools"]},
-    {"id": "pos-installed-enough", "prompt": "Decide if the installed skills are enough or pick more for this task", "should_trigger": true, "covers": ["installed_enough"]},
-    {"id": "pos-market-tools", "prompt": "Pick a plugin or MCP server from the marketplace for this task", "should_trigger": true, "covers": ["market_tools"]},
-    {"id": "neg-format", "prompt": "Format this file with black", "should_trigger": false},
-    {"id": "neg-regex", "prompt": "What does this regex match", "should_trigger": false},
-    {"id": "neg-run-tests", "prompt": "Run the unit tests and show me the output", "should_trigger": false},
-    {"id": "neg-summarize", "prompt": "Summarize this README in two sentences", "should_trigger": false},
-    {"id": "neg-convert", "prompt": "Convert this CSV file to JSON", "should_trigger": false},
-    {"id": "neg-git", "prompt": "Show the git log for the last ten commits", "should_trigger": false},
-    {"id": "neg-arch-doc", "prompt": "What architecture does this project use, explain it to me", "should_trigger": false},
-    {"id": "neg-keep-going", "prompt": "Keep going on the same change without asking anything", "should_trigger": false},
-    {"id": "neg-loop-bug", "prompt": "The while loop in main.py is stuck, find the bug in it", "should_trigger": false, "lexical": false}
+    {
+      "id": "pos-approach",
+      "prompt": "Decide the approach before I start: keep the current auth module or change it?",
+      "should_trigger": true,
+      "covers": [
+        "approach",
+        "keep_vs_change"
+      ]
+    },
+    {
+      "id": "pos-library",
+      "prompt": "Pick a library for HTTP retries in this coding task, which one should we use",
+      "should_trigger": true,
+      "covers": [
+        "library"
+      ]
+    },
+    {
+      "id": "pos-stuck",
+      "prompt": "I am stuck, the same test fails twice, decide the next move",
+      "should_trigger": true,
+      "covers": [
+        "stuck_move"
+      ]
+    },
+    {
+      "id": "pos-loop",
+      "prompt": "I keep looping on the same fix and it is not working, what now",
+      "should_trigger": true,
+      "covers": [
+        "stuck_move"
+      ]
+    },
+    {
+      "id": "pos-plan",
+      "prompt": "Planning task: decide the architecture for the cache layer",
+      "should_trigger": true,
+      "covers": [
+        "architecture"
+      ]
+    },
+    {
+      "id": "pos-remember",
+      "prompt": "I do not remember the planning, which approach did we pick",
+      "should_trigger": true,
+      "covers": [
+        "approach"
+      ]
+    },
+    {
+      "id": "pos-tools",
+      "prompt": "Which of the installed skills or MCP servers should I load for this task",
+      "should_trigger": true,
+      "covers": [
+        "load_tools"
+      ]
+    },
+    {
+      "id": "pos-delete",
+      "prompt": "Decided to delete or keep this dead code, you choose",
+      "should_trigger": true,
+      "covers": [
+        "delete",
+        "keep_vs_change"
+      ]
+    },
+    {
+      "id": "pos-refactor",
+      "prompt": "Refactor this module in place or rewrite it, pick one",
+      "should_trigger": true,
+      "covers": [
+        "refactor_vs_rewrite"
+      ]
+    },
+    {
+      "id": "pos-naming",
+      "prompt": "Pick a name for this new module before I implement it",
+      "should_trigger": true,
+      "covers": [
+        "naming"
+      ]
+    },
+    {
+      "id": "pos-good-enough",
+      "prompt": "Deciding if this implementation is good enough, keep or change",
+      "should_trigger": true,
+      "covers": [
+        "good_enough",
+        "keep_vs_change"
+      ]
+    },
+    {
+      "id": "pos-next-move",
+      "prompt": "I do not know the next move, you decide for me",
+      "should_trigger": true,
+      "covers": [
+        "unknown_move"
+      ]
+    },
+    {
+      "id": "pos-offtrack",
+      "prompt": "Decided already? Check if I drifted off track from the plan",
+      "should_trigger": true,
+      "covers": [
+        "on_track"
+      ]
+    },
+    {
+      "id": "pos-mcp-pick",
+      "prompt": "Decide which installed skill plugin or MCP server this task needs",
+      "should_trigger": true,
+      "covers": [
+        "load_tools"
+      ]
+    },
+    {
+      "id": "pos-installed-enough",
+      "prompt": "Decide if the installed skills are enough or pick more for this task",
+      "should_trigger": true,
+      "covers": [
+        "installed_enough"
+      ]
+    },
+    {
+      "id": "pos-market-tools",
+      "prompt": "Pick a plugin or MCP server from the marketplace for this task",
+      "should_trigger": true,
+      "covers": [
+        "market_tools"
+      ]
+    },
+    {
+      "id": "neg-format",
+      "prompt": "Format this file with black",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-regex",
+      "prompt": "What does this regex match",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-run-tests",
+      "prompt": "Run the unit tests and show me the output",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-summarize",
+      "prompt": "Summarize this README in two sentences",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-convert",
+      "prompt": "Convert this CSV file to JSON",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-git",
+      "prompt": "Show the git log for the last ten commits",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-arch-doc",
+      "prompt": "What architecture does this project use, explain it to me",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-keep-going",
+      "prompt": "Keep going on the same change without asking anything",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-loop-bug",
+      "prompt": "The while loop in main.py is stuck, find the bug in it",
+      "should_trigger": false,
+      "lexical": false
+    }
   ]
 }

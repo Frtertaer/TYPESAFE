@@ -141,12 +141,44 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         policy_path = Path(argv[idx + 1].strip())
         argv = argv[:idx] + argv[idx + 2 :]
+    watch_seconds = 0.0
+    if "--watch" in argv:
+        idx = argv.index("--watch")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--watch needs a SECONDS value\n")
+            return 2
+        try:
+            watch_seconds = float(argv[idx + 1])
+        except ValueError:
+            sys.stderr.write("bad --watch %r (seconds)\n" % argv[idx + 1])
+            return 2
+        argv = argv[:idx] + argv[idx + 2 :]
     strict = "--strict" in argv
     argv = [a for a in argv if a not in ("--json", "--quiet", "--strict")]
     if len(argv) > 1:
         sys.stderr.write("usage: trigger_lint.py [CASES.json] [--json] [--quiet] [--strict] [--severity L] [--out PATH] [--policy PATH]\n")
         return 2
     path = Path(argv[0]) if argv else DEFAULT_CASES
+    if watch_seconds > 0:
+        import time as _time
+
+        try:
+            max_ticks = int(os.environ.get("JEV_TLINT_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        while max_ticks <= 0 or ticks < max_ticks:
+            rows = lint_cases(path, policy_path=policy_path)
+            tick = {
+                "ts": int(_time.time()),
+                "findings": len(rows),
+                "errors": sum(1 for r in rows if r["severity"] == "error"),
+            }
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            _time.sleep(watch_seconds)
+        return 0
     findings = lint_cases(path, policy_path=policy_path)
     shown = [
         f

@@ -203,6 +203,20 @@ class CliTests(unittest.TestCase):
                     trigger_lint.main([str(path), "--severity", "error"])
             self.assertNotIn("T009", buf.getvalue())
 
+    def test_watch_emits_ticks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(tmp, [dict(GOOD_CASE)])
+            with mock.patch.dict(os.environ, {"JEV_TLINT_WATCH_MAX": "2"}):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = trigger_lint.main([str(path), "--watch", "0.01"])
+        self.assertEqual(rc, 0)
+        ticks = [
+            json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertTrue(all("errors" in t for t in ticks))
+
 
 if __name__ == "__main__":
     unittest.main()

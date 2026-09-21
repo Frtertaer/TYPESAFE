@@ -998,6 +998,32 @@ class PickWithJevTests(unittest.TestCase):
         HOOK.pick_with_jev("t", "hermes", PICKED)
         self.assertEqual(seen.get("timeout"), INV.hook_jev_timeout_seconds())
 
+    def test_hook_retries_env_reaches_jev_call(self) -> None:
+        seen = {}
+
+        class FakeJev:
+            @staticmethod
+            def load_api_key():
+                return "k"
+
+            @staticmethod
+            def load_policy(path=None):
+                return {}
+
+            @staticmethod
+            def post_systemone(state, questions, policy, **kwargs):
+                seen.update(kwargs)
+                return {"answers": {}, "model": "fake-0"}
+
+            @staticmethod
+            def decide(ans, policy, irreversible=False):
+                return {"action": "proceed", "picks": {}, "probabilities": {}}
+
+        sys.modules["jev"] = FakeJev
+        with patch.dict(os.environ, {"JEV_HOOK_RETRIES": "2"}):
+            HOOK.pick_with_jev("t", "hermes", PICKED)
+        self.assertEqual(seen.get("retries"), 2)
+
     def test_hook_timeout_env_overrides(self) -> None:
         seen = {}
 

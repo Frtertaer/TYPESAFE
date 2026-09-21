@@ -514,6 +514,7 @@ class TriggerEvalTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             self.assertIn("verdict: **PASS**", text)
             self.assertIn("- positives: 16", text)
+            self.assertIn("- coverage: 23/25 (92%)", text)
             self.assertIn("| pos-approach | True | True |", text)
 
     def test_positive_cases_declare_covers(self) -> None:

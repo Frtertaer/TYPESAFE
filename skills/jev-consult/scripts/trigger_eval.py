@@ -406,6 +406,8 @@ def main(argv: list[str] | None = None) -> int:
             "",
             "- positives: %d" % result["n_positives"],
             "- negatives: %d" % result["n_negatives"],
+            "- coverage: %d/%d (%.0f%%)"
+            % (result["hits"], len(result["cases"]), result["coverage"] * 100),
             "- worst positive: %.3f" % result["worst_positive"],
             "- best negative: %.3f" % result["best_negative"],
             "- margin: %.2f" % result["margin"],

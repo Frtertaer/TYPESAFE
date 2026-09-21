@@ -136,6 +136,36 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertNotIn("should_trigger=", buf.getvalue())
 
+    def test_ids_prints_case_ids(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--ids"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().strip().splitlines()
+        self.assertIn("neg-loop-bug", lines)
+        self.assertTrue(all(line.startswith(("pos-", "neg-")) for line in lines))
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = write_cases(
+                tmp,
+                [
+                    {
+                        "id": "pos-dead",
+                        "prompt": "zzz qqq xxx",
+                        "should_trigger": True,
+                    },
+                    {
+                        "id": "neg-x",
+                        "prompt": "unrelated words here",
+                        "should_trigger": False,
+                    },
+                ],
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(["--cases", str(cases), "--ids", "--fail"])
+            self.assertEqual(rc, 1)
+            self.assertEqual(buf.getvalue().strip(), "pos-dead")
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

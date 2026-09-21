@@ -91,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print only the failing case rows (positives that scored 0).",
     )
     parser.add_argument(
+        "--ids",
+        action="store_true",
+        help="Print only the case ids, one per line (with --fail: failing ids only).",
+    )
+    parser.add_argument(
         "--out",
         metavar="PATH",
         default="",
@@ -116,6 +121,13 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("--out failed: %s\n" % exc)
             return 1
         sys.stderr.write("wrote %s\n" % args.out)
+    if args.ids:
+        rows = result["cases"]
+        if args.fail:
+            rows = [r for r in rows if not r["ok"]]
+        for row in rows:
+            sys.stdout.write("%s\n" % row["id"])
+        return 0 if result["ok"] else 1
     if args.json:
         payload = result
         if args.fail:

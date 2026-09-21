@@ -1,0 +1,211 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""doctor.py - verify a jev-consult install per harness. Read-only; never installs.
+
+Checks (per harness): skill copied, hooks registered where that harness reads
+them, TYPESAFE_API_KEY resolvable (presence only - never printed), policy.json
+loads, decisions log reachable. Exit 0 when every check passes, 1 on any
+failure, 2 on bad usage. Degrades gracefully: a missing piece is a failed
+check, not a crash.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+SKILL_DIR = SCRIPT_DIR.parent
+POLICY_PATH = SKILL_DIR / "policy.json"
+PLUGIN_NAME = "jev-compact"
+COMPACT_MARK = "compact_hook.py"
+TOOLS_MARK = "inventory_hook.py"
+ALLOWED = ("hermes", "claude-code", "codex", "grok")
+
+
+def user_home() -> Path:
+    return Path(os.environ.get("USERPROFILE") or Path.home())
+
+
+def hermes_home(home: Path) -> Path:
+    for candidate in (home / ".hermes", Path("D:/Hermes/home")):
+        if (candidate / "skills").is_dir() or (candidate / "plugins").is_dir():
+            return candidate
+    return home / ".hermes"
+
+
+def _check(agent: str, name: str, ok: bool, detail: str) -> dict:
+    return {"agent": agent, "check": name, "ok": bool(ok), "detail": detail}
+
+
+def _has_hook_entry(hooks: object, event: str, marker: str) -> bool:
+    if not isinstance(hooks, dict):
+        return False
+    entries = hooks.get(event)
+    if not isinstance(entries, list):
+        return False
+    return any(marker in json.dumps(entry) for entry in entries)
+
+
+def _load_json(path: Path) -> object:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _skill_check(agent: str, skill_dirs: list[Path]) -> dict:
+    for parent in skill_dirs:
+        if (parent / "jev-consult" / "SKILL.md").is_file():
+            return _check(agent, "skill", True, str(parent / "jev-consult"))
+    return _check(agent, "skill", False, "jev-consult/SKILL.md missing under %s" % skill_dirs)
+
+
+def check_hermes(home: Path, hermes: Path) -> list[dict]:
+    out = [_skill_check("hermes", [hermes / "skills"])]
+    dest = hermes / "plugins" / PLUGIN_NAME
+    out.append(_check("hermes", "plugin_dir", dest.is_dir(), str(dest)))
+    config = hermes / "config.yaml"
+    enabled = False
+    detail = "missing " + str(config)
+    if config.is_file():
+        try:
+            text = config.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        enabled = ("- %s" % PLUGIN_NAME) in text
+        detail = "enabled" if enabled else "not in plugins.enabled"
+    out.append(_check("hermes", "plugin_enabled", enabled, detail))
+    return out
+
+
+def check_claude(home: Path) -> list[dict]:
+    out = [_skill_check("claude-code", [home / ".claude" / "skills"])]
+    settings = home / ".claude" / "settings.json"
+    data = _load_json(settings)
+    if data is None:
+        out.append(_check("claude-code", "hooks", False, "missing/invalid " + str(settings)))
+        return out
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    out.append(
+        _check(
+            "claude-code",
+            "compact_hook",
+            _has_hook_entry(hooks, "PostToolUse", COMPACT_MARK),
+            "PostToolUse",
+        )
+    )
+    out.append(
+        _check(
+            "claude-code",
+            "inventory_hook",
+            _has_hook_entry(hooks, "UserPromptSubmit", TOOLS_MARK),
+            "UserPromptSubmit",
+        )
+    )
+    return out
+
+
+def check_grok(home: Path) -> list[dict]:
+    out = [_skill_check("grok", [home / ".grok" / "skills"])]
+    for name, event, mark in (
+        ("jev-compact.json", "PostToolUse", COMPACT_MARK),
+        ("jev-tools.json", "UserPromptSubmit", TOOLS_MARK),
+    ):
+        path = home / ".grok" / "hooks" / name
+        data = _load_json(path)
+        ok = _has_hook_entry((data or {}).get("hooks") if isinstance(data, dict) else None, event, mark)
+        out.append(_check("grok", name, ok, event))
+    return out
+
+
+def check_codex(home: Path) -> list[dict]:
+    out = [
+        _skill_check("codex", [home / ".codex" / "skills", home / ".agents" / "skills"])
+    ]
+    hooks_path = home / ".codex" / "hooks.json"
+    data = _load_json(hooks_path)
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    out.append(
+        _check(
+            "codex",
+            "inventory_hook",
+            _has_hook_entry(hooks, "UserPromptSubmit", TOOLS_MARK),
+            "UserPromptSubmit in %s" % hooks_path,
+        )
+    )
+    return out
+
+
+def _env_file_has_key(path: Path) -> bool:
+    try:
+        if not path.is_file() or path.stat().st_size > 65536:
+            return False
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("#") or "=" not in line:
+            continue
+        if line.split("=", 1)[0].strip() == "TYPESAFE_API_KEY":
+            return True
+    return False
+
+
+def check_common(home: Path, hermes: Path) -> list[dict]:
+    out = []
+    key_set = bool(os.environ.get("TYPESAFE_API_KEY")) or any(
+        _env_file_has_key(p)
+        for p in (home / ".env", hermes / ".env", Path.cwd() / ".env")
+    )
+    out.append(_check("*", "api_key", key_set, "set" if key_set else "missing"))
+    policy_ok = False
+    detail = "missing " + str(POLICY_PATH)
+    data = _load_json(POLICY_PATH)
+    if isinstance(data, dict):
+        policy_ok = bool(data.get("question_soft_max"))
+        detail = "ok" if policy_ok else "no question_soft_max"
+    out.append(_check("*", "policy", policy_ok, detail))
+    log = Path(os.environ.get("JEV_CONSULT_LOG") or (home / ".cache" / "jev-consult" / "decisions.jsonl"))
+    lines = 0
+    if log.is_file():
+        try:
+            lines = len(log.read_text(encoding="utf-8", errors="replace").splitlines())
+        except OSError:
+            pass
+    out.append(_check("*", "decisions_log", True, "%s (%d lines)" % (log, lines)))
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Check a jev-consult install. Read-only.")
+    parser.add_argument("--agents", default=",".join(ALLOWED))
+    parser.add_argument("--home", help="Override user home (tests).")
+    parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
+    args = parser.parse_args(argv)
+    agents = [a.strip() for a in args.agents.split(",") if a.strip()]
+    bad = [a for a in agents if a not in ALLOWED]
+    if bad:
+        sys.stderr.write("unknown agents: %s\n" % ", ".join(bad))
+        return 2
+    home = Path(args.home) if args.home else user_home()
+    hermes = Path(args.hermes_home) if args.hermes_home else hermes_home(home)
+    checks: list[dict] = check_common(home, hermes)
+    if "hermes" in agents:
+        checks += check_hermes(home, hermes)
+    if "claude-code" in agents:
+        checks += check_claude(home)
+    if "grok" in agents:
+        checks += check_grok(home)
+    if "codex" in agents:
+        checks += check_codex(home)
+    ok = all(c["ok"] for c in checks)
+    sys.stdout.write(json.dumps({"ok": ok, "checks": checks}, indent=2) + "\n")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

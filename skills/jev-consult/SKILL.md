@@ -152,4 +152,5 @@ Mid-session: same path. You ask Jev; Jev only chooses.
 
 ```text
 python scripts/install.py
+python skills/jev-consult/scripts/doctor.py  # verify hooks/skill/key/policy per harness; exit 0 = all ok
 ```

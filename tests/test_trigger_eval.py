@@ -532,6 +532,13 @@ class TriggerEvalTests(unittest.TestCase):
         with redirect_stdout(buf):
             te.main(["--desc-tokens", "--desc", "pick between two options"])
         self.assertEqual(buf.getvalue().splitlines(), ["between", "option", "pick", "two"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--desc-tokens", "--desc", "pick between two options", "--json"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            json.loads(buf.getvalue()), ["between", "option", "pick", "two"]
+        )
 
     def test_margin_override_flips_verdict(self) -> None:
         buf = io.StringIO()

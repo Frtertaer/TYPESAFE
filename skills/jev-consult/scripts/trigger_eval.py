@@ -308,8 +308,12 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as exc:
             sys.stderr.write("trigger_eval failed: %s\n" % exc)
             return 2
-        for tok in sorted(set(scorer.tokens(text))):
-            sys.stdout.write("%s\n" % tok)
+        tokens = sorted(set(scorer.tokens(text)))
+        if args.json:
+            sys.stdout.write(json.dumps(tokens) + "\n")
+        else:
+            for tok in tokens:
+                sys.stdout.write("%s\n" % tok)
         return 0
     if args.score:
         if not VENDORED_SCORER.is_file():

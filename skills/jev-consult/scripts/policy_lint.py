@@ -376,6 +376,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     strict = "--strict" in argv
     show = "--show" in argv
+    quiet = "--quiet" in argv
     diff_path = None
     if "--diff" in argv:
         i = argv.index("--diff")
@@ -384,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         diff_path = argv[i + 1]
         del argv[i : i + 2]
-    argv = [a for a in argv if a not in {"--strict", "--show"}]
+    argv = [a for a in argv if a not in {"--strict", "--show", "--quiet"}]
     path = Path(argv[0]) if argv else DEFAULT_POLICY
     try:
         policy = json.loads(path.read_text(encoding="utf-8"))
@@ -408,11 +409,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     findings = lint_policy(policy)
     for finding in findings:
+        if quiet and finding["severity"] != "error":
+            continue
         sys.stdout.write(format_finding(finding) + "\n")
     errors = sum(1 for f in findings if f["severity"] == "error")
     warns = sum(1 for f in findings if f["severity"] == "warn")
     infos = sum(1 for f in findings if f["severity"] == "info")
-    sys.stdout.write("policy_lint: %d error(s), %d warning(s), %d info\n" % (errors, warns, infos))
+    if not quiet:
+        sys.stdout.write("policy_lint: %d error(s), %d warning(s), %d info\n" % (errors, warns, infos))
     if errors or (strict and warns):
         return 1
     return 0

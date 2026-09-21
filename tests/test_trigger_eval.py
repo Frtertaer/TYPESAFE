@@ -465,6 +465,14 @@ class TriggerEvalTests(unittest.TestCase):
             set(row["matched"]) | set(row["unmatched"]),
             set(row["matched"] + row["unmatched"]),
         )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--unmatched", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertIn("pos-approach", payload)
+        self.assertIsInstance(payload["pos-approach"], list)
+        self.assertNotIn("zzz", payload["pos-approach"])
 
     def test_prompts_lists_case_prompts(self) -> None:
         buf = io.StringIO()

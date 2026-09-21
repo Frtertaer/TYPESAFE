@@ -646,6 +646,8 @@ def main(argv: list[str] | None = None) -> int:
                 "coverage": result["coverage"],
                 "hits": result["hits"],
             }
+        elif args.unmatched and not args.id:
+            payload = {row["id"]: row["unmatched"] for row in _rows()}
         else:
             payload = dict(result)
             payload["cases"] = _rows()

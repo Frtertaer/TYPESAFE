@@ -191,7 +191,11 @@ def handle(
     prompt = extract_prompt(payload)
     if not prompt:
         return {}
-    harness = harness or detect_harness(Path(__file__))
+    harness = (
+        harness
+        or os.environ.get("JEV_HOOK_HARNESS", "").strip()
+        or detect_harness(Path(__file__))
+    )
     cwd = extract_cwd(payload)
     deduped = None
     stale_match = False

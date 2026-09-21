@@ -62,6 +62,23 @@ class InventoryHookTests(unittest.TestCase):
         names = [row["name"] for row in sidecar["names"]]
         self.assertIn("jwt-auth", names)
 
+    def test_env_harness_override_used_when_no_arg(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_HARNESS": "claude-code"}):
+                out = HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "Add JWT access tokens in Python",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    pick_fn=skip_pick,
+                )
+            sidecar = json.loads((Path(tmp) / ".jev-tools.json").read_text(encoding="utf-8"))
+        self.assertEqual(sidecar["harness"], "claude-code")
+        self.assertIn("additionalContext", out.get("hookSpecificOutput", {}))
+
     def test_grok_writes_sidecar_without_additional_context(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

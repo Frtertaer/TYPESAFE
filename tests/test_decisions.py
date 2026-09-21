@@ -1797,5 +1797,26 @@ class PruneTest(unittest.TestCase):
             proc = self.run_cli("--file", str(path), "--last", "--status", "nope")
             self.assertEqual(proc.stdout.strip(), "")
 
+    def test_validate_flags_bad_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "harness": "claude", "jev_status": "ok"},
+                    {"harness": "codex", "jev_status": "ok"},
+                    {"ts": 3},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--validate")
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("entry[1] missing ts", proc.stdout)
+            self.assertIn("entry[2] missing jev_status", proc.stdout)
+            proc = self.run_cli("--file", str(path), "--drop-bad")
+            write_log(path, [{"ts": 1, "jev_status": "ok"}])
+            proc = self.run_cli("--file", str(path), "--validate")
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn("0 invalid entries", proc.stdout)
+
 if __name__ == "__main__":
     unittest.main()

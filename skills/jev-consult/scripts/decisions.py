@@ -544,6 +544,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the unparseable jsonl lines with line numbers",
     )
     parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Print parseable entries missing a numeric ts or a non-empty jev_status (index + reason)",
+    )
+    parser.add_argument(
         "--prune",
         action="store_true",
         help="Rewrite the log keeping only entries matching the time/status filters",
@@ -596,6 +601,20 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("no decisions log at %s\n" % path)
         return 1
     entries, bad = load_entries(path)
+    if getattr(args, "validate", False):
+        bad_rows = []
+        for index, item in enumerate(entries):
+            problems = []
+            if not isinstance(item.get("ts"), (int, float)) or isinstance(item.get("ts"), bool):
+                problems.append("ts")
+            if not str(item.get("jev_status") or "").strip():
+                problems.append("jev_status")
+            if problems:
+                bad_rows.append((index, ",".join(problems)))
+        for index, why in bad_rows:
+            sys.stdout.write("entry[%d] missing %s\n" % (index, why))
+        sys.stdout.write("%d invalid entr%s\n" % (len(bad_rows), "y" if len(bad_rows) == 1 else "ies"))
+        return 1 if bad_rows else 0
     if getattr(args, "drop_bad", False):
         if getattr(args, "dry_run", False):
             sys.stderr.write("dry-run: would drop %d bad line(s)\n" % bad)

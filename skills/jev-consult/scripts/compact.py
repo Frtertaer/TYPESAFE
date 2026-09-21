@@ -1396,6 +1396,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Verify 'full output saved: PATH' references in FILE exist (rc 1 on missing).",
     )
     parser.add_argument(
+        "--orphan-spill",
+        metavar="FILE",
+        default="",
+        help="List spill files not referenced by FILE (uses --spill-dir for the dir).",
+    )
+    parser.add_argument(
         "--stats",
         action="store_true",
         help="Print a one-line compaction summary to stderr after the result.",
@@ -1444,6 +1450,22 @@ def main(argv: list[str] | None = None) -> int:
             )
         sys.stdout.write("%d refs, %d missing\n" % (len(refs), len(missing)))
         return 1 if missing else 0
+    if args.orphan_spill:
+        try:
+            text = Path(args.orphan_spill).read_text(encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("--orphan-spill failed: %s\n" % exc)
+            return 2
+        referenced = set(re.findall(r"full output saved: (\S+?)\]", text))
+        directory = Path(args.spill_dir) if args.spill_dir else None
+        orphans = [
+            path for path, _size, _mtime in list_spill(directory)
+            if str(path) not in referenced
+        ]
+        for path in orphans:
+            sys.stdout.write("orphan: %s\n" % path)
+        sys.stdout.write("%d orphans\n" % len(orphans))
+        return 0
     if args.list_spill:
         directory = Path(args.spill_dir) if args.spill_dir else None
         rows = list_spill(directory)

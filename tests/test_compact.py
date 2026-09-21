@@ -1433,6 +1433,33 @@ class ListSpillTests(unittest.TestCase):
                 rc = C.main(["--verify-spill", str(Path(tmp) / "nope.txt")])
             self.assertEqual(rc, 2)
 
+    def test_cli_orphan_spill_lists_unreferenced(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            used = target / "used.txt"
+            free = target / "free.txt"
+            used.write_text("u", encoding="utf-8")
+            free.write_text("f", encoding="utf-8")
+            doc = Path(tmp) / "out.txt"
+            doc.write_text(
+                "[truncated 1; full output saved: %s]" % used, encoding="utf-8"
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(
+                    ["--orphan-spill", str(doc), "--spill-dir", str(target)]
+                )
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertIn("orphan: %s" % free, out)
+            self.assertNotIn("orphan: %s" % used, out)
+            self.assertIn("1 orphans", out)
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = C.main(["--orphan-spill", str(Path(tmp) / "nope.txt")])
+            self.assertEqual(rc, 2)
+
     def test_cli_list_spill_out_writes_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "spill"

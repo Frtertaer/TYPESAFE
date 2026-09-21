@@ -268,6 +268,20 @@ class CliTest(unittest.TestCase):
         self.assertIn("| case | defect | before_jev |", proc.stdout)
         self.assertIn("drift_case", proc.stdout)
 
+    def test_cli_out_writes_result_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            out_path = Path(tmp) / "result.json"
+            proc = self.run_cli("--cases", str(path), "--out", str(out_path))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("wrote", proc.stderr)
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["rows"]), 2)
+            self.assertEqual(payload["rows"][0]["id"], "drift_case")
+            # stdout still prints the table
+            self.assertIn("before_jev", proc.stdout)
+
     def test_cli_bad_cases_exits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cases.json"

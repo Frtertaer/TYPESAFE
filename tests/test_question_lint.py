@@ -266,6 +266,37 @@ class LintCliTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 2)
 
+    def test_severity_env_default(self) -> None:
+        import os as _os
+
+        request = {
+            "state": {"task": "x"},
+            "questions": {
+                "a": noul("Should the coder not proceed?"),
+                "b": noul("Is it not true that the fix cannot ship?"),
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, request)
+            env = dict(_os.environ, JEV_QLINT_SEVERITY="warn")
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path)],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertIn("J001", proc.stdout)
+            self.assertNotIn("J002", proc.stdout)
+            # CLI flag beats env
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--severity", "error"],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertIn("J002", proc.stdout)
+            self.assertNotIn("J001", proc.stdout)
+
     def test_quiet_still_prints_errors(self) -> None:
         request = {
             "state": {"task": "x"},

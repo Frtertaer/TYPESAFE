@@ -14,6 +14,7 @@ question and does not fire.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -284,6 +285,10 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("bad --severity %r (want error|warn|info)\n" % severity)
             return 2
         argv = argv[:idx] + argv[idx + 2 :]
+    else:
+        env_sev = os.environ.get("JEV_QLINT_SEVERITY", "").strip().lower()
+        if env_sev and env_sev in SEVERITIES:
+            severity = env_sev
     argv = [a for a in argv if a not in ("--json", "--fix", "--strict", "--quiet")]
     if not argv:
         sys.stderr.write("usage: question_lint.py FILE [--json] [--fix] [--strict]\n")

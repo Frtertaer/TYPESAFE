@@ -1394,6 +1394,132 @@ class PruneSidecarsTests(unittest.TestCase):
             self.assertFalse(stale.exists())
 
 
+class DedupeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+
+    def _items(self):
+        return INV.scan("hermes", hermes=FIXTURE)
+
+    def _payload(self, prompt: str, cwd: str) -> dict:
+        return {
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": prompt,
+            "cwd": cwd,
+        }
+
+    def test_same_prompt_reuses_sidecar_without_jev(self) -> None:
+        calls = []
+
+        def counting_pick(prompt, harness, picked):
+            calls.append(prompt)
+            return skip_pick(prompt, harness, picked)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            prompt = "Add JWT access tokens in Python"
+            out1 = HOOK.handle(
+                self._payload(prompt, tmp),
+                items=self._items(),
+                harness="claude-code",
+                pick_fn=counting_pick,
+            )
+            self.assertTrue((Path(tmp) / ".jev-tools.json").is_file())
+            out2 = HOOK.handle(
+                self._payload(prompt, tmp),
+                items=self._items(),
+                harness="claude-code",
+                pick_fn=counting_pick,
+            )
+        self.assertEqual(len(calls), 1)
+        note2 = out2["hookSpecificOutput"]["additionalContext"]
+        self.assertEqual(
+            note2, out1["hookSpecificOutput"]["additionalContext"]
+        )
+
+    def test_different_prompt_does_not_dedupe(self) -> None:
+        calls = []
+
+        def counting_pick(prompt, harness, picked):
+            calls.append(prompt)
+            return skip_pick(prompt, harness, picked)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            HOOK.handle(
+                self._payload("Add JWT access tokens in Python", tmp),
+                items=self._items(),
+                harness="claude-code",
+                pick_fn=counting_pick,
+            )
+            HOOK.handle(
+                self._payload("Draw an ascii banner", tmp),
+                items=self._items(),
+                harness="claude-code",
+                pick_fn=counting_pick,
+            )
+        self.assertEqual(len(calls), 2)
+
+    def test_stale_sidecar_does_not_dedupe(self) -> None:
+        import time as _time
+        calls = []
+
+        def counting_pick(prompt, harness, picked):
+            calls.append(prompt)
+            return skip_pick(prompt, harness, picked)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            prompt = "Add JWT access tokens in Python"
+            HOOK.handle(
+                self._payload(prompt, tmp),
+                items=self._items(),
+                harness="claude-code",
+                pick_fn=counting_pick,
+            )
+            sidecar = Path(tmp) / ".jev-tools.json"
+            data = json.loads(sidecar.read_text(encoding="utf-8"))
+            data["written_at"] = int(_time.time() - 999999)
+            sidecar.write_text(json.dumps(data), encoding="utf-8")
+            HOOK.handle(
+                self._payload(prompt, tmp),
+                items=self._items(),
+                harness="claude-code",
+                pick_fn=counting_pick,
+            )
+        self.assertEqual(len(calls), 2)
+
+    def test_dedupe_winner_note_replayed(self) -> None:
+        def winner_pick(prompt, harness, picked):
+            return {"status": "winner", "winner": picked[0]}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            prompt = "Add JWT access tokens in Python"
+            out1 = HOOK.handle(
+                self._payload(prompt, tmp),
+                items=self._items(),
+                harness="claude-code",
+                pick_fn=winner_pick,
+            )
+            called = []
+
+            def boom(prompt, harness, picked):
+                called.append(prompt)
+                return {"status": "none"}
+
+            out2 = HOOK.handle(
+                self._payload(prompt, tmp),
+                items=self._items(),
+                harness="claude-code",
+                pick_fn=boom,
+            )
+        self.assertEqual(called, [])
+        self.assertEqual(
+            out2["hookSpecificOutput"]["additionalContext"],
+            out1["hookSpecificOutput"]["additionalContext"],
+        )
+        self.assertIn("jwt-auth", out2["hookSpecificOutput"]["additionalContext"])
+
+
 class CheckMissTests(unittest.TestCase):
     def test_check_miss_fresh_stale_missing(self) -> None:
         import time as _time

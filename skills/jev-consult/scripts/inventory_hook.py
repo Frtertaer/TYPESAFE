@@ -31,9 +31,12 @@ from inventory import (  # noqa: E402
     format_winner_note,
     hook_budget_seconds,
     picker_request,
+    read_sidecar,
     resolve_picker,
     scan_cached,
     shortlist,
+    sidecar_fresh,
+    sidecar_items,
     tokens,
     write_miss,
     write_sidecar,
@@ -157,6 +160,72 @@ def handle(
     if not prompt:
         return {}
     harness = harness or detect_harness(Path(__file__))
+    cwd = extract_cwd(payload)
+    deduped = None
+    if cwd is not None:
+        prior = read_sidecar(cwd / SIDECAR_NAME)
+        if (
+            prior
+            and sidecar_fresh(prior)
+            and str(prior.get("task") or "") == prompt[:500]
+        ):
+            deduped = prior
+    if deduped is not None:
+        picked = sidecar_items(deduped)
+        prior_pick = deduped.get("jev_pick")
+        winner = None
+        if isinstance(prior_pick, dict):
+            winner = next(
+                (
+                    item
+                    for item in picked
+                    if item.get("name") == prior_pick.get("name")
+                    and item.get("kind") == prior_pick.get("kind")
+                ),
+                None,
+            )
+        picker = {
+            "status": "winner" if winner is not None else "dedupe",
+            "winner": winner,
+        }
+        catalog: list[dict] = []
+        explicit_winner = None
+        extra = {
+            "jev_status": "dedupe" if winner is None else "winner",
+            "dedupe": True,
+        }
+        winner_out = winner if isinstance(winner, dict) else None
+        if extra["jev_status"] == "winner" and winner_out and winner_out.get("name"):
+            extra["jev_pick"] = {"kind": winner_out.get("kind"), "name": winner_out.get("name")}
+        note = _note_for_picker(picked, picker)
+        append_decision(
+            {
+                "ts": time.time(),
+                "harness": harness,
+                "prompt_sha": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12],
+                "prompt_head": _redact_prompt(prompt[:240])[:160],
+                "n_catalog": 0,
+                "shortlist": [item.get("id") for item in picked],
+                "explicit": False,
+                "dedupe": True,
+                "jev_status": extra["jev_status"],
+                "winner": {"kind": winner_out.get("kind"), "name": winner_out.get("name")}
+                if winner_out
+                else None,
+            }
+        )
+        if not note:
+            return {}
+        if event == "pre_llm_call" or harness == "hermes":
+            return {"context": note}
+        if harness == "grok":
+            return {}
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": note,
+            }
+        }
     catalog = items if items is not None else scan_cached(harness)
     hits = explicit_mentions(prompt, catalog)
     explicit_winner = hits[0] if len(hits) == 1 else None
@@ -204,7 +273,6 @@ def handle(
             "latency_ms": picker.get("latency_ms"),
         }
     )
-    cwd = extract_cwd(payload)
     if cwd is not None:
         try:
             write_sidecar(cwd / SIDECAR_NAME, harness, prompt, picked, extra)

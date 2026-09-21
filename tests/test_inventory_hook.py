@@ -636,5 +636,233 @@ class MainLoopTests(unittest.TestCase):
         self.assertEqual(json.loads(out), {})
 
 
+class HandleBranchTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+        self.items = INV.scan("hermes", hermes=FIXTURE)
+
+    def test_extract_prompt_variants(self) -> None:
+        self.assertEqual(HOOK.extract_prompt({"prompt": " p "}), "p")
+        self.assertEqual(HOOK.extract_prompt({"user_message": "u"}), "u")
+        self.assertEqual(HOOK.extract_prompt({"userMessage": "m"}), "m")
+        self.assertEqual(
+            HOOK.extract_prompt(
+                {
+                    "conversation_history": [
+                        {"role": "assistant", "content": "old"},
+                        {"role": "user", "content": " latest "},
+                    ]
+                }
+            ),
+            "latest",
+        )
+        self.assertEqual(
+            HOOK.extract_prompt({"messages": [{"role": "user", "text": "t1"}]}), "t1"
+        )
+        self.assertEqual(
+            HOOK.extract_prompt({"messages": [{"role": "user", "message": "mm"}]}), "mm"
+        )
+        self.assertEqual(HOOK.extract_prompt({}), "")
+        self.assertEqual(HOOK.extract_prompt({"prompt": "  "}), "")
+        self.assertEqual(
+            HOOK.extract_prompt({"conversation_history": [{"role": "assistant", "content": "a"}]}),
+            "",
+        )
+
+    def test_extract_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(HOOK.extract_cwd({"cwd": tmp}), Path(tmp))
+            self.assertEqual(HOOK.extract_cwd({"cwd_path": tmp}), Path(tmp))
+            self.assertEqual(HOOK.extract_cwd({"workspace": tmp}), Path(tmp))
+        self.assertIsNone(HOOK.extract_cwd({"cwd": "/no/such/dir-xyz"}))
+        self.assertIsNone(HOOK.extract_cwd({}))
+
+    def test_redact_prompt_wiring(self) -> None:
+        class FakeJev:
+            @staticmethod
+            def redact(text):
+                return text.replace("secret", "[R]")
+
+        with patch.dict(sys.modules, {"jev": FakeJev}):
+            self.assertEqual(HOOK._redact_prompt("a secret"), "a [R]")
+        with patch.dict(sys.modules, {"jev": None}):
+            self.assertEqual(HOOK._redact_prompt("a secret"), "a secret")
+
+    def test_unknown_event_and_empty_prompt(self) -> None:
+        self.assertEqual(
+            HOOK.handle(
+                {"hook_event_name": "PostToolUse", "prompt": "jwt"},
+                items=self.items,
+                harness="claude-code",
+            ),
+            {},
+        )
+        self.assertEqual(
+            HOOK.handle({"prompt": "  "}, items=self.items, harness="claude-code"), {}
+        )
+
+    def test_explicit_single_mention_wins(self) -> None:
+        out = HOOK.handle(
+            {"hook_event_name": "UserPromptSubmit", "prompt": "run $jwt-auth now"},
+            items=self.items,
+            harness="claude-code",
+            pick_fn=lambda *a, **k: self.fail("picker must not run on explicit hit"),
+        )
+        note = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("jwt-auth", note)
+        self.assertIn("skill_relevance", note)  # winner note, not the list note
+
+    def test_pick_fn_exception_falls_back_to_note(self) -> None:
+        def boom(*_a, **_k):
+            raise RuntimeError("down")
+
+        out = HOOK.handle(
+            {"hook_event_name": "UserPromptSubmit", "prompt": "Add JWT tokens please"},
+            items=self.items,
+            harness="claude-code",
+            pick_fn=boom,
+        )
+        note = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("jwt-auth", note)
+
+    def test_pick_fn_non_dict_keeps_idf(self) -> None:
+        out = HOOK.handle(
+            {"hook_event_name": "UserPromptSubmit", "prompt": "Add JWT tokens please"},
+            items=self.items,
+            harness="claude-code",
+            pick_fn=lambda *_a, **_k: "garbage",
+        )
+        self.assertIn("jwt-auth", out["hookSpecificOutput"]["additionalContext"])
+
+    def test_miss_written_when_no_picks_and_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = HOOK.handle(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "zebra quokka xylophone",
+                    "cwd": tmp,
+                },
+                items=self.items,
+                harness="claude-code",
+                pick_fn=skip_pick,
+            )
+            self.assertTrue((Path(tmp) / INV.MISS_NAME).is_file())
+            miss = json.loads((Path(tmp) / INV.MISS_NAME).read_text(encoding="utf-8"))
+            self.assertEqual(miss["harness"], "claude-code")
+            note = out["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("peer_fill.py", note)
+
+    def test_no_cwd_miss_note_still_returned(self) -> None:
+        out = HOOK.handle(
+            {"hook_event_name": "UserPromptSubmit", "prompt": "zebra quokka xylophone"},
+            items=self.items,
+            harness="claude-code",
+            pick_fn=skip_pick,
+        )
+        self.assertIn("peer_fill.py", out["hookSpecificOutput"]["additionalContext"])
+
+    def test_no_tokens_no_miss(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = HOOK.handle(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "a a a",  # tokens() drops <3 chars
+                    "cwd": tmp,
+                },
+                items=self.items,
+                harness="claude-code",
+                pick_fn=skip_pick,
+            )
+            self.assertEqual(out, {})
+            self.assertFalse((Path(tmp) / INV.MISS_NAME).exists())
+
+    def test_picked_clears_existing_miss(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            miss = Path(tmp) / INV.MISS_NAME
+            miss.write_text('{"stale": true}', encoding="utf-8")
+            HOOK.handle(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "Add JWT tokens please",
+                    "cwd": tmp,
+                },
+                items=self.items,
+                harness="claude-code",
+                pick_fn=skip_pick,
+            )
+            self.assertFalse(miss.exists())
+
+    def test_hermes_returns_context(self) -> None:
+        out = HOOK.handle(
+            {"prompt": "Add JWT tokens please"},
+            items=self.items,
+            harness="hermes",
+            pick_fn=skip_pick,
+        )
+        self.assertIn("context", out)
+        self.assertIn("jwt-auth", out["context"])
+
+    def test_pre_llm_call_returns_context(self) -> None:
+        out = HOOK.handle(
+            {"event": "pre_llm_call", "prompt": "Add JWT tokens please"},
+            items=self.items,
+            harness="claude-code",
+            pick_fn=skip_pick,
+        )
+        self.assertIn("context", out)
+
+    def test_grok_emits_nothing(self) -> None:
+        out = HOOK.handle(
+            {"prompt": "Add JWT tokens please"},
+            items=self.items,
+            harness="grok",
+            pick_fn=skip_pick,
+        )
+        self.assertEqual(out, {})
+
+    def test_winner_pick_writes_sidecar_fields(self) -> None:
+        def win(*_a, **_k):
+            return {
+                "status": "winner",
+                "winner": {"kind": "skill", "name": "jwt-auth"},
+                "strong": True,
+                "need": 0.9,
+                "probabilities": {"p_jwt_auth": 0.8},
+                "latency_ms": 12,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = HOOK.handle(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "Add JWT tokens please",
+                    "cwd": tmp,
+                },
+                items=self.items,
+                harness="claude-code",
+                pick_fn=win,
+            )
+            note = out["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("skill_relevance", note)
+            sidecar = json.loads((Path(tmp) / INV.SIDECAR_NAME).read_text(encoding="utf-8"))
+        self.assertTrue(sidecar["strong_pick"])
+        self.assertEqual(sidecar["jev_pick"], {"kind": "skill", "name": "jwt-auth"})
+        self.assertEqual(sidecar["jev_status"], "winner")
+
+    def test_none_pick_returns_empty(self) -> None:
+        def none_pick(*_a, **_k):
+            return {"status": "none", "winner": None}
+
+        out = HOOK.handle(
+            {"hook_event_name": "UserPromptSubmit", "prompt": "Add JWT tokens please"},
+            items=self.items,
+            harness="claude-code",
+            pick_fn=none_pick,
+        )
+        self.assertEqual(out, {})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

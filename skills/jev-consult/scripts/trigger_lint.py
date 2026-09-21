@@ -141,9 +141,10 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         policy_path = Path(argv[idx + 1].strip())
         argv = argv[:idx] + argv[idx + 2 :]
-    argv = [a for a in argv if a not in ("--json", "--quiet")]
+    strict = "--strict" in argv
+    argv = [a for a in argv if a not in ("--json", "--quiet", "--strict")]
     if len(argv) > 1:
-        sys.stderr.write("usage: trigger_lint.py [CASES.json] [--json] [--quiet] [--severity L] [--out PATH] [--policy PATH]\n")
+        sys.stderr.write("usage: trigger_lint.py [CASES.json] [--json] [--quiet] [--strict] [--severity L] [--out PATH] [--policy PATH]\n")
         return 2
     path = Path(argv[0]) if argv else DEFAULT_CASES
     findings = lint_cases(path, policy_path=policy_path)
@@ -198,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(
             "trigger_lint: %d error(s), %d warning(s), %d info\n" % (n_err, n_warn, n_info)
         )
-    return 1 if n_err else 0
+    return 1 if n_err or (strict and findings) else 0
 
 
 if __name__ == "__main__":

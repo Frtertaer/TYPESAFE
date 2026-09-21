@@ -865,6 +865,52 @@ class HandleBranchTests(unittest.TestCase):
         self.assertEqual(out, {})
 
 
+class BudgetGuardTests(unittest.TestCase):
+    def test_budget_exceeded_skips_jev(self) -> None:
+        calls = []
+
+        def spy(prompt, harness, picked):
+            calls.append(1)
+            return {"status": "winner", "winner": picked[0]}
+
+        payload = {"event": "UserPromptSubmit", "prompt": "jwt auth please"}
+        with patch.object(HOOK, "hook_budget_seconds", return_value=0.0):
+            out = HOOK.handle(
+                payload,
+                items=[{"kind": "skill", "name": "jwt-auth", "id": "skill_jwt_auth", "description": "jwt"}],
+                harness="claude-code",
+                pick_fn=spy,
+            )
+        self.assertEqual(calls, [])  # Jev never called
+        # falls open to the IDF shortlist note
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("jwt-auth", ctx)
+
+    def test_budget_ok_calls_jev(self) -> None:
+        calls = []
+
+        def spy(prompt, harness, picked):
+            calls.append(1)
+            return {"status": "idf", "winner": None}
+
+        payload = {"event": "UserPromptSubmit", "prompt": "jwt auth please"}
+        with patch.object(HOOK, "hook_budget_seconds", return_value=999.0):
+            HOOK.handle(
+                payload,
+                items=[{"kind": "skill", "name": "jwt-auth", "id": "skill_jwt_auth", "description": "jwt"}],
+                harness="claude-code",
+                pick_fn=spy,
+            )
+        self.assertEqual(calls, [1])
+
+    def test_hook_budget_seconds_policy(self) -> None:
+        self.assertEqual(INV.hook_budget_seconds(), 12.0)
+        with patch.object(INV.json, "loads", side_effect=ValueError):
+            self.assertEqual(INV.hook_budget_seconds(), INV.DEFAULT_HOOK_BUDGET_SECONDS)
+        with patch.object(INV.json, "loads", return_value={"hook_budget_seconds": -5}):
+            self.assertEqual(INV.hook_budget_seconds(), 0.0)
+
+
 class InventoryInternalsTests(unittest.TestCase):
     def test_uniquify(self) -> None:
         items = [{"id": "a", "name": "x"}, {"id": "a", "name": "y"}, {"id": "b", "name": "z"}]

@@ -663,6 +663,20 @@ def sidecar_ttl_seconds() -> float:
         return DEFAULT_SIDECAR_TTL_SECONDS
 
 
+HOOK_BUDGET_KEY = "hook_budget_seconds"
+DEFAULT_HOOK_BUDGET_SECONDS = 12.0
+
+
+def hook_budget_seconds() -> float:
+    """Max seconds handle() may spend before skipping the Jev pick."""
+    try:
+        policy_path = Path(__file__).resolve().parent.parent / "policy.json"
+        data = json.loads(policy_path.read_text(encoding="utf-8"))
+        return max(0.0, float(data.get(HOOK_BUDGET_KEY, DEFAULT_HOOK_BUDGET_SECONDS)))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return DEFAULT_HOOK_BUDGET_SECONDS
+
+
 def read_sidecar(path: Path) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))

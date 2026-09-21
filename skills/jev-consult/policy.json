@@ -15,6 +15,7 @@
   "noul_unsure": 0.5,
   "tight_gap": 0.08,
   "sidecar_ttl_seconds": 14400,
+  "hook_budget_seconds": 12,
   "must_ask": [
     "approach",
     "keep_vs_change",

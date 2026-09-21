@@ -29,6 +29,7 @@ from inventory import (  # noqa: E402
     format_miss_note,
     format_note,
     format_winner_note,
+    hook_budget_seconds,
     picker_request,
     resolve_picker,
     scan_cached,
@@ -148,6 +149,7 @@ def handle(
     harness: str | None = None,
     pick_fn=None,
 ) -> dict:
+    t0 = time.monotonic()
     event = event_name(payload)
     if event and event not in {"UserPromptSubmit", "pre_llm_call"}:
         return {}
@@ -164,7 +166,9 @@ def handle(
         picker = {"status": "winner", "winner": explicit_winner}
     else:
         picked = shortlist(catalog, prompt, HOOK_LIMIT, [hit["name"] for hit in hits])
-        if picked:
+        if picked and time.monotonic() - t0 >= hook_budget_seconds():
+            picker = {"status": "budget", "winner": None}
+        elif picked:
             chooser = pick_fn if pick_fn is not None else pick_with_jev
             try:
                 got = chooser(prompt, harness, picked)

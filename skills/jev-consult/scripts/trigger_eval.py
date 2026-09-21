@@ -106,6 +106,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print rows as CSV: id,should_trigger,lexical,score,ok.",
     )
+    parser.add_argument(
+        "--covers",
+        action="store_true",
+        help="Print per-tag coverage counts and ids of cases with no covers field.",
+    )
     parser.add_argument("--quiet", action="store_true", help="Print only the verdict line.")
     parser.add_argument(
         "--fail",
@@ -211,6 +216,20 @@ def main(argv: list[str] | None = None) -> int:
             ]
         return rows
 
+    if args.covers:
+        counts: dict[str, int] = {}
+        uncovered: list[str] = []
+        for row in _rows():
+            tags = row["covers"] or []
+            for tag in tags:
+                counts[tag] = counts.get(tag, 0) + 1
+            if not tags:
+                uncovered.append(row["id"])
+        for tag in sorted(counts):
+            sys.stdout.write("%s %d\n" % (tag, counts[tag]))
+        for cid in uncovered:
+            sys.stdout.write("uncovered: %s\n" % cid)
+        return 0 if result["ok"] else 1
     if args.ids:
         for row in _rows():
             sys.stdout.write("%s\n" % row["id"])

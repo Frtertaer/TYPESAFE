@@ -266,6 +266,15 @@ class TriggerEvalTests(unittest.TestCase):
         row = [l for l in lines if l.startswith("pos-approach,")][0]
         self.assertEqual(row.split(",")[1], "True")
 
+    def test_covers_reports_tag_counts_and_uncovered(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--covers"])
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertIn("approach 1\n", out)
+        self.assertIn("uncovered: neg-format\n", out)
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

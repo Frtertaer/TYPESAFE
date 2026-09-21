@@ -110,6 +110,40 @@ def extract_cwd(payload: dict) -> Path | None:
     return None
 
 
+def payload_ts(payload: dict) -> float | None:
+    for key in ("timestamp", "ts", "time", "created_at"):
+        value = payload.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            ts = float(value)
+            return ts / 1000.0 if ts > 1e12 else ts
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                continue
+            try:
+                return float(text)
+            except ValueError:
+                try:
+                    import datetime as _dt
+
+                    parsed = _dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+                    return parsed.timestamp()
+                except ValueError:
+                    continue
+    return None
+
+
+def hook_max_age() -> float:
+    """Max prompt age in seconds before the hook skips it (0 = off)."""
+    try:
+        env = float(os.environ.get("JEV_HOOK_MAX_AGE", "") or -1)
+        if env >= 0:
+            return env
+    except ValueError:
+        pass
+    return 0.0
+
+
 def event_name(payload: dict) -> str:
     override = os.environ.get("JEV_HOOK_EVENT", "").strip()
     if override:
@@ -193,6 +227,11 @@ def handle(
     event = event_name(payload)
     if event and event not in {"UserPromptSubmit", "pre_llm_call"}:
         return {}
+    max_age = hook_max_age()
+    if max_age > 0:
+        ts = payload_ts(payload)
+        if ts is not None and time.time() - ts > max_age:
+            return {}
     prompt = extract_prompt(payload)
     if not prompt:
         return {}

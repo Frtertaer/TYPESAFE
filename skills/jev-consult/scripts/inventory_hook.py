@@ -530,7 +530,57 @@ def main(argv: list[str] | None = None) -> int:
                     pass  # fail-open: still print to stdout
         sys.stdout.write(text)
         return 0
-    raw = sys.stdin.read()
+    raw = ""
+    file_path = ""
+    if "--file" in argv:
+        idx = argv.index("--file")
+        if idx + 1 < len(argv):
+            file_path = argv[idx + 1]
+            try:
+                raw = Path(file_path).read_text(encoding="utf-8")
+            except OSError:
+                sys.stdout.write("{}\n")
+                return 0
+            del argv[idx : idx + 2]
+        else:
+            sys.stdout.write("{}\n")
+            return 0
+    watch_seconds = 0.0
+    if "--watch" in argv:
+        idx = argv.index("--watch")
+        if idx + 1 < len(argv):
+            try:
+                watch_seconds = float(argv[idx + 1])
+            except ValueError:
+                watch_seconds = 0.0
+    if watch_seconds > 0:
+        try:
+            max_ticks = int(os.environ.get("JEV_HOOK_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        while max_ticks <= 0 or ticks < max_ticks:
+            tick: dict = {"ts": int(time.time())}
+            try:
+                if file_path:
+                    raw = Path(file_path).read_text(encoding="utf-8")
+                else:
+                    raw = sys.stdin.read()
+                payload = json.loads(raw) if raw.strip() else {}
+                out = handle(payload) if isinstance(payload, dict) else {}
+            except Exception:
+                out = {}
+            tick["keys"] = sorted(out.keys()) if isinstance(out, dict) else []
+            tick["winner"] = (
+                ((LAST_DECISION or {}).get("winner") or {}).get("name") or None
+            )
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            time.sleep(watch_seconds)
+        return 0
+    if not raw:
+        raw = sys.stdin.read()
     if not raw.strip():
         sys.stdout.write("{}\n")
         return 0

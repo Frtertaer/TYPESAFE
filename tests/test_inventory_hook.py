@@ -312,6 +312,49 @@ class InventoryHookTests(unittest.TestCase):
             self.assertNotEqual(HOOK.LAST_DECISION["question"], "dedupe")
             self.assertFalse(HOOK.LAST_DECISION.get("dedupe"))
 
+    def test_watch_file_emits_ticks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {
+                        "event": "UserPromptSubmit",
+                        "prompt": "jwt",
+                        "cwd": str(cwd),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ, {"JEV_HOOK_WATCH_MAX": "2", "JEV_HOOK_OFF": "1"}
+            ):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(
+                        ["--file", str(payload), "--watch", "0.01"]
+                    )
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(t["keys"] == [] for t in ticks))
+            self.assertTrue(all(t["winner"] is None for t in ticks))
+
+    def test_file_flag_reads_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text("{}\n", encoding="utf-8")
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--file", str(payload)])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "{}")
+
     def test_events_flag_lists_allowed_events(self) -> None:
         buf = io.StringIO()
         with patch.dict(os.environ, {"JEV_HOOK_EVENTS": ""}):

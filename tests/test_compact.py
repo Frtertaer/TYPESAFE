@@ -1428,6 +1428,67 @@ class KeepTextEnvTests(unittest.TestCase):
             self.assertIn("k1", ids)
 
 
+class PreserveRecentEnvTests(unittest.TestCase):
+    def setUp(self):
+        self._spill_env = patch.dict(os.environ, {"JEV_CONSULT_SPILL": "0"})
+        self._spill_env.start()
+        self.addCleanup(self._spill_env.stop)
+
+    def _run(self, path, env):
+        import io
+        import json as _json
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with patch.dict(os.environ, env):
+            with redirect_stdout(buf):
+                rc = C.main(
+                    [str(path), "--history", "--fake", "--min-reduction", "0"]
+                )
+        self.assertEqual(rc, 0)
+        return _json.loads(buf.getvalue())
+
+    def test_env_zero_pins_only_first(self):
+        import json as _json
+
+        messages = [{"role": "user", "content": "compress"}]
+        for i in range(10):
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "t%d" % i,
+                            "name": "Read",
+                            "input": {"file_path": "f%d.py" % i},
+                        }
+                    ],
+                }
+            )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t%d" % i,
+                            "content": "blob " * 200,
+                        }
+                    ],
+                }
+            )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.json"
+            path.write_text(_json.dumps(messages), encoding="utf-8")
+            zero = self._run(path, {"JEV_PRESERVE_RECENT": "0"})
+            default = self._run(path, {"JEV_PRESERVE_RECENT": ""})
+        self.assertLess(len(zero["messages"]), len(default["messages"]))
+        self.assertEqual(
+            zero["stats"]["preserve_recent"] if "preserve_recent" in zero["stats"] else 0, 0
+        )
+
+
 class DryRunTests(unittest.TestCase):
     def setUp(self):
         self._spill_env = patch.dict(os.environ, {"JEV_CONSULT_SPILL": "0"})

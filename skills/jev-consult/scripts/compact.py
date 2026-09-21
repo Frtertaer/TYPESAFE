@@ -759,7 +759,8 @@ def fit_state(
 ) -> dict[str, Any]:
     goal = options.get("goal") or goal_from_messages(messages)
     max_tokens = int(options.get("max_state_tokens") or MAX_STATE_TOKENS)
-    preserve = int(options.get("preserve_recent") or PRESERVE_RECENT)
+    preserve_raw = options.get("preserve_recent")
+    preserve = int(preserve_raw) if preserve_raw is not None else PRESERVE_RECENT
     keep_pattern = options.get("keep_text") or ""
     keep_re = None
     if keep_pattern:
@@ -1072,7 +1073,8 @@ def compact(
         messages = extract_messages(messages)
     else:
         messages = flatten_session_records(messages)
-    preserve = int(opts.get("preserve_recent") or PRESERVE_RECENT)
+    preserve_raw = opts.get("preserve_recent")
+    preserve = int(preserve_raw) if preserve_raw is not None else PRESERVE_RECENT
     keep_threshold = float(opts.get("keep_threshold") if opts.get("keep_threshold") is not None else KEEP_THRESHOLD)
     head_chars = int(opts.get("truncate_head_chars") if opts.get("truncate_head_chars") is not None else TRUNCATE_HEAD_CHARS)
     messages = [normalize_message(item) for item in messages]
@@ -1305,7 +1307,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--trace", help="Optional .jev-trace.json; matching file_path stays.")
     parser.add_argument("--goal", default="")
     parser.add_argument("--keep-threshold", type=float, default=KEEP_THRESHOLD)
-    parser.add_argument("--preserve-recent", type=int, default=PRESERVE_RECENT)
+    try:
+        env_preserve = int(os.environ.get("JEV_PRESERVE_RECENT", "") or PRESERVE_RECENT)
+    except ValueError:
+        env_preserve = PRESERVE_RECENT
+    parser.add_argument("--preserve-recent", type=int, default=max(0, env_preserve))
     parser.add_argument("--truncate-head-chars", type=int, default=TRUNCATE_HEAD_CHARS)
     parser.add_argument("--min-reduction", type=float, default=MIN_REDUCTION)
     parser.add_argument(

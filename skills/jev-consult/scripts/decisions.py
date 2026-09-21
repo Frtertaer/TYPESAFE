@@ -276,6 +276,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print unique fill kind values with counts, sorted desc",
     )
     parser.add_argument(
+        "--fields",
+        action="store_true",
+        help="Print all field names seen in entries with counts, sorted desc",
+    )
+    parser.add_argument(
         "--prune",
         action="store_true",
         help="Rewrite the log keeping only entries matching --days/--since/--harness/--status filters",
@@ -333,7 +338,14 @@ def main(argv: list[str] | None = None) -> int:
             "pruned %d of %d entries (kept %d)\n"
             % (len(total) - len(entries), len(total), len(entries))
         )
-    if args.statuses or args.harnesses or args.winners or args.outcomes or args.fills:
+    if (
+        args.statuses
+        or args.harnesses
+        or args.winners
+        or args.outcomes
+        or args.fills
+        or args.fields
+    ):
         counts: dict[str, int] = {}
         if args.winners:
             for item in entries:
@@ -342,7 +354,9 @@ def main(argv: list[str] | None = None) -> int:
                     key = "%s:%s" % (winner.get("kind") or "?", winner["name"])
                     counts[key] = counts.get(key, 0) + 1
         else:
-            if args.outcomes:
+            if args.fields:
+                field = None
+            elif args.outcomes:
                 field = "outcome"
             elif args.fills:
                 field = "fill"
@@ -351,8 +365,12 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 field = "jev_status"
             for item in entries:
-                value = str(item.get(field) or "unknown")
-                counts[value] = counts.get(value, 0) + 1
+                if field is None:
+                    for k in item:
+                        counts[k] = counts.get(k, 0) + 1
+                else:
+                    value = str(item.get(field) or "unknown")
+                    counts[value] = counts.get(value, 0) + 1
         for value, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
             sys.stdout.write("%s %d\n" % (value, n))
         return 0

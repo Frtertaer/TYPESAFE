@@ -477,6 +477,25 @@ class CliTest(unittest.TestCase):
             stats = json.loads(proc.stdout)
             self.assertEqual(stats["total"], 0)
 
+    def test_fields_lists_all_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"harness": "a", "ts": 1},
+                    {"harness": "b", "outcome": "human"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--fields")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = dict(
+                line.rsplit(" ", 1) for line in proc.stdout.strip().splitlines()
+            )
+            self.assertEqual(lines["harness"], "2")
+            self.assertEqual(lines["ts"], "1")
+            self.assertEqual(lines["outcome"], "1")
+
     def test_prune_no_filter_still_rc2(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

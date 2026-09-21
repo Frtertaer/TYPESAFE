@@ -432,5 +432,27 @@ class DiffFlagTests(unittest.TestCase):
         self.assertEqual(rc, 2)
 
 
+class WatchFlagTests(unittest.TestCase):
+    def test_watch_emits_ticks(self) -> None:
+        import os
+        from unittest import mock
+
+        buf = io.StringIO()
+        with mock.patch.dict(os.environ, {"JEV_PLINT_WATCH_MAX": "2"}):
+            with redirect_stdout(buf):
+                rc = policy_lint.main(["--watch", "0.01"])
+        self.assertEqual(rc, 0)
+        ticks = [
+            json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertTrue(all("errors" in t for t in ticks))
+
+    def test_watch_bad_value_rc2(self) -> None:
+        with redirect_stdout(io.StringIO()):
+            rc = policy_lint.main(["--watch", "bogus"])
+        self.assertEqual(rc, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

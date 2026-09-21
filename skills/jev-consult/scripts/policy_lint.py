@@ -412,6 +412,18 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         diff_path = argv[i + 1]
         del argv[i : i + 2]
+    watch_seconds = 0.0
+    if "--watch" in argv:
+        i = argv.index("--watch")
+        if i + 1 >= len(argv):
+            sys.stderr.write("--watch needs a SECONDS value\n")
+            return 2
+        try:
+            watch_seconds = float(argv[i + 1])
+        except ValueError:
+            sys.stderr.write("bad --watch %r (seconds)\n" % argv[i + 1])
+            return 2
+        del argv[i : i + 2]
     argv = [a for a in argv if a not in {"--strict", "--show", "--quiet", "--json"}]
     path = Path(argv[0]) if argv else DEFAULT_POLICY
     try:
@@ -433,6 +445,30 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if show:
         sys.stdout.write(json.dumps({"path": str(path), "policy": policy}, indent=2) + "\n")
+        return 0
+    if watch_seconds > 0:
+        import time as _time
+
+        try:
+            max_ticks = int(os.environ.get("JEV_PLINT_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        while max_ticks <= 0 or ticks < max_ticks:
+            rows = lint_policy(policy)
+            tick = {
+                "ts": int(_time.time()),
+                "findings": len(rows),
+                "errors": sum(1 for r in rows if r["severity"] == "error"),
+            }
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            _time.sleep(watch_seconds)
+            try:
+                policy = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
         return 0
     findings = lint_policy(policy)
     shown_rows = [

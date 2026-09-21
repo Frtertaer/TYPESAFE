@@ -1206,7 +1206,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
         "preserve_recent": args.preserve_recent,
         "truncate_head_chars": args.truncate_head_chars,
         "min_reduction": args.min_reduction,
-        "keep_text": args.keep_text,
+        "keep_text": args.keep_text or os.environ.get("JEV_KEEP_TEXT", ""),
         "trace": load_trace(args.trace),
     }
     asker: Asker
@@ -1399,7 +1399,7 @@ def main(argv: list[str] | None = None) -> int:
                     "preserve_recent": args.preserve_recent,
                     "truncate_head_chars": args.truncate_head_chars,
                     "min_reduction": args.min_reduction,
-                    "keep_text": args.keep_text,
+                    "keep_text": args.keep_text or os.environ.get("JEV_KEEP_TEXT", ""),
                     "trace": load_trace(args.trace),
                 }
                 asker = (

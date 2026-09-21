@@ -1379,6 +1379,55 @@ class KeepTextTests(unittest.TestCase):
         self.assertNotIn("k1", self._kept_ids(out))
 
 
+class KeepTextEnvTests(unittest.TestCase):
+    def setUp(self):
+        self._spill_env = patch.dict(os.environ, {"JEV_CONSULT_SPILL": "0"})
+        self._spill_env.start()
+        self.addCleanup(self._spill_env.stop)
+
+    def test_env_keep_text_pins_matching_tool(self):
+        import io
+        import json as _json
+        from contextlib import redirect_stdout
+
+        messages = [{"role": "user", "content": "compress"}]
+        messages.append(
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "k1",
+                        "name": "SeekTool",
+                        "input": {"file_path": "src/a.ts"},
+                    }
+                ],
+            }
+        )
+        messages.append(
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "k1", "content": "blob " * 500}]}
+        )
+        for i in range(12):
+            messages.append({"role": "assistant" if i % 2 else "user", "content": "filler %d" % i})
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.json"
+            path.write_text(_json.dumps(messages), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_KEEP_TEXT": "SeekTool"}):
+                with redirect_stdout(buf):
+                    rc = C.main(
+                        [str(path), "--history", "--fake", "--min-reduction", "0"]
+                    )
+            self.assertEqual(rc, 0)
+            out = _json.loads(buf.getvalue())
+            ids = {
+                t["tool_use_id"]
+                for m in out["messages"]
+                for t in (m.get("toolUses") or [])
+            }
+            self.assertIn("k1", ids)
+
+
 class DryRunTests(unittest.TestCase):
     def setUp(self):
         self._spill_env = patch.dict(os.environ, {"JEV_CONSULT_SPILL": "0"})

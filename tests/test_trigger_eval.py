@@ -211,6 +211,7 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(out["hits"], 23)
         self.assertAlmostEqual(out["coverage"], 0.92)
         self.assertTrue(out["ok"])
+        self.assertEqual(len(out["uncovered"]), 2)
 
     def test_min_coverage_gates_hit_rate(self) -> None:
         buf = io.StringIO()

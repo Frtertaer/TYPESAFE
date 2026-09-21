@@ -539,6 +539,21 @@ def main(argv: list[str] | None = None) -> int:
                         "hits": result["hits"],
                         "total": len(result["cases"]),
                         "coverage": result["coverage"],
+                        "uncovered": [
+                            row["id"]
+                            for row in result["cases"]
+                            if not (
+                                (
+                                    row["should_trigger"]
+                                    and row["score"] is not None
+                                    and row["score"] > 0
+                                )
+                                or (
+                                    not row["should_trigger"]
+                                    and (not row["lexical"] or not row["score"])
+                                )
+                            )
+                        ],
                         "ok": result["ok"] and _coverage_ok(),
                     }
                 )

@@ -1719,5 +1719,25 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0)
             self.assertIn("2", proc.stdout)
 
+    def test_where_not_filters_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "harness": "claude", "jev_status": "ok", "winner": "skill_jwt-auth"},
+                    {"ts": 2, "harness": "codex", "jev_status": "ok", "winner": "skill_zzz"},
+                    {"ts": 3, "harness": "claude", "jev_status": "ok"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--where-not", "winner=skill_jwt-auth", "--count")
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn("2", proc.stdout)
+            proc = self.run_cli(
+                "--file", str(path), "--where", "harness=claude", "--where-not", "winner=skill_jwt-auth", "--count"
+            )
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn("1", proc.stdout)
+
 if __name__ == "__main__":
     unittest.main()

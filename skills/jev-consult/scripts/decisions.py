@@ -474,6 +474,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Keep entries whose KEY field (dotted dig) string-equals VAL; repeatable",
     )
     parser.add_argument(
+        "--where-not",
+        action="append",
+        metavar="KEY=VAL",
+        default=None,
+        help="Drop entries whose KEY field (dotted dig) string-equals VAL; repeatable",
+    )
+    parser.add_argument(
         "--statuses",
         action="store_true",
         help="Print unique jev_status values with counts, sorted desc",
@@ -724,6 +731,16 @@ def main(argv: list[str] | None = None) -> int:
             for item in entries
             if str(_dig(item, wkey) if _dig(item, wkey) is not None else "").lower() == wval
         ]
+    for pair in getattr(args, "where_not", None) or []:
+        if "=" not in pair:
+            continue
+        wkey, wval = pair.split("=", 1)
+        wkey, wval = wkey.strip(), wval.strip().lower()
+        entries = [
+            item
+            for item in entries
+            if str(_dig(item, wkey) if _dig(item, wkey) is not None else "").lower() != wval
+        ]
     if args.prompt:
         needle = args.prompt.lower()
         entries = [
@@ -757,9 +774,10 @@ def main(argv: list[str] | None = None) -> int:
             or getattr(args, "min_shortlist", None) is not None
             or getattr(args, "min_prompt_len", None) is not None
             or args.where
+            or getattr(args, "where_not", None)
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, --min-catalog, --min-shortlist, --min-prompt-len, --where, or --prompt (--reverse does not affect --prune)\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, --min-catalog, --min-shortlist, --min-prompt-len, --where, --where-not, or --prompt (--reverse does not affect --prune)\n"
             )
             return 2
         total, total_bad = load_entries(path)

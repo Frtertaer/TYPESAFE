@@ -521,16 +521,17 @@ def main(argv: list[str] | None = None) -> int:
             if not tags:
                 uncovered.append(row["id"])
         if args.json:
-            sys.stdout.write(
-                json.dumps(
-                    {
-                        "covers": {t: counts[t] for t in sorted(counts)},
-                        "uncovered": uncovered,
-                        "ok": result["ok"] and _covers_ok(),
-                    }
-                )
-                + "\n"
-            )
+            payload = {
+                "covers": {t: counts[t] for t in sorted(counts)},
+                "uncovered": uncovered,
+                "ok": result["ok"] and _covers_ok(),
+            }
+            if args.min_covers:
+                payload["min_covers"] = args.min_covers
+                payload["below"] = [
+                    t for t in sorted(counts) if counts[t] < args.min_covers
+                ]
+            sys.stdout.write(json.dumps(payload) + "\n")
         else:
             for tag in sorted(counts):
                 low = "  <-- below --min-covers" if (

@@ -627,6 +627,21 @@ class TriggerEvalTests(unittest.TestCase):
         with redirect_stdout(buf):
             te.main(["--min-covers", "4", "--covers"])
         self.assertIn("below --min-covers", buf.getvalue())
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--min-covers", "4", "--covers", "--json"])
+        self.assertEqual(rc, 1)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["min_covers"], 4)
+        self.assertIn("approach", payload["below"])
+        self.assertFalse(payload["ok"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--min-covers", "1", "--covers", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["below"], [])
+        self.assertTrue(payload["ok"])
 
     def test_report_writes_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

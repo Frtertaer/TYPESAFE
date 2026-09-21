@@ -2280,6 +2280,15 @@ class DebugFlagTests(unittest.TestCase):
         self.assertIn("jev_status=", err)
         self.assertIn("shortlist=", err)
 
+    def test_out_flag_writes_payload_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "hook.json"
+            payload = {"hook_event_name": "UserPromptSubmit", "prompt": "Add JWT tokens"}
+            rc, out, err = self._run_main(payload, ["--out", str(out_path)])
+            self.assertEqual(rc, 0)
+            written = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual(written, json.loads(out))
+
     def test_no_debug_flag_silent_stderr(self) -> None:
         payload = {"hook_event_name": "UserPromptSubmit", "prompt": "Add JWT tokens"}
         rc, out, err = self._run_main(payload, [])

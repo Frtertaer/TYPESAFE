@@ -489,6 +489,13 @@ def main(argv: list[str] | None = None) -> int:
         out = handle(payload)
     except Exception:
         out = {}
+    if "--out" in argv:
+        idx = argv.index("--out")
+        if idx + 1 < len(argv):
+            try:
+                Path(argv[idx + 1]).write_text(json.dumps(out) + "\n", encoding="utf-8")
+            except OSError:
+                pass
     sys.stdout.write(json.dumps(out) + "\n")
     if "--json" in argv and LAST_DECISION is not None:
         sys.stderr.write(json.dumps(LAST_DECISION, sort_keys=True) + "\n")

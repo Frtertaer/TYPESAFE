@@ -33,6 +33,7 @@ def empty() -> dict[str, Any]:
     data = dict(EMPTY)
     data["inspected"] = []
     data["history"] = []
+    data["notes"] = []
     return data
 
 

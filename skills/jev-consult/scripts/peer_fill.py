@@ -306,6 +306,11 @@ def main() -> int:
         metavar="NAME",
         help="Print one peer item's full JSON record by name and exit.",
     )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Print the cwd fill state (miss file, task, ask file) as JSON and exit.",
+    )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     task = args.task
@@ -319,6 +324,23 @@ def main() -> int:
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home()
     if dest == "auto":
         dest = detect_harness(Path(__file__))
+    if args.status:
+        try:
+            miss = read_miss(cwd / MISS_NAME)
+            ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+            report = {
+                "cwd": str(cwd),
+                "harness": dest,
+                "miss": bool(miss),
+                "miss_task": str(miss.get("task") or "") if miss else "",
+                "miss_written_at": miss.get("written_at") if miss else None,
+                "ask_file_exists": ask_path.is_file(),
+                "task": task,
+            }
+            sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        except Exception:
+            sys.stdout.write(json.dumps({"error": "fail_open"}) + "\n")
+        return 0
     if args.list:
         try:
             peers = peer_skills(dest, home, hermes)

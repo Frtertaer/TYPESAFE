@@ -6,6 +6,7 @@ import importlib.util
 import json
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -667,6 +668,28 @@ class PeerFillE2ETests(unittest.TestCase):
             self.assertEqual(entries[0]["jev_status"], "fill")
             self.assertEqual(entries[0]["fill"], "peer")
             self.assertEqual(entries[0]["outcome"], "no_peer")
+
+    def test_status_reports_fill_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(["--status", "--cwd", tmp], tmp, tmp)
+            report = json.loads(out)
+            self.assertFalse(report["miss"])
+            self.assertFalse(report["ask_file_exists"])
+            self.assertEqual(report["cwd"], str(Path(tmp).resolve()))
+            (Path(tmp) / ".jev-peer-fill.request.json").write_text(
+                "{}", encoding="utf-8"
+            )
+            (Path(tmp) / ".jev-tools-miss.json").write_text(
+                json.dumps(
+                    {"task": "jwt", "harness": "codex", "written_at": time.time()}
+                ),
+                encoding="utf-8",
+            )
+            out = self._run(["--status", "--cwd", tmp], tmp, tmp)
+            report = json.loads(out)
+            self.assertTrue(report["miss"])
+            self.assertEqual(report["miss_task"], "jwt")
+            self.assertTrue(report["ask_file_exists"])
 
 
 if __name__ == "__main__":

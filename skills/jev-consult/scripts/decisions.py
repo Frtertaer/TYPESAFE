@@ -97,6 +97,7 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
         },
         "latency_ms": {
             "n": len(latencies),
+            "mean": round(sum(latencies) / len(latencies), 1) if latencies else None,
             "p50": _percentile(latencies, 0.5),
             "p90": _percentile(latencies, 0.9),
             "max": max(latencies) if latencies else None,
@@ -130,8 +131,8 @@ def format_stats(stats: dict) -> str:
     latency = stats["latency_ms"]
     if latency["n"]:
         lines.append(
-            "latency_ms: n=%d p50=%s p90=%s max=%s"
-            % (latency["n"], latency["p50"], latency["p90"], latency["max"])
+            "latency_ms: n=%d mean=%s p50=%s p90=%s max=%s"
+            % (latency["n"], latency["mean"], latency["p50"], latency["p90"], latency["max"])
         )
     if stats["top_winners"]:
         lines.append(

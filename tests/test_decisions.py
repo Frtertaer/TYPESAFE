@@ -72,6 +72,7 @@ class SummarizeTest(unittest.TestCase):
         self.assertAlmostEqual(stats["need_skill"]["mean"], 0.4667, places=3)
         self.assertEqual(stats["latency_ms"]["p50"], 200)
         self.assertEqual(stats["latency_ms"]["max"], 300)
+        self.assertAlmostEqual(stats["latency_ms"]["mean"], 200.0, places=1)
         self.assertEqual(stats["top_winners"]["skill:alpha"], 2)
 
     def test_empty(self):

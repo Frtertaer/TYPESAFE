@@ -29,7 +29,7 @@ python skills/jev-consult/scripts/decisions.py                          # stats 
                                                                         # --statuses/--harnesses/--winners/--outcomes/--fills/--fields,
                                                                         # --jsonl raw entries; --prune keeps only filtered
 python skills/jev-consult/scripts/compare.py --live
-python skills/jev-consult/scripts/compact.py transcript.json --history --fake   # --dir DIR for batch, --prune-spill S
+python skills/jev-consult/scripts/compact.py transcript.json --history --fake   # --dir DIR for batch, --prune-spill S, --list-spill
 python skills/jev-consult/scripts/trace.py show --key plan                      # single field from .jev-trace.json
 python skills/jev-consult/scripts/trace.py stats                                # counts, last_pick, file age
 python tests/test_jev.py

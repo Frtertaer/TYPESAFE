@@ -1290,5 +1290,37 @@ class PruneSpillTests(unittest.TestCase):
             self.assertFalse(stale.exists())
 
 
+class ListSpillTests(unittest.TestCase):
+    def test_lists_files_with_size_and_mtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            a = target / "a.txt"
+            a.write_text("x" * 7, encoding="utf-8")
+            (target / "sub").mkdir()
+            rows = C.list_spill(target)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0][0], a)
+            self.assertEqual(rows[0][1], 7)
+            self.assertGreater(rows[0][2], 0)
+
+    def test_missing_dir_returns_empty(self) -> None:
+        self.assertEqual(C.list_spill(Path("no-such-spill-dir")), [])
+
+    def test_cli_list_spill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            f = target / "f.txt"
+            f.write_text("y" * 5, encoding="utf-8")
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--list-spill", "--spill-dir", str(target)])
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertIn("%s 5 " % f, out)
+            self.assertIn("1 spill files", out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

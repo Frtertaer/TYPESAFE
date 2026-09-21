@@ -1226,6 +1226,23 @@ def cmd_compact(args: argparse.Namespace) -> int:
     return 0
 
 
+def list_spill(directory: Path | None = None) -> list[tuple[Path, int, float]]:
+    """Return (path, size_bytes, mtime) for regular files in the spill dir."""
+    target = directory if directory is not None else spill_dir_default()
+    if target is None or not target.is_dir():
+        return []
+    rows: list[tuple[Path, int, float]] = []
+    for candidate in sorted(target.iterdir()):
+        try:
+            info = candidate.stat()
+        except OSError:
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            continue
+        rows.append((candidate, info.st_size, info.st_mtime))
+    return rows
+
+
 def prune_spill(
     directory: Path | None = None,
     older_than: float = 0.0,
@@ -1280,7 +1297,12 @@ def main(argv: list[str] | None = None) -> int:
         metavar="SECONDS",
         help="Unlink spill files older than SECONDS in the spill dir (or --spill-dir) and exit.",
     )
-    parser.add_argument("--spill-dir", help="Override spill directory for --prune-spill.")
+    parser.add_argument("--spill-dir", help="Override spill directory for --prune-spill/--list-spill.")
+    parser.add_argument(
+        "--list-spill",
+        action="store_true",
+        help="List spill files (name, bytes, mtime) and exit.",
+    )
     parser.add_argument(
         "--stats",
         action="store_true",
@@ -1292,6 +1314,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Compact every *.json/*.jsonl transcript in DIR; one JSON line per file on stdout.",
     )
     args = parser.parse_args(argv)
+    if args.list_spill:
+        directory = Path(args.spill_dir) if args.spill_dir else None
+        rows = list_spill(directory)
+        for path, size, mtime in rows:
+            sys.stdout.write("%s %d %d\n" % (path, size, int(mtime)))
+        sys.stdout.write("%d spill files\n" % len(rows))
+        return 0
     if args.prune_spill is not None:
         directory = Path(args.spill_dir) if args.spill_dir else None
         removed = prune_spill(directory, args.prune_spill)

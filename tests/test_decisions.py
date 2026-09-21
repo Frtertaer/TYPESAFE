@@ -213,6 +213,26 @@ class CliTest(unittest.TestCase):
             self.assertIn("beta", proc.stdout)
             self.assertIn("fix the flaky test", proc.stdout)
 
+    def test_count_prints_filtered_total(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1700000000, "harness": "codex", "jev_status": "winner"},
+                    {"ts": 1700000001, "harness": "hermes", "jev_status": "winner"},
+                    {"ts": 1700000002, "harness": "codex", "jev_status": "fail_open"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--count")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip(), "3")
+            proc = self.run_cli(
+                "--file", str(path), "--count", "--status", "winner"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip(), "2")
+
     def test_json_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

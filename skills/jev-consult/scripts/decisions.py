@@ -367,6 +367,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print counts of dedupe true/false, sorted desc",
     )
     parser.add_argument(
+        "--count",
+        action="store_true",
+        help="Print only the number of entries matching the filters",
+    )
+    parser.add_argument(
         "--prune",
         action="store_true",
         help="Rewrite the log keeping only entries matching the time/status filters",
@@ -438,6 +443,9 @@ def main(argv: list[str] | None = None) -> int:
             "pruned %d of %d entries (kept %d)\n"
             % (len(total) - len(entries), len(total), len(entries))
         )
+    if args.count:
+        sys.stdout.write("%d\n" % len(entries))
+        return 0
     if (
         args.statuses
         or args.harnesses

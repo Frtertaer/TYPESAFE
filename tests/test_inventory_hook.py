@@ -1685,7 +1685,7 @@ class CheckMissTests(unittest.TestCase):
             with patch("sys.stdout", buf):
                 rc = INV.main(["--check-miss", str(miss)])
             self.assertEqual(rc, 0)
-            self.assertEqual(buf.getvalue().strip(), "fresh")
+            self.assertTrue(buf.getvalue().strip().startswith("fresh"))
 
             buf = io.StringIO()
             with patch("sys.stdout", buf):

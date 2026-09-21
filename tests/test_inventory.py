@@ -246,6 +246,52 @@ class InventoryTests(unittest.TestCase):
             meta = inv.parse_frontmatter(path)
         self.assertEqual(meta["description"], "First part continued here")
 
+    def test_check_sidecar_reports_age(self) -> None:
+        import re
+        import time as time_mod
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            path.write_text(
+                json.dumps({"written_at": time_mod.time() - 10}), encoding="utf-8"
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--check-sidecar", str(path)])
+            self.assertEqual(code, 0)
+            out = buf.getvalue().strip()
+            self.assertRegex(out, r"^fresh \(age \d+s\)$")
+            self.assertGreaterEqual(int(re.search(r"age (\d+)s", out).group(1)), 9)
+
+    def test_check_sidecar_missing_no_age(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--check-sidecar", str(Path(tmp) / "none.json")])
+            self.assertEqual(code, 0)
+            self.assertEqual(buf.getvalue().strip(), "missing")
+
+    def test_check_sidecar_stale_reports_age(self) -> None:
+        import time as time_mod
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            path.write_text(
+                json.dumps({"written_at": time_mod.time() - 999999}), encoding="utf-8"
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--check-sidecar", str(path)])
+            self.assertEqual(code, 0)
+            self.assertTrue(buf.getvalue().strip().startswith("stale (age "))
+
     def test_picker_request_has_untrusted_rule(self) -> None:
         payload = inv.picker_request(
             "task", "hermes", [{"id": "x", "kind": "skill", "name": "jwt-auth"}]

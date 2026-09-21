@@ -108,7 +108,7 @@ class SidecarTtlTests(unittest.TestCase):
             with redirect_stdout(buf):
                 code = INV.main(["--check-sidecar", str(path)])
             self.assertEqual(code, 0)
-            self.assertEqual(buf.getvalue().strip(), "fresh")
+            self.assertTrue(buf.getvalue().strip().startswith("fresh"))
 
     def test_read_miss_drops_stale(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

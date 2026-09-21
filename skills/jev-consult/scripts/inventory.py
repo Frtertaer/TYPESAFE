@@ -963,11 +963,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
     args = parser.parse_args(argv)
-    if args.check_sidecar:
-        sys.stdout.write(sidecar_status(Path(args.check_sidecar)) + "\n")
-        return 0
-    if args.check_miss:
-        sys.stdout.write(sidecar_status(Path(args.check_miss)) + "\n")
+    if args.check_sidecar or args.check_miss:
+        target = Path(args.check_sidecar or args.check_miss)
+        status = sidecar_status(target)
+        suffix = ""
+        if status in ("fresh", "stale"):
+            written = read_sidecar(target).get("written_at")
+            if isinstance(written, (int, float)) and not isinstance(written, bool):
+                suffix = " (age %ds)" % int(time.time() - float(written))
+        sys.stdout.write(status + suffix + "\n")
         return 0
     if args.prune_sidecars:
         removed = prune_stale_sidecars(Path(args.prune_sidecars))

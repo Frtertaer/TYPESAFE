@@ -1039,6 +1039,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--all-names", action="store_true", help="Include every installed name (no descriptions).")
     parser.add_argument("--scores", action="store_true", help="Add IDF score to each shortlist item.")
+    parser.add_argument("--csv", action="store_true", help="Emit the shortlist as CSV rows instead of JSON.")
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
     args = parser.parse_args(argv)
@@ -1112,7 +1113,21 @@ def main(argv: list[str] | None = None) -> int:
         payload["shortlist"] = [
             {**item, "score": score_item(item, query, df)} for item in picked
         ]
-    sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+    if getattr(args, "csv", False):
+        import csv as _csv
+
+        writer = _csv.writer(sys.stdout, lineterminator="\n")
+        header = ["id", "kind", "name"]
+        if args.scores:
+            header.append("score")
+        writer.writerow(header)
+        for item in payload["shortlist"]:
+            row = [item.get("id") or "", item.get("kind") or "", item.get("name") or ""]
+            if args.scores:
+                row.append("%.4f" % (item.get("score") or 0))
+            writer.writerow(row)
+    else:
+        sys.stdout.write(json.dumps(payload, indent=2) + "\n")
     if args.write_ask:
         write_ask(Path(args.write_ask), args.task, harness, picked)
     if args.sidecar:

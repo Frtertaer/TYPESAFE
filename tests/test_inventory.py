@@ -185,6 +185,33 @@ class InventoryTests(unittest.TestCase):
         self.assertIn("jwt-auth", names)
         self.assertNotIn("ascii-art", names)
 
+    def test_cli_csv_shortlist(self) -> None:
+        import csv as _csv
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--task",
+                    "jwt tokens",
+                    "--limit",
+                    "8",
+                    "--csv",
+                ]
+            )
+        self.assertEqual(code, 0)
+        rows = list(_csv.reader(StringIO(buf.getvalue())))
+        self.assertEqual(rows[0], ["id", "kind", "name"])
+        names = [row[2] for row in rows[1:]]
+        self.assertIn("jwt-auth", names)
+        self.assertNotIn("ascii-art", names)
+
     def _write_skill(self, tmp: str, name: str, frontmatter: str) -> Path:
         skill = Path(tmp) / name
         skill.mkdir(parents=True)

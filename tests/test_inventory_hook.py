@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -1595,12 +1596,20 @@ class HookE2ETests(unittest.TestCase):
 
     HOOK_PATH = ROOT / "skills" / "jev-consult" / "scripts" / "inventory_hook.py"
 
-    def _run(self, stdin_text: str, cwd: str | None = None, home: str | None = None):
+    def _run(
+        self,
+        stdin_text: str,
+        cwd: str | None = None,
+        home: str | None = None,
+        env_extra: dict | None = None,
+    ):
         import subprocess
 
         env = dict(os.environ)
         env.pop("TYPESAFE_API_KEY", None)
         env["JEV_CONSULT_LOG"] = "0"
+        if env_extra:
+            env.update(env_extra)
         if home:
             env["USERPROFILE"] = home
             env["HOME"] = home
@@ -1656,6 +1665,34 @@ class HookE2ETests(unittest.TestCase):
     def test_unknown_event(self) -> None:
         out = json.loads(self._run(json.dumps({"event": "PostToolUse", "prompt": "x"})))
         self.assertEqual(out, {})
+
+    def test_max_age_skips_stale_payload_e2e(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            stale = json.dumps(
+                {
+                    "event": "UserPromptSubmit",
+                    "prompt": "jwt stuff",
+                    "cwd": str(cwd),
+                    "timestamp": 1700000000,
+                }
+            )
+            out = json.loads(
+                self._run(stale, env_extra={"JEV_HOOK_MAX_AGE": "30"})
+            )
+            self.assertEqual(out, {})
+            fresh = json.dumps(
+                {
+                    "event": "UserPromptSubmit",
+                    "prompt": "jwt stuff",
+                    "cwd": str(cwd),
+                    "timestamp": int(time.time()),
+                }
+            )
+            out = json.loads(
+                self._run(fresh, env_extra={"JEV_HOOK_MAX_AGE": "30"})
+            )
+            self.assertNotEqual(out, {})
 
     def test_json_flag_echoes_last_decision_to_stderr(self) -> None:
         import subprocess

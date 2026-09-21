@@ -1818,5 +1818,22 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0)
             self.assertIn("0 invalid entries", proc.stdout)
 
+    def test_missing_filters_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "ok", "winner": {"name": "jwt"}},
+                    {"ts": 2, "jev_status": "ok"},
+                    {"ts": 3, "jev_status": "ok", "winner": None},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--missing", "winner", "--count")
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn("2", proc.stdout)
+            proc = self.run_cli("--file", str(path), "--missing", "winner.name", "--count")
+            self.assertIn("2", proc.stdout)
+
 if __name__ == "__main__":
     unittest.main()

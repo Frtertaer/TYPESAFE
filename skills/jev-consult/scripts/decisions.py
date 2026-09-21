@@ -481,6 +481,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Drop entries whose KEY field (dotted dig) string-equals VAL; repeatable",
     )
     parser.add_argument(
+        "--missing",
+        metavar="FIELD",
+        default=os.environ.get("JEV_DECISIONS_MISSING", ""),
+        help="Only entries lacking FIELD (dotted dig resolves to None)",
+    )
+    parser.add_argument(
         "--statuses",
         action="store_true",
         help="Print unique jev_status values with counts, sorted desc",
@@ -762,6 +768,9 @@ def main(argv: list[str] | None = None) -> int:
             for item in entries
             if str(_dig(item, wkey) if _dig(item, wkey) is not None else "").lower() == wval
         ]
+    missing_field = getattr(args, "missing", "") or ""
+    if missing_field:
+        entries = [item for item in entries if _dig(item, missing_field) is None]
     for pair in getattr(args, "where_not", None) or []:
         if "=" not in pair:
             continue
@@ -806,9 +815,10 @@ def main(argv: list[str] | None = None) -> int:
             or getattr(args, "min_prompt_len", None) is not None
             or args.where
             or getattr(args, "where_not", None)
+            or missing_field
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, --min-catalog, --min-shortlist, --min-prompt-len, --where, --where-not, or --prompt (--reverse does not affect --prune)\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, --min-catalog, --min-shortlist, --min-prompt-len, --where, --where-not, --missing, or --prompt (--reverse does not affect --prune)\n"
             )
             return 2
         total, total_bad = load_entries(path)

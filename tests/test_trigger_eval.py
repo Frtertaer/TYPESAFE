@@ -635,6 +635,20 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertTrue(all(t["ok"] for t in ticks))
         self.assertIn("worst_positive", ticks[0])
         self.assertAlmostEqual(ticks[0]["coverage"], 0.92)
+        self.assertTrue(ticks[0]["coverage_ok"])
+
+    def test_watch_tick_reports_coverage_gate(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
+            with redirect_stdout(buf):
+                rc = te.main(
+                    ["--watch", "0.01", "--quiet", "--min-coverage", "0.99"]
+                )
+        self.assertEqual(rc, 0)
+        tick = json.loads(
+            next(l for l in buf.getvalue().splitlines() if l.startswith("{"))
+        )
+        self.assertFalse(tick["coverage_ok"])
 
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

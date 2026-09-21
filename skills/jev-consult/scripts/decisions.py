@@ -58,6 +58,7 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
     winners: dict[str, int] = {}
     needs: list[float] = []
     latencies: list[float] = []
+    shortlists: list[float] = []
     prompts: dict[str, int] = {}
     stamps: list[float] = []
     explicit = strong = 0
@@ -83,6 +84,9 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
         latency = item.get("latency_ms")
         if isinstance(latency, (int, float)):
             latencies.append(float(latency))
+        sl = item.get("shortlist_n")
+        if isinstance(sl, (int, float)) and not isinstance(sl, bool):
+            shortlists.append(float(sl))
         ts = item.get("ts")
         if isinstance(ts, (int, float)) and not isinstance(ts, bool):
             stamps.append(float(ts))
@@ -107,6 +111,12 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
             "p50": _percentile(latencies, 0.5),
             "p90": _percentile(latencies, 0.9),
             "max": max(latencies) if latencies else None,
+        },
+        "shortlist_n": {
+            "n": len(shortlists),
+            "mean": round(sum(shortlists) / len(shortlists), 2) if shortlists else None,
+            "min": min(shortlists) if shortlists else None,
+            "max": max(shortlists) if shortlists else None,
         },
         "top_winners": dict(
             sorted(winners.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
@@ -146,6 +156,12 @@ def format_stats(stats: dict) -> str:
         lines.append(
             "latency_ms: n=%d mean=%s p50=%s p90=%s max=%s"
             % (latency["n"], latency["mean"], latency["p50"], latency["p90"], latency["max"])
+        )
+    sl = stats["shortlist_n"]
+    if sl["n"]:
+        lines.append(
+            "shortlist_n: n=%d mean=%s min=%s max=%s"
+            % (sl["n"], sl["mean"], sl["min"], sl["max"])
         )
     if stats["top_winners"]:
         lines.append(

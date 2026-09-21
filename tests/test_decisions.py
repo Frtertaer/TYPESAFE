@@ -77,6 +77,21 @@ class SummarizeTest(unittest.TestCase):
         self.assertEqual(stats["top_winners"]["skill:alpha"], 2)
         self.assertIsNone(stats["first_ts"])
 
+    def test_shortlist_n_aggregates(self):
+        stats = decisions.summarize(
+            [
+                {"jev_status": "idf", "shortlist_n": 6},
+                {"jev_status": "winner", "shortlist_n": 4},
+                {"jev_status": "dedupe"},
+            ]
+        )
+        self.assertEqual(stats["shortlist_n"]["n"], 2)
+        self.assertAlmostEqual(stats["shortlist_n"]["mean"], 5.0, places=2)
+        self.assertEqual(stats["shortlist_n"]["min"], 4.0)
+        self.assertEqual(stats["shortlist_n"]["max"], 6.0)
+        out = decisions.format_stats(stats)
+        self.assertIn("shortlist_n:", out)
+
     def test_first_last_ts(self):
         entries = [
             {"ts": 1000.0, "jev_status": "winner"},

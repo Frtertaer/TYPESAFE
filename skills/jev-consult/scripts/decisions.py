@@ -167,6 +167,12 @@ def time_str(ts: object) -> str:
         return "?"
 
 
+def filter_harness(entries: list[dict], harness: str | None) -> list[dict]:
+    if not harness:
+        return entries
+    return [item for item in entries if str(item.get("harness") or "") == harness]
+
+
 def filter_since(entries: list[dict], since: float | None) -> list[dict]:
     if since is None:
         return entries
@@ -206,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tail", type=int, default=0, help="Print last N entries")
     parser.add_argument("--days", type=float, default=0.0, help="Only entries from the last N days")
     parser.add_argument("--since", type=float, default=0.0, help="Only entries with ts >= epoch seconds")
+    parser.add_argument("--harness", default="", help="Only entries for this harness")
     parser.add_argument(
         "--prune",
         action="store_true",
@@ -226,6 +233,8 @@ def main(argv: list[str] | None = None) -> int:
         since = time.time() - args.days * 86400
     if since is not None:
         entries = filter_since(entries, since)
+    if args.harness:
+        entries = filter_harness(entries, args.harness)
     if args.prune:
         if since is None:
             sys.stderr.write("--prune requires --days or --since\n")

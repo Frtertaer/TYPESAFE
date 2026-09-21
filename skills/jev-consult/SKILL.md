@@ -153,6 +153,8 @@ If `installed_enough` is no and `peer_fill` printed `no_peer`, run `catalog_fill
 
 Mid-session: same path. You ask Jev; Jev only chooses.
 
+Trigger evals: `trigger-cases.json` in the repo's test fixtures lists prompts that must (and must not) route to this skill. The vendored `run_trigger_evals` tool scores each case's lexical overlap with this SKILL.md description — every positive must clear the strongest negative by a 1.15 margin (`"lexical": false` cases skip the lexical tier). `covers` names must match `must_ask` kinds in `policy.json`, and every kind needs at least one positive case. A failure means fix the description, not the scorer.
+
 ## After clone
 
 ```text

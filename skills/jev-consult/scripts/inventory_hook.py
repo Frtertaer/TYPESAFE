@@ -34,10 +34,12 @@ from inventory import (  # noqa: E402
     hook_note_limit,
     hook_jev_retries,
     hook_jev_timeout_seconds,
+    name_df,
     picker_request,
     read_sidecar,
     resolve_picker,
     scan_cached,
+    score_item,
     shortlist,
     sidecar_age_seconds,
     sidecar_fresh,
@@ -60,6 +62,21 @@ def _redact_prompt(prompt: str) -> str:
         return jev_mod.redact(prompt)
     except Exception:
         return prompt
+
+
+def _avg_score(items: list[dict], pool: list[dict], text: str) -> float | None:
+    """Mean IDF score of `items` under the prompt query; None when no query."""
+    query = tokens(text)
+    if not query or not items:
+        return None
+    try:
+        df = name_df(pool or items, query)
+        vals = [score_item(item, query, df) for item in items]
+    except Exception:
+        return None
+    if not vals:
+        return None
+    return round(sum(vals) / len(vals), 3)
 
 
 def last_decision_age() -> float | None:
@@ -311,6 +328,7 @@ def handle(
             if winner_out
             else None,
             "sidecar_age_s": sidecar_age_s,
+            "shortlist_score_avg": _avg_score(picked, items or picked, prompt),
         }
         append_decision(LAST_DECISION)
         if not note:
@@ -385,6 +403,7 @@ def handle(
         "question": picker.get("question"),
         "need": picker.get("need"),
         "probabilities": picker.get("probabilities") or {},
+        "shortlist_score_avg": _avg_score(picked, catalog, prompt),
         "winner": {"kind": winner.get("kind"), "name": winner.get("name")}
         if winner
         else None,
@@ -475,6 +494,7 @@ def main(argv: list[str] | None = None) -> int:
             "shortlist": len(LAST_DECISION.get("shortlist") or []),
             "latency_ms": LAST_DECISION.get("latency_ms"),
             "sidecar_age_s": LAST_DECISION.get("sidecar_age_s"),
+            "score_avg": LAST_DECISION.get("shortlist_score_avg"),
         }
         line = " ".join("%s=%s" % (k, v) for k, v in parts.items() if v is not None)
         if _debug_enabled(argv):

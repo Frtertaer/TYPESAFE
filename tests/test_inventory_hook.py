@@ -84,6 +84,26 @@ class InventoryHookTests(unittest.TestCase):
             self.assertEqual(note.count("- skill"), 1)
             self.assertGreater(HOOK.LAST_DECISION["shortlist_n"], 1)
 
+    def test_last_decision_records_shortlist_score_avg(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            HOOK.handle(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "Add JWT access tokens in Python",
+                    "cwd": tmp,
+                },
+                items=items,
+                harness="claude-code",
+                pick_fn=skip_pick,
+            )
+            avg = HOOK.LAST_DECISION["shortlist_score_avg"]
+            self.assertIsInstance(avg, float)
+            self.assertGreater(avg, 0)
+
+    def test_avg_score_none_for_empty_query(self) -> None:
+        self.assertIsNone(HOOK._avg_score([{"name": "x"}], [], ""))
+
     def test_max_age_env_skips_stale_prompt(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

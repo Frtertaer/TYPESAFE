@@ -237,6 +237,9 @@ def cmd_notes(args: argparse.Namespace) -> int:
     data = load(path)
     notes = data.get("notes")
     notes = notes if isinstance(notes, list) else []
+    limit = getattr(args, "limit", None)
+    if isinstance(limit, int) and limit >= 0:
+        notes = notes[-limit:] if limit else []
     if getattr(args, "json", False):
         sys.stdout.write(json.dumps(notes, ensure_ascii=False, indent=2) + "\n")
         return 0
@@ -340,6 +343,7 @@ def build_parser() -> argparse.ArgumentParser:
     stats_cmd.set_defaults(func=cmd_stats)
     notes_cmd = sub.add_parser("notes", help="List recorded notes (iso + text)")
     notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")
+    notes_cmd.add_argument("--limit", type=int, help="Show only the last N notes")
     notes_cmd.set_defaults(func=cmd_notes)
     return parser
 

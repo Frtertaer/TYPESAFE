@@ -318,6 +318,25 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(rows[0]["text"], "n1")
             self.assertIn("iso", rows[0])
 
+    def test_cli_notes_limit_caps_output(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            for text in ("a", "b", "c"):
+                tr.main(["--file", str(path), "record", "--pick", "x", "--note", text])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--limit", "2"])
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertNotIn("a", out.split(" note(s)")[0].split("\n")[0])
+            self.assertIn("b", out)
+            self.assertIn("c", out)
+            self.assertIn("2 note(s)", out)
+
     def test_cli_record_note_stdin_dash(self) -> None:
         import io
         from unittest.mock import patch

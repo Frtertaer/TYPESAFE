@@ -1172,6 +1172,23 @@ class CompactCliTests(unittest.TestCase):
                 )
             self.assertEqual(rc, 0)
             self.assertIn("check: ok", buf.getvalue())
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [
+                        str(f),
+                        "--history",
+                        "--fake",
+                        "--min-reduction",
+                        "0.99",
+                        "--check",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(rc, 1)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["check"], "FAIL")
+            self.assertEqual(out["min_reduction"], 0.99)
 
     def test_trace_file_loads(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

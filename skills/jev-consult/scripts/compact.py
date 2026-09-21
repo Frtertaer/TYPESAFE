@@ -1232,14 +1232,26 @@ def cmd_compact(args: argparse.Namespace) -> int:
     if getattr(args, "check", False):
         stats = result.get("stats") or {}
         ratio = stats.get("reduction", reduction_ratio(result))
-        if stats.get("fallback"):
+        ok = not stats.get("fallback")
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "check": "ok" if ok else "FAIL",
+                        "reduction": ratio,
+                        "min_reduction": args.min_reduction,
+                    }
+                )
+                + "\n"
+            )
+        elif ok:
+            sys.stdout.write("check: ok reduction %.3f\n" % ratio)
+        else:
             sys.stdout.write(
                 "check: FAIL reduction %.3f below --min-reduction %s\n"
                 % (ratio, args.min_reduction)
             )
-            return 1
-        sys.stdout.write("check: ok reduction %.3f\n" % ratio)
-        return 0
+        return 0 if ok else 1
     if getattr(args, "dry_run", False):
         result["messages"] = messages
         stats = result.setdefault("stats", {})

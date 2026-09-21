@@ -1911,6 +1911,27 @@ class PruneTest(unittest.TestCase):
                 json.loads(proc.stdout)["values"], ["jwt-auth"]
             )
 
+    def test_jq_last_limits_to_one_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "winner": {"kind": "skill", "name": "jwt-auth"}},
+                    {"ts": 2, "winner": {"kind": "mcp", "name": "sqlite"}},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--jq", "winner.name", "--jq-last"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.splitlines(), ["sqlite"])
+            proc = self.run_cli(
+                "--file", str(path), "--jq", "winner.name",
+                "--jq-last", "--json",
+            )
+            self.assertEqual(json.loads(proc.stdout)["values"], ["sqlite"])
+
     def test_status_outcome_fill_winner_accept_comma_lists(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

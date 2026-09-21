@@ -565,6 +565,11 @@ def main(argv: list[str] | None = None) -> int:
         help="With --jq: print only the first extracted value",
     )
     parser.add_argument(
+        "--jq-last",
+        action="store_true",
+        help="With --jq: print only the last extracted value",
+    )
+    parser.add_argument(
         "--errors",
         action="store_true",
         help="Print the unparseable jsonl lines with line numbers (rc 1 when any)",
@@ -943,6 +948,8 @@ def main(argv: list[str] | None = None) -> int:
             values = filtered
         if getattr(args, "jq_first", False):
             values = values[:1]
+        if getattr(args, "jq_last", False):
+            values = values[-1:]
         if args.json:
             out_values = [list(v) if isinstance(v, tuple) else v for v in values]
             sys.stdout.write(json.dumps({"field": args.jq, "values": out_values}, indent=2) + "\n")

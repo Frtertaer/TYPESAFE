@@ -170,14 +170,14 @@ def handle(
     harness = harness or detect_harness(Path(__file__))
     cwd = extract_cwd(payload)
     deduped = None
+    stale_match = False
     if cwd is not None:
         prior = read_sidecar(cwd / SIDECAR_NAME)
-        if (
-            prior
-            and sidecar_fresh(prior)
-            and str(prior.get("task") or "") == prompt[:500]
-        ):
-            deduped = prior
+        if prior and str(prior.get("task") or "") == prompt[:500]:
+            if sidecar_fresh(prior):
+                deduped = prior
+            else:
+                stale_match = True
     if deduped is not None:
         picked = sidecar_items(deduped)
         prior_pick = deduped.get("jev_pick")
@@ -253,6 +253,8 @@ def handle(
             except Exception:
                 picker = {"status": "error", "winner": None}
     extra = {"jev_status": str(picker.get("status") or "idf")}
+    if stale_match:
+        extra["stale_sidecar"] = True
     if explicit_winner is not None:
         extra["explicit"] = True
     if picker.get("strong"):
@@ -277,6 +279,7 @@ def handle(
         else None,
         "strong_pick": bool(picker.get("strong")),
         "latency_ms": picker.get("latency_ms"),
+        "stale_sidecar": stale_match,
     }
     append_decision(LAST_DECISION)
     if cwd is not None:

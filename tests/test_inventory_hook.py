@@ -1613,6 +1613,32 @@ class DedupeTests(unittest.TestCase):
             )
         self.assertEqual(len(calls), 2)
 
+    def test_stale_sidecar_marks_decision(self) -> None:
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            prompt = "Add JWT access tokens in Python"
+            HOOK.handle(
+                self._payload(prompt, tmp),
+                items=self._items(),
+                harness="claude-code",
+                pick_fn=skip_pick,
+            )
+            self.assertFalse(HOOK.LAST_DECISION.get("stale_sidecar", False))
+            sidecar = Path(tmp) / ".jev-tools.json"
+            data = json.loads(sidecar.read_text(encoding="utf-8"))
+            data["written_at"] = int(_time.time() - 999999)
+            sidecar.write_text(json.dumps(data), encoding="utf-8")
+            HOOK.handle(
+                self._payload(prompt, tmp),
+                items=self._items(),
+                harness="claude-code",
+                pick_fn=skip_pick,
+            )
+            self.assertTrue(HOOK.LAST_DECISION.get("stale_sidecar"))
+            sidecar_data = json.loads(sidecar.read_text(encoding="utf-8"))
+            self.assertTrue(sidecar_data.get("stale_sidecar"))
+
     def test_dedupe_winner_note_replayed(self) -> None:
         def winner_pick(prompt, harness, picked):
             return {"status": "winner", "winner": picked[0]}

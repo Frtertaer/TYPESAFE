@@ -470,5 +470,171 @@ class InstallToolsHookTests(unittest.TestCase):
             self.assertFalse(hooks.exists())
 
 
+_MISSING = object()
+
+PICKED = [
+    {"id": "skill:alpha", "kind": "skill", "name": "alpha", "description": "does alpha"},
+    {"id": "skill:beta", "kind": "skill", "name": "beta", "description": "does beta"},
+]
+
+
+def fake_jev(answers=None, post_exc=None, key_exc=None, decide_exc=None, decide_ret=None):
+    class M:
+        @staticmethod
+        def load_api_key():
+            if key_exc is not None:
+                raise key_exc
+            return "k"
+
+        @staticmethod
+        def load_policy(path=None):
+            return {}
+
+        @staticmethod
+        def post_systemone(state, questions, policy, **kwargs):
+            if post_exc is not None:
+                raise post_exc
+            return {"answers": answers, "model": "fake-0"}
+
+        @staticmethod
+        def decide(ans, policy, irreversible=False):
+            if decide_exc is not None:
+                raise decide_exc
+            if decide_ret is not None:
+                return decide_ret
+            return {"action": "proceed", "picks": {}, "probabilities": {}}
+
+    return M
+
+
+class PickWithJevTests(unittest.TestCase):
+    """The real pick_with_jev fail-open branches (handle() tests inject pick_fn)."""
+
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+        self._had_jev = sys.modules.get("jev", _MISSING)
+        self.addCleanup(self._restore_jev)
+
+    def _restore_jev(self) -> None:
+        if self._had_jev is _MISSING:
+            sys.modules.pop("jev", None)
+        else:
+            sys.modules["jev"] = self._had_jev
+
+    def test_empty_shortlist_never_imports_jev(self) -> None:
+        sys.modules["jev"] = None  # would raise ImportError if reached
+        out = HOOK.pick_with_jev("task", "hermes", [])
+        self.assertEqual(out, {"status": "empty", "winner": None})
+
+    def test_jev_import_failure_is_error(self) -> None:
+        sys.modules["jev"] = None
+        out = HOOK.pick_with_jev("task", "hermes", PICKED)
+        self.assertEqual(out, {"status": "error", "winner": None})
+
+    def test_missing_api_key_is_skip(self) -> None:
+        sys.modules["jev"] = fake_jev(key_exc=SystemExit(2))
+        out = HOOK.pick_with_jev("task", "hermes", PICKED)
+        self.assertEqual(out["status"], "skip")
+
+    def test_post_exception_is_error(self) -> None:
+        sys.modules["jev"] = fake_jev(post_exc=RuntimeError("down"))
+        self.assertEqual(HOOK.pick_with_jev("t", "hermes", PICKED)["status"], "error")
+
+    def test_post_systemexit_is_error(self) -> None:
+        sys.modules["jev"] = fake_jev(post_exc=SystemExit(3))
+        self.assertEqual(HOOK.pick_with_jev("t", "hermes", PICKED)["status"], "error")
+
+    def test_non_dict_answers_is_error(self) -> None:
+        sys.modules["jev"] = fake_jev(answers="nope")
+        self.assertEqual(HOOK.pick_with_jev("t", "hermes", PICKED)["status"], "error")
+
+    def test_decide_exception_is_error(self) -> None:
+        sys.modules["jev"] = fake_jev(decide_exc=ValueError("bad answers"))
+        self.assertEqual(HOOK.pick_with_jev("t", "hermes", PICKED)["status"], "error")
+
+    def test_decide_systemexit_is_error(self) -> None:
+        sys.modules["jev"] = fake_jev(decide_exc=SystemExit(1))
+        self.assertEqual(HOOK.pick_with_jev("t", "hermes", PICKED)["status"], "error")
+
+    def test_escalate_decision_maps_to_escalate(self) -> None:
+        sys.modules["jev"] = fake_jev(decide_ret={"action": "escalate", "picks": {}, "probabilities": {}})
+        self.assertEqual(HOOK.pick_with_jev("t", "hermes", PICKED)["status"], "escalate")
+
+    def test_none_pick_maps_to_none(self) -> None:
+        sys.modules["jev"] = fake_jev(
+            decide_ret={
+                "action": "proceed",
+                "picks": {"load_tools": "none", "need_skill": 0.8},
+                "probabilities": {},
+            }
+        )
+        out = HOOK.pick_with_jev("t", "hermes", PICKED)
+        self.assertEqual(out["status"], "none")
+        self.assertIsNone(out["winner"])
+
+    def test_strong_winner_sets_fields(self) -> None:
+        sys.modules["jev"] = fake_jev(
+            decide_ret={
+                "action": "proceed",
+                "picks": {"load_tools": "skill:beta", "need_skill": 0.9},
+                "probabilities": {"load_tools": {"skill:beta": 0.95}},
+            }
+        )
+        out = HOOK.pick_with_jev("t", "hermes", PICKED)
+        self.assertEqual(out["status"], "winner")
+        self.assertEqual(out["winner"]["name"], "beta")
+        self.assertTrue(out["strong"])
+        self.assertEqual(out["need"], 0.9)
+        self.assertEqual(out["probabilities"], {"skill:beta": 0.95})
+        self.assertIsInstance(out["latency_ms"], int)
+
+    def test_non_numeric_need_still_attached_as_none(self) -> None:
+        sys.modules["jev"] = fake_jev(
+            decide_ret={
+                "action": "proceed",
+                "picks": {"load_tools": "skill:beta", "need_skill": "high"},
+                "probabilities": {"load_tools": {"skill:beta": 0.5}},
+            }
+        )
+        out = HOOK.pick_with_jev("t", "hermes", PICKED)
+        self.assertIsNone(out["need"])
+        self.assertIn(out["status"], {"winner", "idf", "escalate"})
+
+
+class MainLoopTests(unittest.TestCase):
+    """stdin/stdout edge cases for the hook entrypoint."""
+
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+
+    def run_main(self, stdin_text: str) -> str:
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with patch("sys.stdin", io.StringIO(stdin_text)), redirect_stdout(buf):
+            rc = HOOK.main()
+        self.assertEqual(rc, 0)
+        return buf.getvalue()
+
+    def test_empty_stdin_prints_empty_object(self) -> None:
+        self.assertEqual(self.run_main(""), "{}\n")
+
+    def test_bad_json_prints_empty_object(self) -> None:
+        self.assertEqual(self.run_main("{not json"), "{}\n")
+
+    def test_non_dict_payload_prints_empty_object(self) -> None:
+        self.assertEqual(self.run_main("[1, 2]"), "{}\n")
+
+    def test_handle_exception_still_prints_object(self) -> None:
+        with patch.object(HOOK, "handle", side_effect=RuntimeError("boom")):
+            out = self.run_main('{"prompt": "x"}')
+        self.assertEqual(json.loads(out), {})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

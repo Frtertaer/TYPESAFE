@@ -257,6 +257,31 @@ class CliTest(unittest.TestCase):
             self.assertIn("beta", lines[2])
             self.assertIn("a \\| b", lines[2])
 
+    def test_prune_by_harness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"harness": "codex", "jev_status": "winner"},
+                    {"harness": "grok", "jev_status": "idf"},
+                    {"harness": "codex", "jev_status": "none"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--prune", "--harness", "codex")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            self.assertEqual(len(lines), 2)
+            kept = [json.loads(l) for l in lines]
+            self.assertTrue(all(e["harness"] == "codex" for e in kept))
+
+    def test_prune_no_filter_still_rc2(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"harness": "a"}])
+            proc = self.run_cli("--file", str(path), "--prune")
+            self.assertEqual(proc.returncode, 2)
+
     def test_md_respects_status_filter(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

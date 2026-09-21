@@ -228,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--prune",
         action="store_true",
-        help="Rewrite the log keeping only entries inside the --days/--since window",
+        help="Rewrite the log keeping only entries matching --days/--since/--harness/--status filters",
     )
     parser.add_argument("--json", action="store_true", help="Machine-readable stats")
     parser.add_argument(
@@ -260,8 +260,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.status:
         entries = filter_status(entries, args.status)
     if args.prune:
-        if since is None:
-            sys.stderr.write("--prune requires --days or --since\n")
+        if since is None and not args.harness and not args.status:
+            sys.stderr.write("--prune requires --days, --since, --harness, or --status\n")
             return 2
         total, _ = load_entries(path)
         try:

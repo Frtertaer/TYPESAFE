@@ -438,6 +438,40 @@ class PeerFillTests(unittest.TestCase):
 
 
 class PeerFillInternalsTests(unittest.TestCase):
+    def test_watch_emits_fill_state_ticks(self) -> None:
+        import io
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / INV.MISS_NAME).write_text(
+                json.dumps({"task": "jwt flow", "written_at": int(time.time())}),
+                encoding="utf-8",
+            )
+            env = dict(__import__("os").environ)
+            env["JEV_PEER_WATCH_MAX"] = "2"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--cwd",
+                    str(cwd),
+                    "--watch",
+                    "0.01",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+            ticks = [
+                json.loads(l) for l in proc.stdout.splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(t["miss"] for t in ticks))
+            self.assertTrue(all(t["miss_task"] == "jwt flow" for t in ticks))
+            self.assertFalse(any(t["ask"] for t in ticks))
+
     def test_item_for_pick(self) -> None:
         candidates = [
             {"id": "skill_jwt_auth", "name": "jwt-auth"},

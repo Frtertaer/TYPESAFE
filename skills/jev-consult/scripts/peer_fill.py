@@ -311,6 +311,13 @@ def main() -> int:
         action="store_true",
         help="Print the cwd fill state (miss file, task, ask file) as JSON and exit.",
     )
+    parser.add_argument(
+        "--watch",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Re-print the fill state as a {ts,miss,ask} JSON tick every S seconds (JEV_PEER_WATCH_MAX caps ticks).",
+    )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     task = args.task
@@ -340,6 +347,29 @@ def main() -> int:
             sys.stdout.write(json.dumps(report, indent=2) + "\n")
         except Exception:
             sys.stdout.write(json.dumps({"error": "fail_open"}) + "\n")
+        return 0
+    if args.watch and args.watch > 0:
+        try:
+            max_ticks = int(os.environ.get("JEV_PEER_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+        while max_ticks <= 0 or ticks < max_ticks:
+            try:
+                miss = read_miss(cwd / MISS_NAME)
+                tick = {
+                    "ts": int(time.time()),
+                    "miss": bool(miss),
+                    "miss_task": str(miss.get("task") or "") if miss else "",
+                    "ask": ask_path.is_file(),
+                }
+            except Exception:
+                tick = {"ts": int(time.time()), "miss": None, "ask": None}
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            time.sleep(args.watch)
         return 0
     if args.list:
         try:

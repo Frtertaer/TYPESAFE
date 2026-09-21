@@ -533,6 +533,47 @@ class InventoryTests(unittest.TestCase):
         self.assertTrue((Path(jwt["path"]) / "SKILL.md").is_file())
 
 
+class ScoresFlagTests(unittest.TestCase):
+    def test_scores_adds_score_field(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness", "hermes",
+                    "--hermes-home", str(FIXTURE),
+                    "--home", str(FIXTURE),
+                    "--task", "Add JWT access tokens in Python",
+                    "--scores",
+                ]
+            )
+        self.assertEqual(code, 0)
+        data = json.loads(buf.getvalue())
+        names = {item["name"]: item for item in data["shortlist"]}
+        self.assertIn("jwt-auth", names)
+        self.assertGreater(names["jwt-auth"]["score"], 0)
+
+    def test_no_scores_omits_field(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness", "hermes",
+                    "--hermes-home", str(FIXTURE),
+                    "--home", str(FIXTURE),
+                    "--task", "Add JWT access tokens in Python",
+                ]
+            )
+        self.assertEqual(code, 0)
+        data = json.loads(buf.getvalue())
+        self.assertTrue(all("score" not in item for item in data["shortlist"]))
+
+
 class TtlEnvOverrideTests(unittest.TestCase):
     def test_env_override_wins(self) -> None:
         import os

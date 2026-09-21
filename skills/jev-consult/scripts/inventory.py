@@ -987,6 +987,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Override sidecar_ttl_seconds for --check-sidecar/--prune-sidecars/--show.",
     )
     parser.add_argument("--all-names", action="store_true", help="Include every installed name (no descriptions).")
+    parser.add_argument("--scores", action="store_true", help="Add IDF score to each shortlist item.")
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
     args = parser.parse_args(argv)
@@ -1054,6 +1055,12 @@ def main(argv: list[str] | None = None) -> int:
     }
     if args.all_names:
         payload["installed_names"] = ["%s:%s" % (item["kind"], item["name"]) for item in items]
+    if args.scores:
+        query = tokens(args.task)
+        df = name_df(items, query) if query else {}
+        payload["shortlist"] = [
+            {**item, "score": score_item(item, query, df)} for item in picked
+        ]
     sys.stdout.write(json.dumps(payload, indent=2) + "\n")
     if args.write_ask:
         write_ask(Path(args.write_ask), args.task, harness, picked)

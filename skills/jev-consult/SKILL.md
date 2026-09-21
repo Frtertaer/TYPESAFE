@@ -149,7 +149,7 @@ python skills/jev-consult/scripts/inventory.py --task "<task>" --harness auto --
 python skills/jev-consult/scripts/jev.py ask tools.request.json
 ```
 
-`--harness` is `hermes`, `claude-code`, `codex`, or `grok`. The script scans all installed items, keyword-filters a shortlist (Choice cap 255; keep ≤12), and writes `load_tools` + `installed_enough`. Pin a missed name with `--include`. Do not dump hundreds of options on Jev.
+`--harness` is `hermes`, `claude-code`, `codex`, or `grok`. The script scans all installed items, keyword-filters a shortlist (Choice cap 255; keep ≤12), and writes `load_tools` + `installed_enough`. Pin a missed name with `--include`. `--scores` adds the IDF score to each shortlist item. Do not dump hundreds of options on Jev.
 
 If `installed_enough` is no and `peer_fill` printed `no_peer`, run `catalog_fill.py --from-miss` (one skill, inspect, `install --yes`). If that prints `no_catalog`, run `apply_fill.py --from-miss` (one Hermes plugin `--no-enable` or one official MCP). **Do not install** npx, `claude plugin install`, Git URLs, or skillbox. Never `--force`. Hook does not install.
 

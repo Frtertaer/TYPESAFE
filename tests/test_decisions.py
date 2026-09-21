@@ -111,17 +111,20 @@ class SummarizeTest(unittest.TestCase):
         self.assertIn("hi", line)
 
 
+def run_cli(*argv: str, env: dict | None = None) -> subprocess.CompletedProcess:
+    full_env = dict(os.environ)
+    if env:
+        full_env.update(env)
+    return subprocess.run(
+        [sys.executable, str(SCRIPTS / "decisions.py"), *argv],
+        capture_output=True,
+        text=True,
+        env=full_env,
+    )
+
+
 class CliTest(unittest.TestCase):
-    def run_cli(self, *argv: str, env: dict | None = None) -> subprocess.CompletedProcess:
-        full_env = dict(os.environ)
-        if env:
-            full_env.update(env)
-        return subprocess.run(
-            [sys.executable, str(SCRIPTS / "decisions.py"), *argv],
-            capture_output=True,
-            text=True,
-            env=full_env,
-        )
+    run_cli = staticmethod(run_cli)
 
     def test_stats_and_tail(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -166,6 +169,47 @@ class CliTest(unittest.TestCase):
         proc = self.run_cli(env={"JEV_CONSULT_LOG": "0"})
         self.assertEqual(proc.returncode, 2)
         self.assertIn("disabled", proc.stderr)
+
+
+class FilterSinceTest(unittest.TestCase):
+    run_cli = staticmethod(run_cli)
+
+    def test_filter_since(self):
+        entries = [
+            {"ts": 1000.0, "jev_status": "idf"},
+            {"ts": 2000.0, "jev_status": "winner"},
+            {"jev_status": "no-ts"},
+            {"ts": "bad", "jev_status": "bad-ts"},
+        ]
+        out = decisions.filter_since(entries, 1500.0)
+        self.assertEqual([e["jev_status"] for e in out], ["winner"])
+        self.assertIs(decisions.filter_since(entries, None), entries)
+
+    def test_main_since_and_days(self):
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            now = _time.time()
+            write_log(
+                path,
+                [
+                    {"ts": now - 10 * 86400, "jev_status": "idf"},
+                    {"ts": now - 100, "jev_status": "winner"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--json", "--since", str(now - 1000))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 1)
+            self.assertEqual(stats["filtered"], 1)
+            proc = self.run_cli("--file", str(path), "--json", "--days", "1")
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 1)
+            self.assertEqual(stats["by_status"]["winner"], 1)
+            proc = self.run_cli("--file", str(path), "--json")
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 2)
+            self.assertIsNone(stats["since"])
 
 
 if __name__ == "__main__":

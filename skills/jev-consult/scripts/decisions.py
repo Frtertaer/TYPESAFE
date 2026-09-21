@@ -8,6 +8,7 @@ import argparse
 import datetime
 import json
 import sys
+import time
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -151,12 +152,28 @@ def time_str(ts: object) -> str:
         return "?"
 
 
+def filter_since(entries: list[dict], since: float | None) -> list[dict]:
+    if since is None:
+        return entries
+    out = []
+    for item in entries:
+        try:
+            ts = float(item.get("ts"))
+        except (TypeError, ValueError):
+            continue
+        if ts >= since:
+            out.append(item)
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Stats over ~/.cache/jev-consult/decisions.jsonl."
     )
     parser.add_argument("--file", help="Override decisions.jsonl path")
     parser.add_argument("--tail", type=int, default=0, help="Print last N entries")
+    parser.add_argument("--days", type=float, default=0.0, help="Only entries from the last N days")
+    parser.add_argument("--since", type=float, default=0.0, help="Only entries with ts >= epoch seconds")
     parser.add_argument("--json", action="store_true", help="Machine-readable stats")
     args = parser.parse_args(argv)
     path = Path(args.file) if args.file else inventory.decisions_log_path()
@@ -167,7 +184,14 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("no decisions log at %s\n" % path)
         return 1
     entries, bad = load_entries(path)
+    since = args.since or None
+    if args.days > 0:
+        since = time.time() - args.days * 86400
+    if since is not None:
+        entries = filter_since(entries, since)
     stats = summarize(entries, bad)
+    stats["filtered"] = len(entries)
+    stats["since"] = since
     if args.json:
         sys.stdout.write(json.dumps(stats, indent=2) + "\n")
     else:

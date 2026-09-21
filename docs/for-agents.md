@@ -20,6 +20,7 @@ python skills/jev-consult/scripts/inventory.py --prune-sidecars DIR     # unlink
 python skills/jev-consult/scripts/inventory.py --show FILE              # sidecar payload + status + age_seconds
 python skills/jev-consult/scripts/inventory.py --show-policy            # effective policy.json contents
 python skills/jev-consult/scripts/inventory.py --out PATH               # write the payload JSON to a file instead of stdout
+python skills/jev-consult/scripts/inventory.py --names                 # bare shortlist ids, one per line
 python skills/jev-consult/scripts/policy_lint.py [--strict|--show|--diff other.json|--out PATH]  # validates policy.json
 python skills/jev-consult/scripts/question_lint.py request.json [--json|--fix|--out PATH]  # lint a request file standalone
 python skills/jev-consult/scripts/skill_lint.py skills/*/SKILL.md       # SKILL.md sanity; [--strict] warns fail, [--fix] rewrites name, [--json] [--out PATH]

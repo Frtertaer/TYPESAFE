@@ -196,6 +196,22 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(payload["prompt"], "zzz qqq")
         self.assertIsInstance(payload["score"], float)
 
+    def test_min_score_filters_rows(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--min-score", "1.0", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertTrue(payload["cases"])
+        self.assertTrue(
+            all(r["score"] is not None and r["score"] >= 1.0 for r in payload["cases"])
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            te.main(["--min-score", "99"])
+        self.assertIn("margin:", buf.getvalue())
+        self.assertNotIn("should_trigger=", buf.getvalue())
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

@@ -111,6 +111,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Evaluate only the case with this id.",
     )
     parser.add_argument(
+        "--min-score",
+        metavar="F",
+        type=float,
+        default=None,
+        help="Show only rows whose lexical score reaches F (after --fail).",
+    )
+    parser.add_argument(
         "--out",
         metavar="PATH",
         default="",
@@ -161,23 +168,30 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("--out failed: %s\n" % exc)
             return 1
         sys.stderr.write("wrote %s\n" % args.out)
-    if args.ids:
+    def _rows() -> list[dict]:
         rows = result["cases"]
         if args.fail:
             rows = [r for r in rows if not r["ok"]]
+        if args.min_score is not None:
+            rows = [
+                r
+                for r in rows
+                if r["score"] is not None and r["score"] >= args.min_score
+            ]
+        return rows
+
+    if args.ids:
+        rows = _rows()
         for row in rows:
             sys.stdout.write("%s\n" % row["id"])
         return 0 if result["ok"] else 1
     if args.json:
-        payload = result
-        if args.fail:
-            payload = dict(result)
-            payload["cases"] = [r for r in result["cases"] if not r["ok"]]
+        payload = dict(result)
+        payload["cases"] = _rows()
         sys.stdout.write(json.dumps(payload, indent=2) + "\n")
     else:
         if not args.quiet:
-            shown = [r for r in result["cases"] if not r["ok"]] if args.fail else result["cases"]
-            for row in shown:
+            for row in _rows():
                 score = "-" if row["score"] is None else "%.3f" % row["score"]
                 marker = "" if row["ok"] else "  <-- FAIL"
                 sys.stdout.write(

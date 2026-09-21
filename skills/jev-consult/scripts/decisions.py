@@ -536,7 +536,7 @@ def main(argv: list[str] | None = None) -> int:
         "--jq",
         metavar="FIELD",
         default="",
-        help="Print the FIELD value of each entry, one per line (a.b digs into nested objects)",
+        help="Print the FIELD value of each entry, one per line (a.b digs into nested objects; comma-separated fields print tab-separated columns)",
     )
     parser.add_argument(
         "--uniq",
@@ -852,22 +852,38 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("%d\n" % len(entries))
         return 0
     if args.jq:
-        values = [_dig(item, args.jq) for item in (entries[::-1] if getattr(args, "reverse", False) else entries)]
+        jq_fields = [part.strip() for part in args.jq.split(",") if part.strip()]
+        ordered = entries[::-1] if getattr(args, "reverse", False) else entries
+        if len(jq_fields) > 1:
+            values = [tuple(_dig(item, field) for field in jq_fields) for item in ordered]
+        else:
+            values = [_dig(item, args.jq) for item in ordered]
         if getattr(args, "uniq", False):
             seen = set()
             uniq_values = []
             for value in values:
-                key = json.dumps(value, sort_keys=True) if not isinstance(value, str) else value
+                key = value if isinstance(value, str) else json.dumps(list(value) if isinstance(value, tuple) else value, sort_keys=True)
                 if key in seen:
                     continue
                 seen.add(key)
                 uniq_values.append(value)
             values = uniq_values
         if args.json:
-            sys.stdout.write(json.dumps({"field": args.jq, "values": values}, indent=2) + "\n")
+            out_values = [list(v) if isinstance(v, tuple) else v for v in values]
+            sys.stdout.write(json.dumps({"field": args.jq, "values": out_values}, indent=2) + "\n")
         else:
             for value in values:
-                if value is None:
+                if isinstance(value, tuple):
+                    cells = []
+                    for cell in value:
+                        if cell is None:
+                            cells.append("null")
+                        elif isinstance(cell, str):
+                            cells.append(cell)
+                        else:
+                            cells.append(json.dumps(cell, sort_keys=True))
+                    sys.stdout.write("\t".join(cells) + "\n")
+                elif value is None:
                     sys.stdout.write("null\n")
                 elif isinstance(value, str):
                     sys.stdout.write(value + "\n")

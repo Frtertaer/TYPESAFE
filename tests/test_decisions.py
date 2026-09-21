@@ -1801,6 +1801,27 @@ class PruneTest(unittest.TestCase):
             proc = self.run_cli("--file", str(path), "--last", "--status", "nope")
             self.assertEqual(proc.stdout.strip(), "")
 
+    def test_jq_multi_fields_prints_columns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "harness": "claude", "jev_status": "ok", "winner": "a"},
+                    {"ts": 2, "harness": "codex", "jev_status": "ok", "winner": "b"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--jq", "winner,harness")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip().splitlines(), ["a	claude", "b	codex"])
+            proc = self.run_cli("--file", str(path), "--jq", "winner,harness", "--json")
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["values"], [["a", "claude"], ["b", "codex"]])
+            proc = self.run_cli(
+                "--file", str(path), "--jq", "winner,harness", "--uniq"
+            )
+            self.assertEqual(len(proc.stdout.strip().splitlines()), 2)
+
     def test_oldest_prints_oldest_entry(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

@@ -795,7 +795,12 @@ def main(argv: list[str] | None = None) -> int:
         ]
     missing_field = getattr(args, "missing", "") or ""
     if missing_field:
-        entries = [item for item in entries if _dig(item, missing_field) is None]
+        missing_keys = [part.strip() for part in missing_field.split(",") if part.strip()]
+        entries = [
+            item
+            for item in entries
+            if any(_dig(item, key) is None for key in missing_keys)
+        ]
     for pair in getattr(args, "where_not", None) or []:
         if "=" not in pair:
             continue

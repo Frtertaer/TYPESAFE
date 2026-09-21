@@ -2002,5 +2002,23 @@ class PruneTest(unittest.TestCase):
             proc = self.run_cli("--file", str(path), "--missing", "winner.name", "--count")
             self.assertIn("2", proc.stdout)
 
+    def test_missing_accepts_comma_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "ok", "winner": {"name": "jwt"}, "fill": "x"},
+                    {"ts": 2, "jev_status": "ok", "winner": {"name": "jwt"}},
+                    {"ts": 3, "jev_status": "ok", "fill": "x"},
+                    {"ts": 4, "jev_status": "ok"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--missing", "winner,fill", "--count")
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(proc.stdout.strip(), "3")
+            proc = self.run_cli("--file", str(path), "--missing", "winner", "--count")
+            self.assertEqual(proc.stdout.strip(), "2")
+
 if __name__ == "__main__":
     unittest.main()

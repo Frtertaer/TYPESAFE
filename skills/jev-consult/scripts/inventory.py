@@ -983,10 +983,11 @@ def main(argv: list[str] | None = None) -> int:
         path = Path(args.show)
         status = sidecar_status(path)
         payload = read_sidecar(path) or {}
-        sys.stdout.write(
-            json.dumps({"path": str(path), "status": status, "payload": payload}, indent=2)
-            + "\n"
-        )
+        out = {"path": str(path), "status": status, "payload": payload}
+        written = payload.get("written_at")
+        if isinstance(written, (int, float)) and not isinstance(written, bool):
+            out["age_seconds"] = int(time.time() - float(written))
+        sys.stdout.write(json.dumps(out, indent=2) + "\n")
         return 0
     if args.catalogs:
         for name, url in catalogs():

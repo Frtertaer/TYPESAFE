@@ -292,6 +292,38 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertTrue(buf.getvalue().strip().startswith("stale (age "))
 
+    def test_show_includes_age_seconds(self) -> None:
+        import time as time_mod
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            path.write_text(
+                json.dumps({"written_at": time_mod.time() - 30, "task": "t"}),
+                encoding="utf-8",
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--show", str(path)])
+            self.assertEqual(code, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["status"], "fresh")
+            self.assertGreaterEqual(out["age_seconds"], 29)
+
+    def test_show_missing_no_age(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--show", str(Path(tmp) / "none.json")])
+            self.assertEqual(code, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["status"], "missing")
+            self.assertNotIn("age_seconds", out)
+
     def test_picker_request_has_untrusted_rule(self) -> None:
         payload = inv.picker_request(
             "task", "hermes", [{"id": "x", "kind": "skill", "name": "jwt-auth"}]

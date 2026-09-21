@@ -410,6 +410,12 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         env_min_need = None
     parser.add_argument("--min-need", type=float, default=env_min_need, help="Only entries with numeric need >= F")
+    env_min_lat = os.environ.get("JEV_DECISIONS_MIN_LATENCY", "").strip()
+    try:
+        env_min_lat = float(env_min_lat) if env_min_lat else None
+    except ValueError:
+        env_min_lat = None
+    parser.add_argument("--min-latency", type=float, default=env_min_lat, help="Only entries with numeric latency_ms >= MS")
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -540,6 +546,14 @@ def main(argv: list[str] | None = None) -> int:
             and not isinstance(item.get("need"), bool)
             and float(item.get("need")) >= args.min_need
         ]
+    if args.min_latency is not None:
+        entries = [
+            item
+            for item in entries
+            if isinstance(item.get("latency_ms"), (int, float))
+            and not isinstance(item.get("latency_ms"), bool)
+            and float(item.get("latency_ms")) >= args.min_latency
+        ]
     if args.prompt:
         needle = args.prompt.lower()
         entries = [
@@ -557,9 +571,10 @@ def main(argv: list[str] | None = None) -> int:
             or args.field
             or args.prompt
             or args.min_need is not None
+            or args.min_latency is not None
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, or --prompt\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, or --prompt\n"
             )
             return 2
         total, total_bad = load_entries(path)

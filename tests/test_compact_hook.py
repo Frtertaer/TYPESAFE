@@ -126,5 +126,62 @@ class InstallHookTests(unittest.TestCase):
             self.assertNotIn("jev-compact", config.read_text(encoding="utf-8"))
 
 
+class HookE2ETests(unittest.TestCase):
+    """Subprocess e2e: stdin payload -> stdout JSON, no Jev key needed."""
+
+    def _run(self, stdin_text: str, home: str | None = None, spill: str | None = None):
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        if home:
+            env["USERPROFILE"] = home
+            env["HOME"] = home
+        if spill:
+            env["JEV_CONSULT_SPILL"] = spill
+        proc = subprocess.run(
+            [sys.executable, str(HOOK_PATH)],
+            input=stdin_text,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stdout.strip()
+
+    def test_empty_and_bad_stdin(self) -> None:
+        self.assertEqual(json.loads(self._run("")), {})
+        self.assertEqual(json.loads(self._run("[1,2]")), {})
+
+    def test_non_post_event_noop(self) -> None:
+        out = json.loads(self._run(json.dumps({"hook_event_name": "UserPromptSubmit", "toolResult": "x"})))
+        self.assertEqual(out, {})
+
+    def test_fat_toolresult_abridged_and_spilled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            spill = Path(tmp) / "spill"
+            home.mkdir()
+            fat = "A" * 40000
+            out = json.loads(
+                self._run(
+                    json.dumps(
+                        {
+                            "hook_event_name": "PostToolUse",
+                            "toolResult": {"output": fat},
+                        }
+                    ),
+                    home=str(home),
+                    spill=str(spill),
+                )
+            )
+            node = out["hookSpecificOutput"]["updatedToolOutput"]
+            self.assertLess(len(node["output"]), len(fat))
+            self.assertIn("omitted", node["output"])
+            self.assertTrue(any(spill.iterdir()))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

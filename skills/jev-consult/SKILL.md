@@ -87,6 +87,7 @@ Jev and a new session forget. `.jev-trace.json` is the memory you stuff into eac
 python skills/jev-consult/scripts/trace.py init --plan "<human task>"
 python skills/jev-consult/scripts/jev.py ask request.json --trace
 python skills/jev-consult/scripts/trace.py record --pick return_to_plan --kind next_move
+python skills/jev-consult/scripts/trace.py state --out state.json  # bare state dict for scaffold --state
 ```
 
 ## Compare

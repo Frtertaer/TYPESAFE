@@ -179,6 +179,73 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(data["last_pick"], "ask_human")
             self.assertEqual(data["current_step"], "blocked")
 
+    def test_state_subcommand_stdout_and_out(self) -> None:
+        import io
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "plan": "Add tests.",
+                        "current_step": "writing",
+                        "attempt_count": 2,
+                        "inspected": [],
+                        "history": [{"pick": "a"}],
+                        "last_error": "",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "state"])
+            self.assertEqual(rc, 0)
+            state = json.loads(buf.getvalue())
+            # bare dict, empty values stripped
+            self.assertEqual(state["plan"], "Add tests.")
+            self.assertNotIn("inspected", state)
+            self.assertNotIn("last_error", state)
+            self.assertIn("history", state)
+            # --out writes scaffold-ready file
+            out = Path(tmp) / "state.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                tr.main(["--file", str(path), "state", "--out", str(out)])
+            written = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(written, state)
+
+    def test_state_missing_file_empty(self) -> None:
+        import io
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(Path(tmp) / "none.json"), "state"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), {"attempt_count": 0})
+
+    def test_state_feeds_scaffold(self) -> None:
+        # state --out output loads as jev.py scaffold --state input
+        jev_path = ROOT / "skills" / "jev-consult" / "scripts" / "jev.py"
+        spec = importlib.util.spec_from_file_location("jev_state_feed", jev_path)
+        jev = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(jev)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(json.dumps({"plan": "P", "attempt_count": 3}), encoding="utf-8")
+            out = Path(tmp) / "state.json"
+            import io
+            from unittest.mock import patch
+
+            with patch.object(sys, "stdout", io.StringIO()):
+                tr.main(["--file", str(path), "state", "--out", str(out)])
+            loaded = jev.load_scaffold_state(str(out), "fallback")
+            self.assertEqual(loaded["plan"], "P")
+            self.assertEqual(loaded["attempt_count"], 3)
+
     def test_jev_apply_trace_fills_forgotten_plan(self) -> None:
         jev_path = ROOT / "skills" / "jev-consult" / "scripts" / "jev.py"
         spec = importlib.util.spec_from_file_location("jev_consult_jev", jev_path)

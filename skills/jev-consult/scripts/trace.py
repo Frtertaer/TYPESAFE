@@ -159,6 +159,20 @@ def cmd_record(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_state(args: argparse.Namespace) -> int:
+    """Emit the trace as a bare state dict for `jev.py scaffold --state`."""
+    path = Path(args.file) if args.file else default_path()
+    data = load(path)
+    state = {key: value for key, value in data.items() if _present(value)}
+    if args.out:
+        Path(args.out).write_text(
+            json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+    else:
+        emit(state)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Hold plan/step in a file because Jev and a new session forget."
@@ -186,6 +200,11 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--kind", default="")
     rec.add_argument("--step", default="")
     rec.set_defaults(func=cmd_record)
+    state_cmd = sub.add_parser(
+        "state", help="Emit trace as a bare state dict (scaffold --state input)"
+    )
+    state_cmd.add_argument("--out", help="Write JSON here instead of stdout")
+    state_cmd.set_defaults(func=cmd_state)
     return parser
 
 

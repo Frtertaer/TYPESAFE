@@ -702,6 +702,34 @@ class FilterSinceTest(unittest.TestCase):
             self.assertEqual(stats["by_status"]["winner"], 1)
             self.assertIsNotNone(stats["since"])
 
+    def test_top_caps_count_lists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "winner"},
+                    {"ts": 2, "jev_status": "winner"},
+                    {"ts": 3, "jev_status": "idf"},
+                    {"ts": 4, "jev_status": "none"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--statuses", "--top", "1")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = proc.stdout.strip().splitlines()
+            self.assertEqual(lines, ["winner 2"])
+
+    def test_top_zero_no_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [{"ts": i, "jev_status": s} for i, s in enumerate(("a", "b", "c"))],
+            )
+            proc = self.run_cli("--file", str(path), "--statuses", "--top", "0")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(len(proc.stdout.strip().splitlines()), 3)
+
     def test_days_overrides_week(self):
         import time as _time
         with tempfile.TemporaryDirectory() as tmp:

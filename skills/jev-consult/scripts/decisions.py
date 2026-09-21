@@ -258,6 +258,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--file", help="Override decisions.jsonl path")
     parser.add_argument("--tail", type=int, default=0, help="Print last N entries")
     parser.add_argument("--first", type=int, default=0, help="Print first N entries")
+    parser.add_argument(
+        "--top", type=int, default=0, help="Cap count-list output (--statuses et al.) to N rows"
+    )
     parser.add_argument("--days", type=float, default=0.0, help="Only entries from the last N days")
     parser.add_argument(
         "--week", action="store_true", help="Alias for --days 7"
@@ -407,7 +410,10 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     value = str(item.get(field) or "unknown")
                     counts[value] = counts.get(value, 0) + 1
-        for value, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        rows = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        if args.top > 0:
+            rows = rows[: args.top]
+        for value, n in rows:
             sys.stdout.write("%s %d\n" % (value, n))
         return 0
     if args.jsonl:

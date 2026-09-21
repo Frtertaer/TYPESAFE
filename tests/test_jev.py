@@ -727,6 +727,49 @@ class JevInternalsTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("v42", buf.getvalue())
 
+    def test_ask_dry_no_api_call(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "req.json"
+            req.write_text(
+                json.dumps(
+                    {
+                        "state": {"task": "t"},
+                        "questions": {
+                            "q": {
+                                "type": "noul",
+                                "instructions": "ok?",
+                                "criteria": {"yes": "y", "no": "n"},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = jev.main(["ask", str(req), "--dry"])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertTrue(out["dry"])
+            self.assertEqual(out["state"]["task"], "t")
+            self.assertIn("q", out["questions"])
+
+    def test_ask_dry_never_posts(self) -> None:
+        def _boom(*a, **k):
+            raise AssertionError("post called")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "req.json"
+            req.write_text(
+                json.dumps({"state": {"task": "t"}, "questions": {"q": {"type": "noul", "instructions": "i", "criteria": {"a": "a", "b": "b"}}}}),
+                encoding="utf-8",
+            )
+            with patch.object(jev, "post_systemone", side_effect=_boom):
+                buf = io.StringIO()
+                with patch.object(sys, "stdout", buf):
+                    rc = jev.main(["ask", str(req), "--dry"])
+            self.assertEqual(rc, 0)
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

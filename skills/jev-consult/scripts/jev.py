@@ -473,6 +473,17 @@ def cmd_ask(args: argparse.Namespace) -> int:
                 )
     else:
         warnings.append("question_lint unavailable; static wording checks skipped")
+    if getattr(args, "dry", False):
+        emit(
+            {
+                "dry": True,
+                "model": request.get("model"),
+                "state": state,
+                "questions": questions,
+                "warnings": warnings,
+            }
+        )
+        return 0
     result = post_systemone(state, questions, policy, model=request.get("model"))
     answers = result.get("answers") or {}
     if not isinstance(answers, dict):
@@ -677,6 +688,11 @@ def build_parser() -> argparse.ArgumentParser:
         const=".jev-trace.json",
         default=None,
         help="Merge trace JSON into state (default .jev-trace.json)",
+    )
+    ask.add_argument(
+        "--dry",
+        action="store_true",
+        help="Validate and print the resolved request; no API call, no key needed.",
     )
     ask.set_defaults(func=cmd_ask)
     decide_cmd = sub.add_parser("decide", help="Apply policy to an answers object")

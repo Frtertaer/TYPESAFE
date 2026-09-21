@@ -387,6 +387,18 @@ class InventoryHookTests(unittest.TestCase):
         self.assertEqual(report["dedupe_ttl_seconds"], 0.0)
         self.assertNotIn("api_key", buf.getvalue().lower())
 
+    def test_env_report_includes_cwd_sidecar_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".jev-tools.json").write_text("{}", encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_HOOK_CWD": tmp}):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(["--env"])
+            self.assertEqual(rc, 0)
+            report = json.loads(buf.getvalue())
+            self.assertTrue(report["sidecar_present"])
+            self.assertFalse(report["miss_present"])
+
     def test_env_out_writes_report_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "env.json"

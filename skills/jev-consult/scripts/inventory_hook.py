@@ -510,6 +510,10 @@ def env_report() -> dict:
         }
     for name in strings:
         report[name.lower()] = bool(os.environ.get(name, "").strip())
+    cwd = os.environ.get("JEV_HOOK_CWD", "").strip() or "."
+    base = Path(cwd)
+    report["sidecar_present"] = (base / SIDECAR_NAME).is_file()
+    report["miss_present"] = (base / MISS_NAME).is_file()
     return report
 
 

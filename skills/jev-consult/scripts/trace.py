@@ -397,6 +397,18 @@ def cmd_notes(args: argparse.Namespace) -> int:
     needle = (getattr(args, "grep", "") or os.environ.get("JEV_TRACE_GREP", "")).strip().lower()
     if needle:
         notes = [n for n in notes if isinstance(n, dict) and needle in str(n.get("text") or "").lower()]
+    if getattr(args, "uniq", False):
+        seen_notes = set()
+        deduped = []
+        for n in notes:
+            if not isinstance(n, dict):
+                continue
+            key = str(n.get("sha") or n.get("text") or "")
+            if key in seen_notes:
+                continue
+            seen_notes.add(key)
+            deduped.append(n)
+        notes = deduped
     limit = getattr(args, "limit", None)
     if isinstance(limit, int) and limit >= 0:
         notes = notes[-limit:] if limit else []
@@ -555,6 +567,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--field", default="", help="Print only this field per note (a.b digs into nested objects)")
     notes_cmd.add_argument("--reverse", action="store_true", help="List notes newest-first")
     notes_cmd.add_argument("--grep", default="", help="Only notes whose text contains SUBSTR (case-insensitive; default JEV_TRACE_GREP)")
+    notes_cmd.add_argument("--uniq", action="store_true", help="Dedupe notes by sha/text (first occurrence wins)")
     notes_cmd.set_defaults(func=cmd_notes)
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")

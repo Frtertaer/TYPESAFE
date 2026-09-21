@@ -211,6 +211,23 @@ class TraceTests(unittest.TestCase):
             self.assertNotIn("jwt tokens", buf.getvalue())
             self.assertIn("unrelated", buf.getvalue())
 
+    def test_notes_uniq_dedupes_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            from io import StringIO
+            from contextlib import redirect_stdout
+
+            with redirect_stdout(StringIO()):
+                tr.main(["--file", str(path), "record", "--pick", "a", "--note", "same note"])
+                tr.main(["--file", str(path), "record", "--pick", "b", "--note", "same note"])
+                tr.main(["--file", str(path), "record", "--pick", "c", "--note", "different"])
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = tr.main(["--file", str(path), "notes", "--uniq", "--json"])
+            self.assertEqual(code, 0)
+            notes = json.loads(buf.getvalue())
+            self.assertEqual(len(notes), 2)
+
     def test_notes_reverse_lists_newest_first(self) -> None:
         import time
         from io import StringIO

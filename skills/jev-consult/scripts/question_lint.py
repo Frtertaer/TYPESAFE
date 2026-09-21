@@ -272,7 +272,8 @@ def main(argv: list[str] | None = None) -> int:
     as_json = "--json" in argv
     do_fix = "--fix" in argv
     strict = "--strict" in argv
-    argv = [a for a in argv if a not in ("--json", "--fix", "--strict")]
+    quiet = "--quiet" in argv
+    argv = [a for a in argv if a not in ("--json", "--fix", "--strict", "--quiet")]
     if not argv:
         sys.stderr.write("usage: question_lint.py FILE [--json] [--fix] [--strict]\n")
         return 2
@@ -299,8 +300,11 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(json.dumps({"findings": findings}, indent=2) + "\n")
     else:
         for f in findings:
+            if quiet and f["severity"] != "error":
+                continue
             sys.stdout.write(format_finding(f) + "\n")
-        sys.stdout.write("lint: %d finding(s)\n" % len(findings))
+        if not quiet:
+            sys.stdout.write("lint: %d finding(s)\n" % len(findings))
     if any(f["severity"] == "error" for f in findings):
         return 1
     return 1 if strict and findings else 0

@@ -219,6 +219,39 @@ class LintCliTests(unittest.TestCase):
         self.assertEqual(loose.returncode, 0)
         self.assertEqual(strict.returncode, 1)
 
+    def test_quiet_prints_only_errors(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Should the coder not proceed?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, request)
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--quiet"],
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(proc.returncode, 0)
+        self.assertNotIn("J001", proc.stdout)
+        self.assertNotIn("lint:", proc.stdout)
+
+    def test_quiet_still_prints_errors(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {
+                "q": noul("Is it not true that the fix cannot ship?"),
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, request)
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--quiet"],
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("J002", proc.stdout)
+
     def test_lint_cli_clean_returns_0(self) -> None:
         request = {
             "state": {"task": "x"},

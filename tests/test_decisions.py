@@ -500,6 +500,27 @@ class CliTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("1", proc.stdout)
 
+    def test_min_score_filters_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "winner", "shortlist_score_avg": 12.5, "prompt_head": "a"},
+                    {"ts": 2, "jev_status": "winner", "shortlist_score_avg": 1.0, "prompt_head": "b"},
+                    {"ts": 3, "jev_status": "none", "prompt_head": "c"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--min-score", "5", "--count")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("1", proc.stdout)
+            proc = self.run_cli(
+                "--file", str(path), "--count",
+                env={"JEV_DECISIONS_MIN_SCORE": "5"},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("1", proc.stdout)
+
     def test_count_prints_filtered_total(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

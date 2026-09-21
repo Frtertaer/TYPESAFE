@@ -509,6 +509,46 @@ class StandaloneCliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertNotIn("fixed", proc.stderr)
 
+    def test_fix_unfixable_finding_still_lints(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Is it not true?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            proc = self._run(str(path), "--fix")
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("warn", proc.stdout)
+        self.assertNotIn("fixed J", proc.stderr)
+
+
+class ApplyFixesTests(unittest.TestCase):
+    def test_no_questions_dict(self) -> None:
+        self.assertEqual(question_lint.apply_fixes({}), [])
+        self.assertEqual(question_lint.apply_fixes({"questions": "nope"}), [])
+
+    def test_skips_non_dict_question(self) -> None:
+        request = {"questions": {"bad": "not-a-dict", "ok": noul("fine?")}}
+        self.assertEqual(question_lint.apply_fixes(request), [])
+
+    def test_j009_fills_only_empty_entries(self) -> None:
+        request = {
+            "questions": {
+                "pick": {
+                    "type": "choice",
+                    "instructions": "Which library should handle the JWT signing?",
+                    "criteria": {"jwtlib": "", "other": "", "mine": "keep"},
+                }
+            }
+        }
+        applied = question_lint.apply_fixes(request)
+        self.assertEqual(applied, ["J009"])
+        criteria = request["questions"]["pick"]["criteria"]
+        self.assertEqual(criteria["jwtlib"], "jwtlib")
+        self.assertEqual(criteria["other"], "other")
+        self.assertEqual(criteria["mine"], "keep")
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

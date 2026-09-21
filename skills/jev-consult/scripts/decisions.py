@@ -255,6 +255,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print unique winner kind:name pairs with counts, sorted desc",
     )
     parser.add_argument(
+        "--outcomes",
+        action="store_true",
+        help="Print unique outcome values with counts, sorted desc",
+    )
+    parser.add_argument(
         "--prune",
         action="store_true",
         help="Rewrite the log keeping only entries matching --days/--since/--harness/--status filters",
@@ -308,7 +313,7 @@ def main(argv: list[str] | None = None) -> int:
             "pruned %d of %d entries (kept %d)\n"
             % (len(total) - len(entries), len(total), len(entries))
         )
-    if args.statuses or args.harnesses or args.winners:
+    if args.statuses or args.harnesses or args.winners or args.outcomes:
         counts: dict[str, int] = {}
         if args.winners:
             for item in entries:
@@ -317,7 +322,12 @@ def main(argv: list[str] | None = None) -> int:
                     key = "%s:%s" % (winner.get("kind") or "?", winner["name"])
                     counts[key] = counts.get(key, 0) + 1
         else:
-            field = "harness" if args.harnesses else "jev_status"
+            if args.outcomes:
+                field = "outcome"
+            elif args.harnesses:
+                field = "harness"
+            else:
+                field = "jev_status"
             for item in entries:
                 value = str(item.get(field) or "unknown")
                 counts[value] = counts.get(value, 0) + 1

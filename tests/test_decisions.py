@@ -418,6 +418,24 @@ class CliTest(unittest.TestCase):
             stats = json.loads(proc.stdout)
             self.assertEqual(stats["total"], 1)
 
+    def test_outcomes_sorted_desc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"outcome": "human"},
+                    {"outcome": "blocked"},
+                    {"outcome": "human"},
+                    {"jev_status": "idf"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--outcomes")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(
+                proc.stdout.strip().splitlines(), ["human 2", "blocked 1", "unknown 1"]
+            )
+
     def test_prune_no_filter_still_rc2(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

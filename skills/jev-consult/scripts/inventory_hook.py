@@ -250,11 +250,7 @@ def handle(
         return {}
     t0 = time.monotonic()
     event = event_name(payload)
-    allowed_raw = os.environ.get("JEV_HOOK_EVENTS", "").strip()
-    if allowed_raw:
-        allowed = {part.strip() for part in allowed_raw.split(",") if part.strip()}
-    else:
-        allowed = {"UserPromptSubmit", "pre_llm_call"}
+    allowed = allowed_events()
     if event and event not in allowed:
         return {}
     max_age = hook_max_age()
@@ -464,8 +460,19 @@ def _debug_enabled(argv: list[str]) -> bool:
     return os.environ.get("JEV_HOOK_DEBUG", "").strip().lower() in {"1", "true", "yes"}
 
 
+def allowed_events() -> set[str]:
+    raw = os.environ.get("JEV_HOOK_EVENTS", "").strip()
+    if raw:
+        return {part.strip() for part in raw.split(",") if part.strip()}
+    return {"UserPromptSubmit", "pre_llm_call"}
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if "--events" in argv:
+        for name in sorted(allowed_events()):
+            sys.stdout.write(name + "\n")
+        return 0
     raw = sys.stdin.read()
     if not raw.strip():
         sys.stdout.write("{}\n")

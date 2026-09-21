@@ -281,6 +281,21 @@ class InventoryHookTests(unittest.TestCase):
             self.assertNotEqual(HOOK.LAST_DECISION["question"], "dedupe")
             self.assertFalse(HOOK.LAST_DECISION.get("dedupe"))
 
+    def test_events_flag_lists_allowed_events(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_EVENTS": ""}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--events"])
+        self.assertEqual(rc, 0)
+        names = buf.getvalue().split()
+        self.assertEqual(names, ["UserPromptSubmit", "pre_llm_call"])
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_EVENTS": "b_event,a_event"}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--events"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().split(), ["a_event", "b_event"])
+
     def test_over_budget_flag_when_pick_exceeds_budget(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
 

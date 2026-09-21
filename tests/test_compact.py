@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import sys
@@ -1079,6 +1080,85 @@ class NormalizeTests(unittest.TestCase):
     def test_count(self):
         decisions = [{"reason": "pinned"}, {"reason": "kept"}, {"reason": "pinned"}]
         self.assertEqual(C._count(decisions, "pinned"), 2)
+
+
+class CompactCliTests(unittest.TestCase):
+    """main()/cmd_compact end-to-end with the built-in --fake asker (no Jev)."""
+
+    def _transcript(self) -> list:
+        return [
+            {"role": "user", "content": "read the file"},
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "t1", "name": "read", "input": {"file_path": "/x"}}],
+            },
+            {"role": "tool", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "z" * 400}]},
+            {"role": "assistant", "content": "done"},
+        ]
+
+    def test_requires_history_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            with patch.object(sys, "stderr", io.StringIO()) as err:
+                rc = C.main([str(f), "--fake"])
+            self.assertEqual(rc, 2)
+            self.assertIn("--history", err.getvalue())
+
+    def test_fake_compact_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main([str(f), "--history", "--fake", "--min-reduction", "0"])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+        self.assertIn("messages", out)
+        self.assertEqual(out["stats"]["calls"], 1)
+        self.assertIn(out["decisions"][0]["action"], ("drop_result", "drop_call", "keep", "kept"))
+
+    def test_output_file_and_stdin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_f = Path(tmp) / "out.json"
+            stdin = io.StringIO(json.dumps(self._transcript()))
+            with patch.object(sys, "stdin", stdin), patch.object(sys, "stdout", io.StringIO()):
+                rc = C.main(["-", "--history", "--fake", "-o", str(out_f), "--min-reduction", "0"])
+            self.assertEqual(rc, 0)
+            out = json.loads(out_f.read_text(encoding="utf-8"))
+            self.assertIn("stats", out)
+
+    def test_min_reduction_fallback_restores(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main([str(f), "--history", "--fake", "--min-reduction", "0.99"])
+            out = json.loads(buf.getvalue())
+        self.assertTrue(out["stats"]["fallback"])
+        self.assertEqual(out["stats"]["messagesAfter"], out["stats"]["messagesBefore"])
+
+    def test_trace_file_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            tr = Path(tmp) / ".jev-trace.json"
+            tr.write_text('{"plan": "x"}', encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main([str(f), "--history", "--fake", "--trace", str(tr), "--min-reduction", "0"])
+            self.assertEqual(rc, 0)
+            json.loads(buf.getvalue())
+
+    def test_compact_or_keep_zero_min_reduction(self) -> None:
+        asker = lambda state, questions: {"answers": {n: {"type": "noul", "noul": 0.9} for n in questions}}
+        result = C.compact_or_keep(self._transcript(), asker, {"min_reduction": 0})
+        self.assertFalse(result["stats"]["fallback"])
+
+    def test_parse_transcript_empty_exits(self) -> None:
+        with self.assertRaises(SystemExit):
+            C.parse_transcript("")
 
 
 if __name__ == "__main__":

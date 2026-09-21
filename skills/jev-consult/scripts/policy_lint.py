@@ -425,6 +425,56 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         del argv[i : i + 2]
     argv = [a for a in argv if a not in {"--strict", "--show", "--quiet", "--json"}]
+    if len(argv) > 1:
+        results = []
+        for arg in argv:
+            fpath = Path(arg)
+            try:
+                fpol = json.loads(fpath.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (fpath, exc))
+                return 2
+            ffind = lint_policy(fpol)
+            ferr = sum(1 for f in ffind if f["severity"] == "error")
+            fwarn = sum(1 for f in ffind if f["severity"] == "warn")
+            finfo = sum(1 for f in ffind if f["severity"] == "info")
+            fshown = [
+                f
+                for f in ffind
+                if (not severity or f["severity"] == severity)
+                and (not quiet or f["severity"] == "error")
+            ]
+            results.append(
+                {
+                    "path": str(fpath),
+                    "findings": fshown,
+                    "errors": ferr,
+                    "warnings": fwarn,
+                    "infos": finfo,
+                }
+            )
+        if as_json:
+            sys.stdout.write(json.dumps(results, indent=2) + "\n")
+        else:
+            for res in results:
+                sys.stdout.write("%s:\n" % res["path"])
+                for finding in res["findings"]:
+                    sys.stdout.write(format_finding(finding) + "\n")
+                sys.stdout.write(
+                    "  %d error(s), %d warning(s), %d info\n"
+                    % (res["errors"], res["warnings"], res["infos"])
+                )
+        if out_path:
+            try:
+                Path(out_path).write_text(
+                    json.dumps(results, indent=2) + "\n", encoding="utf-8"
+                )
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                return 1
+        any_err = any(r["errors"] for r in results)
+        any_warn = any(r["warnings"] for r in results)
+        return 1 if any_err or (strict and any_warn) else 0
     path = Path(argv[0]) if argv else DEFAULT_POLICY
     try:
         policy = json.loads(path.read_text(encoding="utf-8"))

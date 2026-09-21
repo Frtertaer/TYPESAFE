@@ -219,6 +219,41 @@ class PolicyLintTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 1)
 
+    def test_multiple_paths_lint_each_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            good = Path(tmp) / "good.json"
+            good.write_text(json.dumps(base_policy()), encoding="utf-8")
+            badpol = base_policy()
+            badpol["noul_yes"] = 1.7
+            bad = Path(tmp) / "bad.json"
+            bad.write_text(json.dumps(badpol), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = policy_lint.main([str(good), str(bad)])
+            self.assertEqual(rc, 1)
+            out = buf.getvalue()
+            self.assertIn(str(good) + ":", out)
+            self.assertIn(str(bad) + ":", out)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = policy_lint.main([str(good), str(good)])
+            self.assertEqual(rc, 0)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = policy_lint.main([str(good), str(bad), "--json"])
+            self.assertEqual(rc, 1)
+            rows = json.loads(buf.getvalue())
+            self.assertEqual(len(rows), 2)
+            self.assertTrue(rows[0]["path"].endswith("good.json"))
+            self.assertEqual(rows[1]["errors"], 1)
+            proc = subprocess.run(
+                [sys.executable, str(LINT_PATH), str(good), str(good)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn("good.json:", proc.stdout)
+
     def test_strict_fails_on_warnings(self) -> None:
         policy = base_policy()
         policy["escalate_if"]["confidence_below"] = 0.9

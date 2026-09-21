@@ -864,5 +864,165 @@ class HandleBranchTests(unittest.TestCase):
         self.assertEqual(out, {})
 
 
+class InventoryInternalsTests(unittest.TestCase):
+    def test_uniquify(self) -> None:
+        items = [{"id": "a", "name": "x"}, {"id": "a", "name": "y"}, {"id": "b", "name": "z"}]
+        out = INV.uniquify(items)
+        ids = [i["id"] for i in out]
+        self.assertEqual(len(set(ids)), 3)
+        self.assertEqual(ids[0], "a")
+        self.assertTrue(ids[1].startswith("a_"))
+        self.assertLessEqual(max(len(i) for i in ids), 48)
+
+    def test_name_df_and_token_weight(self) -> None:
+        items = [{"name": "jwt-auth"}, {"name": "jwt-verify"}, {"name": "other"}]
+        df = INV.name_df(items, {"jwt", "zzz"})
+        self.assertEqual(df, {"jwt": 2, "zzz": 0})
+        self.assertEqual(INV.token_weight("jwt", df), 5)
+        self.assertEqual(INV.token_weight("zzz", df), 0)
+        self.assertEqual(INV.token_weight("hot", {"hot": 9}), 1)
+
+    def test_score_item(self) -> None:
+        item = {"name": "jwt-auth", "description": "token signing"}
+        self.assertEqual(INV.score_item(item, set()), 0)
+        self.assertEqual(INV.score_item(item, {"jwt"}), 3)  # name match, no df
+        self.assertGreater(
+            INV.score_item(item, {"jwt"}), INV.score_item({"name": "x", "description": "jwt"}, {"jwt"})
+        )
+        df = {"jwt": 50}
+        self.assertEqual(INV.score_item(item, {"jwt"}, df), 1)  # common token cheapened
+
+    def test_fm_scalar(self) -> None:
+        self.assertEqual(INV._fm_scalar('"quoted"'), "quoted")
+        self.assertEqual(INV._fm_scalar("'it''s'"), "it's")
+        self.assertEqual(INV._fm_scalar("plain"), "plain")
+        self.assertEqual(INV._fm_scalar('"bad'), "bad")
+
+    def test_mcp_names_from_yaml(self) -> None:
+        text = (
+            "other: 1\n"
+            "mcp_servers:\n"
+            "  github: # comment\n"
+            "    url: x\n"
+            "  slack:\n"
+            "next_key: 2\n"
+        )
+        self.assertEqual(INV.mcp_names_from_yaml(text), ["github", "slack"])
+        self.assertEqual(INV.mcp_names_from_yaml("nothing: 1\n"), [])
+
+    def test_mcp_names_from_json(self) -> None:
+        self.assertEqual(INV.mcp_names_from_json("bad"), [])
+        self.assertEqual(INV.mcp_names_from_json("[1]"), [])
+        self.assertEqual(INV.mcp_names_from_json('{"mcpServers": {"a": {}}}'), ["a"])
+        self.assertEqual(INV.mcp_names_from_json('{"mcp_servers": {"b": {}}}'), ["b"])
+        self.assertEqual(INV.mcp_names_from_json('{"mcpServers": [1]}'), [])
+
+    def test_mcp_names_from_toml(self) -> None:
+        text = "[mcp_servers.github]\nurl = 1\n[mcp_servers.slack]\nx = 2\n[mcp_servers.github]\n"
+        self.assertEqual(INV.mcp_names_from_toml(text), ["github", "slack"])
+
+    def test_iter_mcp_suffixes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "a.yaml").write_text("mcp_servers:\n  gh:\n", encoding="utf-8")
+            (d / "b.json").write_text('{"mcpServers": {"j": {}}}', encoding="utf-8")
+            (d / "c.toml").write_text("[mcp_servers.tt]\n", encoding="utf-8")
+            items = INV.iter_mcp([d / "a.yaml", d / "b.json", d / "c.toml", d / "missing.json"])
+        self.assertEqual({i["name"] for i in items}, {"gh", "j", "tt"})
+
+    def test_iter_claude_plugins(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertEqual(INV.iter_claude_plugins([root]), [])
+            manifest = root / "installed_plugins.json"
+            manifest.write_text("bad", encoding="utf-8")
+            self.assertEqual(INV.iter_claude_plugins([root]), [])
+            manifest.write_text('{"plugins": {"nice@1.0": {}, "other@2": {}}}', encoding="utf-8")
+            items = INV.iter_claude_plugins([root])
+            self.assertEqual({i["name"] for i in items}, {"nice", "other"})
+
+    def test_iter_plugin_yaml(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plug = root / "myp"
+            plug.mkdir()
+            (plug / "plugin.yaml").write_text("name: real-name\n", encoding="utf-8")
+            noname = root / "direc"
+            noname.mkdir()
+            (noname / "plugin.yml").write_text("version: 1\n", encoding="utf-8")
+            nodir = root / "nothing"
+            nodir.mkdir()  # no manifest
+            items = INV.iter_plugin_yaml([root, root])  # dup dir dedupes
+            names = {i["name"] for i in items}
+            self.assertEqual(names, {"real-name", "direc"})
+
+    def test_walk_named_skips_cruft(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "ok" / "x").mkdir(parents=True)
+            (root / "ok" / "x" / "SKILL.md").write_text("---\nname: ok-skill\n---\n", encoding="utf-8")
+            (root / "node_modules" / "junk").mkdir(parents=True)
+            (root / "node_modules" / "junk" / "SKILL.md").write_text("---\nname: bad\n---\n", encoding="utf-8")
+            items = INV.iter_skills([root])
+            self.assertEqual([i["name"] for i in items], ["ok-skill"])
+
+    def test_scan_cached(self) -> None:
+        INV.clear_scan_cache()
+        calls = []
+
+        def fake_scan(harness, home=None, hermes=None):
+            calls.append(harness)
+            return [{"id": "x", "name": "x"}]
+
+        with patch.object(INV, "scan", side_effect=fake_scan):
+            first = INV.scan_cached("hermes")
+            second = INV.scan_cached("hermes")
+        self.assertIs(first, second)  # cached object
+        self.assertEqual(len(calls), 1)
+        INV.clear_scan_cache()
+
+    def test_decisions_log_path(self) -> None:
+        with patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"}):
+            self.assertIsNone(INV.decisions_log_path())
+        with patch.dict(os.environ, {"JEV_CONSULT_LOG": "C:/x/log.jsonl"}):
+            self.assertEqual(INV.decisions_log_path(), Path("C:/x/log.jsonl"))
+
+    def test_append_decision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "sub" / "decisions.jsonl"
+            INV.append_decision({"a": 1}, log)
+            INV.append_decision({"b": 2}, log)
+            lines = log.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 2)
+            self.assertEqual(json.loads(lines[1]), {"b": 2})
+        with patch.object(INV, "decisions_log_path", return_value=None):
+            INV.append_decision({"x": 1})  # no target: silent no-op
+
+    def test_detect_harness(self) -> None:
+        self.assertEqual(INV.detect_harness(Path("C:/u/.claude/skills/x/h.py")), "claude-code")
+        self.assertEqual(INV.detect_harness(Path("C:/u/.grok/skills/x/h.py")), "grok")
+        self.assertEqual(INV.detect_harness(Path("C:/u/.codex/skills/x/h.py")), "codex")
+        self.assertEqual(INV.detect_harness(Path("C:/u/.agents/skills/x/h.py")), "codex")
+        self.assertEqual(INV.detect_harness(Path("D:/Hermes/home/skills/x/h.py")), "hermes")
+        self.assertEqual(INV.detect_harness(Path("C:/other/x.py")), "hermes")  # fallback
+
+    def test_format_notes(self) -> None:
+        self.assertEqual(INV.format_note([]), "")
+        note = INV.format_note([{"kind": "skill", "name": "jwt-auth"}])
+        self.assertIn("jwt-auth", note)
+        self.assertIn("Never auto-install", note)
+        miss = INV.format_miss_note(Path("C:/x/peer_fill.py"))
+        self.assertIn("peer_fill.py", miss)
+        self.assertIn("catalog_fill.py", miss)
+        self.assertIn("apply_fill.py", miss)
+        self.assertIn("Never --force", miss)
+
+    def test_policy_float(self) -> None:
+        self.assertEqual(INV._policy_float({"x": 0.9}, "x", 0.5), 0.9)
+        self.assertEqual(INV._policy_float({"x": "bad"}, "x", 0.5), 0.5)
+        self.assertEqual(INV._policy_float(None, "x", 0.5), 0.5)
+        self.assertEqual(INV._policy_float({}, "x", 0.5), 0.5)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

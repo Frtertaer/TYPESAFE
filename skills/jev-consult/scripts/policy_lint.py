@@ -377,6 +377,17 @@ def main(argv: list[str] | None = None) -> int:
     strict = "--strict" in argv
     show = "--show" in argv
     quiet = "--quiet" in argv
+    severity = ""
+    if "--severity" in argv:
+        i = argv.index("--severity")
+        if i + 1 >= len(argv):
+            sys.stderr.write("--severity needs a value (error|warn|info)\n")
+            return 2
+        severity = argv[i + 1].strip().lower()
+        if severity not in ("error", "warn", "info"):
+            sys.stderr.write("bad --severity %r (want error|warn|info)\n" % severity)
+            return 2
+        del argv[i : i + 2]
     diff_path = None
     if "--diff" in argv:
         i = argv.index("--diff")
@@ -409,6 +420,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     findings = lint_policy(policy)
     for finding in findings:
+        if severity and finding["severity"] != severity:
+            continue
         if quiet and finding["severity"] != "error":
             continue
         sys.stdout.write(format_finding(finding) + "\n")

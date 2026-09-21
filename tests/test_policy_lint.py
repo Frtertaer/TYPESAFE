@@ -271,6 +271,24 @@ class PolicyLintTests(unittest.TestCase):
         self.assertNotIn("P010", buf.getvalue())
         self.assertNotIn("policy_lint:", buf.getvalue())
 
+    def test_severity_filters_lines(self) -> None:
+        policy = base_policy()
+        policy["escalate_if"]["confidene_below"] = 0.4
+        policy["noul_yes"] = 1.7
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "policy.json"
+            p.write_text(json.dumps(policy), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = policy_lint.main([str(p), "--severity", "warn"])
+            self.assertEqual(rc, 1)  # error still sets rc
+            self.assertIn("P010", buf.getvalue())
+            self.assertNotIn("P002", buf.getvalue().split("policy_lint:")[0])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = policy_lint.main([str(p), "--severity", "bogus"])
+            self.assertEqual(rc, 2)
+
     def test_quiet_still_prints_errors(self) -> None:
         policy = base_policy()
         policy["noul_yes"] = 1.7

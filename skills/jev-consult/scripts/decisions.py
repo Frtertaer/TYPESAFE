@@ -346,7 +346,11 @@ def main(argv: list[str] | None = None) -> int:
         description="Stats over ~/.cache/jev-consult/decisions.jsonl."
     )
     parser.add_argument("--file", help="Override decisions.jsonl path")
-    parser.add_argument("--tail", type=int, default=0, help="Print last N entries")
+    try:
+        env_tail = int(os.environ.get("JEV_DECISIONS_TAIL", "") or 0)
+    except ValueError:
+        env_tail = 0
+    parser.add_argument("--tail", type=int, default=max(0, env_tail), help="Print last N entries")
     parser.add_argument("--first", type=int, default=0, help="Print first N entries")
     parser.add_argument(
         "--top", type=int, default=0, help="Cap count-list output (--statuses et al.) to N rows"

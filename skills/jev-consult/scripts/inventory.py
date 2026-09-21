@@ -950,6 +950,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--catalogs", action="store_true", help="Print marketplace URLs and exit.")
     parser.add_argument(
+        "--show-policy",
+        action="store_true",
+        help="Print the effective policy.json contents and exit.",
+    )
+    parser.add_argument(
         "--prune-sidecars",
         metavar="DIR",
         help="Unlink stale/invalid .jev-tools*.json under DIR and exit.",
@@ -1000,6 +1005,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.catalogs:
         for name, url in catalogs():
             sys.stdout.write("%s\t%s\n" % (name, url))
+        return 0
+    if args.show_policy:
+        sys.stdout.write(json.dumps(_policy_dict(), indent=2, sort_keys=True) + "\n")
         return 0
     harness = detect_harness(Path(__file__)) if args.harness == "auto" else args.harness
     home = Path(args.home) if args.home else None

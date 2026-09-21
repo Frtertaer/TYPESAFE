@@ -292,6 +292,18 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertTrue(buf.getvalue().strip().startswith("stale (age "))
 
+    def test_show_policy_prints_policy_json(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(["--show-policy"])
+        self.assertEqual(code, 0)
+        data = json.loads(buf.getvalue())
+        self.assertIn("sidecar_ttl_seconds", data)
+        self.assertIn("version", data)
+
     def test_show_includes_age_seconds(self) -> None:
         import time as time_mod
         from io import StringIO

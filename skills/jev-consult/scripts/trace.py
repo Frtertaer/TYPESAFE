@@ -38,7 +38,10 @@ def load(path: Path | None = None) -> dict[str, Any]:
     path = path or default_path()
     if not path.is_file():
         return empty()
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return empty()
     if not isinstance(raw, dict):
         return empty()
     data = empty()
@@ -46,7 +49,10 @@ def load(path: Path | None = None) -> dict[str, Any]:
         if key not in raw:
             continue
         data[key] = raw[key]
-    data["attempt_count"] = int(data.get("attempt_count") or 0)
+    try:
+        data["attempt_count"] = int(data.get("attempt_count") or 0)
+    except (TypeError, ValueError):
+        data["attempt_count"] = 0
     if not isinstance(data.get("inspected"), list):
         data["inspected"] = []
     if not isinstance(data.get("history"), list):

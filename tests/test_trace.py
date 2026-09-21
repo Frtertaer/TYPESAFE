@@ -69,6 +69,116 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(data["plan"], "")
         self.assertEqual(data["attempt_count"], 0)
 
+    def test_load_corrupt_json_is_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text("{truncated", encoding="utf-8")
+            data = tr.load(path)
+            self.assertEqual(data, tr.empty())
+
+    def test_load_non_dict_is_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text("[1, 2, 3]", encoding="utf-8")
+            self.assertEqual(tr.load(path), tr.empty())
+
+    def test_load_keeps_only_known_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "plan": "A",
+                        "surprise": "dropped",
+                        "attempt_count": "3",
+                        "inspected": "not a list",
+                        "history": {"nope": True},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            data = tr.load(path)
+            self.assertEqual(data["plan"], "A")
+            self.assertNotIn("surprise", data)
+            self.assertEqual(data["attempt_count"], 3)
+            self.assertEqual(data["inspected"], [])
+            self.assertEqual(data["history"], [])
+
+    def test_load_bad_attempt_count_coerced(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(json.dumps({"attempt_count": "lots"}), encoding="utf-8")
+            self.assertEqual(tr.load(path)["attempt_count"], 0)
+
+    def test_merge_state_empty_values_keep_trace(self) -> None:
+        trace = tr.empty()
+        trace["plan"] = "the plan"
+        trace["current_step"] = "step 2"
+        merged = tr.merge_state({"plan": "", "current_step": None, "inspected": [], "extra": {}}, trace)
+        self.assertEqual(merged["plan"], "the plan")
+        self.assertEqual(merged["current_step"], "step 2")
+        self.assertEqual(merged["inspected"], [])
+        # present values still win
+        merged = tr.merge_state({"plan": "override"}, trace)
+        self.assertEqual(merged["plan"], "override")
+
+    def test_record_caps_history_at_20(self) -> None:
+        data = tr.empty()
+        for i in range(25):
+            data = tr.record(data, pick="p%d" % i)
+        self.assertEqual(len(data["history"]), 20)
+        self.assertEqual(data["history"][0]["pick"], "p5")
+        self.assertEqual(data["last_pick"], "p24")
+        self.assertNotIn("kind", data["history"][-1])
+
+    def test_bump_without_error_keeps_last_error(self) -> None:
+        data = tr.bump({"attempt_count": 2, "last_error": "old"}, error="")
+        self.assertEqual(data["attempt_count"], 3)
+        self.assertEqual(data["last_error"], "old")
+
+    def test_cli_show_and_set(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            rc = tr.main(["--file", str(path), "show"])
+            self.assertEqual(rc, 0)
+            self.assertFalse(path.exists())
+            rc = tr.main(
+                [
+                    "--file",
+                    str(path),
+                    "set",
+                    "--plan",
+                    "P",
+                    "--step",
+                    "S",
+                    "--unknown",
+                    "U",
+                    "--error",
+                    "E",
+                    "--attempt",
+                    "4",
+                ]
+            )
+            self.assertEqual(rc, 0)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                (data["plan"], data["current_step"], data["unknown"], data["last_error"], data["attempt_count"]),
+                ("P", "S", "U", "E", 4),
+            )
+            # set with no flags leaves fields untouched
+            rc = tr.main(["--file", str(path), "set"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["plan"], "P")
+
+    def test_cli_record_with_step(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            rc = tr.main(["--file", str(path), "record", "--pick", "ask_human", "--step", "blocked"])
+            self.assertEqual(rc, 0)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["last_pick"], "ask_human")
+            self.assertEqual(data["current_step"], "blocked")
+
     def test_jev_apply_trace_fills_forgotten_plan(self) -> None:
         jev_path = ROOT / "skills" / "jev-consult" / "scripts" / "jev.py"
         spec = importlib.util.spec_from_file_location("jev_consult_jev", jev_path)

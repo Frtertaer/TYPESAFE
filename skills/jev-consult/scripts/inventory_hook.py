@@ -173,7 +173,7 @@ def handle(
     stale_match = False
     if cwd is not None:
         prior = read_sidecar(cwd / SIDECAR_NAME)
-        norm = lambda s: " ".join(str(s or "").split())[:500]
+        norm = lambda s: " ".join(str(s or "").split())[:500].lower()
         if prior and norm(prior.get("task")) == norm(prompt):
             if sidecar_fresh(prior):
                 deduped = prior

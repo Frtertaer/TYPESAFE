@@ -75,6 +75,26 @@ def lint_skill(path: Path) -> list[dict]:
                 "message": "description is %d chars (over 1024)" % len(description),
             }
         )
+    policy_file = path.parent / "policy.json"
+    if policy_file.is_file():
+        try:
+            import json as _json
+
+            policy_keys = set(_json.loads(policy_file.read_text(encoding="utf-8")))
+        except (OSError, _json.JSONDecodeError):
+            policy_keys = None
+        if policy_keys is not None:
+            cited = set(
+                re.findall(r"`([a-z][a-z0-9_]*)`\s*\([^)]*policy\.json", text)
+            )
+            for key in sorted(cited - policy_keys):
+                findings.append(
+                    {
+                        "rule": "S007",
+                        "severity": "warn",
+                        "message": "cited policy.json key %r not found" % key,
+                    }
+                )
     return findings
 
 

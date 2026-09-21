@@ -74,6 +74,45 @@ class LintSkillTests(unittest.TestCase):
             findings = skill_lint.lint_skill(path)
             self.assertTrue(any(f["rule"] == "S006" for f in findings))
 
+    def test_policy_key_drift_warns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = write_skill(root, "s", GOOD.format(name="s"))
+            path.write_text(
+                path.read_text(encoding="utf-8")
+                + "\nSee `ghost_key` (policy.json, default 3).\n",
+                encoding="utf-8",
+            )
+            (root / "s" / "policy.json").write_text('{"version": 1}', encoding="utf-8")
+            findings = skill_lint.lint_skill(path)
+            rules = [f["rule"] for f in findings]
+            self.assertIn("S007", rules)
+            msg = [f["message"] for f in findings if f["rule"] == "S007"][0]
+            self.assertIn("ghost_key", msg)
+
+    def test_policy_key_present_no_warn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = write_skill(root, "s", GOOD.format(name="s"))
+            path.write_text(
+                path.read_text(encoding="utf-8")
+                + "\nSee `version` (policy.json) here.\n",
+                encoding="utf-8",
+            )
+            (root / "s" / "policy.json").write_text('{"version": 1}', encoding="utf-8")
+            self.assertEqual(skill_lint.lint_skill(path), [])
+
+    def test_no_policy_file_no_s007(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = write_skill(root, "s", GOOD.format(name="s"))
+            path.write_text(
+                path.read_text(encoding="utf-8")
+                + "\nSee `ghost_key` (policy.json).\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(skill_lint.lint_skill(path), [])
+
     def test_repo_skill_lints_clean(self):
         findings = skill_lint.lint_skill(
             ROOT / "skills" / "jev-consult" / "SKILL.md"

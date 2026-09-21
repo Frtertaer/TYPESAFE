@@ -1556,5 +1556,42 @@ class CheckMissTests(unittest.TestCase):
         self.assertEqual(buf.getvalue().strip(), "missing")
 
 
+class DebugFlagTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+
+    def _run_main(self, payload: dict, argv: list) -> tuple:
+        out_buf = io.StringIO()
+        err_buf = io.StringIO()
+        with patch("sys.stdin", io.StringIO(json.dumps(payload))), patch(
+            "sys.stdout", out_buf
+        ), patch("sys.stderr", err_buf), patch.object(
+            HOOK, "pick_with_jev", return_value={"status": "skip", "winner": None}
+        ):
+            rc = HOOK.main(argv)
+        return rc, out_buf.getvalue(), err_buf.getvalue()
+
+    def test_debug_writes_kv_stderr(self) -> None:
+        payload = {"hook_event_name": "UserPromptSubmit", "prompt": "Add JWT tokens"}
+        rc, out, err = self._run_main(payload, ["--debug"])
+        self.assertEqual(rc, 0)
+        self.assertIn("jev_status=", err)
+        self.assertIn("shortlist=", err)
+
+    def test_no_debug_flag_silent_stderr(self) -> None:
+        payload = {"hook_event_name": "UserPromptSubmit", "prompt": "Add JWT tokens"}
+        rc, out, err = self._run_main(payload, [])
+        self.assertEqual(rc, 0)
+        self.assertEqual(err.strip(), "")
+
+    def test_debug_env_var_enables(self) -> None:
+        payload = {"hook_event_name": "UserPromptSubmit", "prompt": "Add JWT tokens"}
+        with patch.dict(os.environ, {"JEV_HOOK_DEBUG": "1"}):
+            rc, out, err = self._run_main(payload, [])
+        self.assertIn("jev_status=", err)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

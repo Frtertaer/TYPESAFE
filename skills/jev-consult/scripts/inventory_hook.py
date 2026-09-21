@@ -45,6 +45,8 @@ from inventory import (  # noqa: E402
 FILL_SCRIPT = _SCRIPTS / "peer_fill.py"
 HOOK_JEV_TIMEOUT = 8.0
 
+LAST_DECISION: dict | None = None
+
 
 def _redact_prompt(prompt: str) -> str:
     try:
@@ -152,6 +154,8 @@ def handle(
     harness: str | None = None,
     pick_fn=None,
 ) -> dict:
+    global LAST_DECISION
+    LAST_DECISION = None
     t0 = time.monotonic()
     event = event_name(payload)
     if event and event not in {"UserPromptSubmit", "pre_llm_call"}:
@@ -198,22 +202,21 @@ def handle(
         if extra["jev_status"] == "winner" and winner_out and winner_out.get("name"):
             extra["jev_pick"] = {"kind": winner_out.get("kind"), "name": winner_out.get("name")}
         note = _note_for_picker(picked, picker)
-        append_decision(
-            {
-                "ts": time.time(),
-                "harness": harness,
-                "prompt_sha": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12],
-                "prompt_head": _redact_prompt(prompt[:240])[:160],
-                "n_catalog": 0,
-                "shortlist": [item.get("id") for item in picked],
-                "explicit": False,
-                "dedupe": True,
-                "jev_status": extra["jev_status"],
-                "winner": {"kind": winner_out.get("kind"), "name": winner_out.get("name")}
-                if winner_out
-                else None,
-            }
-        )
+        LAST_DECISION = {
+            "ts": time.time(),
+            "harness": harness,
+            "prompt_sha": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12],
+            "prompt_head": _redact_prompt(prompt[:240])[:160],
+            "n_catalog": 0,
+            "shortlist": [item.get("id") for item in picked],
+            "explicit": False,
+            "dedupe": True,
+            "jev_status": extra["jev_status"],
+            "winner": {"kind": winner_out.get("kind"), "name": winner_out.get("name")}
+            if winner_out
+            else None,
+        }
+        append_decision(LAST_DECISION)
         if not note:
             return {}
         if event == "pre_llm_call" or harness == "hermes":
@@ -254,25 +257,24 @@ def handle(
     if extra["jev_status"] == "winner" and winner and winner.get("name"):
         extra["jev_pick"] = {"kind": winner.get("kind"), "name": winner.get("name")}
     note = _note_for_picker(picked, picker)
-    append_decision(
-        {
-            "ts": time.time(),
-            "harness": harness,
-            "prompt_sha": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12],
-            "prompt_head": _redact_prompt(prompt[:240])[:160],
-            "n_catalog": len(catalog),
-            "shortlist": [item.get("id") for item in picked],
-            "explicit": explicit_winner is not None,
-            "jev_status": extra["jev_status"],
-            "need": picker.get("need"),
-            "probabilities": picker.get("probabilities") or {},
-            "winner": {"kind": winner.get("kind"), "name": winner.get("name")}
-            if winner
-            else None,
-            "strong_pick": bool(picker.get("strong")),
-            "latency_ms": picker.get("latency_ms"),
-        }
-    )
+    LAST_DECISION = {
+        "ts": time.time(),
+        "harness": harness,
+        "prompt_sha": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12],
+        "prompt_head": _redact_prompt(prompt[:240])[:160],
+        "n_catalog": len(catalog),
+        "shortlist": [item.get("id") for item in picked],
+        "explicit": explicit_winner is not None,
+        "jev_status": extra["jev_status"],
+        "need": picker.get("need"),
+        "probabilities": picker.get("probabilities") or {},
+        "winner": {"kind": winner.get("kind"), "name": winner.get("name")}
+        if winner
+        else None,
+        "strong_pick": bool(picker.get("strong")),
+        "latency_ms": picker.get("latency_ms"),
+    }
+    append_decision(LAST_DECISION)
     if cwd is not None:
         try:
             write_sidecar(cwd / SIDECAR_NAME, harness, prompt, picked, extra)
@@ -307,7 +309,16 @@ def handle(
     return {}
 
 
-def main() -> int:
+def _debug_enabled(argv: list[str]) -> bool:
+    import os
+
+    if "--debug" in argv:
+        return True
+    return os.environ.get("JEV_HOOK_DEBUG", "").strip().lower() in {"1", "true", "yes"}
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
     raw = sys.stdin.read()
     if not raw.strip():
         sys.stdout.write("{}\n")
@@ -325,6 +336,17 @@ def main() -> int:
     except Exception:
         out = {}
     sys.stdout.write(json.dumps(out) + "\n")
+    if _debug_enabled(argv) and LAST_DECISION is not None:
+        parts = {
+            "jev_status": LAST_DECISION.get("jev_status"),
+            "winner": (LAST_DECISION.get("winner") or {}).get("name"),
+            "dedupe": LAST_DECISION.get("dedupe"),
+            "shortlist": len(LAST_DECISION.get("shortlist") or []),
+            "latency_ms": LAST_DECISION.get("latency_ms"),
+        }
+        sys.stderr.write(
+            " ".join("%s=%s" % (k, v) for k, v in parts.items() if v is not None) + "\n"
+        )
     return 0
 
 

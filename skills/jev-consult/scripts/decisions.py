@@ -868,6 +868,13 @@ def main(argv: list[str] | None = None) -> int:
             if prev_keys is not None:
                 tick["added"] = len(cur_keys - prev_keys)
                 tick["removed"] = len(prev_keys - cur_keys)
+                prev_count = len(prev_keys)
+                if prev_count:
+                    tick["delta_pct"] = round(
+                        100.0 * (len(entries) - prev_count) / prev_count, 1
+                    )
+                else:
+                    tick["delta_pct"] = None
             sys.stdout.write(json.dumps(tick) + "\n")
             sys.stdout.flush()
             prev_keys = cur_keys

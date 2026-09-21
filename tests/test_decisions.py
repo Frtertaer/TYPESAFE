@@ -1994,8 +1994,10 @@ class PruneTest(unittest.TestCase):
         self.assertNotIn("added", ticks[0])
         self.assertEqual(ticks[1]["added"], 1)
         self.assertEqual(ticks[1]["removed"], 0)
+        self.assertEqual(ticks[1]["delta_pct"], 100.0)
         self.assertEqual(ticks[2]["added"], 0)
         self.assertEqual(ticks[2]["removed"], 1)
+        self.assertEqual(ticks[2]["delta_pct"], -50.0)
 
     def test_status_outcome_fill_winner_accept_comma_lists(self):
         with tempfile.TemporaryDirectory() as tmp:

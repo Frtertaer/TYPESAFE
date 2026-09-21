@@ -62,6 +62,14 @@ def lint_skill(path: Path) -> list[dict]:
                 "message": "name %r does not match directory %r" % (name, path.parent.name),
             }
         )
+    if name and not re.match(r"^[a-z0-9][a-z0-9-]*$", name):
+        findings.append(
+            {
+                "rule": "S008",
+                "severity": "warn",
+                "message": "name %r is not lowercase-hyphenated" % name,
+            }
+        )
     description = meta.get("description", "").strip()
     if not description:
         findings.append(

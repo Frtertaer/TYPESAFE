@@ -74,6 +74,21 @@ class LintSkillTests(unittest.TestCase):
             findings = skill_lint.lint_skill(path)
             self.assertTrue(any(f["rule"] == "S006" for f in findings))
 
+    def test_name_casing_warns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = write_skill(root, "MySkill", GOOD.format(name="MySkill"))
+            findings = skill_lint.lint_skill(path)
+            rules = [f["rule"] for f in findings]
+            self.assertIn("S008", rules)
+
+    def test_name_clean_casing_no_s008(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = write_skill(root, "my-skill-2", GOOD.format(name="my-skill-2"))
+            findings = skill_lint.lint_skill(path)
+            self.assertNotIn("S008", [f["rule"] for f in findings])
+
     def test_policy_key_drift_warns(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

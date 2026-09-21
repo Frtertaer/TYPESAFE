@@ -130,6 +130,8 @@ Log maintenance: `python skills/jev-consult/scripts/decisions.py` prints stats (
 
 Environment: `TYPESAFE_API_KEY` authorizes Jev calls (never print it). `JEV_CONSULT_LOG=0` disables `decisions.jsonl`. `JEV_CONSULT_SPILL=0` disables spill writes. `JEV_HOOK_DEBUG=1` makes the hook echo the last decision (`jev_status`, `winner`, `dedupe`, `shortlist` size, `latency_ms`) to stderr. `JEV_TRACE` sets the default trace file `trace.py` reads.
 
+The hook enforces a wall-clock budget: `hook_budget_seconds` (policy.json, 12s default) caps each invocation; on timeout it skips the Jev pick, logs `jev_status=budget`, and returns the IDF shortlist without a winner (fail-open).
+
 If `.jev-tools-miss.json` exists, do not ask the user. Run:
 
 ```text

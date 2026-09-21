@@ -589,9 +589,13 @@ def format_miss_note(script: Path) -> str:
 
 
 def write_miss(path: Path, harness: str, task: str) -> None:
+    task = (task or "")[:500]
+    prior = read_sidecar(path)
+    if prior and sidecar_fresh(prior) and str(prior.get("task") or "") == task:
+        return
     payload = {
         "harness": harness,
-        "task": (task or "")[:500],
+        "task": task,
         "empty": True,
         "written_at": int(time.time()),
     }

@@ -1556,6 +1556,35 @@ class CheckMissTests(unittest.TestCase):
         self.assertEqual(buf.getvalue().strip(), "missing")
 
 
+class MissDedupeTests(unittest.TestCase):
+    def test_same_task_fresh_miss_not_rewritten(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / INV.MISS_NAME
+            INV.write_miss(path, "codex", "task a")
+            first = INV.read_sidecar(path)["written_at"]
+            INV.write_miss(path, "codex", "task a")
+            second = INV.read_sidecar(path)["written_at"]
+            self.assertEqual(first, second)
+
+    def test_different_task_rewrites(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / INV.MISS_NAME
+            INV.write_miss(path, "codex", "task a")
+            INV.write_miss(path, "codex", "task b")
+            self.assertEqual(INV.read_sidecar(path)["task"], "task b")
+
+    def test_stale_miss_rewritten(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / INV.MISS_NAME
+            path.write_text(
+                json.dumps({"harness": "codex", "task": "task a", "empty": True, "written_at": 1})
+                + "\n",
+                encoding="utf-8",
+            )
+            INV.write_miss(path, "codex", "task a")
+            self.assertGreater(INV.read_sidecar(path)["written_at"], 1)
+
+
 class ShowSidecarTests(unittest.TestCase):
     def test_show_fresh_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

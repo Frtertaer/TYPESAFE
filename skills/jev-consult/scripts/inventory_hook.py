@@ -60,11 +60,24 @@ def _redact_prompt(prompt: str) -> str:
         return prompt
 
 
+def _content_text(value) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = [
+            str(block.get("text") or "")
+            for block in value
+            if isinstance(block, dict)
+        ]
+        return " ".join(part for part in parts if part)
+    return ""
+
+
 def extract_prompt(payload: dict) -> str:
     for key in ("prompt", "user_message", "userMessage"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+        text = _content_text(payload.get(key))
+        if text.strip():
+            return text.strip()
     history = payload.get("conversation_history") or payload.get("messages")
     if isinstance(history, list):
         for item in reversed(history):
@@ -73,9 +86,11 @@ def extract_prompt(payload: dict) -> str:
             role = str(item.get("role") or item.get("type") or "").lower()
             if role not in {"user", "human"}:
                 continue
-            content = item.get("content") or item.get("text") or item.get("message")
-            if isinstance(content, str) and content.strip():
-                return content.strip()
+            text = _content_text(
+                item.get("content") or item.get("text") or item.get("message")
+            )
+            if text.strip():
+                return text.strip()
     return ""
 
 

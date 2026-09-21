@@ -724,6 +724,14 @@ class HandleBranchTests(unittest.TestCase):
     def test_extract_prompt_variants(self) -> None:
         self.assertEqual(HOOK.extract_prompt({"prompt": " p "}), "p")
         self.assertEqual(HOOK.extract_prompt({"user_message": "u"}), "u")
+        blocks = [{"type": "text", "text": "block"}, {"type": "image"}]
+        self.assertEqual(HOOK.extract_prompt({"prompt": blocks}), "block")
+        self.assertEqual(
+            HOOK.extract_prompt(
+                {"messages": [{"role": "user", "content": [{"type": "text", "text": "deep"}, {"type": "text", "text": "dive"}]}]}
+            ),
+            "deep dive",
+        )
         self.assertEqual(HOOK.extract_prompt({"userMessage": "m"}), "m")
         self.assertEqual(
             HOOK.extract_prompt(

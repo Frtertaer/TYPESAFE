@@ -542,6 +542,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Count entries grouped by FIELD (a.b digs into nested objects)",
     )
     parser.add_argument(
+        "--jq-where-contains",
+        metavar="SUB",
+        default="",
+        help="With --jq: keep only extracted values containing SUB.",
+    )
+    parser.add_argument(
         "--jq",
         metavar="FIELD",
         default="",
@@ -915,6 +921,21 @@ def main(argv: list[str] | None = None) -> int:
                 seen.add(key)
                 uniq_values.append(value)
             values = uniq_values
+        if args.jq_where_contains:
+            needle = args.jq_where_contains
+            filtered = []
+            for value in values:
+                haystack = (
+                    value
+                    if isinstance(value, str)
+                    else json.dumps(
+                        list(value) if isinstance(value, tuple) else value,
+                        sort_keys=True,
+                    )
+                )
+                if needle in haystack:
+                    filtered.append(value)
+            values = filtered
         if args.json:
             out_values = [list(v) if isinstance(v, tuple) else v for v in values]
             sys.stdout.write(json.dumps({"field": args.jq, "values": out_values}, indent=2) + "\n")

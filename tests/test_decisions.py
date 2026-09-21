@@ -1859,6 +1859,30 @@ class PruneTest(unittest.TestCase):
             )
             self.assertEqual(len(proc.stdout.strip().splitlines()), 2)
 
+    def test_jq_where_contains_filters_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "winner": {"kind": "skill", "name": "jwt-auth"}},
+                    {"ts": 2, "winner": {"kind": "mcp", "name": "sqlite"}},
+                    {"ts": 3},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--jq", "winner.name",
+                "--jq-where-contains", "auth",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.splitlines(), ["jwt-auth"])
+            proc = self.run_cli(
+                "--file", str(path), "--jq", "winner",
+                "--jq-where-contains", "mcp", "--json",
+            )
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["values"], [{"kind": "mcp", "name": "sqlite"}])
+
     def test_status_outcome_fill_winner_accept_comma_lists(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

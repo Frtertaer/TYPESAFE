@@ -709,6 +709,24 @@ class JevInternalsTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             jev.main([])
 
+    def test_version_flag(self) -> None:
+        buf = io.StringIO()
+        with patch.object(sys, "stdout", buf):
+            rc = jev.main(["--version"])
+        self.assertEqual(rc, 0)
+        self.assertIn("jev-consult", buf.getvalue())
+        self.assertIn("policy v", buf.getvalue())
+
+    def test_version_flag_with_policy_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = Path(tmp) / "policy.json"
+            custom.write_text('{"version": 42}', encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = jev.main(["--policy", str(custom), "--version"])
+        self.assertEqual(rc, 0)
+        self.assertIn("v42", buf.getvalue())
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

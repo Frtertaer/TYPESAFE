@@ -663,7 +663,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Ask TypeSafe Jev and apply jev-consult policy. Never prints secrets."
     )
     parser.add_argument("--policy", help="Path to policy.json (defaults to skill policy.json)")
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="Print the jev-consult policy version and exit.",
+    )
+    sub = parser.add_subparsers(dest="command")
     ask = sub.add_parser("ask", help="POST state+questions, print answers and decision")
     ask.add_argument("file", help="JSON file or - for stdin")
     ask.add_argument(
@@ -713,6 +718,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.version:
+        try:
+            version = load_policy(args.policy).get("version", "?")
+        except Exception:
+            version = "?"
+        sys.stdout.write("jev-consult (policy v%s)\n" % version)
+        return 0
+    if not hasattr(args, "func"):
+        parser.error("a command is required")
     return int(args.func(args))
 
 

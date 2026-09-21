@@ -116,7 +116,7 @@ def extract_prompt(payload: dict) -> str:
             )
             if text.strip():
                 return text.strip()
-    return ""
+    return os.environ.get("JEV_HOOK_PROMPT", "").strip()
 
 
 def extract_cwd(payload: dict) -> Path | None:

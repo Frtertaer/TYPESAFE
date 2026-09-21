@@ -388,6 +388,18 @@ class TraceTests(unittest.TestCase):
                 tr.main(["--file", str(path), "history", "--json"])
             rows = json.loads(buf.getvalue())
             self.assertEqual([r["pick"] for r in rows], ["jwt-auth", "sqlite"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--field", "kind"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().split(), ["skill", "mcp"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--field", "missing", "--json"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["field"], "missing")
+            self.assertEqual(payload["values"], [None, None])
 
     def test_cli_notes_out_writes_file(self) -> None:
         import io

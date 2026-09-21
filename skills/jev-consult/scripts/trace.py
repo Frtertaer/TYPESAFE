@@ -256,6 +256,20 @@ def cmd_history(args: argparse.Namespace) -> int:
     limit = getattr(args, "limit", None)
     if isinstance(limit, int) and limit >= 0:
         history = history[-limit:] if limit else []
+    field = getattr(args, "field", "") or ""
+    if field:
+        values = [_dig(entry, field) for entry in history]
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps({"field": field, "values": values}, ensure_ascii=False, indent=2) + "\n"
+            )
+            return 0
+        for value in values:
+            sys.stdout.write(
+                (value if isinstance(value, str) else json.dumps(value, ensure_ascii=False) if value is not None else "null")
+                + "\n"
+            )
+        return 0
     if getattr(args, "json", False):
         sys.stdout.write(json.dumps(history, ensure_ascii=False, indent=2) + "\n")
         return 0
@@ -471,6 +485,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")
     hist_cmd.add_argument("--limit", type=int, help="Show only the last N picks")
+    hist_cmd.add_argument("--field", default="", help="Print only this field per pick (a.b digs into nested objects)")
     hist_cmd.set_defaults(func=cmd_history)
     return parser
 

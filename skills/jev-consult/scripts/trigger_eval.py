@@ -86,6 +86,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--quiet", action="store_true", help="Print only the verdict line.")
     parser.add_argument(
+        "--fail",
+        action="store_true",
+        help="Print only the failing case rows (positives that scored 0).",
+    )
+    parser.add_argument(
         "--out",
         metavar="PATH",
         default="",
@@ -112,10 +117,15 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         sys.stderr.write("wrote %s\n" % args.out)
     if args.json:
-        sys.stdout.write(json.dumps(result, indent=2) + "\n")
+        payload = result
+        if args.fail:
+            payload = dict(result)
+            payload["cases"] = [r for r in result["cases"] if not r["ok"]]
+        sys.stdout.write(json.dumps(payload, indent=2) + "\n")
     else:
         if not args.quiet:
-            for row in result["cases"]:
+            shown = [r for r in result["cases"] if not r["ok"]] if args.fail else result["cases"]
+            for row in shown:
                 score = "-" if row["score"] is None else "%.3f" % row["score"]
                 marker = "" if row["ok"] else "  <-- FAIL"
                 sys.stdout.write(

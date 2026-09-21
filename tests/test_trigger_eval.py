@@ -102,6 +102,40 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertEqual(len(payload["cases"]), len(payload["cases"]))
 
+    def test_fail_flag_filters_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = write_cases(
+                tmp,
+                [
+                    {
+                        "id": "pos-dead",
+                        "prompt": "zzz qqq xxx",
+                        "should_trigger": True,
+                    },
+                    {
+                        "id": "neg-x",
+                        "prompt": "unrelated words here",
+                        "should_trigger": False,
+                    },
+                ],
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(["--cases", str(cases), "--fail"])
+            self.assertEqual(rc, 1)
+            self.assertIn("pos-dead", buf.getvalue())
+            self.assertNotIn("neg-x", buf.getvalue())
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(["--cases", str(cases), "--fail", "--json"])
+            payload = json.loads(buf.getvalue())
+            self.assertEqual([r["id"] for r in payload["cases"]], ["pos-dead"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(["--fail"])
+            self.assertEqual(rc, 0)
+            self.assertNotIn("should_trigger=", buf.getvalue())
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

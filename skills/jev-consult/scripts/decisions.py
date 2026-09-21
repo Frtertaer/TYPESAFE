@@ -451,6 +451,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Count entries grouped by FIELD (a.b digs into nested objects)",
     )
     parser.add_argument(
+        "--jq",
+        metavar="FIELD",
+        default="",
+        help="Print the FIELD value of each entry, one per line (a.b digs into nested objects)",
+    )
+    parser.add_argument(
         "--errors",
         action="store_true",
         help="Print the unparseable jsonl lines with line numbers",
@@ -558,6 +564,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.count:
         sys.stdout.write("%d\n" % len(entries))
+        return 0
+    if args.jq:
+        values = [_dig(item, args.jq) for item in entries]
+        if args.json:
+            sys.stdout.write(json.dumps({"field": args.jq, "values": values}, indent=2) + "\n")
+        else:
+            for value in values:
+                if value is None:
+                    sys.stdout.write("null\n")
+                elif isinstance(value, str):
+                    sys.stdout.write(value + "\n")
+                else:
+                    sys.stdout.write(json.dumps(value, sort_keys=True) + "\n")
         return 0
     if args.group_by:
         rows = sorted(group_by(entries, args.group_by).items(), key=lambda kv: (-kv[1], kv[0]))

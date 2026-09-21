@@ -255,6 +255,32 @@ class CliTest(unittest.TestCase):
             self.assertEqual(payload["counts"], {"codex": 2, "hermes": 1})
             self.assertEqual(payload["field"], "harness")
 
+    def test_jq_prints_field_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "harness": "codex", "winner": {"kind": "skill", "name": "jwt-auth"}},
+                    {"ts": 2, "harness": "codex"},
+                    {"ts": 3, "harness": "hermes", "winner": {"kind": "mcp", "name": "sqlite"}},
+                    {"ts": 4, "harness": "codex", "jev_status": "winner", "need": 0.5},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--jq", "winner.name")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.splitlines(), ["jwt-auth", "null", "sqlite", "null"])
+            proc = self.run_cli("--file", str(path), "--jq", "harness", "--status", "winner")
+            self.assertEqual(proc.stdout.splitlines(), ["codex"])
+            proc = self.run_cli("--file", str(path), "--jq", "winner", "--json")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["field"], "winner")
+            self.assertEqual(payload["values"][0], {"kind": "skill", "name": "jwt-auth"})
+            self.assertIsNone(payload["values"][1])
+            proc = self.run_cli("--file", str(path), "--jq", "need")
+            self.assertEqual(proc.stdout.splitlines(), ["null", "null", "null", "0.5"])
+
     def test_tail_env_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

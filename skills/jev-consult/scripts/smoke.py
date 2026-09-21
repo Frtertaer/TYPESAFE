@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -25,13 +26,16 @@ def _step(name: str, ok: bool, detail: str) -> dict:
     return {"name": name, "ok": bool(ok), "detail": detail}
 
 
-def _run(argv: list[str], cwd: Path | None = None) -> tuple[int, str]:
+def _run(
+    argv: list[str], cwd: Path | None = None, env: dict | None = None
+) -> tuple[int, str]:
     proc = subprocess.run(
         [sys.executable, *argv],
         capture_output=True,
         text=True,
         cwd=str(cwd) if cwd else None,
         timeout=60,
+        env=env,
     )
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
@@ -183,6 +187,29 @@ def step_question_lint(tmp: Path) -> dict:
     return _step("question_lint", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 
+def step_apply_fill(tmp: Path) -> dict:
+    env = dict(os.environ)
+    env["JEV_CONSULT_LOG"] = "0"
+    env.pop("TYPESAFE_API_KEY", None)
+    env["USERPROFILE"] = str(tmp / "home")
+    env["HOME"] = str(tmp / "home")
+    rc, out = _run(
+        [
+            str(SCRIPTS / "apply_fill.py"),
+            "--task",
+            "jwt",
+            "--harness",
+            "claude-code",
+            "--cwd",
+            str(tmp / "cwd"),
+            "--dry-run",
+        ],
+        env=env,
+    )
+    ok = rc == 0 and "human" in out
+    return _step("apply_fill", ok, out.strip()[:120] or "rc=%d" % rc)
+
+
 def step_compare(tmp: Path) -> dict:
     rc, out = _run([str(SCRIPTS / "compare.py"), "--strict"])
     ok = rc == 0 and "after_jev" in out
@@ -225,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             step_skill_lint,
             step_question_lint,
             step_compare,
+            step_apply_fill,
             step_doctor,
         ):
             try:

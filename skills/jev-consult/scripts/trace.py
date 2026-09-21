@@ -419,6 +419,16 @@ def cmd_stats(args: argparse.Namespace) -> int:
             out["age_seconds"] = int(time.time() - path.stat().st_mtime)
         except OSError:
             pass
+    if getattr(args, "out", ""):
+        try:
+            Path(args.out).write_text(
+                json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % args.out)
+        return 0
     emit(out)
     return 0
 
@@ -490,6 +500,7 @@ def build_parser() -> argparse.ArgumentParser:
     state_cmd.add_argument("--out", help="Write JSON here instead of stdout")
     state_cmd.set_defaults(func=cmd_state)
     stats_cmd = sub.add_parser("stats", help="Summary: counts, last pick, file age")
+    stats_cmd.add_argument("--out", default="", help="Write the stats JSON to PATH instead of stdout")
     stats_cmd.set_defaults(func=cmd_stats)
     notes_cmd = sub.add_parser("notes", help="List recorded notes (iso + text)")
     notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")

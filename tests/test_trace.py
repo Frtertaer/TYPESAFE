@@ -111,6 +111,22 @@ class TraceTests(unittest.TestCase):
             self.assertTrue(out["has_unknown"])
             self.assertGreaterEqual(out["age_seconds"], 0)
 
+    def test_stats_out_writes_file(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stderr
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            out_path = Path(tmp) / "stats.json"
+            tr.save({"plan": "p", "attempt_count": 2}, path)
+            err = StringIO()
+            with redirect_stderr(err):
+                rc = tr.main(["--file", str(path), "stats", "--out", str(out_path)])
+            self.assertEqual(rc, 0)
+            out = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual(out["attempt_count"], 2)
+            self.assertIn("wrote", err.getvalue())
+
     def test_load_missing_is_empty(self) -> None:
         data = tr.load(Path("definitely-missing-jev-trace.json"))
         self.assertEqual(data["plan"], "")

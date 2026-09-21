@@ -467,6 +467,13 @@ def main(argv: list[str] | None = None) -> int:
         env_min_plen = None
     parser.add_argument("--min-prompt-len", type=float, default=env_min_plen, help="Only entries with numeric prompt_len >= N")
     parser.add_argument(
+        "--where",
+        action="append",
+        metavar="KEY=VAL",
+        default=None,
+        help="Keep entries whose KEY field (dotted dig) string-equals VAL; repeatable",
+    )
+    parser.add_argument(
         "--statuses",
         action="store_true",
         help="Print unique jev_status values with counts, sorted desc",
@@ -707,6 +714,16 @@ def main(argv: list[str] | None = None) -> int:
             and not isinstance(item.get("latency_ms"), bool)
             and float(item.get("latency_ms")) >= args.min_latency
         ]
+    for pair in args.where or []:
+        if "=" not in pair:
+            continue
+        wkey, wval = pair.split("=", 1)
+        wkey, wval = wkey.strip(), wval.strip().lower()
+        entries = [
+            item
+            for item in entries
+            if str(_dig(item, wkey) if _dig(item, wkey) is not None else "").lower() == wval
+        ]
     if args.prompt:
         needle = args.prompt.lower()
         entries = [
@@ -739,9 +756,10 @@ def main(argv: list[str] | None = None) -> int:
             or getattr(args, "min_catalog", None) is not None
             or getattr(args, "min_shortlist", None) is not None
             or getattr(args, "min_prompt_len", None) is not None
+            or args.where
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, --min-catalog, --min-shortlist, --min-prompt-len, or --prompt (--reverse does not affect --prune)\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, --min-catalog, --min-shortlist, --min-prompt-len, --where, or --prompt (--reverse does not affect --prune)\n"
             )
             return 2
         total, total_bad = load_entries(path)

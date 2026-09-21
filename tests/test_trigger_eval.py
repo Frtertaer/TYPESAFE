@@ -201,6 +201,17 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertIn("coverage: 1/2 (50%)", buf.getvalue())
 
+    def test_coverage_json_emits_object(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--coverage", "--json"])
+        self.assertEqual(rc, 0)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["total"], 25)
+        self.assertEqual(out["hits"], 23)
+        self.assertAlmostEqual(out["coverage"], 0.92)
+        self.assertTrue(out["ok"])
+
     def test_min_coverage_gates_hit_rate(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

@@ -496,10 +496,23 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write("unscored %d\n" % unscored)
         return 0 if result["ok"] else 1
     if args.coverage:
-        sys.stdout.write(
-            "coverage: %d/%d (%.0f%%)\n"
-            % (result["hits"], len(result["cases"]), result["coverage"] * 100)
-        )
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "hits": result["hits"],
+                        "total": len(result["cases"]),
+                        "coverage": result["coverage"],
+                        "ok": result["ok"] and _coverage_ok(),
+                    }
+                )
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "coverage: %d/%d (%.0f%%)\n"
+                % (result["hits"], len(result["cases"]), result["coverage"] * 100)
+            )
         return 0 if (result["ok"] and _coverage_ok()) else 1
     if args.ids:
         for row in _rows():

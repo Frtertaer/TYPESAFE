@@ -447,6 +447,12 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         env_min_score = None
     parser.add_argument("--min-score", type=float, default=env_min_score, help="Only entries with numeric shortlist_score_avg >= F")
+    env_min_cat = os.environ.get("JEV_DECISIONS_MIN_CATALOG", "")
+    try:
+        env_min_cat = float(env_min_cat) if env_min_cat else None
+    except ValueError:
+        env_min_cat = None
+    parser.add_argument("--min-catalog", type=float, default=env_min_cat, help="Only entries with numeric n_catalog >= N")
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -610,6 +616,14 @@ def main(argv: list[str] | None = None) -> int:
         entries = [item for item in entries if item.get("over_budget") is True]
     if getattr(args, "strong", False):
         entries = [item for item in entries if item.get("strong_pick") is True]
+    if getattr(args, "min_catalog", None) is not None:
+        entries = [
+            item
+            for item in entries
+            if isinstance(item.get("n_catalog"), (int, float))
+            and not isinstance(item.get("n_catalog"), bool)
+            and float(item.get("n_catalog")) >= args.min_catalog
+        ]
     if getattr(args, "min_score", None) is not None:
         entries = [
             item
@@ -693,9 +707,10 @@ def main(argv: list[str] | None = None) -> int:
             or getattr(args, "over_budget", False)
             or getattr(args, "strong", False)
             or getattr(args, "min_score", None) is not None
+            or getattr(args, "min_catalog", None) is not None
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, or --prompt\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, --min-catalog, or --prompt\n"
             )
             return 2
         total, total_bad = load_entries(path)

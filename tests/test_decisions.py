@@ -552,6 +552,36 @@ class CliTest(unittest.TestCase):
             self.assertEqual(len(kept), 1)
             self.assertEqual(kept[0]["harness"], "a")
 
+    def test_first_prints_earliest_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"harness": "first", "ts": 1},
+                    {"harness": "mid", "ts": 2},
+                    {"harness": "last", "ts": 3},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--first", "1")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("first", proc.stdout)
+            self.assertNotIn("last", proc.stdout.splitlines()[-1])
+
+    def test_first_and_tail_first_wins(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [{"harness": "h1", "ts": 1}, {"harness": "h9", "ts": 9}],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--first", "1", "--tail", "1"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            tail_lines = [l for l in proc.stdout.splitlines() if "h" in l]
+            self.assertIn("h1", proc.stdout)
+
     def test_dedupes_counts(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

@@ -257,6 +257,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--file", help="Override decisions.jsonl path")
     parser.add_argument("--tail", type=int, default=0, help="Print last N entries")
+    parser.add_argument("--first", type=int, default=0, help="Print first N entries")
     parser.add_argument("--days", type=float, default=0.0, help="Only entries from the last N days")
     parser.add_argument("--since", type=float, default=0.0, help="Only entries with ts >= epoch seconds")
     parser.add_argument("--until", type=float, default=0.0, help="Only entries with ts <= epoch seconds")
@@ -448,8 +449,9 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(json.dumps(stats, indent=2) + "\n")
     else:
         sys.stdout.write(format_stats(stats) + "\n")
-    if args.tail > 0:
-        for item in entries[-args.tail:]:
+    shown = entries[: args.first] if args.first > 0 else entries[-args.tail :]
+    if args.first > 0 or args.tail > 0:
+        for item in shown:
             sys.stdout.write(format_entry(item) + "\n")
     return 0
 

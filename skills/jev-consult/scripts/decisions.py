@@ -231,6 +231,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print unique jev_status values with counts, sorted desc",
     )
     parser.add_argument(
+        "--harnesses",
+        action="store_true",
+        help="Print unique harness values with counts, sorted desc",
+    )
+    parser.add_argument(
         "--prune",
         action="store_true",
         help="Rewrite the log keeping only entries matching --days/--since/--harness/--status filters",
@@ -278,13 +283,14 @@ def main(argv: list[str] | None = None) -> int:
             "pruned %d of %d entries (kept %d)\n"
             % (len(total) - len(entries), len(total), len(entries))
         )
-    if args.statuses:
+    if args.statuses or args.harnesses:
+        key = "harness" if args.harnesses else "jev_status"
         counts: dict[str, int] = {}
         for item in entries:
-            status = str(item.get("jev_status") or "unknown")
-            counts[status] = counts.get(status, 0) + 1
-        for status, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
-            sys.stdout.write("%s %d\n" % (status, n))
+            value = str(item.get(key) or "unknown")
+            counts[value] = counts.get(value, 0) + 1
+        for value, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+            sys.stdout.write("%s %d\n" % (value, n))
         return 0
     if args.csv or args.md:
         rows = []

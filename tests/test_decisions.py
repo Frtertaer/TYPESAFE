@@ -306,6 +306,24 @@ class CliTest(unittest.TestCase):
             proc = self.run_cli("--file", str(path), "--statuses", "--harness", "b")
             self.assertEqual(proc.stdout.strip(), "idf 1")
 
+    def test_harnesses_sorted_desc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"harness": "codex"},
+                    {"harness": "grok"},
+                    {"harness": "codex"},
+                    {"jev_status": "x"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--harnesses")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(
+                proc.stdout.strip().splitlines(), ["codex 2", "grok 1", "unknown 1"]
+            )
+
     def test_prune_no_filter_still_rc2(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

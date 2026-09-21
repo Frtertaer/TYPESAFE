@@ -369,51 +369,76 @@ def cmd_notes(args: argparse.Namespace) -> int:
             sys.stderr.write("prune failed: %s\n" % exc)
             return 1
         notes = data["notes"]
-    since = getattr(args, "since", None)
-    if since is not None:
-        since_ts = _ts_arg(since)
-        if since_ts is None:
-            sys.stderr.write("bad --since: %s\n" % since)
-            return 2
-        notes = [
-            n
-            for n in notes
-            if isinstance(n, dict) and isinstance(n.get("ts"), (int, float)) and n["ts"] >= since_ts
-        ]
-    before = getattr(args, "before", None)
-    if before is not None:
-        before_ts = _ts_arg(before)
-        if before_ts is None:
-            sys.stderr.write("bad --before: %s\n" % before)
-            return 2
-        notes = [
-            n
-            for n in notes
-            if isinstance(n, dict) and isinstance(n.get("ts"), (int, float)) and n["ts"] <= before_ts
-        ]
-    want_harness = getattr(args, "harness", "") or ""
-    if want_harness:
-        notes = [n for n in notes if isinstance(n, dict) and n.get("harness") == want_harness]
-    needle = (getattr(args, "grep", "") or os.environ.get("JEV_TRACE_GREP", "")).strip().lower()
-    if needle:
-        notes = [n for n in notes if isinstance(n, dict) and needle in str(n.get("text") or "").lower()]
-    if getattr(args, "uniq", False):
-        seen_notes = set()
-        deduped = []
-        for n in notes:
-            if not isinstance(n, dict):
-                continue
-            key = str(n.get("sha") or n.get("text") or "")
-            if key in seen_notes:
-                continue
-            seen_notes.add(key)
-            deduped.append(n)
-        notes = deduped
-    limit = getattr(args, "limit", None)
-    if isinstance(limit, int) and limit >= 0:
-        notes = notes[-limit:] if limit else []
-    if getattr(args, "reverse", False):
-        notes = notes[::-1]
+    def _filtered(items: list) -> list | None:
+        since = getattr(args, "since", None)
+        if since is not None:
+            since_ts = _ts_arg(since)
+            if since_ts is None:
+                sys.stderr.write("bad --since: %s\n" % since)
+                return None
+            items = [
+                n
+                for n in items
+                if isinstance(n, dict) and isinstance(n.get("ts"), (int, float)) and n["ts"] >= since_ts
+            ]
+        before = getattr(args, "before", None)
+        if before is not None:
+            before_ts = _ts_arg(before)
+            if before_ts is None:
+                sys.stderr.write("bad --before: %s\n" % before)
+                return None
+            items = [
+                n
+                for n in items
+                if isinstance(n, dict) and isinstance(n.get("ts"), (int, float)) and n["ts"] <= before_ts
+            ]
+        want_harness = getattr(args, "harness", "") or ""
+        if want_harness:
+            items = [n for n in items if isinstance(n, dict) and n.get("harness") == want_harness]
+        needle = (getattr(args, "grep", "") or os.environ.get("JEV_TRACE_GREP", "")).strip().lower()
+        if needle:
+            items = [n for n in items if isinstance(n, dict) and needle in str(n.get("text") or "").lower()]
+        if getattr(args, "uniq", False):
+            seen_notes = set()
+            deduped = []
+            for n in items:
+                if not isinstance(n, dict):
+                    continue
+                key = str(n.get("sha") or n.get("text") or "")
+                if key in seen_notes:
+                    continue
+                seen_notes.add(key)
+                deduped.append(n)
+            items = deduped
+        limit = getattr(args, "limit", None)
+        if isinstance(limit, int) and limit >= 0:
+            items = items[-limit:] if limit else []
+        if getattr(args, "reverse", False):
+            items = items[::-1]
+        return items
+
+    notes = _filtered(notes)
+    if notes is None:
+        return 2
+
+    if getattr(args, "watch", 0.0) and args.watch > 0:
+        import time as _time
+
+        try:
+            max_ticks = int(os.environ.get("JEV_TRACE_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        while max_ticks <= 0 or ticks < max_ticks:
+            fresh = load(path).get("notes")
+            fresh = fresh if isinstance(fresh, list) else []
+            filtered = _filtered(fresh)
+            tick = {"ts": int(_time.time()), "notes": len(filtered) if filtered is not None else None}
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            _time.sleep(args.watch)
+        return 0
     field = getattr(args, "field", "") or ""
     if field:
         values = [_dig(n, field) for n in notes if isinstance(n, dict)]
@@ -597,6 +622,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--reverse", action="store_true", help="List notes newest-first")
     notes_cmd.add_argument("--grep", default="", help="Only notes whose text contains SUBSTR (case-insensitive; default JEV_TRACE_GREP)")
     notes_cmd.add_argument("--uniq", action="store_true", help="Dedupe notes by sha/text (first occurrence wins)")
+    notes_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,notes} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     notes_cmd.set_defaults(func=cmd_notes)
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")

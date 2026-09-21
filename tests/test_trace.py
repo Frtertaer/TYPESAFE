@@ -242,6 +242,37 @@ class TraceTests(unittest.TestCase):
             self.assertTrue(out["exists"])
             self.assertGreaterEqual(out["age_seconds"], 590)
 
+    def test_show_pretty_text(self) -> None:
+        import io
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                tr.main(["--file", str(path), "init", "--plan", "Add tests.", "--step", "writing"])
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "show", "--pretty"])
+            self.assertEqual(rc, 0)
+            text = buf.getvalue()
+            self.assertIn("file: ", text)
+            self.assertIn("age: ", text)
+            self.assertIn("plan: Add tests.", text)
+            self.assertIn("current_step: writing", text)
+
+    def test_show_pretty_missing(self) -> None:
+        import io
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "none.json"
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "show", "--pretty"])
+            self.assertEqual(rc, 0)
+            self.assertIn("(missing)", buf.getvalue())
+            self.assertNotIn("age:", buf.getvalue())
+
     def test_state_missing_file_empty(self) -> None:
         import io
         from unittest.mock import patch

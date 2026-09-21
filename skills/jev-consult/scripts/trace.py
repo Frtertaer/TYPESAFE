@@ -127,6 +127,18 @@ def cmd_show(args: argparse.Namespace) -> int:
             age_seconds = max(0.0, round(time.time() - path.stat().st_mtime, 3))
         except OSError:
             age_seconds = None
+    if getattr(args, "pretty", False):
+        lines = [
+            "file: %s%s" % (path, "" if exists else " (missing)"),
+        ]
+        if age_seconds is not None:
+            lines.append("age: %ss" % age_seconds)
+        for key in ("plan", "current_step", "attempt_count", "last_pick", "last_error"):
+            value = data.get(key)
+            if _present(value):
+                lines.append("%s: %s" % (key, value))
+        sys.stdout.write("\n".join(lines) + "\n")
+        return 0
     emit({"path": str(path), "exists": exists, "age_seconds": age_seconds, "trace": data})
     return 0
 
@@ -192,6 +204,7 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--step", default="")
     init.set_defaults(func=cmd_init)
     show = sub.add_parser("show", help="Print the trace (empty object if missing)")
+    show.add_argument("--pretty", action="store_true", help="Key fields as text lines.")
     show.set_defaults(func=cmd_show)
     setter = sub.add_parser("set", help="Update fields")
     setter.add_argument("--plan")

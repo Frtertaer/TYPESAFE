@@ -657,6 +657,31 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertIn("| pos-approach | True | True |", text)
             self.assertIn("- uncovered:", text)
 
+    def test_report_json_writes_object(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.json"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(
+                    [
+                        "--report",
+                        str(path),
+                        "--json",
+                        "--min-coverage",
+                        "0.5",
+                        "--min-covers",
+                        "1",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["total"], 25)
+            self.assertEqual(payload["coverage_gate"], "PASS")
+            self.assertEqual(payload["covers_gate"], "PASS")
+            self.assertEqual(len(payload["uncovered"]), 2)
+            self.assertTrue(payload["cases"])
+
     def test_report_notes_gate_results(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "report.md"

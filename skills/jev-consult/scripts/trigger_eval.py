@@ -445,6 +445,40 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         sys.stderr.write("wrote %s\n" % args.out)
     if args.report:
+        if args.json:
+            uncovered_ids = _uncovered()
+            report = {
+                "ok": result["ok"],
+                "n_positives": result["n_positives"],
+                "n_negatives": result["n_negatives"],
+                "coverage": result["coverage"],
+                "hits": result["hits"],
+                "total": len(result["cases"]),
+                "worst_positive": result["worst_positive"],
+                "best_negative": result["best_negative"],
+                "margin": result["margin"],
+                "uncovered": uncovered_ids,
+                "min_coverage": args.min_coverage,
+                "min_covers": args.min_covers,
+                "coverage_gate": (
+                    "PASS" if _coverage_ok() else "FAIL"
+                )
+                if args.min_coverage is not None
+                else None,
+                "covers_gate": ("PASS" if _covers_ok() else "FAIL")
+                if args.min_covers
+                else None,
+                "cases": result["cases"],
+            }
+            try:
+                Path(args.report).write_text(
+                    json.dumps(report, indent=2) + "\n", encoding="utf-8"
+                )
+            except OSError as exc:
+                sys.stderr.write("--report failed: %s\n" % exc)
+                return 1
+            sys.stderr.write("wrote %s\n" % args.report)
+            return 0 if (result["ok"] and _covers_ok() and _coverage_ok()) else 1
         lines = [
             "# trigger eval report",
             "",

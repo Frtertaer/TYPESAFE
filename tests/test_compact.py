@@ -855,5 +855,231 @@ class InternalsTests(unittest.TestCase):
         self.assertEqual(seen["policy"], {"fake": True})
 
 
+class NormalizeTests(unittest.TestCase):
+    def test_map_role(self):
+        self.assertEqual(C.map_role("assistant"), "assistant")
+        self.assertEqual(C.map_role("model"), "assistant")
+        self.assertEqual(C.map_role("AI"), "assistant")
+        self.assertEqual(C.map_role("tool"), "tool")
+        self.assertEqual(C.map_role("function"), "tool")
+        self.assertEqual(C.map_role("tool_result"), "tool")
+        self.assertEqual(C.map_role("system"), "system")
+        self.assertEqual(C.map_role("human"), "user")
+        self.assertEqual(C.map_role(None), "user")
+
+    def test_content_text(self):
+        self.assertEqual(C.content_text(None), "")
+        self.assertEqual(C.content_text("hi"), "hi")
+        self.assertEqual(C.content_text(42), "42")
+        self.assertEqual(C.content_text({"text": "x"}), "x")
+        self.assertEqual(C.content_text({"content": {"text": "y"}}), "y")
+        self.assertEqual(
+            C.content_text(
+                [
+                    "a",
+                    {"type": "tool_use", "name": "t"},
+                    {"type": "text", "text": "b"},
+                    {"type": "text", "content": "nested"},
+                ]
+            ),
+            "a\nb\nnested",
+        )
+        self.assertEqual(C.content_text(set()), "")
+
+    def test_parse_arguments(self):
+        self.assertEqual(C.parse_arguments({"a": 1}), {"a": 1})
+        self.assertEqual(C.parse_arguments('{"a": 1}'), {"a": 1})
+        self.assertEqual(C.parse_arguments("not json"), {"_raw": "not json"})
+        self.assertEqual(C.parse_arguments("[1,2]"), {"_raw": [1, 2]})
+        self.assertEqual(C.parse_arguments(""), {})
+        self.assertEqual(C.parse_arguments(None), {})
+
+    def test_error_flag(self):
+        self.assertTrue(C.error_flag({"isError": True}))
+        self.assertTrue(C.error_flag({"is_error": True}))
+        self.assertTrue(C.error_flag({"status": "ERROR"}))
+        self.assertFalse(C.error_flag({"status": "ok"}))
+        self.assertFalse(C.error_flag({}))
+
+    def test_collect_tool_uses_variants(self):
+        item = {
+            "toolUses": [{"tool_use_id": "a", "tool": "t1"}],
+            "tool_calls": [
+                {
+                    "id": "b",
+                    "function": {"name": "t2", "arguments": '{"x": 1}'},
+                }
+            ],
+        }
+        uses = C.collect_tool_uses(item)
+        self.assertEqual(len(uses), 2)
+        self.assertEqual(uses[1]["tool"], "t2")
+        self.assertEqual(uses[1]["input"], {"x": 1})
+
+    def test_collect_tool_uses_function_call(self):
+        uses = C.collect_tool_uses(
+            {"function_call": {"name": "f", "arguments": "{}"}, "tool_call_id": "c1"}
+        )
+        self.assertEqual(uses[0]["tool_use_id"], "c1")
+
+    def test_collect_tool_results_variants(self):
+        item = {
+            "toolResults": [{"tool_use_id": "a", "text": "r1"}],
+            "role": "tool",
+            "tool_call_id": "b",
+            "output": "r2",
+        }
+        results = C.collect_tool_results(item)
+        texts = {r["tool_use_id"]: r["text"] for r in results}
+        self.assertEqual(texts, {"a": "r1", "b": "r2"})
+
+    def test_collect_tool_results_content_blocks(self):
+        item = {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "u1", "content": "done"},
+                {"type": "text", "text": "hi"},
+            ],
+        }
+        results = C.collect_tool_results(item)
+        self.assertEqual(results[0]["tool_use_id"], "u1")
+        self.assertEqual(results[0]["text"], "done")
+
+    def test_normalize_tool_use(self):
+        tool = C.normalize_tool_use(
+            {"call_id": "c", "name": "exec", "arguments": '{"cmd": "ls"}', "text": "t"}
+        )
+        self.assertEqual(tool["tool_use_id"], "c")
+        self.assertEqual(tool["tool"], "exec")
+        self.assertEqual(tool["input"], {"cmd": "ls"})
+        self.assertEqual(tool["text"], "t")
+        self.assertNotIn("isError", tool)
+        err = C.normalize_tool_use({"id": "x", "isError": True})
+        self.assertTrue(err["isError"])
+        self.assertEqual(
+            C.normalize_tool_use({"tool_use_id": "p", "input": {"a": 1}})["input"],
+            {"a": 1},
+        )
+
+    def test_normalize_tool_result(self):
+        res = C.normalize_tool_result({"tool_call_id": "c", "text": "out"})
+        self.assertEqual(res["tool_use_id"], "c")
+        self.assertEqual(res["text"], "out")
+        res2 = C.normalize_tool_result({"id": "x", "result": "from-result"})
+        self.assertEqual(res2["text"], "from-result")
+        res3 = C.normalize_tool_result({"call_id": "y", "output": "o", "is_error": True})
+        self.assertTrue(res3["isError"])
+
+    def test_normalize_message_uses_results(self):
+        raw = {
+            "role": "assistant",
+            "tool_calls": [
+                {"id": "c1", "function": {"name": "exec", "arguments": "{}"}}
+            ],
+            "text": "calling",
+        }
+        msg = C.normalize_message(raw)
+        self.assertEqual(msg["role"], "assistant")
+        self.assertEqual(msg["toolUses"][0]["tool_use_id"], "c1")
+
+    def test_normalize_message_tool_role_clears_text(self):
+        raw = {"role": "tool", "tool_call_id": "c", "text": "output text"}
+        msg = C.normalize_message(raw)
+        self.assertEqual(msg["role"], "tool")
+        self.assertEqual(msg["text"], "")
+        self.assertEqual(msg["toolResults"][0]["text"], "output text")
+
+    def test_session_records_to_messages(self):
+        self.assertEqual(C.session_records_to_messages({"role": "user", "text": "hi"}), [{"role": "user", "text": "hi"}])
+        self.assertEqual(C.session_records_to_messages({"type": "progress"}), [])
+        self.assertEqual(
+            C.session_records_to_messages(
+                {"type": "assistant", "message": {"role": "assistant", "text": "m"}}
+            ),
+            [{"role": "assistant", "text": "m"}],
+        )
+        calls = C.session_records_to_messages(
+            {"type": "custom_tool_call", "call_id": "c", "name": "exec", "input": {"a": 1}}
+        )
+        self.assertEqual(calls[0]["role"], "assistant")
+        self.assertEqual(calls[0]["tool_calls"][0]["function"]["name"], "exec")
+        self.assertIn('"a": 1', calls[0]["tool_calls"][0]["function"]["arguments"])
+        out = C.session_records_to_messages(
+            {"type": "custom_tool_call_output", "call_id": "c", "output": "ok"}
+        )
+        self.assertEqual(out[0]["role"], "tool")
+        nested = C.session_records_to_messages(
+            {"type": "response_item", "payload": {"role": "user", "text": "deep"}}
+        )
+        self.assertEqual(nested[0]["text"], "deep")
+        self.assertEqual(C.session_records_to_messages("raw string"), ["raw string"])
+
+    def test_extract_messages_shapes(self):
+        self.assertEqual(C.extract_messages([{"role": "user"}]), [{"role": "user"}])
+        self.assertEqual(C.extract_messages({"messages": [{"role": "user"}]}), [{"role": "user"}])
+        nested = C.extract_messages({"request": {"body": '[{"role": "user"}]'}})
+        self.assertEqual(nested, [{"role": "user"}])
+        nested2 = C.extract_messages({"request": {"messages": [{"role": "user"}]}})
+        self.assertEqual(nested2, [{"role": "user"}])
+        with self.assertRaises(SystemExit):
+            C.extract_messages({"other": 1})
+        with self.assertRaises(SystemExit):
+            C.extract_messages("string")
+
+    def test_parse_transcript_json_and_jsonl(self):
+        msgs = C.parse_transcript('[{"role": "user", "text": "a"}]')
+        self.assertEqual(len(msgs), 1)
+        lines = '{"role": "user", "text": "a"}\n{"role": "assistant", "text": "b"}\n'
+        self.assertEqual(len(C.parse_transcript(lines)), 2)
+        with self.assertRaises(SystemExit):
+            C.parse_transcript("   ")
+
+    def test_input_paths(self):
+        inp = {"file_path": "a.py", "path": " b.txt ", "other": "x", "target": ""}
+        self.assertEqual(C.input_paths(inp), ["a.py", "b.txt"])
+
+    def test_spill_dir_default(self):
+        with patch.dict(os.environ, {"JEV_CONSULT_SPILL": "0"}):
+            self.assertIsNone(C.spill_dir_default())
+        with patch.dict(os.environ, {"JEV_CONSULT_SPILL": "/tmp/spill-x"}):
+            self.assertEqual(C.spill_dir_default(), Path("/tmp/spill-x"))
+        with patch.dict(os.environ, {"JEV_CONSULT_SPILL": ""}):
+            self.assertTrue(str(C.spill_dir_default()).endswith("spill"))
+
+    def test_noul_answer(self):
+        self.assertEqual(C.noul_answer({"keep": {"noul": 0.7}}, "keep"), 0.7)
+        with self.assertRaises(RuntimeError):
+            C.noul_answer({}, "keep")
+        with self.assertRaises(RuntimeError):
+            C.noul_answer({"keep": "bad"}, "keep")
+        with self.assertRaises(RuntimeError):
+            C.noul_answer({"keep": {"noul": "x"}}, "keep")
+
+    def test_decide_call_branches(self):
+        call = C.ToolCall("id1", "u1", "exec", {}, 0, 0, 10, False, True)
+        d = C.decide_call(call, {"keepCall": 0.0, "keepResult": 0.0}, 0.5)
+        self.assertEqual(d["reason"], "pinned")
+        call2 = C.ToolCall("id2", "u2", "exec", {}, 0, 0, 10, False, False)
+        self.assertEqual(
+            C.decide_call(call2, {"keepCall": 0.1, "keepResult": 0.9}, 0.5)["action"], "keep"
+        )
+        self.assertEqual(
+            C.decide_call(call2, {"keepCall": 0.9, "keepResult": 0.1}, 0.5)["action"],
+            "drop_result",
+        )
+        self.assertEqual(
+            C.decide_call(call2, {"keepCall": 0.1, "keepResult": 0.1}, 0.5)["action"],
+            "drop_call",
+        )
+
+    def test_message_chars(self):
+        msg = {"text": "abcd", "toolUses": [{"input": {"a": 1}}], "toolResults": [{"text": "xyz"}]}
+        self.assertEqual(C.message_chars(msg), 4 + len('{"a":1}') + 3)
+
+    def test_count(self):
+        decisions = [{"reason": "pinned"}, {"reason": "kept"}, {"reason": "pinned"}]
+        self.assertEqual(C._count(decisions, "pinned"), 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

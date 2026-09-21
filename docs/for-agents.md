@@ -22,6 +22,7 @@ python skills/jev-consult/scripts/inventory.py --show-policy            # effect
 python skills/jev-consult/scripts/inventory.py --out PATH               # write the payload JSON to a file instead of stdout
 python skills/jev-consult/scripts/inventory.py --names                 # bare shortlist ids, one per line
 python skills/jev-consult/scripts/inventory.py --paths                 # bare shortlist item paths, one per line
+python skills/jev-consult/scripts/inventory.py --id NAME               # print the matching item JSON (rc 1 when absent)
 python skills/jev-consult/scripts/inventory.py --grep SUBSTR            # keep items whose name/desc/id contains SUBSTR
 python skills/jev-consult/scripts/policy_lint.py [--strict|--show|--diff other.json|--out PATH]  # validates policy.json
 python skills/jev-consult/scripts/question_lint.py request.json [--json|--fix|--out PATH]  # lint a request file standalone

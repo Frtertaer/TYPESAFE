@@ -1055,6 +1055,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", metavar="PATH", default="", help="Write the payload JSON to PATH instead of stdout.")
     parser.add_argument("--names", action="store_true", help="Print bare shortlist ids, one per line (for piping).")
     parser.add_argument("--paths", action="store_true", help="Print bare shortlist item paths, one per line (for piping).")
+    parser.add_argument("--id", metavar="NAME", default="", help="Print the single matching item's JSON (matches id or name).")
     parser.add_argument(
         "--explain",
         action="store_true",
@@ -1168,6 +1169,19 @@ def main(argv: list[str] | None = None) -> int:
             )
             explained.append({**item, "matched": matched})
         payload["shortlist"] = explained
+    if args.id:
+        want = args.id.strip().lower()
+        found = [
+            item
+            for item in items
+            if str(item.get("id") or "").lower() == want
+            or str(item.get("name") or "").lower() == want
+        ]
+        if not found:
+            sys.stderr.write("no item %s\n" % args.id)
+            return 1
+        sys.stdout.write(json.dumps(found[0], indent=2, sort_keys=True) + "\n")
+        return 0
     if getattr(args, "paths", False):
         for item in payload["shortlist"]:
             sys.stdout.write("%s\n" % (item.get("path") or item.get("id")))

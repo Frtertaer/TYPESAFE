@@ -282,6 +282,40 @@ class InventoryTests(unittest.TestCase):
         self.assertTrue(lines)
         self.assertTrue(any("jwt-auth" in ln for ln in lines))
 
+    def test_cli_id_prints_matching_item(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--id",
+                    "jwt-auth",
+                ]
+            )
+        self.assertEqual(code, 0)
+        item = json.loads(buf.getvalue())
+        self.assertEqual(item["name"], "jwt-auth")
+        err = StringIO()
+        with redirect_stdout(StringIO()), redirect_stderr(err):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--id",
+                    "nope-missing",
+                ]
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("nope-missing", err.getvalue())
+
     def test_cli_out_writes_payload_file(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

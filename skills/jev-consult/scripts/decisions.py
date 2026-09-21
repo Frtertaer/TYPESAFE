@@ -5,6 +5,7 @@ The hook appends one JSON line per routed prompt. This reads them back:
 status mix, explicit/strong-pick rates, need_skill mean, latency percentiles.
 """
 import argparse
+import csv
 import datetime
 import json
 import os
@@ -230,6 +231,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Rewrite the log keeping only entries inside the --days/--since window",
     )
     parser.add_argument("--json", action="store_true", help="Machine-readable stats")
+    parser.add_argument(
+        "--csv",
+        action="store_true",
+        help="Print filtered entries as CSV rows (ts,harness,status,winner,prompt) and exit",
+    )
     args = parser.parse_args(argv)
     path = Path(args.file) if args.file else inventory.decisions_log_path()
     if path is None:
@@ -262,6 +268,23 @@ def main(argv: list[str] | None = None) -> int:
             "pruned %d of %d entries (kept %d)\n"
             % (len(total) - len(entries), len(total), len(entries))
         )
+    if args.csv:
+        writer = csv.writer(sys.stdout, lineterminator="\n")
+        writer.writerow(["ts", "harness", "jev_status", "winner", "dedupe", "prompt_head"])
+        for item in entries:
+            winner = item.get("winner")
+            winner_name = winner.get("name") if isinstance(winner, dict) else ""
+            writer.writerow(
+                [
+                    item.get("ts"),
+                    item.get("harness") or "",
+                    item.get("jev_status") or "unknown",
+                    winner_name or "",
+                    bool(item.get("dedupe")),
+                    str(item.get("prompt_head") or "").strip()[:120],
+                ]
+            )
+        return 0
     stats = summarize(entries, bad)
     stats["filtered"] = len(entries)
     stats["since"] = since

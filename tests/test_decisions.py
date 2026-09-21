@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import subprocess
@@ -179,6 +180,41 @@ class CliTest(unittest.TestCase):
             proc = self.run_cli("--file", str(Path(tmp) / "none.jsonl"))
             self.assertEqual(proc.returncode, 1)
             self.assertIn("no decisions log", proc.stderr)
+
+    def test_csv_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {
+                        "ts": 1700000000,
+                        "harness": "codex",
+                        "jev_status": "winner",
+                        "winner": {"kind": "skill", "name": "beta"},
+                        "prompt_head": "fix the test",
+                    },
+                    {"ts": 1700000001, "harness": "grok", "jev_status": "idf"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--csv")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = list(csv.reader(proc.stdout.splitlines()))
+            self.assertEqual(rows[0], ["ts", "harness", "jev_status", "winner", "dedupe", "prompt_head"])
+            self.assertEqual(len(rows), 3)
+            self.assertEqual(rows[1][1], "codex")
+            self.assertEqual(rows[1][3], "beta")
+            self.assertEqual(rows[2][1], "grok")
+
+    def test_csv_respects_status_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"harness": "a", "jev_status": "winner"}, {"harness": "b", "jev_status": "idf"}])
+            proc = self.run_cli("--file", str(path), "--csv", "--status", "idf")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = list(csv.reader(proc.stdout.splitlines()))
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[1][1], "b")
 
     def test_disabled_log_fails_cleanly(self):
         proc = self.run_cli(env={"JEV_CONSULT_LOG": "0"})

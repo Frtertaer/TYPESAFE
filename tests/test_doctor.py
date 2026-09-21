@@ -188,6 +188,34 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertTrue(check_of(out, "skill", "codex")["ok"])
 
+    def test_hooks_json_validity_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            hermes = Path(tmp) / "hermes"
+            codex_dir = home / ".codex"
+            codex_dir.mkdir(parents=True)
+            (codex_dir / "hooks.json").write_text("{not json", encoding="utf-8")
+            rc, out, _ = run_main(
+                ["--home", str(home), "--hermes-home", str(hermes), "--agents", "codex"],
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 1)
+            c = check_of(out, "hooks_json", "codex")
+            self.assertFalse(c["ok"])
+            self.assertIn("invalid JSON", c["detail"])
+            (codex_dir / "hooks.json").write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+            rc, out, _ = run_main(
+                ["--home", str(home), "--hermes-home", str(hermes), "--agents", "codex"],
+                cwd=tmp,
+            )
+            self.assertEqual(check_of(out, "hooks_json", "codex")["detail"], "valid")
+            (codex_dir / "hooks.json").unlink()
+            rc, out, _ = run_main(
+                ["--home", str(home), "--hermes-home", str(hermes), "--agents", "codex"],
+                cwd=tmp,
+            )
+            self.assertTrue(check_of(out, "hooks_json", "codex")["ok"])
+
     def test_grok_missing_tools_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)

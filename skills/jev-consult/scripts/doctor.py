@@ -35,6 +35,7 @@ HINTS = {
     "hooks": "create .claude/settings.json with a hooks block or run python scripts/install.py --agents claude-code",
     "api_key": "set TYPESAFE_API_KEY in the environment or a .env file",
     "policy": "restore skills/jev-consult/policy.json",
+    "hooks_json": "fix or delete the malformed hooks file; it blocks hook registration",
 }
 
 
@@ -73,6 +74,19 @@ def _load_json(path: Path) -> object:
         return None
 
 
+def _json_validity_check(agent: str, name: str, path: Path) -> dict:
+    """ok when the file is absent or parses as JSON; fails on malformed JSON."""
+    if not path.is_file():
+        return _check(agent, name, True, "absent %s" % path)
+    try:
+        json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except ValueError as exc:
+        return _check(agent, name, False, "invalid JSON in %s: %s" % (path, exc))
+    except OSError as exc:
+        return _check(agent, name, False, "unreadable %s: %s" % (path, exc))
+    return _check(agent, name, True, "valid")
+
+
 def _skill_check(agent: str, skill_dirs: list[Path]) -> dict:
     for parent in skill_dirs:
         if (parent / "jev-consult" / "SKILL.md").is_file():
@@ -99,8 +113,11 @@ def check_hermes(home: Path, hermes: Path) -> list[dict]:
 
 
 def check_claude(home: Path) -> list[dict]:
-    out = [_skill_check("claude-code", [home / ".claude" / "skills"])]
     settings = home / ".claude" / "settings.json"
+    out = [
+        _skill_check("claude-code", [home / ".claude" / "skills"]),
+        _json_validity_check("claude-code", "hooks_json", settings),
+    ]
     data = _load_json(settings)
     if data is None:
         out.append(_check("claude-code", "hooks", False, "missing/invalid " + str(settings)))
@@ -132,6 +149,7 @@ def check_grok(home: Path) -> list[dict]:
         ("jev-tools.json", "UserPromptSubmit", TOOLS_MARK),
     ):
         path = home / ".grok" / "hooks" / name
+        out.append(_json_validity_check("grok", "hooks_json", path))
         data = _load_json(path)
         ok = _has_hook_entry((data or {}).get("hooks") if isinstance(data, dict) else None, event, mark)
         out.append(_check("grok", name, ok, event))
@@ -143,6 +161,7 @@ def check_codex(home: Path) -> list[dict]:
         _skill_check("codex", [home / ".codex" / "skills", home / ".agents" / "skills"])
     ]
     hooks_path = home / ".codex" / "hooks.json"
+    out.append(_json_validity_check("codex", "hooks_json", hooks_path))
     data = _load_json(hooks_path)
     hooks = data.get("hooks") if isinstance(data, dict) else None
     out.append(

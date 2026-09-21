@@ -560,6 +560,11 @@ def main(argv: list[str] | None = None) -> int:
         help="With --jq: print each value only once (first occurrence wins)",
     )
     parser.add_argument(
+        "--jq-first",
+        action="store_true",
+        help="With --jq: print only the first extracted value",
+    )
+    parser.add_argument(
         "--errors",
         action="store_true",
         help="Print the unparseable jsonl lines with line numbers (rc 1 when any)",
@@ -936,6 +941,8 @@ def main(argv: list[str] | None = None) -> int:
                 if needle in haystack:
                     filtered.append(value)
             values = filtered
+        if getattr(args, "jq_first", False):
+            values = values[:1]
         if args.json:
             out_values = [list(v) if isinstance(v, tuple) else v for v in values]
             sys.stdout.write(json.dumps({"field": args.jq, "values": out_values}, indent=2) + "\n")

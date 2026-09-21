@@ -132,6 +132,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print each covers tag followed by the case ids that carry it.",
     )
+    parser.add_argument(
+        "--dist",
+        action="store_true",
+        help="Print a histogram of lexical scores (0.25-wide buckets).",
+    )
     parser.add_argument("--quiet", action="store_true", help="Print only the verdict line.")
     parser.add_argument(
         "--summary",
@@ -305,6 +310,19 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write("%s %d\n" % (tag, counts[tag]))
         for cid in uncovered:
             sys.stdout.write("uncovered: %s\n" % cid)
+        return 0 if result["ok"] else 1
+    if args.dist:
+        buckets: dict[int, int] = {}
+        unscored = 0
+        for row in _rows():
+            if row["score"] is None:
+                unscored += 1
+                continue
+            buckets[int(row["score"] / 0.25)] = buckets.get(int(row["score"] / 0.25), 0) + 1
+        for b in sorted(buckets):
+            sys.stdout.write("%.2f-%.2f %d\n" % (b * 0.25, (b + 1) * 0.25, buckets[b]))
+        if unscored:
+            sys.stdout.write("unscored %d\n" % unscored)
         return 0 if result["ok"] else 1
     if args.ids:
         for row in _rows():

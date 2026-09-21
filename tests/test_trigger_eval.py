@@ -359,6 +359,22 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("x 5.00", buf.getvalue())
 
+    def test_dist_prints_histogram(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--dist"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertTrue(lines)
+        for line in lines:
+            if line.startswith("unscored"):
+                continue
+            lo_hi, _, count = line.partition(" ")
+            lo, hi = lo_hi.split("-")
+            self.assertAlmostEqual(float(hi) - float(lo), 0.25)
+            self.assertTrue(int(count) > 0)
+        self.assertIn("unscored 1\n", buf.getvalue())
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

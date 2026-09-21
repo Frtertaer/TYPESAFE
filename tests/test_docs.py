@@ -36,6 +36,29 @@ class DocFlagsTests(unittest.TestCase):
                     missing.append("%s: %s documented but absent" % (match.group(1), flag))
         self.assertEqual(missing, [])
 
+    def test_skill_md_flags_exist_in_scripts(self) -> None:
+        skill_md = ROOT / "skills" / "jev-consult" / "SKILL.md"
+        lines = skill_md.read_text(encoding="utf-8").splitlines()
+        missing = []
+        for line in lines:
+            match = re.search(r"(?:scripts/)?([a-z_]+\.py)", line)
+            if not match:
+                continue
+            script = SCRIPTS / match.group(1)
+            if not script.is_file():
+                script = ROOT / "scripts" / match.group(1)
+            if not script.is_file():
+                continue
+            have = _script_flags(script)
+            for flag in set(FLAG_RE.findall(line)):
+                # --force/--yes/--no-enable belong to external CLIs
+                # (hermes skills install, claude plugin) quoted in prose.
+                if flag in {"--force", "--yes", "--no-enable"}:
+                    continue
+                if flag not in have:
+                    missing.append("SKILL.md %s: %s absent" % (match.group(1), flag))
+        self.assertEqual(missing, [])
+
     def test_policy_lint_reads_real_policy(self) -> None:
         policy = json.loads(
             (ROOT / "skills" / "jev-consult" / "policy.json").read_text(encoding="utf-8")

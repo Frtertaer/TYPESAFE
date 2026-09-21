@@ -437,6 +437,8 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         env_max_lat = None
     parser.add_argument("--max-latency", type=float, default=env_max_lat, help="Only entries with numeric latency_ms <= MS")
+    env_over_budget = os.environ.get("JEV_DECISIONS_OVER_BUDGET", "").strip().lower() in ("1", "true", "yes")
+    parser.add_argument("--over-budget", dest="over_budget", action="store_true", default=env_over_budget, help="Only entries with over_budget=true")
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -596,6 +598,8 @@ def main(argv: list[str] | None = None) -> int:
         entries = [item for item in entries if item.get("dedupe") is True]
     if getattr(args, "stale", False):
         entries = [item for item in entries if item.get("stale_sidecar") is True]
+    if getattr(args, "over_budget", False):
+        entries = [item for item in entries if item.get("over_budget") is True]
     if args.sha:
         want_sha = args.sha.strip().lower()
         entries = [
@@ -668,9 +672,10 @@ def main(argv: list[str] | None = None) -> int:
             or args.sha
             or args.max_need is not None
             or args.max_latency is not None
+            or getattr(args, "over_budget", False)
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, or --prompt\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, or --prompt\n"
             )
             return 2
         total, total_bad = load_entries(path)

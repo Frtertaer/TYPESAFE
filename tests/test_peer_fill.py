@@ -354,13 +354,14 @@ class PeerFillE2ETests(unittest.TestCase):
 
     SCRIPT = SCRIPTS / "peer_fill.py"
 
-    def _run(self, argv: list[str], cwd: str, home: str):
+    def _run(self, argv: list[str], cwd: str, home: str, log: str | None = "0"):
         import os
         import subprocess
 
         env = dict(os.environ)
         env.pop("TYPESAFE_API_KEY", None)
-        env["JEV_CONSULT_LOG"] = "0"
+        if log is not None:
+            env["JEV_CONSULT_LOG"] = log
         env["USERPROFILE"] = home
         env["HOME"] = home
         proc = subprocess.run(
@@ -413,6 +414,28 @@ class PeerFillE2ETests(unittest.TestCase):
             )
             self.assertEqual(out, "already_enough")
             self.assertTrue((Path(tmp) / ".jev-tools.json").is_file())
+
+    def test_fill_outcome_logged_to_decisions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / ".codex" / "skills").mkdir(parents=True)
+            log_path = Path(tmp) / "decisions.jsonl"
+            out = self._run(
+                ["--task", "jwt tokens", "--harness", "codex", "--home", str(home)],
+                tmp,
+                tmp,
+                log=str(log_path),
+            )
+            self.assertEqual(out, "no_peer")
+            entries = [
+                json.loads(l)
+                for l in log_path.read_text(encoding="utf-8").splitlines()
+                if l.strip()
+            ]
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["jev_status"], "fill")
+            self.assertEqual(entries[0]["fill"], "peer")
+            self.assertEqual(entries[0]["outcome"], "no_peer")
 
 
 if __name__ == "__main__":

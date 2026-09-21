@@ -12,6 +12,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -23,6 +24,7 @@ from inventory import (  # noqa: E402
     KIND_SKILL,
     MISS_NAME,
     SIDECAR_NAME,
+    append_decision,
     clear_miss,
     clear_scan_cache,
     detect_harness,
@@ -190,10 +192,23 @@ def fill(
     dry_run: bool,
     ask_path: Path,
 ) -> int:
+    def emit(msg: str) -> None:
+        sys.stdout.write(msg + "\n")
+        append_decision(
+            {
+                "ts": int(time.time()),
+                "harness": dest,
+                "jev_status": "fill",
+                "fill": "peer",
+                "outcome": msg.split()[0],
+                "prompt_head": task[:120],
+            }
+        )
+
     local = skill_items(dest, home, hermes)
     if tokens(task) and shortlist(local, task, PEER_LIMIT, []):
         write_sidecar(cwd / SIDECAR_NAME, dest, task, shortlist(local, task, 6, []))
-        sys.stdout.write("already_enough\n")
+        emit("already_enough")
         return 0
     peers = peer_skills(dest, home, hermes)
     chosen = None
@@ -202,23 +217,23 @@ def fill(
     else:
         candidates = shortlist(peers, task, PEER_LIMIT, [])
         if not candidates:
-            sys.stdout.write("no_peer\n")
+            emit("no_peer")
             return 0
         write_peer_ask(ask_path, task, dest, candidates)
         data = run_jev(ask_path)
         if not data:
-            sys.stdout.write("jev_skip\n")
+            emit("jev_skip")
             return 0
         decision = data.get("decision") or {}
         if decision.get("action") != "proceed":
-            sys.stdout.write("jev_skip\n")
+            emit("jev_skip")
             return 0
         chosen = item_for_pick(
             str((decision.get("picks") or {}).get("load_tools") or ""),
             candidates,
         )
     if chosen is None:
-        sys.stdout.write("none\n")
+        emit("none")
         return 0
     src = Path(str(chosen.get("path") or ""))
     if (
@@ -227,7 +242,7 @@ def fill(
         or src.name.lower() in SKIP_NAMES
         or not under_any(src, allowed_roots(home, hermes))
     ):
-        sys.stdout.write("bad_source\n")
+        emit("bad_source")
         return 0
     copied: list[str] = []
     for parent in skill_dirs(dest, home, hermes):
@@ -235,14 +250,14 @@ def fill(
         if dest_path is not None:
             copied.append(str(dest_path))
     if not copied:
-        sys.stdout.write("exists\n")
+        emit("exists")
         return 0
     if not dry_run:
         write_sidecar(cwd / SIDECAR_NAME, dest, task, [chosen])
         clear_miss(cwd / MISS_NAME)
         clear_scan_cache()
     tag = "dry " if dry_run else ""
-    sys.stdout.write("%scopied %s -> %s\n" % (tag, src, ";".join(copied)))
+    emit("%scopied %s -> %s" % (tag, src, ";".join(copied)))
     return 0
 
 

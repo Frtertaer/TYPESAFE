@@ -397,13 +397,14 @@ class CatalogFillE2ETests(unittest.TestCase):
 
     SCRIPT = SCRIPTS / "catalog_fill.py"
 
-    def _run(self, argv: list[str], cwd: str, home: str):
+    def _run(self, argv: list[str], cwd: str, home: str, log: str | None = "0"):
         import os
         import subprocess
 
         env = dict(os.environ)
         env.pop("TYPESAFE_API_KEY", None)
-        env["JEV_CONSULT_LOG"] = "0"
+        if log is not None:
+            env["JEV_CONSULT_LOG"] = log
         env["USERPROFILE"] = home
         env["HOME"] = home
         proc = subprocess.run(
@@ -436,6 +437,26 @@ class CatalogFillE2ETests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = self._run(["--task", "jwt tokens"], tmp, tmp)
             self.assertIn(out, ("no_hermes", "no_catalog", "jev_skip"))
+
+    def test_fill_outcome_logged_to_decisions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "decisions.jsonl"
+            out = self._run(
+                ["--task", "x", "--pick", "exploit-pack"],
+                tmp,
+                tmp,
+                log=str(log_path),
+            )
+            self.assertEqual(out, "blocked")
+            entries = [
+                json.loads(l)
+                for l in log_path.read_text(encoding="utf-8").splitlines()
+                if l.strip()
+            ]
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["jev_status"], "fill")
+            self.assertEqual(entries[0]["fill"], "catalog")
+            self.assertEqual(entries[0]["outcome"], "blocked")
 
 
 if __name__ == "__main__":

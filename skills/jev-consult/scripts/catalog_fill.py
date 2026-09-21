@@ -24,6 +24,7 @@ from inventory import (  # noqa: E402
     MISS_NAME,
     SIDECAR_NAME,
     UNTRUSTED_RULE,
+    append_decision,
     clear_miss,
     clear_scan_cache,
     detect_harness,
@@ -304,9 +305,22 @@ def fill(
     dry_run: bool,
     ask_path: Path,
 ) -> int:
+    def emit(msg: str) -> None:
+        sys.stdout.write(msg + "\n")
+        append_decision(
+            {
+                "ts": int(time.time()),
+                "harness": dest,
+                "jev_status": "fill",
+                "fill": "catalog",
+                "outcome": msg.split()[0],
+                "prompt_head": task[:120],
+            }
+        )
+
     if pick:
         if blocked_text(pick):
-            sys.stdout.write("blocked\n")
+            emit("blocked")
             return 0
         chosen = {
             "id": slug_id(pick),
@@ -317,44 +331,44 @@ def fill(
     else:
         hits = search_hits(task)
         if hits is None:
-            sys.stdout.write("no_hermes\n")
+            emit("no_hermes")
             return 0
         ranked = shortlist(hits, task, SEARCH_LIMIT, []) if hits else []
         if not ranked:
-            sys.stdout.write("no_catalog\n")
+            emit("no_catalog")
             return 0
         write_catalog_ask(ask_path, task, dest, ranked)
         data = run_jev(ask_path)
         if not data:
-            sys.stdout.write("jev_skip\n")
+            emit("jev_skip")
             return 0
         decision = data.get("decision") or {}
         if decision.get("action") != "proceed":
-            sys.stdout.write("jev_skip\n")
+            emit("jev_skip")
             return 0
         chosen = item_for_pick(str((decision.get("picks") or {}).get("load_tools") or ""), ranked)
     if chosen is None:
-        sys.stdout.write("none\n")
+        emit("none")
         return 0
     ident = str(chosen.get("identifier") or "").strip()
     if not ident or blocked_text(ident, str(chosen.get("name") or "")):
-        sys.stdout.write("blocked\n")
+        emit("blocked")
         return 0
     if not inspect_ok(ident):
-        sys.stdout.write("inspect_fail\n")
+        emit("inspect_fail")
         return 0
     if not install_one(ident, dry_run):
-        sys.stdout.write("install_fail\n")
+        emit("install_fail")
         return 0
     tag = "dry " if dry_run else ""
     if dry_run:
-        sys.stdout.write("%swould_install %s\n" % (tag, ident))
+        emit("%swould_install %s" % (tag, ident))
         return 0
     src = installed_dir(hermes, chosen)
     if src is not None:
         critical = scan_critical(src)
         if critical is not None and critical > 0:
-            sys.stdout.write("scan_fail %s\n" % ident)
+            emit("scan_fail %s" % ident)
             return 0
     copied: list[str] = []
     if dest != "hermes" and src is not None:
@@ -366,9 +380,9 @@ def fill(
     clear_miss(cwd / MISS_NAME)
     clear_scan_cache()
     if copied:
-        sys.stdout.write("installed %s -> %s\n" % (ident, ";".join(copied)))
+        emit("installed %s -> %s" % (ident, ";".join(copied)))
     else:
-        sys.stdout.write("installed %s\n" % ident)
+        emit("installed %s" % ident)
     return 0
 
 

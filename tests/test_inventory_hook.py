@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import sys
@@ -1022,6 +1023,162 @@ class InventoryInternalsTests(unittest.TestCase):
         self.assertEqual(INV._policy_float({"x": "bad"}, "x", 0.5), 0.5)
         self.assertEqual(INV._policy_float(None, "x", 0.5), 0.5)
         self.assertEqual(INV._policy_float({}, "x", 0.5), 0.5)
+
+
+class ScanMergeTests(unittest.TestCase):
+    def _tree(self, tmp: str):
+        home = Path(tmp) / "home"
+        hermes = Path(tmp) / "hermes"
+        # hermes skill
+        s = hermes / "skills" / "token-writer"
+        s.mkdir(parents=True)
+        (s / "SKILL.md").write_text("---\nname: token-writer\ndescription: h\n---\n", encoding="utf-8")
+        # claude plugin manifest + yaml plugin
+        cplugins = home / ".claude" / "plugins"
+        cplugins.mkdir(parents=True)
+        (cplugins / "installed_plugins.json").write_text(
+            '{"plugins": {"cplug@1": {}}}', encoding="utf-8"
+        )
+        yplug = cplugins / "yamlplug"
+        yplug.mkdir()
+        (yplug / "plugin.yaml").write_text("name: yamlplug\n", encoding="utf-8")
+        # claude mcp json
+        (home / ".claude.json").parent.mkdir(parents=True, exist_ok=True)
+        (home / ".claude.json").write_text('{"mcpServers": {"ghmcp": {}}}', encoding="utf-8")
+        return home, hermes
+
+    def test_scan_hermes_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hermes = self._tree(tmp)
+            items = INV.scan("hermes", home=home, hermes=hermes)
+        self.assertEqual({i["kind"] for i in items}, {"skill"})
+        self.assertEqual(items[0]["name"], "token-writer")
+
+    def test_scan_claude_tree_merges_all_kinds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hermes = self._tree(tmp)
+            items = INV.scan("claude-code", home=home, hermes=hermes)
+        kinds = {i["kind"] for i in items}
+        self.assertEqual(kinds, {"plugin", "mcp"})
+        self.assertIn("cplug", {i["name"] for i in items})
+        self.assertIn("yamlplug", {i["name"] for i in items})
+        self.assertIn("ghmcp", {i["name"] for i in items})
+
+    def test_scan_codex_two_skill_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            for part in (".codex", ".agents"):
+                d = home / part / "skills" / ("s-%s" % part[1:])
+                d.mkdir(parents=True)
+                (d / "SKILL.md").write_text(
+                    "---\nname: s-%s\n---\n" % part[1:], encoding="utf-8"
+                )
+            items = INV.scan("codex", home=home, hermes=Path(tmp) / "hermes")
+        self.assertEqual({i["name"] for i in items}, {"s-codex", "s-agents"})
+
+    def test_scan_dedupes_same_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = Path(tmp) / "hermes"
+            for sub in ("a", "b"):
+                d = hermes / "skills" / sub
+                d.mkdir(parents=True)
+                (d / "SKILL.md").write_text("---\nname: same-name\n---\n", encoding="utf-8")
+            items = INV.scan("hermes", home=Path(tmp) / "home", hermes=hermes)
+        ids = [i["id"] for i in items]
+        self.assertEqual(len(ids), 2)
+        self.assertEqual(len(set(ids)), 2)  # uniquify split the collision
+
+    def test_explicit_only_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp) / "s"
+            (skill / "agents").mkdir(parents=True)
+            md = skill / "SKILL.md"
+            md.write_text("---\nname: s\n---\n", encoding="utf-8")
+            self.assertFalse(INV.explicit_only(md))
+            (skill / "agents" / "openai.yaml").write_text(
+                "allow_implicit_invocation: false\n", encoding="utf-8"
+            )
+            self.assertTrue(INV.explicit_only(md))
+            (skill / "agents" / "openai.yaml").write_text(
+                "allow_implicit_invocation: true\n", encoding="utf-8"
+            )
+            self.assertFalse(INV.explicit_only(md))
+            (skill / "agents" / "openai.yaml").write_bytes(b"x" * 20001)
+            self.assertFalse(INV.explicit_only(md))
+
+    def test_parse_frontmatter_multiline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "sname"
+            d.mkdir()
+            (d / "SKILL.md").write_text(
+                "---\nname: quoted-skill\ndescription: >\n  first line\n  second line\n---\n",
+                encoding="utf-8",
+            )
+            meta = INV.parse_frontmatter(d / "SKILL.md")
+            self.assertEqual(meta["name"], "quoted-skill")
+            self.assertIn("first line", meta["description"])
+            plain = d / "NOFM.md"
+            plain.write_text("no frontmatter\n", encoding="utf-8")
+            meta2 = INV.parse_frontmatter(plain)
+            self.assertEqual(meta2["name"], "sname")  # falls back to dir name
+
+    def test_picker_request_and_write_ask(self) -> None:
+        picked = [{"kind": "skill", "name": "jwt-auth", "id": "skill_jwt_auth", "description": "d"}]
+        req = INV.picker_request("task t", "claude-code", picked)
+        self.assertEqual(set(req["questions"]), {"load_tools", "need_skill"})
+        self.assertIn("none", req["questions"]["load_tools"]["criteria"])
+        self.assertIn("skill_jwt_auth", req["questions"]["load_tools"]["criteria"])
+        self.assertIn("untrusted", req["questions"]["load_tools"]["instructions"])
+        self.assertEqual(req["state"]["harness"], "claude-code")
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "ask.json"
+            INV.write_ask(out, "t", "hermes", picked)
+            payload = json.loads(out.read_text(encoding="utf-8"))
+        self.assertIn("installed_enough", payload["questions"])
+
+    def test_main_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hermes = self._tree(tmp)
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = INV.main(
+                    [
+                        "--harness", "hermes", "--hermes-home", str(hermes),
+                        "--home", str(home), "--task", "token writer",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["counts"]["skill"], 1)
+            self.assertEqual(out["shortlist"][0]["id"], "skill_token_writer")
+
+            ask = Path(tmp) / "ask.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                INV.main(
+                    [
+                        "--harness", "hermes", "--hermes-home", str(hermes), "--home", str(home),
+                        "--task", "jwt", "--include", "token-writer", "--write-ask", str(ask),
+                    ]
+                )
+            payload = json.loads(ask.read_text(encoding="utf-8"))
+            self.assertIn("skill_token_writer", payload["questions"]["load_tools"]["criteria"])
+
+    def test_main_catalogs_and_all_names(self) -> None:
+        buf = io.StringIO()
+        with patch.object(sys, "stdout", buf):
+            INV.main(["--catalogs"])
+        self.assertIn("\t", buf.getvalue())  # name<TAB>url rows
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hermes = self._tree(tmp)
+            buf2 = io.StringIO()
+            with patch.object(sys, "stdout", buf2):
+                INV.main(
+                    [
+                        "--harness", "hermes", "--hermes-home", str(hermes),
+                        "--home", str(home), "--all-names",
+                    ]
+                )
+            self.assertIn("token-writer", buf2.getvalue())
 
 
 if __name__ == "__main__":

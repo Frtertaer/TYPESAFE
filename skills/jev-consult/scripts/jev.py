@@ -534,12 +534,24 @@ def cmd_lint(args: argparse.Namespace) -> int:
         policy_get(policy, "choice_option_hard_max", default=255)
     )
     findings = question_lint.lint_request(request, max_options=max_options)
-    for finding in findings:
-        sys.stdout.write(question_lint.format_finding(finding) + "\n")
     errors = sum(1 for f in findings if f["severity"] == "error")
     warns = sum(1 for f in findings if f["severity"] == "warn")
     infos = sum(1 for f in findings if f["severity"] == "info")
-    sys.stdout.write("lint: %d error(s), %d warning(s), %d info\n" % (errors, warns, infos))
+    if getattr(args, "json", False):
+        emit(
+            {
+                "findings": findings,
+                "errors": errors,
+                "warnings": warns,
+                "infos": infos,
+            }
+        )
+    else:
+        for finding in findings:
+            sys.stdout.write(question_lint.format_finding(finding) + "\n")
+        sys.stdout.write(
+            "lint: %d error(s), %d warning(s), %d info\n" % (errors, warns, infos)
+        )
     if errors or (args.strict and warns):
         return 1
     return 0
@@ -720,6 +732,9 @@ def build_parser() -> argparse.ArgumentParser:
     lint_cmd.add_argument("file", help="JSON file or - for stdin")
     lint_cmd.add_argument(
         "--strict", action="store_true", help="Warnings also fail the lint"
+    )
+    lint_cmd.add_argument(
+        "--json", action="store_true", help="Machine-readable findings"
     )
     lint_cmd.set_defaults(func=cmd_lint)
     ping = sub.add_parser("ping", help="Live connectivity check; prints model and noul only")

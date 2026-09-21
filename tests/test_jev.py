@@ -754,6 +754,41 @@ class JevInternalsTests(unittest.TestCase):
             self.assertEqual(out["state"]["task"], "t")
             self.assertIn("q", out["questions"])
 
+    def test_lint_json_emits_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "req.json"
+            req.write_text(
+                json.dumps(
+                    {
+                        "state": {},
+                        "questions": {
+                            "q": {"type": "choice", "instructions": "pick", "criteria": {"only": "one"}}
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = jev.main(["lint", str(req), "--json"])
+            out = json.loads(buf.getvalue())
+            self.assertIn("findings", out)
+            self.assertIn("errors", out)
+            self.assertIn(rc, (0, 1))
+
+    def test_lint_text_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "req.json"
+            req.write_text(
+                json.dumps({"state": {}, "questions": {"q": {"type": "choice", "instructions": "pick one", "criteria": {"a": "x", "b": "y"}}}}),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = jev.main(["lint", str(req)])
+            self.assertEqual(rc, 0)
+            self.assertIn("lint:", buf.getvalue())
+
     def test_scaffold_list_prints_template_ids(self) -> None:
         buf = io.StringIO()
         with patch.object(sys, "stdout", buf):

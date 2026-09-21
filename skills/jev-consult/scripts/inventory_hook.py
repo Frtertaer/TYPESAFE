@@ -379,6 +379,11 @@ def handle(
         else None,
         "strong_pick": bool(picker.get("strong")),
         "latency_ms": picker.get("latency_ms"),
+        "budget_ms": int(hook_budget_seconds() * 1000),
+        "over_budget": (
+            isinstance(picker.get("latency_ms"), (int, float))
+            and picker["latency_ms"] > hook_budget_seconds() * 1000
+        ),
         "stale_sidecar": stale_match,
     }
     append_decision(LAST_DECISION)

@@ -216,6 +216,27 @@ class InventoryHookTests(unittest.TestCase):
             HOOK.handle(payload, items=items, harness="claude-code", pick_fn=skip_pick)
             self.assertEqual(HOOK.LAST_DECISION["question"], "dedupe")
 
+    def test_over_budget_flag_when_pick_exceeds_budget(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+
+        def slow_pick(*_a, **_kw):
+            return {"status": "idf", "winner": None, "latency_ms": 99999}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_BUDGET": "12"}):
+                HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "Add JWT access tokens in Python",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=slow_pick,
+                )
+            self.assertEqual(HOOK.LAST_DECISION["budget_ms"], 12000)
+            self.assertTrue(HOOK.LAST_DECISION["over_budget"])
+
     def test_no_sidecar_env_skips_sidecar_write(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

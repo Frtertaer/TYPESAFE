@@ -982,7 +982,11 @@ def write_ask(path: Path, task: str, harness: str, picked: list[dict]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Inventory installed skills/plugins/MCP for a Jev Choice.")
-    parser.add_argument("--task", default="", help="Task text used to filter the shortlist.")
+    parser.add_argument(
+        "--task",
+        default=os.environ.get("JEV_TASK", ""),
+        help="Task text used to filter the shortlist (default JEV_TASK env).",
+    )
     parser.add_argument(
         "--harness",
         default="auto",

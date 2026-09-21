@@ -234,6 +234,30 @@ class InventoryTests(unittest.TestCase):
         payload = json.loads(buf.getvalue())
         self.assertTrue(all(i["kind"] == "mcp" for i in payload["shortlist"]))
 
+    def test_cli_task_env_default(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_TASK": "jwt tokens"}):
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(FIXTURE),
+                        "--limit",
+                        "8",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["task"], "jwt tokens")
+        names = [item["name"] for item in payload["shortlist"]]
+        self.assertIn("jwt-auth", names)
+
     def _write_skill(self, tmp: str, name: str, frontmatter: str) -> Path:
         skill = Path(tmp) / name
         skill.mkdir(parents=True)

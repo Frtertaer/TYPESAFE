@@ -40,6 +40,7 @@ def evaluate(
     skill_dir: Path,
     case_id: str = "",
     desc_text: str = "",
+    include_tokens: bool = False,
 ) -> dict | None:
     """Per-case scores plus the aggregate margin verdict; None on missing inputs.
     With `case_id`, only that case is evaluated (margin still computed across it).
@@ -61,19 +62,24 @@ def evaluate(
         lexical = case.get("lexical") is not False
         expected = bool(case.get("should_trigger"))
         score = None
+        matched: list[str] = []
         if lexical:
-            score = scorer.score(scorer.tokens(case.get("prompt", "")), desc_tokens)
+            prompt_tokens = scorer.tokens(case.get("prompt", ""))
+            score = scorer.score(prompt_tokens, desc_tokens)
             (pos if expected else neg).append(score)
-        rows.append(
-            {
-                "id": case.get("id"),
-                "should_trigger": expected,
-                "lexical": lexical,
-                "score": score,
-                "covers": case.get("covers"),
-                "ok": (score is not None and score > 0) if (expected and lexical) else True,
-            }
-        )
+            if include_tokens:
+                matched = sorted(set(prompt_tokens) & set(desc_tokens))
+        row = {
+            "id": case.get("id"),
+            "should_trigger": expected,
+            "lexical": lexical,
+            "score": score,
+            "covers": case.get("covers"),
+            "ok": (score is not None and score > 0) if (expected and lexical) else True,
+        }
+        if include_tokens:
+            row["matched"] = matched
+        rows.append(row)
     worst_pos = min(pos) if pos else 0.0
     best_neg = max(neg) if neg else 0.0
     ok = bool(pos) and worst_pos > 0 and worst_pos > best_neg * margin
@@ -147,6 +153,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Score prompts against TEXT instead of the skill's SKILL.md description.",
     )
     parser.add_argument(
+        "--tokens",
+        action="store_true",
+        help="Show which prompt tokens matched the description per row.",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help=(
@@ -185,7 +196,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         result = evaluate(
-            Path(args.cases), Path(args.skill), case_id=args.id, desc_text=args.desc
+            Path(args.cases),
+            Path(args.skill),
+            case_id=args.id,
+            desc_text=args.desc,
+            include_tokens=args.tokens,
         )
     except (OSError, ValueError, KeyError) as exc:
         sys.stderr.write("trigger_eval failed: %s\n" % exc)
@@ -268,16 +283,16 @@ def main(argv: list[str] | None = None) -> int:
             for row in _rows():
                 score = "-" if row["score"] is None else "%.3f" % row["score"]
                 marker = "" if row["ok"] else "  <-- FAIL"
-                sys.stdout.write(
-                    "%-28s should_trigger=%-5s lexical=%-5s score=%s%s\n"
-                    % (
-                        row["id"],
-                        row["should_trigger"],
-                        row["lexical"],
-                        score,
-                        marker,
-                    )
+                line = "%-28s should_trigger=%-5s lexical=%-5s score=%s%s" % (
+                    row["id"],
+                    row["should_trigger"],
+                    row["lexical"],
+                    score,
+                    marker,
                 )
+                if args.tokens:
+                    line += "  tokens=%s" % ",".join(row["matched"])
+                sys.stdout.write(line + "\n")
         sys.stdout.write(
             "margin: %s (worst positive %.3f vs best negative %.3f x %.2f)\n"
             % (

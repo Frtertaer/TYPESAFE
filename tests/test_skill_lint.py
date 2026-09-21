@@ -144,6 +144,22 @@ class CliTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 1)
             self.assertNotIn("fixed S005", proc.stderr)
 
+    def test_json_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_skill(tmp, "bad", "---\ndescription: d\n---\n")
+            proc = self._run(str(bad), "--json")
+            self.assertEqual(proc.returncode, 1)
+            findings = json.loads(proc.stdout)["findings"]
+            self.assertEqual(findings[0]["rule"], "S003")
+            self.assertIn(str(bad), findings[0]["path"])
+
+    def test_json_clean_rc0_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            good = write_skill(tmp, "ok", GOOD.format(name="ok"))
+            proc = self._run(str(good), "--json")
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(json.loads(proc.stdout)["findings"], [])
+
     def test_multiple_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             good = write_skill(tmp, "ok", GOOD.format(name="ok"))

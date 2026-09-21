@@ -106,7 +106,8 @@ def fix_name(path: Path) -> bool:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     do_fix = "--fix" in argv
-    argv = [a for a in argv if a != "--fix"]
+    as_json = "--json" in argv
+    argv = [a for a in argv if a not in ("--fix", "--json")]
     if not argv:
         sys.stderr.write("usage: skill_lint.py SKILL.md [more.md ...] [--fix]\n")
         return 2
@@ -123,6 +124,14 @@ def main(argv: list[str] | None = None) -> int:
             if any(f["rule"] == "S005" for f in lint_skill(path)):
                 if fix_name(path):
                     sys.stderr.write("fixed S005 %s\n" % path)
+    if as_json:
+        import json as _json
+
+        rows = [
+            {"path": str(path), **f} for path in paths for f in lint_skill(path)
+        ]
+        sys.stdout.write(_json.dumps({"findings": rows}, indent=2) + "\n")
+        return 1 if any(r["severity"] == "error" for r in rows) else 0
     for path in paths:
         for f in lint_skill(path):
             sys.stdout.write("%s %s %s: %s\n" % (f["severity"], f["rule"], path, f["message"]))

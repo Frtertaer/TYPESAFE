@@ -1860,6 +1860,27 @@ class PruneTest(unittest.TestCase):
             proc = self.run_cli("--file", str(path), "--harness", "claude,grok", "--count")
             self.assertEqual(proc.stdout.strip(), "2")
 
+    def test_prune_dry_run_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "ok", "harness": "claude"},
+                    {"ts": 2, "jev_status": "ok", "harness": "codex"},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--prune", "--dry-run", "--json",
+                "--harness", "claude",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            summary = payload["prune_dry_run"]
+            self.assertEqual(summary["would_prune"], 1)
+            self.assertEqual(summary["kept"], 1)
+            self.assertEqual(summary["total"], 2)
+
     def test_oldest_prints_oldest_entry(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

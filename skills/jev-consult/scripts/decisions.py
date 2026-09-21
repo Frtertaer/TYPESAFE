@@ -833,10 +833,18 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         total, total_bad = load_entries(path)
         if getattr(args, "dry_run", False):
-            sys.stderr.write(
-                "dry-run: would prune %d of %d entries (kept %d, dropped %d bad line(s))\n"
-                % (len(total) - len(entries), len(total), len(entries), total_bad)
-            )
+            if args.json:
+                args._prune_dry_run = {
+                    "would_prune": len(total) - len(entries),
+                    "total": len(total),
+                    "kept": len(entries),
+                    "bad_lines": total_bad,
+                }
+            else:
+                sys.stderr.write(
+                    "dry-run: would prune %d of %d entries (kept %d, dropped %d bad line(s))\n"
+                    % (len(total) - len(entries), len(total), len(entries), total_bad)
+                )
         else:
             try:
                 prune_entries(path, entries)
@@ -1025,6 +1033,8 @@ def main(argv: list[str] | None = None) -> int:
     stats["filtered"] = len(entries)
     stats["since"] = since
     stats["until"] = until
+    if getattr(args, "_prune_dry_run", None):
+        stats["prune_dry_run"] = args._prune_dry_run
     if args.json:
         sys.stdout.write(json.dumps(stats, indent=2) + "\n")
     else:

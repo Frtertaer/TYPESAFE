@@ -132,6 +132,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Score prompts against TEXT instead of the skill's SKILL.md description.",
     )
     parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "Exit 1 when any case row fails or any lexical negative scores > 0, "
+            "not just the margin verdict."
+        ),
+    )
+    parser.add_argument(
         "--out",
         metavar="PATH",
         default="",
@@ -199,8 +207,7 @@ def main(argv: list[str] | None = None) -> int:
         return rows
 
     if args.ids:
-        rows = _rows()
-        for row in rows:
+        for row in _rows():
             sys.stdout.write("%s\n" % row["id"])
         return 0 if result["ok"] else 1
     if args.json:
@@ -231,6 +238,11 @@ def main(argv: list[str] | None = None) -> int:
                 result["margin"],
             )
         )
+    if args.strict and any(
+        not row["ok"] or (not row["should_trigger"] and (row["score"] or 0) > 0)
+        for row in result["cases"]
+    ):
+        return 1
     return 0 if result["ok"] else 1
 
 

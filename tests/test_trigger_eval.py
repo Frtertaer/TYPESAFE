@@ -229,6 +229,32 @@ class TriggerEvalTests(unittest.TestCase):
         payload = json.loads(buf.getvalue())
         self.assertFalse(payload["ok"])
 
+    def test_strict_fails_on_scored_negative(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(
+                tmp,
+                [
+                    {
+                        "id": "p",
+                        "prompt": "jev consult pick decide between options choose approach wisely",
+                        "should_trigger": True,
+                    },
+                    {
+                        "id": "n",
+                        "prompt": "decision approach",
+                        "should_trigger": False,
+                    },
+                ],
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(["--cases", str(path)])
+            self.assertEqual(rc, 0)  # margin passes (1.333 > 0.707*1.15)
+            # strict still fails because the negative scored
+            with redirect_stdout(buf):
+                rc = te.main(["--cases", str(path), "--strict"])
+            self.assertEqual(rc, 1)
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

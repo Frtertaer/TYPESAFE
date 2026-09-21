@@ -61,6 +61,10 @@ class InventoryHookTests(unittest.TestCase):
         self.assertEqual(sidecar["harness"], "claude-code")
         names = [row["name"] for row in sidecar["names"]]
         self.assertIn("jwt-auth", names)
+        self.assertEqual(
+            HOOK.LAST_DECISION["shortlist_n"],
+            len(HOOK.LAST_DECISION["shortlist"]),
+        )
 
     def test_hook_off_env_short_circuits(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)

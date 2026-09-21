@@ -300,6 +300,7 @@ def handle(
         "prompt_sha": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12],
         "prompt_head": _redact_prompt(prompt[:240])[:160],
         "n_catalog": len(catalog),
+        "shortlist_n": len(picked),
         "shortlist": [item.get("id") for item in picked],
         "explicit": explicit_winner is not None,
         "jev_status": extra["jev_status"],

@@ -297,6 +297,35 @@ class CliTest(unittest.TestCase):
             self.assertEqual(len(shown), 1)
             self.assertIn("alpha-entry", shown[0])
 
+    def test_top_env_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"jev_status": "winner"},
+                    {"jev_status": "none"},
+                    {"jev_status": "none"},
+                    {"jev_status": "error"},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--statuses", env={"JEV_DECISIONS_TOP": "1"}
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = [l for l in proc.stdout.splitlines() if l.strip()]
+            self.assertEqual(len(rows), 1)
+            self.assertIn("none 2", rows[0])
+            proc = self.run_cli(
+                "--file",
+                str(path),
+                "--statuses",
+                "--top",
+                "3",
+                env={"JEV_DECISIONS_TOP": "1"},
+            )
+            self.assertEqual(len([l for l in proc.stdout.splitlines() if l.strip()]), 3)
+
     def test_stats_iso_fields(self):
         entries = [{"ts": 1700000000}, {"ts": 1700086400}]
         stats = decisions.summarize(entries)

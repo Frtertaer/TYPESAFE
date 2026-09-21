@@ -356,8 +356,12 @@ def main(argv: list[str] | None = None) -> int:
         env_first = 0
     parser.add_argument("--tail", type=int, default=max(0, env_tail), help="Print last N entries")
     parser.add_argument("--first", type=int, default=max(0, env_first), help="Print first N entries")
+    try:
+        env_top = int(os.environ.get("JEV_DECISIONS_TOP", "") or 0)
+    except ValueError:
+        env_top = 0
     parser.add_argument(
-        "--top", type=int, default=0, help="Cap count-list output (--statuses et al.) to N rows"
+        "--top", type=int, default=max(0, env_top), help="Cap count-list output (--statuses et al.) to N rows"
     )
     parser.add_argument("--days", type=float, default=0.0, help="Only entries from the last N days")
     parser.add_argument(

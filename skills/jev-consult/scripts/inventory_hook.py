@@ -352,6 +352,7 @@ def handle(
         "harness": harness,
         "prompt_sha": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12],
         "prompt_head": _redact_prompt(prompt[:240])[:160],
+        "prompt_tail": _redact_prompt(prompt[-80:]),
         "prompt_len": len(prompt),
         "n_catalog": len(catalog),
         "shortlist_n": len(picked),

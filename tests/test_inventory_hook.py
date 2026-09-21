@@ -129,6 +129,10 @@ class InventoryHookTests(unittest.TestCase):
                 HOOK.LAST_DECISION["prompt_len"],
                 len("Add JWT access tokens in Python"),
             )
+            self.assertEqual(
+                HOOK.LAST_DECISION["prompt_tail"],
+                "Add JWT access tokens in Python",
+            )
 
     def test_hook_winner_env_forces_explicit_pick(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)

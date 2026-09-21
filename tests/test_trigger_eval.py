@@ -543,6 +543,17 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertAlmostEqual(float(hi) - float(lo), 0.25)
             self.assertTrue(int(count) > 0)
         self.assertIn("unscored 1\n", buf.getvalue())
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--dist", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["unscored"], 1)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["buckets"])
+        for label in payload["buckets"]:
+            lo, hi = label.split("-")
+            self.assertAlmostEqual(float(hi) - float(lo), 0.25)
 
     def test_sort_orders_rows_by_score(self) -> None:
         buf = io.StringIO()

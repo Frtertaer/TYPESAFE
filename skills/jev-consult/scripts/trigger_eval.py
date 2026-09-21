@@ -547,10 +547,27 @@ def main(argv: list[str] | None = None) -> int:
                 unscored += 1
                 continue
             buckets[int(row["score"] / 0.25)] = buckets.get(int(row["score"] / 0.25), 0) + 1
-        for b in sorted(buckets):
-            sys.stdout.write("%.2f-%.2f %d\n" % (b * 0.25, (b + 1) * 0.25, buckets[b]))
-        if unscored:
-            sys.stdout.write("unscored %d\n" % unscored)
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "buckets": {
+                            "%.2f-%.2f" % (b * 0.25, (b + 1) * 0.25): buckets[b]
+                            for b in sorted(buckets)
+                        },
+                        "unscored": unscored,
+                        "ok": result["ok"],
+                    }
+                )
+                + "\n"
+            )
+        else:
+            for b in sorted(buckets):
+                sys.stdout.write(
+                    "%.2f-%.2f %d\n" % (b * 0.25, (b + 1) * 0.25, buckets[b])
+                )
+            if unscored:
+                sys.stdout.write("unscored %d\n" % unscored)
         return 0 if result["ok"] else 1
     if args.uncovered:
         if args.json:

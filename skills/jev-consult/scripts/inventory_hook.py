@@ -520,7 +520,15 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(name + "\n")
         return 0
     if "--env" in argv:
-        sys.stdout.write(json.dumps(env_report(), indent=2, sort_keys=True) + "\n")
+        text = json.dumps(env_report(), indent=2, sort_keys=True) + "\n"
+        if "--out" in argv:
+            idx = argv.index("--out")
+            if idx + 1 < len(argv):
+                try:
+                    Path(argv[idx + 1]).write_text(text, encoding="utf-8")
+                except OSError:
+                    pass  # fail-open: still print to stdout
+        sys.stdout.write(text)
         return 0
     raw = sys.stdin.read()
     if not raw.strip():

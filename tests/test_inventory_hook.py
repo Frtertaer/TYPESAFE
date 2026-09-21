@@ -344,6 +344,18 @@ class InventoryHookTests(unittest.TestCase):
         self.assertEqual(report["dedupe_ttl_seconds"], 0.0)
         self.assertNotIn("api_key", buf.getvalue().lower())
 
+    def test_env_out_writes_report_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "env.json"
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_HOOK_LIMIT": "3"}):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(["--env", "--out", str(target)])
+            self.assertEqual(rc, 0)
+            report = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(report["limit"], 3)
+            self.assertEqual(json.loads(buf.getvalue())["limit"], 3)
+
     def test_hook_skip_events_excludes_events(self) -> None:
         buf = io.StringIO()
         with patch.dict(os.environ, {"JEV_HOOK_SKIP_EVENTS": "pre_llm_call"}):

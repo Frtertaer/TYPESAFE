@@ -684,6 +684,33 @@ class StandaloneCliTests(unittest.TestCase):
         self.assertIn("warn", proc.stdout)
         self.assertNotIn("fixed J", proc.stderr)
 
+    def test_watch_emits_ticks(self) -> None:
+        import os as _os
+
+        request = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Is it not true?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            env = dict(_os.environ, JEV_QLINT_WATCH_MAX="2")
+            proc = subprocess.run(
+                [sys.executable, str(self.QLINT_PATH), str(path), "--watch", "0.01"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+        self.assertEqual(proc.returncode, 0)
+        ticks = [
+            json.loads(l)
+            for l in proc.stdout.splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertTrue(all("errors" in t for t in ticks))
+
 
 class LintStateEdgeTests(unittest.TestCase):
     def test_dict_state_over_limit_is_j020(self) -> None:

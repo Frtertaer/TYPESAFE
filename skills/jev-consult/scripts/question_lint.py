@@ -304,6 +304,18 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         out_path = argv[idx + 1].strip()
         argv = argv[:idx] + argv[idx + 2 :]
+    watch_seconds = 0.0
+    if "--watch" in argv:
+        idx = argv.index("--watch")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--watch needs a SECONDS value\n")
+            return 2
+        try:
+            watch_seconds = float(argv[idx + 1])
+        except ValueError:
+            sys.stderr.write("bad --watch %r (seconds)\n" % argv[idx + 1])
+            return 2
+        argv = argv[:idx] + argv[idx + 2 :]
     argv = [a for a in argv if a not in ("--json", "--fix", "--strict", "--quiet")]
     if not argv:
         sys.stderr.write("usage: question_lint.py FILE [--json] [--fix] [--strict]\n")
@@ -321,6 +333,32 @@ def main(argv: list[str] | None = None) -> int:
     if not isinstance(request, dict):
         sys.stderr.write("request JSON must be an object\n")
         return 2
+    if watch_seconds > 0:
+        import time as _time
+
+        try:
+            max_ticks = int(os.environ.get("JEV_QLINT_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        while max_ticks <= 0 or ticks < max_ticks:
+            current = lint_request(request)
+            tick = {
+                "ts": int(_time.time()),
+                "findings": len(current),
+                "errors": sum(1 for f in current if f["severity"] == "error"),
+            }
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            _time.sleep(watch_seconds)
+            try:
+                fresh = json.loads(Path(argv[0]).read_text(encoding="utf-8"))
+                if isinstance(fresh, dict):
+                    request = fresh
+            except (OSError, ValueError):
+                pass
+        return 0
     if do_fix:
         applied = apply_fixes(request)
         Path(argv[0]).write_text(json.dumps(request, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -24,6 +25,7 @@ from catalog_fill import BLOCKED_INSPECT, blocked_text, slug_id  # noqa: E402
 from inventory import (  # noqa: E402
     MISS_NAME,
     SIDECAR_NAME,
+    append_decision,
     clear_miss,
     clear_scan_cache,
     detect_harness,
@@ -262,59 +264,72 @@ def fill(
     dry_run: bool,
     ask_path: Path,
 ) -> int:
+    def emit(msg: str) -> None:
+        sys.stdout.write(msg + "\n")
+        append_decision(
+            {
+                "ts": int(time.time()),
+                "harness": dest,
+                "jev_status": "fill",
+                "fill": "apply",
+                "outcome": msg.split()[0],
+                "prompt_head": task[:120],
+            }
+        )
+
     if dest != "hermes":
-        sys.stdout.write("human\n")
+        emit("human")
         return 0
     if pick:
         if blocked_text(pick):
-            sys.stdout.write("blocked\n")
+            emit("blocked")
             return 0
         parsed = parse_kind_pick(pick)
         if parsed is None:
-            sys.stdout.write("none\n")
+            emit("none")
             return 0
         chosen = as_item(parsed[0], parsed[1])
     else:
         hits = search_hits(task)
         if hits is None:
-            sys.stdout.write("no_hermes\n")
+            emit("no_hermes")
             return 0
         ranked = shortlist(hits, task, SEARCH_LIMIT, []) if hits else []
         if not ranked:
-            sys.stdout.write("no_apply\n")
+            emit("no_apply")
             return 0
         write_apply_ask(ask_path, task, ranked)
         data = run_jev(ask_path)
         if not data:
-            sys.stdout.write("jev_skip\n")
+            emit("jev_skip")
             return 0
         decision = data.get("decision") or {}
         if decision.get("action") != "proceed":
-            sys.stdout.write("jev_skip\n")
+            emit("jev_skip")
             return 0
         chosen = item_for_pick(str((decision.get("picks") or {}).get("load_tools") or ""), ranked)
     if chosen is None:
-        sys.stdout.write("none\n")
+        emit("none")
         return 0
     kind = str(chosen.get("kind") or "")
     name = str(chosen.get("name") or "")
     if kind not in ("plugin", "mcp") or not name or blocked_text(kind, name):
-        sys.stdout.write("blocked\n")
+        emit("blocked")
         return 0
     if not inspect_ok(kind, name):
-        sys.stdout.write("inspect_fail\n")
+        emit("inspect_fail")
         return 0
     if not install_one(kind, name, dry_run):
-        sys.stdout.write("install_fail\n")
+        emit("install_fail")
         return 0
     tag = "dry " if dry_run else ""
     if dry_run:
-        sys.stdout.write("%swould_install %s %s\n" % (tag, kind, name))
+        emit("%swould_install %s %s" % (tag, kind, name))
         return 0
     write_sidecar(cwd / SIDECAR_NAME, dest, task, [chosen])
     clear_miss(cwd / MISS_NAME)
     clear_scan_cache()
-    sys.stdout.write("installed %s %s\n" % (kind, name))
+    emit("installed %s %s" % (kind, name))
     return 0
 
 

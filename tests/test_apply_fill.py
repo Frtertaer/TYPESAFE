@@ -297,12 +297,13 @@ class ApplyFillE2ETests(unittest.TestCase):
 
     SCRIPT = SCRIPTS / "apply_fill.py"
 
-    def _run(self, argv: list[str], cwd: str | None = None, home: str | None = None):
+    def _run(self, argv: list[str], cwd: str | None = None, home: str | None = None, log: str | None = "0"):
         import subprocess
 
         env = dict(os.environ)
         env.pop("TYPESAFE_API_KEY", None)
-        env["JEV_CONSULT_LOG"] = "0"
+        if log is not None:
+            env["JEV_CONSULT_LOG"] = log
         if home:
             env["USERPROFILE"] = home
             env["HOME"] = home
@@ -350,6 +351,24 @@ class ApplyFillE2ETests(unittest.TestCase):
                 home=tmp,
             )
             self.assertEqual(out, "blocked")
+
+    def test_fill_outcome_logged_to_decisions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "decisions.jsonl"
+            out = self._run(
+                ["--task", "x", "--harness", "codex", "--cwd", tmp],
+                cwd=tmp,
+                home=tmp,
+                log=str(log_path),
+            )
+            self.assertEqual(out, "human")
+            entries = [json.loads(l) for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            self.assertEqual(len(entries), 1)
+            entry = entries[0]
+            self.assertEqual(entry["jev_status"], "fill")
+            self.assertEqual(entry["fill"], "apply")
+            self.assertEqual(entry["outcome"], "human")
+            self.assertEqual(entry["harness"], "codex")
 
 
 if __name__ == "__main__":

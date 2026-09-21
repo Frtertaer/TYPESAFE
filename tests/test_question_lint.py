@@ -299,5 +299,106 @@ class AskLintWarningTests(unittest.TestCase):
         )
 
 
+class RemainingRulesTests(unittest.TestCase):
+    def test_arithmetic_warns_j003(self) -> None:
+        findings = question_lint.lint_question(
+            "q", noul("Is the number of failing tests greater than five?")
+        )
+        self.assertIn(("J003", "warn"), rules(findings))
+
+    def test_datetime_warns_j004(self) -> None:
+        findings = question_lint.lint_question(
+            "q", noul("Did the token expire within the last hour?")
+        )
+        self.assertIn(("J004", "warn"), rules(findings))
+
+    def test_numeric_warns_j005(self) -> None:
+        findings = question_lint.lint_question(
+            "q", noul("Does the error rate exceed 500 per minute?")
+        )
+        self.assertIn(("J005", "warn"), rules(findings))
+
+    def test_multi_hop_info_j006(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            noul(
+                "If the build passed then should the release ship, otherwise "
+                "should we roll back?"
+            ),
+        )
+        self.assertIn(("J006", "info"), rules(findings))
+
+    def test_short_instructions_warn_j007(self) -> None:
+        findings = question_lint.lint_question("q", noul("Pick one."))
+        self.assertIn(("J007", "warn"), rules(findings))
+
+    def test_vague_no_criteria_info_j008(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {"type": "score", "instructions": "Is this approach good for the task?"},
+        )
+        self.assertIn(("J008", "info"), rules(findings))
+
+    def test_vague_with_criteria_no_j008(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            noul(
+                "Is this approach good for the task?",
+                {"true": "meets the goal", "false": "does not meet it"},
+            ),
+        )
+        self.assertNotIn(("J008", "info"), rules(findings))
+
+    def test_noul_no_criteria_info_j009(self) -> None:
+        findings = question_lint.lint_question(
+            "q", noul("Should the worker retry the failing step now?")
+        )
+        self.assertIn(("J009", "info"), rules(findings))
+
+    def test_choice_undescribed_options_j009(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which harness should receive this skill?",
+                "criteria": {"a": "", "b": "", "c": "", "d": "described"},
+            },
+        )
+        self.assertIn(("J009", "info"), rules(findings))
+
+    def test_score_many_levels_warns_j013(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "score",
+                "instructions": "Rate the answer quality on a detailed scale.",
+                "criteria": ["l%s" % i for i in range(8)],
+            },
+        )
+        self.assertIn(("J013", "warn"), rules(findings))
+
+    def test_score_five_levels_no_j013(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "score",
+                "instructions": "Rate the answer quality on a coarse scale.",
+                "criteria": ["l%s" % i for i in range(5)],
+            },
+        )
+        self.assertNotIn(("J013", "warn"), rules(findings))
+
+    def test_clean_question_no_findings(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which library should handle the JWT signing?",
+                "criteria": {"jwtlib": "PyJWT-based", "none": "skip this step"},
+            },
+        )
+        self.assertEqual(findings, [])
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

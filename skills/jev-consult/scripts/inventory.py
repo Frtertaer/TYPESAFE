@@ -915,6 +915,12 @@ def main(argv: list[str] | None = None) -> int:
         const=SIDECAR_NAME,
         help="Print fresh/stale/missing/invalid for a sidecar file and exit.",
     )
+    parser.add_argument(
+        "--check-miss",
+        nargs="?",
+        const=MISS_NAME,
+        help="Print fresh/stale/missing/invalid for a miss marker file and exit.",
+    )
     parser.add_argument("--catalogs", action="store_true", help="Print marketplace URLs and exit.")
     parser.add_argument(
         "--prune-sidecars",
@@ -927,6 +933,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.check_sidecar:
         sys.stdout.write(sidecar_status(Path(args.check_sidecar)) + "\n")
+        return 0
+    if args.check_miss:
+        sys.stdout.write(sidecar_status(Path(args.check_miss)) + "\n")
         return 0
     if args.prune_sidecars:
         removed = prune_stale_sidecars(Path(args.prune_sidecars))

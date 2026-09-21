@@ -1394,5 +1394,41 @@ class PruneSidecarsTests(unittest.TestCase):
             self.assertFalse(stale.exists())
 
 
+class CheckMissTests(unittest.TestCase):
+    def test_check_miss_fresh_stale_missing(self) -> None:
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmp:
+            miss = Path(tmp) / ".jev-tools-miss.json"
+            miss.write_text(
+                json.dumps({"harness": "grok", "task": "t", "empty": True,
+                            "written_at": int(_time.time())}),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = INV.main(["--check-miss", str(miss)])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "fresh")
+
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                INV.main(["--check-miss", str(Path(tmp) / "absent.json")])
+            self.assertEqual(buf.getvalue().strip(), "missing")
+
+    def test_check_miss_default_name(self) -> None:
+        # Bare --check-miss uses the default miss filename (cwd-relative).
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                with patch("sys.stdout", buf):
+                    rc = INV.main(["--check-miss"])
+            finally:
+                os.chdir(cwd)
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().strip(), "missing")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

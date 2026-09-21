@@ -66,6 +66,25 @@ class InventoryHookTests(unittest.TestCase):
             len(HOOK.LAST_DECISION["shortlist"]),
         )
 
+    def test_hook_winner_env_forces_explicit_pick(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_WINNER": "ascii-art"}):
+                out = HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "Add JWT access tokens in Python",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            note = out["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("ascii-art", note)
+            self.assertTrue(HOOK.LAST_DECISION["explicit"])
+            self.assertEqual(HOOK.LAST_DECISION["jev_status"], "winner")
+
     def test_hook_off_env_short_circuits(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

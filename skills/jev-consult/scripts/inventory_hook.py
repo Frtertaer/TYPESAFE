@@ -266,6 +266,17 @@ def handle(
         }
     catalog = items if items is not None else scan_cached(harness)
     hits = explicit_mentions(prompt, catalog)
+    env_winner = os.environ.get("JEV_HOOK_WINNER", "").strip()
+    if env_winner:
+        lowered = env_winner.lower()
+        forced = [
+            item
+            for item in catalog
+            if str(item.get("name") or "").lower() == lowered
+            or str(item.get("id") or "").lower() == lowered
+        ]
+        if forced:
+            hits = forced[:1]
     explicit_winner = hits[0] if len(hits) == 1 else None
     picker = {"status": "idf", "winner": None}
     if explicit_winner is not None:

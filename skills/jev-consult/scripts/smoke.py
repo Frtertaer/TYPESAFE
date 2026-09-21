@@ -315,6 +315,13 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="Also write the results JSON to PATH.",
     )
+    parser.add_argument(
+        "--watch",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Re-run the steps every S seconds, printing a {ts,ok,failed} JSON tick.",
+    )
     args = parser.parse_args(argv)
     names = {name for name, _ in STEPS}
     if args.list:
@@ -338,19 +345,43 @@ def main(argv: list[str] | None = None) -> int:
             env_timeout = 0.0
         if env_timeout > 0:
             STEP_TIMEOUT = env_timeout
-    steps: list[dict] = []
-    with tempfile.TemporaryDirectory() as tmp_raw:
-        tmp = Path(tmp_raw)
-        for name, fn_name in STEPS:
-            if wanted and name not in wanted:
-                continue
-            fn = globals()[fn_name]
-            try:
-                steps.append(fn(tmp))
-            except Exception as exc:  # a crash is a failed step, not a crash
-                steps.append(_step(getattr(fn, "__name__", "step"), False, "raised %r" % exc))
-            if args.fail_fast and not steps[-1]["ok"]:
-                break
+    def _run_steps() -> list[dict]:
+        rows: list[dict] = []
+        with tempfile.TemporaryDirectory() as tmp_raw:
+            tmp = Path(tmp_raw)
+            for name, fn_name in STEPS:
+                if wanted and name not in wanted:
+                    continue
+                fn = globals()[fn_name]
+                try:
+                    rows.append(fn(tmp))
+                except Exception as exc:  # a crash is a failed step, not a crash
+                    rows.append(_step(getattr(fn, "__name__", "step"), False, "raised %r" % exc))
+                if args.fail_fast and not rows[-1]["ok"]:
+                    break
+        return rows
+
+    if args.watch and args.watch > 0:
+        import time as _time
+
+        try:
+            max_ticks = int(os.environ.get("JEV_SMOKE_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        while max_ticks <= 0 or ticks < max_ticks:
+            steps = _run_steps()
+            tick = {
+                "ts": int(_time.time()),
+                "ok": all(s["ok"] for s in steps),
+                "failed": [s["name"] for s in steps if not s["ok"]],
+            }
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            _time.sleep(args.watch)
+        return 0
+    steps = _run_steps()
     ok = all(s["ok"] for s in steps)
     text = json.dumps({"ok": ok, "steps": steps}, indent=2) + "\n"
     sys.stdout.write(text)

@@ -202,6 +202,27 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(MOD.STEP_TIMEOUT, 9.0)
         MOD.STEP_TIMEOUT = 60.0
 
+    def test_watch_emits_ticks(self) -> None:
+        def boom(tmp):
+            raise RuntimeError("explode")
+
+        with patch.dict(os.environ, {"JEV_SMOKE_WATCH_MAX": "2"}):
+            with patch.object(MOD, "_run", return_value=(1, "nope")), patch.object(
+                MOD, "step_policy", side_effect=boom
+            ):
+                import io
+
+                buf = io.StringIO()
+                with patch.object(sys, "stdout", buf):
+                    rc = MOD.main(["--watch", "0.001", "--only", "policy"])
+        self.assertEqual(rc, 0)
+        ticks = [
+            json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertTrue(all(t["ok"] is False for t in ticks))
+        self.assertTrue(all(t["failed"] for t in ticks))
+
     def test_policy_step_real(self) -> None:
         from pathlib import Path as P
         import tempfile

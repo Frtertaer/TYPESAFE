@@ -766,6 +766,17 @@ def hook_limit() -> int:
     return HOOK_LIMIT
 
 
+def hook_note_limit() -> int:
+    """Max item lines in the hook note (0 = unlimited). Env JEV_HOOK_NOTE_LIMIT."""
+    try:
+        env = int(os.environ.get("JEV_HOOK_NOTE_LIMIT", "") or -1)
+        if env >= 0:
+            return env
+    except ValueError:
+        pass
+    return 0
+
+
 HOOK_JEV_RETRIES_KEY = "hook_jev_retries"
 DEFAULT_HOOK_JEV_RETRIES = 0
 

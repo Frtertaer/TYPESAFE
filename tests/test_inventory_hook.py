@@ -66,6 +66,24 @@ class InventoryHookTests(unittest.TestCase):
             len(HOOK.LAST_DECISION["shortlist"]),
         )
 
+    def test_note_limit_env_truncates_list(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_NOTE_LIMIT": "1"}):
+                out = HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "ascii-art plus authorized-scan for this task",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            note = out["hookSpecificOutput"]["additionalContext"]
+            self.assertEqual(note.count("- skill"), 1)
+            self.assertGreater(HOOK.LAST_DECISION["shortlist_n"], 1)
+
     def test_last_decision_records_prompt_len(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

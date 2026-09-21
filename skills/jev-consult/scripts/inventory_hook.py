@@ -31,6 +31,7 @@ from inventory import (  # noqa: E402
     format_note,
     format_winner_note,
     hook_budget_seconds,
+    hook_note_limit,
     hook_jev_retries,
     hook_jev_timeout_seconds,
     picker_request,
@@ -173,7 +174,9 @@ def _note_for_picker(picked: list[dict], picker: dict) -> str:
         return format_winner_note(winner)
     if status == "none":
         return ""
-    return format_note(picked)
+    note_limit = hook_note_limit()
+    shown = picked[:note_limit] if note_limit > 0 else picked
+    return format_note(shown)
 
 
 def handle(

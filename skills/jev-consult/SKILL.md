@@ -161,5 +161,5 @@ Trigger evals: `trigger-cases.json` in the repo's test fixtures lists prompts th
 
 ```text
 python scripts/install.py
-python skills/jev-consult/scripts/doctor.py  # verify hooks/skill/key/policy per harness; exit 0 = all ok
+python skills/jev-consult/scripts/doctor.py  # verify hooks/skill/key/policy per harness; exit 0 = all ok; failing checks carry a `hint`
 ```

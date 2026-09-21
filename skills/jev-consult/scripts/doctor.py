@@ -24,6 +24,23 @@ COMPACT_MARK = "compact_hook.py"
 TOOLS_MARK = "inventory_hook.py"
 ALLOWED = ("hermes", "claude-code", "codex", "grok")
 
+HINTS = {
+    "skill": "run python scripts/install.py --agents <agent>",
+    "plugin_dir": "run python scripts/install.py --agents hermes",
+    "plugin_enabled": "add - jev-compact under plugins.enabled in config.yaml",
+    "compact_hook": "run python scripts/install.py --agents <agent>",
+    "inventory_hook": "run python scripts/install.py --agents <agent>",
+    "jev-compact.json": "run python scripts/install.py --agents grok",
+    "jev-tools.json": "run python scripts/install.py --agents grok",
+    "hooks": "create .claude/settings.json with a hooks block or run python scripts/install.py --agents claude-code",
+    "api_key": "set TYPESAFE_API_KEY in the environment or a .env file",
+    "policy": "restore skills/jev-consult/policy.json",
+}
+
+
+def _hint(name: str) -> str | None:
+    return HINTS.get(name)
+
 
 def user_home() -> Path:
     return Path(os.environ.get("USERPROFILE") or Path.home())
@@ -203,6 +220,11 @@ def main(argv: list[str] | None = None) -> int:
     if "codex" in agents:
         checks += check_codex(home)
     ok = all(c["ok"] for c in checks)
+    for check in checks:
+        if not check["ok"]:
+            hint = _hint(check["check"])
+            if hint:
+                check["hint"] = hint.replace("<agent>", check["agent"])
     sys.stdout.write(json.dumps({"ok": ok, "checks": checks}, indent=2) + "\n")
     return 0 if ok else 1
 

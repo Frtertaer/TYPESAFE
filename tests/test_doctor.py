@@ -221,6 +221,30 @@ class DoctorTests(unittest.TestCase):
         self.assertTrue(c["ok"])
         self.assertIn("2 lines", c["detail"])
 
+    def test_failed_checks_carry_hints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run_main(
+                ["--agents", "hermes", "--home", tmp, "--hermes-home", str(Path(tmp) / "h")],
+                cwd=tmp,
+            )
+        self.assertEqual(rc, 1)
+        skill = check_of(out, "skill", agent="hermes")
+        self.assertFalse(skill["ok"])
+        self.assertIn("install.py", skill["hint"])
+        api = check_of(out, "api_key")
+        self.assertFalse(api["ok"])
+        self.assertIn("TYPESAFE_API_KEY", api["hint"])
+
+    def test_passing_checks_have_no_hint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run_main(
+                ["--agents", "hermes", "--home", tmp, "--hermes-home", str(Path(tmp) / "h")],
+                cwd=tmp,
+            )
+        for c in out["checks"]:
+            if c["ok"]:
+                self.assertNotIn("hint", c)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

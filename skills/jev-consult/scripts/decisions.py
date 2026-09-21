@@ -454,6 +454,12 @@ def main(argv: list[str] | None = None) -> int:
         env_min_cat = None
     parser.add_argument("--min-catalog", type=float, default=env_min_cat, help="Only entries with numeric n_catalog >= N")
     parser.add_argument("--reverse", action="store_true", help="Print listed entries newest-first (--out/--jsonl/--csv/--md/--jq/--tail/--first)")
+    env_min_sl = os.environ.get("JEV_DECISIONS_MIN_SHORTLIST", "")
+    try:
+        env_min_sl = float(env_min_sl) if env_min_sl else None
+    except ValueError:
+        env_min_sl = None
+    parser.add_argument("--min-shortlist", type=float, default=env_min_sl, help="Only entries with numeric shortlist_n >= N")
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -617,6 +623,14 @@ def main(argv: list[str] | None = None) -> int:
         entries = [item for item in entries if item.get("over_budget") is True]
     if getattr(args, "strong", False):
         entries = [item for item in entries if item.get("strong_pick") is True]
+    if getattr(args, "min_shortlist", None) is not None:
+        entries = [
+            item
+            for item in entries
+            if isinstance(item.get("shortlist_n"), (int, float))
+            and not isinstance(item.get("shortlist_n"), bool)
+            and float(item.get("shortlist_n")) >= args.min_shortlist
+        ]
     if getattr(args, "min_catalog", None) is not None:
         entries = [
             item
@@ -709,9 +723,10 @@ def main(argv: list[str] | None = None) -> int:
             or getattr(args, "strong", False)
             or getattr(args, "min_score", None) is not None
             or getattr(args, "min_catalog", None) is not None
+            or getattr(args, "min_shortlist", None) is not None
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, --min-catalog, or --prompt (--reverse does not affect --prune)\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, --min-catalog, --min-shortlist, or --prompt (--reverse does not affect --prune)\n"
             )
             return 2
         total, total_bad = load_entries(path)

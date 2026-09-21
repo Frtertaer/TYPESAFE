@@ -561,6 +561,27 @@ class CliTest(unittest.TestCase):
             rows = [json.loads(ln) for ln in proc.stdout.splitlines() if ln.strip()]
             self.assertEqual([r["prompt_head"] for r in rows], ["last", "first"])
 
+    def test_min_shortlist_filters_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "winner", "shortlist_n": 12, "prompt_head": "a"},
+                    {"ts": 2, "jev_status": "winner", "shortlist_n": 2, "prompt_head": "b"},
+                    {"ts": 3, "jev_status": "none", "prompt_head": "c"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--min-shortlist", "6", "--count")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("1", proc.stdout)
+            proc = self.run_cli(
+                "--file", str(path), "--count",
+                env={"JEV_DECISIONS_MIN_SHORTLIST": "6"},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("1", proc.stdout)
+
     def test_count_prints_filtered_total(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

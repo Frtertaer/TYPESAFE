@@ -105,6 +105,36 @@ class InventoryHookTests(unittest.TestCase):
     def test_avg_score_none_for_empty_query(self) -> None:
         self.assertIsNone(HOOK._avg_score([{"name": "x"}], [], ""))
 
+    def test_hook_limit_env_narrows_shortlist(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_LIMIT": "1"}):
+                HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "jwt scan",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            self.assertEqual(HOOK.LAST_DECISION.get("shortlist_n"), 1)
+            tmp2 = Path(tmp) / "other"
+            tmp2.mkdir()
+            with patch.dict(os.environ, {"JEV_HOOK_LIMIT": "3"}):
+                HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "jwt scan",
+                        "cwd": str(tmp2),
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            self.assertEqual(HOOK.LAST_DECISION.get("shortlist_n"), 2)
+
     def test_max_age_env_skips_stale_prompt(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

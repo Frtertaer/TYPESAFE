@@ -979,6 +979,47 @@ class HookRetriesEnvTests(unittest.TestCase):
         with patch.dict(os.environ, {"JEV_HOOK_RETRIES": "bogus"}):
             self.assertGreaterEqual(inv.hook_jev_retries(), 0)
 
+    def test_cli_show_reports_issues_on_malformed_sidecar(self) -> None:
+        import tempfile
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            path.write_text(json.dumps({"names": [{"name": "x"}]}), encoding="utf-8")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--show", str(path)])
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertFalse(payload["valid"])
+        self.assertTrue(any("written_at" in issue for issue in payload["issues"]))
+        self.assertTrue(any("entry 0 missing kind" == issue for issue in payload["issues"]))
+
+    def test_cli_show_valid_sidecar(self) -> None:
+        import tempfile
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "written_at": 1234,
+                        "names": [{"kind": "skill", "name": "x"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--show", str(path)])
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["valid"])
+        self.assertEqual(payload["issues"], [])
+
     def test_cli_kinds_prints_per_kind_counts(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

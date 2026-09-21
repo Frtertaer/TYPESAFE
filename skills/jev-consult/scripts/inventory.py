@@ -689,6 +689,23 @@ def sidecar_items(payload: dict) -> list[dict]:
     return []
 
 
+def sidecar_issues(payload: dict) -> list[str]:
+    """Schema problems in a sidecar payload; empty list means well-formed."""
+    problems: list[str] = []
+    written = payload.get("written_at") if isinstance(payload, dict) else None
+    if not isinstance(written, (int, float)) or isinstance(written, bool):
+        problems.append("written_at missing or not a number")
+    items = sidecar_items(payload)
+    if not items:
+        problems.append("no names/items entries")
+    for index, item in enumerate(items):
+        if not isinstance(item.get("name"), str) or not item.get("name"):
+            problems.append("entry %d missing name" % index)
+        if not isinstance(item.get("kind"), str) or not item.get("kind"):
+            problems.append("entry %d missing kind" % index)
+    return problems
+
+
 def _policy_dict() -> dict:
     try:
         policy_path = Path(__file__).resolve().parent.parent / "policy.json"
@@ -1107,6 +1124,9 @@ def main(argv: list[str] | None = None) -> int:
         status = sidecar_status(path, args.ttl)
         payload = read_sidecar(path) or {}
         out = {"path": str(path), "status": status, "payload": payload}
+        problems = sidecar_issues(payload) if status != "missing" else ["missing"]
+        out["valid"] = not problems
+        out["issues"] = problems
         written = payload.get("written_at")
         if isinstance(written, (int, float)) and not isinstance(written, bool):
             out["age_seconds"] = int(time.time() - float(written))

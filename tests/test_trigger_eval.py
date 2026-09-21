@@ -782,7 +782,7 @@ class TriggerEvalTests(unittest.TestCase):
                 rc = te.main(
                     ["--watch", "0.01", "--quiet", "--min-coverage", "0.99"]
                 )
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 1)
         tick = json.loads(
             next(l for l in buf.getvalue().splitlines() if l.startswith("{"))
         )
@@ -833,6 +833,25 @@ class TriggerEvalTests(unittest.TestCase):
                 with redirect_stdout(buf):
                     rc = te.main(["--watch", "0.01"])
             self.assertEqual(rc, 0)
+
+    def test_watch_rc_honors_coverage_and_covers_gates(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
+            with redirect_stdout(buf):
+                rc = te.main(
+                    ["--watch", "0.01", "--min-coverage", "0.99"]
+                )
+        self.assertEqual(rc, 1)
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
+            with redirect_stdout(buf):
+                rc = te.main(["--watch", "0.01", "--min-covers", "4"])
+        self.assertEqual(rc, 1)
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
+            with redirect_stdout(buf):
+                rc = te.main(["--watch", "0.01", "--min-covers", "1"])
+        self.assertEqual(rc, 0)
 
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

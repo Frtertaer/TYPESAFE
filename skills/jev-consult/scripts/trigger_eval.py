@@ -447,7 +447,18 @@ def main(argv: list[str] | None = None) -> int:
                         pass
                 ticks += 1
                 cur = result
-        return 0 if (cur is not None and cur["ok"]) else 1
+        if cur is None or not cur["ok"]:
+            return 1
+        if args.min_coverage is not None and cur["coverage"] < args.min_coverage:
+            return 1
+        if args.min_covers:
+            counts: dict[str, int] = {}
+            for row in cur["cases"]:
+                for tag in row["covers"] or []:
+                    counts[tag] = counts.get(tag, 0) + 1
+            if any(n < args.min_covers for n in counts.values()):
+                return 1
+        return 0
     if args.report:
         if args.json:
             uncovered_ids = _uncovered()

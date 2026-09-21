@@ -66,6 +66,24 @@ class InventoryHookTests(unittest.TestCase):
             len(HOOK.LAST_DECISION["shortlist"]),
         )
 
+    def test_last_decision_records_prompt_len(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            HOOK.handle(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "Add JWT access tokens in Python",
+                    "cwd": tmp,
+                },
+                items=items,
+                harness="claude-code",
+                pick_fn=skip_pick,
+            )
+            self.assertEqual(
+                HOOK.LAST_DECISION["prompt_len"],
+                len("Add JWT access tokens in Python"),
+            )
+
     def test_hook_winner_env_forces_explicit_pick(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

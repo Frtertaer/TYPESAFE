@@ -19,10 +19,12 @@ python skills/jev-consult/scripts/inventory.py --check-miss [path]      # same s
 python skills/jev-consult/scripts/inventory.py --prune-sidecars DIR     # unlink stale/invalid .jev-tools*.json
 python skills/jev-consult/scripts/policy_lint.py [--strict|--show|--diff other.json]  # validates policy.json
 python skills/jev-consult/scripts/question_lint.py request.json [--json|--fix]        # lint a request file standalone
+python skills/jev-consult/scripts/skill_lint.py skills/*/SKILL.md                     # SKILL.md frontmatter sanity
 python skills/jev-consult/scripts/doctor.py                             # verify per-harness install; exit 0 = all ok
 python skills/jev-consult/scripts/smoke.py                              # offline e2e sanity, no API calls
-python skills/jev-consult/scripts/decisions.py                          # stats + --days/--since/--harness/--status filters,
-                                                                        # --tail/--json/--csv/--md/--statuses/--harnesses/--winners,
+python skills/jev-consult/scripts/decisions.py                          # stats + --days/--since/--harness/--status/--outcome/--fill
+                                                                        # filters, --tail/--json/--csv/--md, count lists
+                                                                        # --statuses/--harnesses/--winners/--outcomes,
                                                                         # --prune keeps only filtered entries
 python skills/jev-consult/scripts/compare.py --live
 python skills/jev-consult/scripts/compact.py transcript.json --history --fake   # --dir DIR for batch, --prune-spill S

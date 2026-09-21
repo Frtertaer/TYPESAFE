@@ -371,8 +371,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--week", action="store_true", help="Alias for --days 7"
     )
-    parser.add_argument("--since", default="", help="Only entries with ts >= epoch seconds or ISO8601")
-    parser.add_argument("--until", default="", help="Only entries with ts <= epoch seconds or ISO8601")
+    parser.add_argument("--since", default=os.environ.get("JEV_DECISIONS_SINCE", ""), help="Only entries with ts >= epoch seconds or ISO8601")
+    parser.add_argument("--until", default=os.environ.get("JEV_DECISIONS_UNTIL", ""), help="Only entries with ts <= epoch seconds or ISO8601")
     parser.add_argument("--harness", default=os.environ.get("JEV_DECISIONS_HARNESS", ""), help="Only entries for this harness")
     parser.add_argument("--status", default=os.environ.get("JEV_DECISIONS_STATUS", ""), help="Only entries with this jev_status")
     parser.add_argument("--outcome", default=os.environ.get("JEV_DECISIONS_OUTCOME", ""), help="Only entries with this outcome (e.g. human, blocked)")

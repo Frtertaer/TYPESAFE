@@ -1561,6 +1561,7 @@ def main(argv: list[str] | None = None) -> int:
         total_in = 0
         total_out = 0
         n_ok = 0
+        rows: list[dict] = []
         for p in files:
             row = {"file": p.name}
             try:
@@ -1597,10 +1598,28 @@ def main(argv: list[str] | None = None) -> int:
             except (Exception, SystemExit) as exc:
                 row["ok"] = False
                 row["error"] = str(exc)[:200]
-            sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
-        sys.stdout.write(
-            "batch: %d file(s), %d ok, %d -> %d chars\n" % (len(files), n_ok, total_in, total_out)
-        )
+            if getattr(args, "json", False):
+                rows.append(row)
+            else:
+                sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "files": rows,
+                        "count": len(files),
+                        "ok": n_ok,
+                        "chars_in": total_in,
+                        "chars_out": total_out,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "batch: %d file(s), %d ok, %d -> %d chars\n" % (len(files), n_ok, total_in, total_out)
+            )
         return 0
     if args.file is None:
         parser.error("file is required unless --prune-spill or --dir is given")

@@ -1230,6 +1230,25 @@ class BatchDirTests(unittest.TestCase):
             self.assertTrue(by_file["good.json"]["ok"])
             self.assertFalse(by_file["bad.json"]["ok"])
 
+    def test_dir_json_emits_single_result_object(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self._write_transcript(d, "a.json")
+            self._write_transcript(d, "b.json")
+            (d / "bad.json").write_text("{{{", encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    ["--dir", str(d), "--history", "--fake", "--min-reduction", "0", "--json"]
+                )
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue().strip())
+            self.assertEqual(out["count"], 3)
+            self.assertEqual(out["ok"], 2)
+            self.assertEqual(len(out["files"]), 3)
+            self.assertIn("chars_in", out)
+            self.assertIn("chars_out", out)
+
 
 class StatsFlagTests(unittest.TestCase):
     def _transcript_file(self, tmp: str) -> Path:
@@ -1521,12 +1540,18 @@ class ListSpillTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "spill"
             target.mkdir()
-            (target / "a.txt").write_text("x" * 3, encoding="utf-8")
+            stale = target / "a.txt"
+            stale.write_text("x" * 3, encoding="utf-8")
+            import os as _os
+            import time as _time
+
+            old = _time.time() - 10
+            _os.utime(stale, (old, old))
             buf = io.StringIO()
             with patch("sys.stdout", buf):
                 rc = C.main(
                     [
-                        "--prune-spill", "0",
+                        "--prune-spill", "5",
                         "--spill-dir", str(target),
                         "--json",
                     ]

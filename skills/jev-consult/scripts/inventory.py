@@ -1056,6 +1056,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--names", action="store_true", help="Print bare shortlist ids, one per line (for piping).")
     parser.add_argument("--paths", action="store_true", help="Print bare shortlist item paths, one per line (for piping).")
     parser.add_argument("--count", action="store_true", help="Print only PICKED/SCANNED counts instead of the payload.")
+    parser.add_argument("--kinds", action="store_true", help="Print per-kind counts (kind N per line) and exit.")
     parser.add_argument("--id", metavar="NAME", default="", help="Print the single matching item's JSON (matches id or name).")
     parser.add_argument(
         "--explain",
@@ -1182,6 +1183,10 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("no item %s\n" % args.id)
             return 1
         sys.stdout.write(json.dumps(found[0], indent=2, sort_keys=True) + "\n")
+        return 0
+    if getattr(args, "kinds", False):
+        for kind in sorted(counts):
+            sys.stdout.write("%s %d\n" % (kind, counts[kind]))
         return 0
     if getattr(args, "count", False):
         sys.stdout.write("%d/%d\n" % (len(payload["shortlist"]), len(items)))

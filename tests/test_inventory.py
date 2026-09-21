@@ -979,6 +979,22 @@ class HookRetriesEnvTests(unittest.TestCase):
         with patch.dict(os.environ, {"JEV_HOOK_RETRIES": "bogus"}):
             self.assertGreaterEqual(inv.hook_jev_retries(), 0)
 
+    def test_cli_kinds_prints_per_kind_counts(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                ["--harness", "hermes", "--hermes-home", str(FIXTURE), "--kinds"]
+            )
+        self.assertEqual(code, 0)
+        rows = dict(
+            line.split() for line in buf.getvalue().strip().splitlines()
+        )
+        self.assertEqual(sum(int(v) for v in rows.values()), 6)
+        self.assertIn("skill", rows)
+
     def test_cli_count_prints_picked_over_scanned(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

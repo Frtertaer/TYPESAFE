@@ -324,6 +324,30 @@ class CliTest(unittest.TestCase):
                 proc.stdout.strip().splitlines(), ["codex 2", "grok 1", "unknown 1"]
             )
 
+    def test_winners_sorted_desc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"winner": {"kind": "skill", "name": "a"}},
+                    {"winner": {"kind": "skill", "name": "b"}},
+                    {"winner": {"kind": "skill", "name": "a"}},
+                    {"jev_status": "idf"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--winners")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip().splitlines(), ["skill:a 2", "skill:b 1"])
+
+    def test_winners_empty_when_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"jev_status": "idf"}])
+            proc = self.run_cli("--file", str(path), "--winners")
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(proc.stdout.strip(), "")
+
     def test_prune_no_filter_still_rc2(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

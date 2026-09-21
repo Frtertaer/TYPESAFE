@@ -503,6 +503,38 @@ class InventoryHookTests(unittest.TestCase):
             self.assertNotEqual(HOOK.LAST_DECISION["question"], "dedupe")
             self.assertFalse(HOOK.LAST_DECISION.get("dedupe"))
 
+    def test_dry_run_skips_sidecar_and_miss(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        saved = {
+            k: os.environ.get(k)
+            for k in ("JEV_HOOK_NOSIDECAR", "JEV_HOOK_NOMISS")
+        }
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                payload = Path(tmp) / "payload.json"
+                payload.write_text(
+                    json.dumps(
+                        {
+                            "hook_event_name": "UserPromptSubmit",
+                            "prompt": "paint a mural today",
+                            "cwd": tmp,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                buf = io.StringIO()
+                with patch.object(sys, "stdout", buf):
+                    rc = HOOK.main(["--file", str(payload), "--dry-run"])
+                self.assertEqual(rc, 0)
+                self.assertFalse((Path(tmp) / ".jev-tools.json").exists())
+                self.assertFalse((Path(tmp) / ".jev-tools-miss.json").exists())
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
     def test_no_sidecar_env_skips_sidecar_write(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

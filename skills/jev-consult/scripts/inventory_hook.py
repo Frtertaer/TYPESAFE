@@ -515,6 +515,10 @@ def env_report() -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if "--dry-run" in argv:
+        os.environ["JEV_HOOK_NOSIDECAR"] = "1"
+        os.environ["JEV_HOOK_NOMISS"] = "1"
+        argv = [a for a in argv if a != "--dry-run"]
     if "--events" in argv:
         for name in sorted(allowed_events()):
             sys.stdout.write(name + "\n")

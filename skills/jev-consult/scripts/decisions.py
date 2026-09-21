@@ -363,7 +363,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--top", type=int, default=max(0, env_top), help="Cap count-list output (--statuses et al.) to N rows"
     )
-    parser.add_argument("--days", type=float, default=0.0, help="Only entries from the last N days")
+    try:
+        env_days = float(os.environ.get("JEV_DECISIONS_DAYS", "") or 0)
+    except ValueError:
+        env_days = 0.0
+    parser.add_argument("--days", type=float, default=max(0.0, env_days), help="Only entries from the last N days")
     parser.add_argument(
         "--week", action="store_true", help="Alias for --days 7"
     )

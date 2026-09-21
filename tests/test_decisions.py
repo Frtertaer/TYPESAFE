@@ -326,6 +326,28 @@ class CliTest(unittest.TestCase):
             )
             self.assertEqual(len([l for l in proc.stdout.splitlines() if l.strip()]), 3)
 
+    def test_days_env_default(self):
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1700000000, "jev_status": "winner"},
+                    {"ts": _time.time(), "jev_status": "winner"},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), env={"JEV_DECISIONS_DAYS": "1"}
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("entries: 1", proc.stdout)
+            proc = self.run_cli(
+                "--file", str(path), "--days", "0", env={"JEV_DECISIONS_DAYS": "1"}
+            )
+            self.assertIn("entries: 2", proc.stdout)
+
     def test_stats_iso_fields(self):
         entries = [{"ts": 1700000000}, {"ts": 1700086400}]
         stats = decisions.summarize(entries)

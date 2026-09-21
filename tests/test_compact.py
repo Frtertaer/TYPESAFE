@@ -1502,6 +1502,40 @@ class ListSpillTests(unittest.TestCase):
             self.assertEqual(payload["count"], 1)
             self.assertEqual(payload["orphans"], [str(free)])
 
+    def test_cli_list_spill_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            (target / "a.txt").write_text("x" * 3, encoding="utf-8")
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(
+                    ["--list-spill", "--spill-dir", str(target), "--json"]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["count"], 1)
+            self.assertEqual(payload["files"][0]["size"], 3)
+
+    def test_cli_prune_spill_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            (target / "a.txt").write_text("x" * 3, encoding="utf-8")
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(
+                    [
+                        "--prune-spill", "0",
+                        "--spill-dir", str(target),
+                        "--json",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["count"], 1)
+            self.assertFalse((target / "a.txt").exists())
+
     def test_cli_list_spill_out_writes_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "spill"

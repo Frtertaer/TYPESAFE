@@ -1496,9 +1496,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.list_spill:
         directory = Path(args.spill_dir) if args.spill_dir else None
         rows = list_spill(directory)
-        text = "".join(
-            "%s %d %d\n" % (path, size, int(mtime)) for path, size, mtime in rows
-        ) + "%d spill files\n" % len(rows)
+        if args.json:
+            text = json.dumps(
+                {
+                    "files": [
+                        {
+                            "path": str(path),
+                            "size": size,
+                            "mtime": int(mtime),
+                        }
+                        for path, size, mtime in rows
+                    ],
+                    "count": len(rows),
+                },
+                indent=2,
+            ) + "\n"
+        else:
+            text = "".join(
+                "%s %d %d\n" % (path, size, int(mtime)) for path, size, mtime in rows
+            ) + "%d spill files\n" % len(rows)
         if args.out:
             try:
                 Path(args.out).write_text(text, encoding="utf-8")
@@ -1512,9 +1528,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.prune_spill is not None:
         directory = Path(args.spill_dir) if args.spill_dir else None
         removed = prune_spill(directory, args.prune_spill)
-        text = "".join("pruned: %s\n" % path for path in removed) + (
-            "pruned %d spill files\n" % len(removed)
-        )
+        if args.json:
+            text = json.dumps(
+                {"pruned": [str(path) for path in removed], "count": len(removed)},
+                indent=2,
+            ) + "\n"
+        else:
+            text = "".join("pruned: %s\n" % path for path in removed) + (
+                "pruned %d spill files\n" % len(removed)
+            )
         if args.out:
             try:
                 Path(args.out).write_text(text, encoding="utf-8")

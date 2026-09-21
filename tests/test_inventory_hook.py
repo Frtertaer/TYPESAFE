@@ -1193,6 +1193,65 @@ class HookE2ETests(unittest.TestCase):
         out = json.loads(self._run(json.dumps({"event": "PostToolUse", "prompt": "x"})))
         self.assertEqual(out, {})
 
+    def _run_script(self, script: Path, stdin_text: str, home: str, cwd: str):
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        env["USERPROFILE"] = home
+        env["HOME"] = home
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            input=stdin_text,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            env=env,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stdout.strip()
+
+    def test_grok_e2e_sidecar_only_no_stdout_context(self) -> None:
+        # Hook copy under a .grok path detects harness=grok -> emits {}
+        import shutil
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_p = Path(tmp)
+            home = tmp_p / "home"
+            grok_hook = home / ".grok" / "skills" / "jev" / "hook.py"
+            grok_hook.parent.mkdir(parents=True)
+            shutil.copyfile(self.HOOK_PATH, grok_hook)
+            shutil.copyfile(
+                self.HOOK_PATH.parent / "inventory.py",
+                grok_hook.parent / "inventory.py",
+            )
+            skill = home / ".grok" / "skills" / "jwt-stuff"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: jwt-stuff\ndescription: jwt\n---\n", encoding="utf-8"
+            )
+            cwd = tmp_p / "work"
+            cwd.mkdir()
+            out = self._run_script(
+                grok_hook,
+                json.dumps(
+                    {
+                        "event": "UserPromptSubmit",
+                        "prompt": "jwt stuff please",
+                        "cwd": str(cwd),
+                    }
+                ),
+                str(home),
+                str(cwd),
+            )
+            self.assertEqual(json.loads(out), {})
+            sidecar = cwd / INV.SIDECAR_NAME
+            self.assertTrue(sidecar.is_file())
+            data = INV.read_sidecar(sidecar)
+            self.assertEqual(data["harness"], "grok")
+
 
 class ScanMergeTests(unittest.TestCase):
     def _tree(self, tmp: str):

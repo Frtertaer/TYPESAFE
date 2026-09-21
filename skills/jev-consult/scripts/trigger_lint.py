@@ -200,7 +200,12 @@ def main(argv: list[str] | None = None) -> int:
         argv = argv[:idx] + argv[idx + 2 :]
     strict = "--strict" in argv
     do_fix = "--fix" in argv
-    argv = [a for a in argv if a not in ("--json", "--quiet", "--strict", "--fix")]
+    dry_run = "--dry-run" in argv
+    argv = [
+        a
+        for a in argv
+        if a not in ("--json", "--quiet", "--strict", "--fix", "--dry-run")
+    ]
     if len(argv) > 1:
         if watch_seconds > 0 or do_fix:
             sys.stderr.write("multiple paths support neither --watch nor --fix\n")
@@ -282,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("cannot fix %s: %s\n" % (path, exc))
             return 2
         applied = fix_cases(data) if isinstance(data, dict) else []
-        if applied:
+        if applied and not dry_run:
             try:
                 path.write_text(
                     json.dumps(data, indent=2, ensure_ascii=False) + "\n",
@@ -291,8 +296,9 @@ def main(argv: list[str] | None = None) -> int:
             except OSError as exc:
                 sys.stderr.write("cannot write %s: %s\n" % (path, exc))
                 return 1
+        verb = "would fix" if dry_run else "fixed"
         for rule in sorted(set(applied)):
-            sys.stderr.write("fixed %s x%d\n" % (rule, applied.count(rule)))
+            sys.stderr.write("%s %s x%d\n" % (verb, rule, applied.count(rule)))
     findings = lint_cases(path, policy_path=policy_path)
     shown = [
         f

@@ -284,6 +284,27 @@ class CliTests(unittest.TestCase):
             self.assertEqual(path.read_text(encoding="utf-8"), before)
             self.assertNotIn("fixed", err.getvalue())
 
+    def test_fix_dry_run_reports_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(
+                tmp,
+                [
+                    {
+                        "id": "Pick Me!",
+                        "prompt": "Decide which approach to take first",
+                        "should_trigger": True,
+                        "covers": ["approach", "approach", 42],
+                    },
+                ],
+            )
+            before = path.read_text(encoding="utf-8")
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = trigger_lint.main([str(path), "--fix", "--dry-run"])
+            self.assertEqual(path.read_text(encoding="utf-8"), before)
+            self.assertIn("would fix", err.getvalue())
+            self.assertIsNotNone(rc)
+
     def test_watch_emits_ticks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = write_cases(tmp, [dict(GOOD_CASE)])

@@ -212,6 +212,54 @@ class InventoryTests(unittest.TestCase):
         self.assertIn("jwt-auth", names)
         self.assertNotIn("ascii-art", names)
 
+    def test_cli_grep_filters_items(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--grep",
+                    "jwt",
+                    "--task",
+                    "jwt tokens",
+                    "--limit",
+                    "8",
+                ]
+            )
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        names = [item["name"] for item in payload["shortlist"]]
+        self.assertIn("jwt-auth", names)
+        self.assertNotIn("ascii-art", names)
+        self.assertEqual(payload["counts"]["skill"], 1)
+
+    def test_cli_grep_lists_matches_without_task(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--grep",
+                    "jwt",
+                ]
+            )
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        names = [item["name"] for item in payload["shortlist"]]
+        self.assertEqual(names, ["jwt-auth"])
+
     def test_cli_out_writes_payload_file(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

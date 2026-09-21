@@ -1064,6 +1064,11 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="Comma filter: only shortlist these kinds (skill,plugin,mcp).",
     )
+    parser.add_argument(
+        "--grep",
+        default="",
+        help="Keep only items whose name or description contains SUBSTR (case-insensitive).",
+    )
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
     args = parser.parse_args(argv)
@@ -1117,9 +1122,21 @@ def main(argv: list[str] | None = None) -> int:
     kinds = {part.strip() for part in args.kind.split(",") if part.strip()}
     if kinds:
         items = [item for item in items if item["kind"] in kinds]
+    if args.grep:
+        needle = args.grep.strip().lower()
+        items = [
+            item
+            for item in items
+            if needle in str(item.get("name") or "").lower()
+            or needle in str(item.get("description") or "").lower()
+            or needle in str(item.get("id") or "").lower()
+        ]
     extra = [part.strip() for part in args.include.split(",") if part.strip()]
     limit = max(1, min(args.limit, 24))
     picked = shortlist(items, args.task, limit, extra)
+    if args.grep and not args.task.strip():
+        seen_ids = {item["id"] for item in picked}
+        picked += [item for item in items if item["id"] not in seen_ids][:limit]
     counts = {
         "skill": sum(1 for item in items if item["kind"] == KIND_SKILL),
         "plugin": sum(1 for item in items if item["kind"] == KIND_PLUGIN),

@@ -431,6 +431,12 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         env_max_need = None
     parser.add_argument("--max-need", type=float, default=env_max_need, help="Only entries with numeric need <= F")
+    env_max_lat = os.environ.get("JEV_DECISIONS_MAX_LATENCY", "")
+    try:
+        env_max_lat = float(env_max_lat) if env_max_lat else None
+    except ValueError:
+        env_max_lat = None
+    parser.add_argument("--max-latency", type=float, default=env_max_lat, help="Only entries with numeric latency_ms <= MS")
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -620,6 +626,14 @@ def main(argv: list[str] | None = None) -> int:
                 == want
             )
         ]
+    if args.max_latency is not None:
+        entries = [
+            item
+            for item in entries
+            if isinstance(item.get("latency_ms"), (int, float))
+            and not isinstance(item.get("latency_ms"), bool)
+            and float(item.get("latency_ms")) <= args.max_latency
+        ]
     if args.min_latency is not None:
         entries = [
             item
@@ -653,9 +667,10 @@ def main(argv: list[str] | None = None) -> int:
             or args.question
             or args.sha
             or args.max_need is not None
+            or args.max_latency is not None
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, or --prompt\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, or --prompt\n"
             )
             return 2
         total, total_bad = load_entries(path)

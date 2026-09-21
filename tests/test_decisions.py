@@ -437,6 +437,27 @@ class CliTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("1", proc.stdout)
 
+    def test_max_latency_filters_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "winner", "latency_ms": 10, "prompt_head": "a"},
+                    {"ts": 2, "jev_status": "winner", "latency_ms": 9000, "prompt_head": "b"},
+                    {"ts": 3, "jev_status": "none", "prompt_head": "c"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--max-latency", "100", "--count")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("1", proc.stdout)
+            proc = self.run_cli(
+                "--file", str(path), "--count",
+                env={"JEV_DECISIONS_MAX_LATENCY": "100"},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("1", proc.stdout)
+
     def test_count_prints_filtered_total(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

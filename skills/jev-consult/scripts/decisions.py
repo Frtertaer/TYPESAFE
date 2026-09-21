@@ -190,6 +190,12 @@ def filter_outcome(entries: list[dict], outcome: str | None) -> list[dict]:
     return [item for item in entries if str(item.get("outcome") or "") == outcome]
 
 
+def filter_fill(entries: list[dict], fill: str | None) -> list[dict]:
+    if not fill:
+        return entries
+    return [item for item in entries if str(item.get("fill") or "") == fill]
+
+
 def filter_since(entries: list[dict], since: float | None) -> list[dict]:
     if since is None:
         return entries
@@ -232,6 +238,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--harness", default="", help="Only entries for this harness")
     parser.add_argument("--status", default="", help="Only entries with this jev_status")
     parser.add_argument("--outcome", default="", help="Only entries with this outcome (e.g. human, blocked)")
+    parser.add_argument("--fill", default="", help="Only entries with this fill kind (apply, catalog, peer)")
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -283,9 +290,13 @@ def main(argv: list[str] | None = None) -> int:
         entries = filter_status(entries, args.status)
     if args.outcome:
         entries = filter_outcome(entries, args.outcome)
+    if args.fill:
+        entries = filter_fill(entries, args.fill)
     if args.prune:
-        if since is None and not args.harness and not args.status and not args.outcome:
-            sys.stderr.write("--prune requires --days, --since, --harness, --status, or --outcome\n")
+        if since is None and not (args.harness or args.status or args.outcome or args.fill):
+            sys.stderr.write(
+                "--prune requires --days, --since, --harness, --status, --outcome, or --fill\n"
+            )
             return 2
         total, _ = load_entries(path)
         try:

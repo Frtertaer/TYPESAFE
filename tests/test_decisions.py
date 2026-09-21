@@ -385,6 +385,39 @@ class CliTest(unittest.TestCase):
             self.assertEqual(len(entries), 1)
             self.assertEqual(entries[0]["outcome"], "blocked")
 
+    def test_fill_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"fill": "apply", "outcome": "human"},
+                    {"fill": "peer", "outcome": "copied"},
+                    {"fill": "apply", "outcome": "exists"},
+                    {"jev_status": "idf"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--fill", "apply", "--json")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 2)
+
+    def test_fill_filter_combines_with_outcome(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"fill": "apply", "outcome": "human"},
+                    {"fill": "apply", "outcome": "blocked"},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--fill", "apply", "--outcome", "blocked", "--json"
+            )
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 1)
+
     def test_prune_no_filter_still_rc2(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

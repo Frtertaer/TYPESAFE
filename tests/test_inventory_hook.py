@@ -112,6 +112,18 @@ class InventoryHookTests(unittest.TestCase):
             )
             self.assertIn("jwt-auth", fresh["hookSpecificOutput"]["additionalContext"])
 
+    def test_last_decision_age_helper(self) -> None:
+        saved = HOOK.LAST_DECISION
+        try:
+            HOOK.LAST_DECISION = None
+            self.assertIsNone(HOOK.last_decision_age())
+            HOOK.LAST_DECISION = {"ts": 100.0}
+            age = HOOK.last_decision_age()
+            self.assertIsNotNone(age)
+            self.assertGreater(age, 0)
+        finally:
+            HOOK.LAST_DECISION = saved
+
     def test_sidecar_records_note_sha(self) -> None:
         import hashlib
         import json

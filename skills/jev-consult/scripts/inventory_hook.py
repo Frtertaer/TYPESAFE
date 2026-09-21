@@ -61,6 +61,12 @@ def _redact_prompt(prompt: str) -> str:
         return prompt
 
 
+def last_decision_age() -> float | None:
+    """Seconds since the last recorded decision, or None if none yet."""
+    ts = LAST_DECISION.get("ts") if isinstance(LAST_DECISION, dict) else None
+    return (time.time() - ts) if isinstance(ts, (int, float)) else None
+
+
 def _content_text(value) -> str:
     if isinstance(value, str):
         return value

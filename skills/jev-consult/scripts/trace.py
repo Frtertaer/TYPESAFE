@@ -484,6 +484,28 @@ def cmd_stats(args: argparse.Namespace) -> int:
 def cmd_state(args: argparse.Namespace) -> int:
     """Emit the trace as a bare state dict for `jev.py scaffold --state`."""
     path = Path(args.file) if args.file else default_path()
+    if getattr(args, "watch", 0.0) and args.watch > 0:
+        import time as _time
+
+        try:
+            max_ticks = int(os.environ.get("JEV_TRACE_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        while max_ticks <= 0 or ticks < max_ticks:
+            data = load(path)
+            state = {key: value for key, value in data.items() if _present(value)}
+            sys.stdout.write(
+                json.dumps(
+                    {"ts": int(_time.time()), "state": state},
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+            sys.stdout.flush()
+            ticks += 1
+            _time.sleep(args.watch)
+        return 0
     data = load(path)
     state = {key: value for key, value in data.items() if _present(value)}
     if args.out:
@@ -552,6 +574,13 @@ def build_parser() -> argparse.ArgumentParser:
         "state", help="Emit trace as a bare state dict (scaffold --state input)"
     )
     state_cmd.add_argument("--out", help="Write JSON here instead of stdout")
+    state_cmd.add_argument(
+        "--watch",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Re-read the trace every S seconds and print a {ts,state} JSON tick",
+    )
     state_cmd.set_defaults(func=cmd_state)
     stats_cmd = sub.add_parser("stats", help="Summary: counts, last pick, file age")
     stats_cmd.add_argument("--out", default="", help="Write the stats JSON to PATH instead of stdout")

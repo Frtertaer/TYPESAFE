@@ -1262,6 +1262,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Unlink spill files older than SECONDS in the spill dir (or --spill-dir) and exit.",
     )
     parser.add_argument("--spill-dir", help="Override spill directory for --prune-spill.")
+    parser.add_argument(
+        "--dir",
+        metavar="DIR",
+        help="Compact every *.json/*.jsonl transcript in DIR; one JSON line per file on stdout.",
+    )
     args = parser.parse_args(argv)
     if args.prune_spill is not None:
         directory = Path(args.spill_dir) if args.spill_dir else None
@@ -1270,8 +1275,51 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write("pruned: %s\n" % path)
         sys.stdout.write("pruned %d spill files\n" % len(removed))
         return 0
+    if args.dir:
+        batch = Path(args.dir)
+        if not batch.is_dir():
+            sys.stderr.write("--dir: no such directory %s\n" % batch)
+            return 2
+        if not args.history:
+            sys.stderr.write("--dir requires --history (same opt-in as single-file mode)\n")
+            return 2
+        files = sorted(
+            [p for p in batch.iterdir() if p.is_file() and p.suffix in (".json", ".jsonl")]
+        )
+        for p in files:
+            row = {"file": p.name}
+            try:
+                messages = parse_transcript(p.read_text(encoding="utf-8"))
+                options = {
+                    "goal": args.goal,
+                    "keep_threshold": args.keep_threshold,
+                    "preserve_recent": args.preserve_recent,
+                    "truncate_head_chars": args.truncate_head_chars,
+                    "min_reduction": args.min_reduction,
+                    "trace": load_trace(args.trace),
+                }
+                asker = (
+                    (lambda s, q: {"answers": {n: {"type": "noul", "noul": 0.1} for n in q}})
+                    if args.fake
+                    else jev_asker
+                )
+                result = compact_or_keep(messages, asker, options)
+                stats = result.get("stats") if isinstance(result, dict) else None
+                stats = stats if isinstance(stats, dict) else {}
+                row["ok"] = True
+                row["kept"] = bool(stats.get("kept"))
+                row["messages_in"] = len(messages)
+                row["messages_out"] = stats.get("messagesAfter")
+                row["chars_in"] = stats.get("charsBefore")
+                row["chars_out"] = stats.get("charsAfter")
+            except (Exception, SystemExit) as exc:
+                row["ok"] = False
+                row["error"] = str(exc)[:200]
+            sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
+        sys.stdout.write("batch: %d file(s)\n" % len(files))
+        return 0
     if args.file is None:
-        parser.error("file is required unless --prune-spill is given")
+        parser.error("file is required unless --prune-spill or --dir is given")
     if not args.history:
         sys.stderr.write(
             "history drop is not the default (Hermes eval: do not adopt Tamara retention). "

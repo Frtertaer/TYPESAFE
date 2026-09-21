@@ -1161,6 +1161,61 @@ class CompactCliTests(unittest.TestCase):
             C.parse_transcript("")
 
 
+class BatchDirTests(unittest.TestCase):
+    def _write_transcript(self, directory: Path, name: str) -> Path:
+        p = directory / name
+        p.write_text(
+            json.dumps([{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"}]),
+            encoding="utf-8",
+        )
+        return p
+
+    def test_dir_requires_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_transcript(Path(tmp), "a.json")
+            with patch.object(sys, "stderr", io.StringIO()) as err:
+                rc = C.main(["--dir", tmp])
+            self.assertEqual(rc, 2)
+            self.assertIn("--history", err.getvalue())
+
+    def test_dir_missing_rc2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(sys, "stderr", io.StringIO()):
+                rc = C.main(["--dir", str(Path(tmp) / "nope"), "--history", "--fake"])
+            self.assertEqual(rc, 2)
+
+    def test_dir_processes_json_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self._write_transcript(d, "a.json")
+            self._write_transcript(d, "b.json")
+            (d / "skip.txt").write_text("not a transcript", encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(["--dir", str(d), "--history", "--fake", "--min-reduction", "0"])
+            self.assertEqual(rc, 0)
+            lines = buf.getvalue().strip().splitlines()
+            rows = [json.loads(l) for l in lines[:-1]]
+            self.assertEqual(len(rows), 2)
+            self.assertTrue(all(r["ok"] for r in rows))
+            self.assertEqual({r["file"] for r in rows}, {"a.json", "b.json"})
+            self.assertEqual(lines[-1], "batch: 2 file(s)")
+
+    def test_dir_per_file_fail_open(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self._write_transcript(d, "good.json")
+            (d / "bad.json").write_text("{{{", encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(["--dir", str(d), "--history", "--fake", "--min-reduction", "0"])
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in buf.getvalue().strip().splitlines()[:-1]]
+            by_file = {r["file"]: r for r in rows}
+            self.assertTrue(by_file["good.json"]["ok"])
+            self.assertFalse(by_file["bad.json"]["ok"])
+
+
 class PruneSpillTests(unittest.TestCase):
     def _spill_dir(self, tmp: str) -> Path:
         target = Path(tmp) / "spill"

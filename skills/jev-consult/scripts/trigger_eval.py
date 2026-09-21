@@ -413,8 +413,15 @@ def main(argv: list[str] | None = None) -> int:
                     or cur["coverage"] >= args.min_coverage
                 ),
             }
-            sys.stdout.write(json.dumps(tick) + "\n")
+            line = json.dumps(tick) + "\n"
+            sys.stdout.write(line)
             sys.stdout.flush()
+            if args.out:
+                try:
+                    with open(args.out, "a", encoding="utf-8") as fh:
+                        fh.write(line)
+                except OSError:
+                    pass  # fail-open: ticks still print to stdout
             ticks += 1
             _time.sleep(args.watch)
             try:
@@ -428,10 +435,15 @@ def main(argv: list[str] | None = None) -> int:
             except (OSError, ValueError, KeyError):
                 cur = None
             if cur is None:
-                sys.stdout.write(
-                    json.dumps({"ts": int(_time.time()), "ok": None}) + "\n"
-                )
+                line = json.dumps({"ts": int(_time.time()), "ok": None}) + "\n"
+                sys.stdout.write(line)
                 sys.stdout.flush()
+                if args.out:
+                    try:
+                        with open(args.out, "a", encoding="utf-8") as fh:
+                            fh.write(line)
+                    except OSError:
+                        pass
                 ticks += 1
                 cur = result
         return 0

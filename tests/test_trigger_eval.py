@@ -788,6 +788,23 @@ class TriggerEvalTests(unittest.TestCase):
         )
         self.assertFalse(tick["coverage_ok"])
 
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "ticks.jsonl"
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "2"}):
+                with redirect_stdout(buf):
+                    rc = te.main(
+                        ["--watch", "0.01", "--quiet", "--out", str(target)]
+                    )
+            self.assertEqual(rc, 0)
+            lines = [
+                json.loads(l) for l in target.read_text().splitlines() if l
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all(t["ok"] for t in lines))
+            self.assertEqual(len(buf.getvalue().splitlines()), 2)
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

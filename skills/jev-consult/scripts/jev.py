@@ -25,6 +25,23 @@ try:
 except ImportError:
     question_lint = None
 
+try:
+    import policy_lint
+except ImportError:
+    policy_lint = None
+
+
+def policy_warnings(policy: dict[str, Any]) -> list[str]:
+    if policy_lint is None:
+        return ["policy_lint unavailable; static policy checks skipped"]
+    warnings: list[str] = []
+    for finding in policy_lint.lint_policy(policy):
+        if finding["severity"] in ("error", "warn"):
+            warnings.append(
+                "policy_lint %s %s: %s" % (finding["rule"], finding["path"], finding["message"])
+            )
+    return warnings
+
 ENDPOINT_DEFAULT = "https://api.typesafe.ai/v1/systemone"
 ASK_ESCALATE_EXIT = 2
 SECRET_RE = re.compile(
@@ -446,7 +463,8 @@ def cmd_ask(args: argparse.Namespace) -> int:
     if state is None or not questions:
         raise SystemExit("request needs state and questions")
     state = apply_trace(state, getattr(args, "trace", None))
-    warnings = validate_questions(questions, policy)
+    warnings = policy_warnings(policy)
+    warnings += validate_questions(questions, policy)
     if question_lint is not None:
         for finding in question_lint.lint_request(request):
             if finding["severity"] in ("error", "warn"):
@@ -488,7 +506,7 @@ def cmd_decide(args: argparse.Namespace) -> int:
         raise SystemExit("answers must be an object")
     irreversible = bool(payload.get("irreversible", args.irreversible))
     decision = decide(answers, policy, irreversible=irreversible)
-    emit({"decision": decision})
+    emit({"decision": decision, "warnings": policy_warnings(policy)})
     if decision["action"] != "proceed":
         return ASK_ESCALATE_EXIT
     return 0

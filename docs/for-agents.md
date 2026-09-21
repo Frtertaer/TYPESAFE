@@ -15,6 +15,7 @@ python skills/jev-consult/scripts/jev.py ask skills/jev-consult/examples/jwt-aut
 python skills/jev-consult/scripts/jev.py scaffold keep_vs_change --out request.json --plan "<task>"
 python skills/jev-consult/scripts/inventory.py --task "<task>" --harness auto --write-ask tools.request.json
 python skills/jev-consult/scripts/inventory.py --check-sidecar [path]   # fresh/stale/missing/invalid
+python skills/jev-consult/scripts/policy_lint.py [--strict]             # validates policy.json structure/thresholds
 python skills/jev-consult/scripts/compare.py --live
 python skills/jev-consult/scripts/compact.py transcript.json --trace
 python tests/test_jev.py

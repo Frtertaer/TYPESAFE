@@ -237,13 +237,43 @@ def format_finding(f: dict) -> str:
     )
 
 
+_FIXABLE = ("J009", "J014")
+
+
+def apply_fixes(request: dict) -> list[str]:
+    """Apply mechanical fixes to the request in place; returns rule ids fixed."""
+    questions = request.get("questions")
+    if not isinstance(questions, dict):
+        return []
+    applied: list[str] = []
+    for qid, q in questions.items():
+        if not isinstance(q, dict):
+            continue
+        before = {f["rule"] for f in lint_question(qid, q)}
+        criteria = q.get("criteria")
+        if q.get("type") == "choice" and "J009" in before and isinstance(criteria, dict):
+            for key in criteria:
+                if not criteria[key]:
+                    criteria[key] = key
+            applied.append("J009")
+        if (
+            q.get("type") == "noul"
+            and "J014" in before
+            and isinstance(criteria, dict)
+        ):
+            criteria["false"] = "The condition does not hold."
+            applied.append("J014")
+    return applied
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Standalone CLI: python question_lint.py request.json [--json]"""
+    """Standalone CLI: python question_lint.py request.json [--json] [--fix]"""
     argv = list(sys.argv[1:] if argv is None else argv)
     as_json = "--json" in argv
-    argv = [a for a in argv if a != "--json"]
+    do_fix = "--fix" in argv
+    argv = [a for a in argv if a not in ("--json", "--fix")]
     if not argv:
-        sys.stderr.write("usage: question_lint.py FILE [--json]\n")
+        sys.stderr.write("usage: question_lint.py FILE [--json] [--fix]\n")
         return 2
     try:
         text = Path(argv[0]).read_text(encoding="utf-8")
@@ -258,6 +288,11 @@ def main(argv: list[str] | None = None) -> int:
     if not isinstance(request, dict):
         sys.stderr.write("request JSON must be an object\n")
         return 2
+    if do_fix:
+        applied = apply_fixes(request)
+        Path(argv[0]).write_text(json.dumps(request, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        for rule in applied:
+            sys.stderr.write("fixed %s\n" % rule)
     findings = lint_request(request)
     if as_json:
         sys.stdout.write(json.dumps({"findings": findings}, indent=2) + "\n")

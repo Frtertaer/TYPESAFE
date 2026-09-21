@@ -454,6 +454,61 @@ class StandaloneCliTests(unittest.TestCase):
     def test_missing_file_rc2(self) -> None:
         self.assertEqual(self._run("nonexistent.json").returncode, 2)
 
+    def test_fix_fills_empty_choice_descriptions(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {
+                "q": {
+                    "type": "choice",
+                    "instructions": "Which library should handle the JWT signing?",
+                    "criteria": {"jwtlib": "", "other": "", "none": "skip"},
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            proc = self._run(str(path), "--fix")
+            fixed = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("fixed J009", proc.stderr)
+        criteria = fixed["questions"]["q"]["criteria"]
+        self.assertEqual(criteria["jwtlib"], "jwtlib")
+        self.assertEqual(criteria["other"], "other")
+        self.assertEqual(criteria["none"], "skip")
+
+    def test_fix_noul_identical_criteria(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {
+                "q": {
+                    "type": "noul",
+                    "instructions": "Should the coder proceed with the plan?",
+                    "criteria": {"true": "same", "false": "same"},
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            proc = self._run(str(path), "--fix")
+            fixed = json.loads(path.read_text(encoding="utf-8"))
+        self.assertIn("fixed J014", proc.stderr)
+        criteria = fixed["questions"]["q"]["criteria"]
+        self.assertNotEqual(criteria["true"], criteria["false"])
+
+    def test_fix_no_op_when_clean(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Should the coder proceed with the plan?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            proc = self._run(str(path), "--fix")
+        self.assertEqual(proc.returncode, 0)
+        self.assertNotIn("fixed", proc.stderr)
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

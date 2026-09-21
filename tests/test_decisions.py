@@ -348,6 +348,43 @@ class CliTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0)
             self.assertEqual(proc.stdout.strip(), "")
 
+    def test_outcome_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"outcome": "human"},
+                    {"outcome": "blocked"},
+                    {"outcome": "human"},
+                    {"jev_status": "idf"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--outcome", "human", "--json")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 2)
+
+    def test_prune_by_outcome(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"outcome": "human"},
+                    {"outcome": "blocked"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--prune", "--outcome", "blocked")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            entries = [
+                json.loads(line)
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["outcome"], "blocked")
+
     def test_prune_no_filter_still_rc2(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

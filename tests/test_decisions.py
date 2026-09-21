@@ -859,6 +859,22 @@ class CliTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(proc.stdout.strip(), "")
 
+    def test_errors_json_lists_bad_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text(
+                '{"ts": 1}\nnot json\n{"ts": 2}\n',
+                encoding="utf-8",
+            )
+            proc = self.run_cli("--file", str(path), "--errors", "--json")
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            rows = json.loads(proc.stdout)
+            self.assertEqual(rows, [{"line": 2, "raw": "not json"}])
+            path.write_text('{"ts": 1}\n', encoding="utf-8")
+            proc = self.run_cli("--file", str(path), "--errors", "--json")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout), [])
+
     def test_json_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

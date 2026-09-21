@@ -857,8 +857,17 @@ def main(argv: list[str] | None = None) -> int:
             )
     if args.errors:
         bad_rows = load_bad_lines(path)
-        for lineno, raw in bad_rows:
-            sys.stdout.write("%d: %s\n" % (lineno, raw[:200]))
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    [{"line": lineno, "raw": raw[:200]} for lineno, raw in bad_rows],
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            for lineno, raw in bad_rows:
+                sys.stdout.write("%d: %s\n" % (lineno, raw[:200]))
         return 1 if bad_rows else 0
     if args.count:
         sys.stdout.write("%d\n" % len(entries))

@@ -1350,5 +1350,49 @@ class ScanMergeTests(unittest.TestCase):
             self.assertIn("token-writer", buf2.getvalue())
 
 
+class PruneSidecarsTests(unittest.TestCase):
+    def _sidecar(self, path, written_at) -> None:
+        path.write_text(
+            json.dumps({"harness": "codex", "task": "t", "written_at": int(written_at)}),
+            encoding="utf-8",
+        )
+
+    def test_prunes_stale_and_invalid_keeps_fresh(self) -> None:
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            now = _time.time()
+            fresh = base / ".jev-tools.json"
+            self._sidecar(fresh, now)
+            stale = base / ".jev-tools-miss.json"
+            self._sidecar(stale, now - 999999)
+            invalid = base / "sub" / ".jev-tools-extra.json"
+            invalid.parent.mkdir()
+            invalid.write_text("not-json", encoding="utf-8")
+            removed = INV.prune_stale_sidecars(base)
+            self.assertEqual(set(removed), {stale, invalid})
+            self.assertTrue(fresh.is_file())
+            self.assertFalse(stale.exists())
+            self.assertFalse(invalid.exists())
+
+    def test_missing_dir_returns_empty(self) -> None:
+        self.assertEqual(
+            INV.prune_stale_sidecars(Path("no-such-dir-xyz")), []
+        )
+
+    def test_cli_prune_sidecars(self) -> None:
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            stale = base / ".jev-tools.json"
+            self._sidecar(stale, _time.time() - 999999)
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = INV.main(["--prune-sidecars", str(base)])
+            self.assertEqual(rc, 0)
+            self.assertIn("pruned 1 stale sidecars", buf.getvalue())
+            self.assertFalse(stale.exists())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

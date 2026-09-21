@@ -775,6 +775,32 @@ def sidecar_status(
     return "fresh" if sidecar_fresh(payload, ttl_seconds, now) else "stale"
 
 
+def prune_stale_sidecars(
+    directory: Path,
+    ttl_seconds: float | None = None,
+    now: float | None = None,
+) -> list[Path]:
+    """Unlink stale/invalid .jev-tools*.json sidecars under directory.
+
+    Recurses the tree; files that fail to parse or lack written_at count as
+    stale. Returns the paths that were removed.
+    """
+    base = Path(directory)
+    if not base.is_dir():
+        return []
+    removed: list[Path] = []
+    for path in sorted(base.rglob(".jev-tools*.json")):
+        if not path.is_file():
+            continue
+        if sidecar_status(path, ttl_seconds, now) in ("stale", "invalid"):
+            try:
+                path.unlink()
+            except OSError:
+                continue
+            removed.append(path)
+    return removed
+
+
 def picker_request(task: str, harness: str, picked: list[dict]) -> dict:
     """One Choice among the IDF shortlist plus Noul need_skill. Hatch is none."""
     criteria = {}
@@ -890,12 +916,23 @@ def main(argv: list[str] | None = None) -> int:
         help="Print fresh/stale/missing/invalid for a sidecar file and exit.",
     )
     parser.add_argument("--catalogs", action="store_true", help="Print marketplace URLs and exit.")
+    parser.add_argument(
+        "--prune-sidecars",
+        metavar="DIR",
+        help="Unlink stale/invalid .jev-tools*.json under DIR and exit.",
+    )
     parser.add_argument("--all-names", action="store_true", help="Include every installed name (no descriptions).")
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
     args = parser.parse_args(argv)
     if args.check_sidecar:
         sys.stdout.write(sidecar_status(Path(args.check_sidecar)) + "\n")
+        return 0
+    if args.prune_sidecars:
+        removed = prune_stale_sidecars(Path(args.prune_sidecars))
+        for path in removed:
+            sys.stdout.write("pruned: %s\n" % path)
+        sys.stdout.write("pruned %d stale sidecars\n" % len(removed))
         return 0
     if args.catalogs:
         for name, url in catalogs():

@@ -202,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--agents", default=",".join(ALLOWED))
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
+    parser.add_argument("--quiet", action="store_true", help="Report only failing checks")
     args = parser.parse_args(argv)
     agents = [a.strip() for a in args.agents.split(",") if a.strip()]
     bad = [a for a in agents if a not in ALLOWED]
@@ -225,7 +226,8 @@ def main(argv: list[str] | None = None) -> int:
             hint = _hint(check["check"])
             if hint:
                 check["hint"] = hint.replace("<agent>", check["agent"])
-    sys.stdout.write(json.dumps({"ok": ok, "checks": checks}, indent=2) + "\n")
+    shown = checks if not args.quiet else [c for c in checks if not c["ok"]]
+    sys.stdout.write(json.dumps({"ok": ok, "checks": shown}, indent=2) + "\n")
     return 0 if ok else 1
 
 

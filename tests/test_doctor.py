@@ -118,6 +118,23 @@ class DoctorTests(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertNotIn("apikey_secret123", text)  # value never printed
 
+    def test_quiet_filters_to_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run_main(
+                [
+                    "--home",
+                    tmp,
+                    "--hermes-home",
+                    str(Path(tmp) / "h"),
+                    "--quiet",
+                ],
+                cwd=tmp,
+            )
+        self.assertEqual(rc, 1)
+        self.assertFalse(out["ok"])
+        self.assertTrue(out["checks"])
+        self.assertTrue(all(not c["ok"] for c in out["checks"]))
+
     def test_claude_missing_tools_hook(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)

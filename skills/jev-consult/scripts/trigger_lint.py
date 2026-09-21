@@ -279,6 +279,12 @@ def main(argv: list[str] | None = None) -> int:
             }
             sys.stdout.write(json.dumps(tick) + "\n")
             sys.stdout.flush()
+            if out_path:
+                try:
+                    with Path(out_path).open("a", encoding="utf-8") as fh:
+                        fh.write(json.dumps(tick) + "\n")
+                except OSError:
+                    pass
             ticks += 1
             _time.sleep(watch_seconds)
         return 1 if (tick["errors"] or (strict and tick["findings"])) else 0

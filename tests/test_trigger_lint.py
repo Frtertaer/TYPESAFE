@@ -320,6 +320,24 @@ class CliTests(unittest.TestCase):
         self.assertTrue(all("errors" in t for t in ticks))
         self.assertTrue(all("warnings" in t and "infos" in t for t in ticks))
 
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(tmp, [dict(GOOD_CASE)])
+            out = Path(tmp) / "ticks.jsonl"
+            with mock.patch.dict(os.environ, {"JEV_TLINT_WATCH_MAX": "2"}):
+                with redirect_stdout(io.StringIO()):
+                    rc = trigger_lint.main(
+                        [str(path), "--watch", "0.01", "--out", str(out)]
+                    )
+            self.assertEqual(rc, 0)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("findings" in t and "ts" in t for t in lines))
+
     def test_watch_rc_reflects_last_lint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             good = write_cases(tmp, [dict(GOOD_CASE)])

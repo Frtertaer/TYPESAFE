@@ -397,6 +397,18 @@ class TriggerEvalTests(unittest.TestCase):
             te.main(["--min-covers", "4", "--covers"])
         self.assertIn("below --min-covers", buf.getvalue())
 
+    def test_report_writes_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.md"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(["--report", str(path), "--quiet"])
+            self.assertEqual(rc, 0)
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("verdict: **PASS**", text)
+            self.assertIn("- positives: 16", text)
+            self.assertIn("| pos-approach | True | True |", text)
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

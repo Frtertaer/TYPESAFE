@@ -225,6 +225,12 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="Also write the result JSON to PATH.",
     )
+    parser.add_argument(
+        "--report",
+        metavar="PATH",
+        default="",
+        help="Write a markdown eval report (verdict, stats, per-case table) to PATH.",
+    )
     args = parser.parse_args(argv)
     if args.desc_tokens:
         if not VENDORED_SCORER.is_file():
@@ -292,6 +298,39 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("--out failed: %s\n" % exc)
             return 1
         sys.stderr.write("wrote %s\n" % args.out)
+    if args.report:
+        lines = [
+            "# trigger eval report",
+            "",
+            "verdict: **%s**" % ("PASS" if result["ok"] else "FAIL"),
+            "",
+            "- positives: %d" % result["n_positives"],
+            "- negatives: %d" % result["n_negatives"],
+            "- worst positive: %.3f" % result["worst_positive"],
+            "- best negative: %.3f" % result["best_negative"],
+            "- margin: %.2f" % result["margin"],
+            "",
+            "| id | should_trigger | lexical | score | ok |",
+            "|---|---|---|---|---|",
+        ]
+        for row in result["cases"]:
+            score = "-" if row["score"] is None else "%.3f" % row["score"]
+            lines.append(
+                "| %s | %s | %s | %s | %s |"
+                % (
+                    row["id"],
+                    row["should_trigger"],
+                    row["lexical"],
+                    score,
+                    "yes" if row["ok"] else "NO",
+                )
+            )
+        try:
+            Path(args.report).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("--report failed: %s\n" % exc)
+            return 1
+        sys.stderr.write("wrote %s\n" % args.report)
     def _rows() -> list[dict]:
         rows = result["cases"]
         if args.fail:

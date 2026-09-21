@@ -230,6 +230,23 @@ def cmd_prune(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_notes(args: argparse.Namespace) -> int:
+    path = Path(args.file) if args.file else default_path()
+    data = load(path)
+    notes = data.get("notes")
+    notes = notes if isinstance(notes, list) else []
+    if getattr(args, "json", False):
+        sys.stdout.write(json.dumps(notes, ensure_ascii=False, indent=2) + "\n")
+        return 0
+    for note in notes:
+        if isinstance(note, dict):
+            stamp = str(note.get("iso") or int(note.get("ts") or 0))
+            text = str(note.get("text") or "")
+            sys.stdout.write("%s %s\n" % (stamp, text))
+    sys.stdout.write("%d note(s)\n" % len(notes))
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     """One-shot summary: attempts, history/inspected counts, last pick, file age."""
     path = Path(args.file) if args.file else default_path()
@@ -319,6 +336,9 @@ def build_parser() -> argparse.ArgumentParser:
     state_cmd.set_defaults(func=cmd_state)
     stats_cmd = sub.add_parser("stats", help="Summary: counts, last pick, file age")
     stats_cmd.set_defaults(func=cmd_stats)
+    notes_cmd = sub.add_parser("notes", help="List recorded notes (iso + text)")
+    notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")
+    notes_cmd.set_defaults(func=cmd_notes)
     return parser
 
 

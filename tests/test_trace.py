@@ -285,6 +285,39 @@ class TraceTests(unittest.TestCase):
             self.assertGreater(data["notes"][0]["ts"], 0)
             self.assertEqual(data["notes"][1]["text"], "second")
 
+    def test_cli_notes_lists_notes(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            tr.main(["--file", str(path), "record", "--pick", "x", "--note", "hello"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes"])
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertIn("hello", out)
+            self.assertIn("1 note(s)", out)
+
+    def test_cli_notes_json(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            tr.main(["--file", str(path), "record", "--pick", "x", "--note", "n1"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--json"])
+            self.assertEqual(rc, 0)
+            rows = json.loads(buf.getvalue())
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["text"], "n1")
+            self.assertIn("iso", rows[0])
+
     def test_cli_record_no_note_no_notes_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "trace.json"

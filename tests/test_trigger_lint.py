@@ -320,6 +320,31 @@ class CliTests(unittest.TestCase):
         self.assertTrue(all("errors" in t for t in ticks))
         self.assertTrue(all("warnings" in t and "infos" in t for t in ticks))
 
+    def test_watch_rc_reflects_last_lint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            good = write_cases(tmp, [dict(GOOD_CASE)])
+            with mock.patch.dict(os.environ, {"JEV_TLINT_WATCH_MAX": "1"}):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = trigger_lint.main([str(good), "--watch", "0.01"])
+            self.assertEqual(rc, 0)
+            bad = write_cases(
+                tmp,
+                [
+                    {
+                        "id": "Pick Me!",
+                        "prompt": "Decide which approach to take first",
+                        "should_trigger": True,
+                        "covers": ["nope-kind"],
+                    },
+                ],
+            )
+            with mock.patch.dict(os.environ, {"JEV_TLINT_WATCH_MAX": "1"}):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = trigger_lint.main([str(bad), "--watch", "0.01"])
+            self.assertEqual(rc, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

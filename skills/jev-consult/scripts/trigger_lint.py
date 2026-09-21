@@ -281,7 +281,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.flush()
             ticks += 1
             _time.sleep(watch_seconds)
-        return 0
+        return 1 if (tick["errors"] or (strict and tick["findings"])) else 0
     if do_fix:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))

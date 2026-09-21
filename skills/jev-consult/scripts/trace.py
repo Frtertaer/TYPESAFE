@@ -75,6 +75,15 @@ def _present(value: Any) -> bool:
     return value not in (None, "", [], {})
 
 
+def _dig(item: dict, key: str):
+    node = item
+    for part in key.split("."):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(part)
+    return node
+
+
 def _ts_arg(raw: str) -> float | None:
     """Parse an epoch-seconds or ISO8601 timestamp argument. Empty -> 0."""
     text = (raw or "").strip()
@@ -313,7 +322,18 @@ def cmd_notes(args: argparse.Namespace) -> int:
     limit = getattr(args, "limit", None)
     if isinstance(limit, int) and limit >= 0:
         notes = notes[-limit:] if limit else []
-    if getattr(args, "json", False):
+    field = getattr(args, "field", "") or ""
+    if field:
+        values = [_dig(n, field) for n in notes if isinstance(n, dict)]
+        if getattr(args, "json", False):
+            out_text = json.dumps({"field": field, "values": values}, ensure_ascii=False, indent=2) + "\n"
+        else:
+            out_text = "".join(
+                (v if isinstance(v, str) else json.dumps(v, ensure_ascii=False) if v is not None else "null")
+                + "\n"
+                for v in values
+            )
+    elif getattr(args, "json", False):
         out_text = json.dumps(notes, ensure_ascii=False, indent=2) + "\n"
     else:
         lines = []
@@ -434,6 +454,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--since", default=None, help="Only notes with ts >= epoch seconds or ISO8601")
     notes_cmd.add_argument("--harness", default="", help="Only notes tagged with this harness")
     notes_cmd.add_argument("--out", default="", help="Write the notes output to PATH instead of stdout")
+    notes_cmd.add_argument("--field", default="", help="Print only this field per note (a.b digs into nested objects)")
     notes_cmd.set_defaults(func=cmd_notes)
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")

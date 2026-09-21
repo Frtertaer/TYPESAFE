@@ -318,6 +318,29 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(rows[0]["text"], "n1")
             self.assertIn("iso", rows[0])
 
+    def test_cli_notes_field_prints_field_only(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            tr.main(["--file", str(path), "record", "--pick", "x", "--note", "hello"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--field", "text"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "hello")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                tr.main(["--file", str(path), "notes", "--field", "nope"])
+            self.assertEqual(buf.getvalue().strip(), "null")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                tr.main(["--file", str(path), "notes", "--field", "text", "--json"])
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["values"], ["hello"])
+
     def test_cli_notes_limit_caps_output(self) -> None:
         import io
         from contextlib import redirect_stdout

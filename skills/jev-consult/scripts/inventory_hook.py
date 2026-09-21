@@ -469,8 +469,13 @@ def _debug_enabled(argv: list[str]) -> bool:
 def allowed_events() -> set[str]:
     raw = os.environ.get("JEV_HOOK_EVENTS", "").strip()
     if raw:
-        return {part.strip() for part in raw.split(",") if part.strip()}
-    return {"UserPromptSubmit", "pre_llm_call"}
+        allowed = {part.strip() for part in raw.split(",") if part.strip()}
+    else:
+        allowed = {"UserPromptSubmit", "pre_llm_call"}
+    skip = os.environ.get("JEV_HOOK_SKIP_EVENTS", "").strip()
+    if skip:
+        allowed -= {part.strip() for part in skip.split(",") if part.strip()}
+    return allowed
 
 
 def main(argv: list[str] | None = None) -> int:

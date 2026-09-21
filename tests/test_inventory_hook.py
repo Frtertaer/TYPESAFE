@@ -327,6 +327,29 @@ class InventoryHookTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(buf.getvalue().split(), ["a_event", "b_event"])
 
+    def test_hook_skip_events_excludes_events(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_SKIP_EVENTS": "pre_llm_call"}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--events"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().split(), ["UserPromptSubmit"])
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_SKIP_EVENTS": "UserPromptSubmit"}):
+                out = HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "Add JWT access tokens in Python",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            self.assertEqual(out, {})
+            self.assertIsNone(HOOK.LAST_DECISION)
+
     def test_over_budget_flag_when_pick_exceeds_budget(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
 

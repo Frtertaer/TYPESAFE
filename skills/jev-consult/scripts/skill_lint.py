@@ -107,9 +107,12 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     do_fix = "--fix" in argv
     as_json = "--json" in argv
-    argv = [a for a in argv if a not in ("--fix", "--json")]
+    strict = "--strict" in argv
+    argv = [a for a in argv if a not in ("--fix", "--json", "--strict")]
     if not argv:
-        sys.stderr.write("usage: skill_lint.py SKILL.md [more.md ...] [--fix]\n")
+        sys.stderr.write(
+            "usage: skill_lint.py SKILL.md [more.md ...] [--fix] [--strict]\n"
+        )
         return 2
     rc = 0
     paths: list[Path] = []
@@ -130,12 +133,15 @@ def main(argv: list[str] | None = None) -> int:
         rows = [
             {"path": str(path), **f} for path in paths for f in lint_skill(path)
         ]
+        def bad(r: dict) -> bool:
+            return r["severity"] == "error" or (strict and r["severity"] == "warn")
+
         sys.stdout.write(_json.dumps({"findings": rows}, indent=2) + "\n")
-        return 1 if any(r["severity"] == "error" for r in rows) else 0
+        return 1 if any(bad(r) for r in rows) else 0
     for path in paths:
         for f in lint_skill(path):
             sys.stdout.write("%s %s %s: %s\n" % (f["severity"], f["rule"], path, f["message"]))
-            if f["severity"] == "error":
+            if f["severity"] == "error" or (strict and f["severity"] == "warn"):
                 rc = 1
     return rc
 

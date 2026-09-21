@@ -153,6 +153,30 @@ class CliTests(unittest.TestCase):
             self.assertEqual(findings[0]["rule"], "S003")
             self.assertIn(str(bad), findings[0]["path"])
 
+    def test_strict_warn_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # S005 warn: dir "other" but name "wrong"
+            other = write_skill(tmp, "other", GOOD.format(name="wrong"))
+            proc = self._run(str(other), "--strict")
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            self.assertIn("S005", proc.stdout)
+            normal = self._run(str(other))
+            self.assertEqual(normal.returncode, 0, normal.stderr)
+
+    def test_strict_json_warn_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(tmp, "other", GOOD.format(name="wrong"))
+            proc = self._run(str(path), "--strict", "--json")
+            self.assertEqual(proc.returncode, 1)
+            rows = json.loads(proc.stdout)["findings"]
+            self.assertEqual(rows[0]["rule"], "S005")
+
+    def test_strict_clean_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(tmp, "ok", GOOD.format(name="ok"))
+            proc = self._run(str(path), "--strict")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
     def test_json_clean_rc0_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
             good = write_skill(tmp, "ok", GOOD.format(name="ok"))

@@ -287,6 +287,8 @@ def cmd_history(args: argparse.Namespace) -> int:
     limit = getattr(args, "limit", None)
     if isinstance(limit, int) and limit >= 0:
         history = history[-limit:] if limit else []
+    if getattr(args, "reverse", False):
+        history = history[::-1]
     field = getattr(args, "field", "") or ""
     if field:
         values = [_dig(entry, field) for entry in history]
@@ -531,6 +533,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")
     hist_cmd.add_argument("--limit", type=int, help="Show only the last N picks")
+    hist_cmd.add_argument("--reverse", action="store_true", help="List picks newest-first")
     hist_cmd.add_argument("--field", default="", help="Print only this field per pick (a.b digs into nested objects)")
     hist_cmd.add_argument("--since", default=None, help="Only picks with ts >= epoch seconds or ISO8601")
     hist_cmd.add_argument("--before", default=None, help="Only picks with ts <= epoch seconds or ISO8601")

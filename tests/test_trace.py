@@ -163,6 +163,30 @@ class TraceTests(unittest.TestCase):
             notes = json.loads(buf.getvalue())
             self.assertEqual([n["text"] for n in notes], ["new", "old"])
 
+    def test_history_reverse_lists_newest_first(self) -> None:
+        import time
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            now = time.time()
+            tr.save(
+                {
+                    "history": [
+                        {"pick": "a", "ts": now - 10, "kind": "x"},
+                        {"pick": "b", "ts": now, "kind": "x"},
+                    ]
+                },
+                path,
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--json", "--reverse"])
+            self.assertEqual(rc, 0)
+            picks = json.loads(buf.getvalue())
+            self.assertEqual([h["pick"] for h in picks], ["b", "a"])
+
     def test_load_missing_is_empty(self) -> None:
         data = tr.load(Path("definitely-missing-jev-trace.json"))
         self.assertEqual(data["plan"], "")

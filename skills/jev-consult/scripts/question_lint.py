@@ -271,9 +271,10 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     as_json = "--json" in argv
     do_fix = "--fix" in argv
-    argv = [a for a in argv if a not in ("--json", "--fix")]
+    strict = "--strict" in argv
+    argv = [a for a in argv if a not in ("--json", "--fix", "--strict")]
     if not argv:
-        sys.stderr.write("usage: question_lint.py FILE [--json] [--fix]\n")
+        sys.stderr.write("usage: question_lint.py FILE [--json] [--fix] [--strict]\n")
         return 2
     try:
         text = Path(argv[0]).read_text(encoding="utf-8")
@@ -300,7 +301,9 @@ def main(argv: list[str] | None = None) -> int:
         for f in findings:
             sys.stdout.write(format_finding(f) + "\n")
         sys.stdout.write("lint: %d finding(s)\n" % len(findings))
-    return 1 if any(f["severity"] == "error" for f in findings) else 0
+    if any(f["severity"] == "error" for f in findings):
+        return 1
+    return 1 if strict and findings else 0
 
 
 if __name__ == "__main__":

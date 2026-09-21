@@ -16,6 +16,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "skills" / "jev-consult" / "scripts"
 JEV_PATH = SCRIPTS / "jev.py"
+QLINT = SCRIPTS / "question_lint.py"
 
 sys.path.insert(0, str(SCRIPTS))
 
@@ -197,6 +198,26 @@ class LintCliTests(unittest.TestCase):
         self.assertEqual(loose.returncode, 0)
         self.assertEqual(strict.returncode, 1)
         self.assertIn("warn  J001", strict.stdout)
+
+    def test_script_strict_flag_fails_on_warn(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Should the coder not proceed?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, request)
+            loose = subprocess.run(
+                [sys.executable, str(QLINT), str(path)],
+                capture_output=True,
+                text=True,
+            )
+            strict = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--strict"],
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(loose.returncode, 0)
+        self.assertEqual(strict.returncode, 1)
 
     def test_lint_cli_clean_returns_0(self) -> None:
         request = {

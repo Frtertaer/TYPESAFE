@@ -971,7 +971,11 @@ def main(argv: list[str] | None = None) -> int:
         default="auto",
         choices=("auto", "hermes", "claude-code", "codex", "grok"),
     )
-    parser.add_argument("--limit", type=int, default=12)
+    try:
+        env_limit = int(os.environ.get("JEV_LIMIT", "") or 12)
+    except ValueError:
+        env_limit = 12
+    parser.add_argument("--limit", type=int, default=max(1, env_limit))
     parser.add_argument("--include", default="", help="Comma names to force onto the shortlist.")
     parser.add_argument("--write-ask", help="Write a Jev ask JSON with load_tools + installed_enough.")
     parser.add_argument("--sidecar", help="Write %s-style JSON of the shortlist names." % SIDECAR_NAME)

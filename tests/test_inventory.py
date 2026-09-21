@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -651,6 +652,38 @@ class HookLimitEnvTests(unittest.TestCase):
             self.assertGreaterEqual(inv.hook_limit(), 1)
         with patch.dict(os.environ, {"JEV_HOOK_LIMIT": "0"}):
             self.assertGreaterEqual(inv.hook_limit(), 1)
+
+
+class LimitEnvTests(unittest.TestCase):
+    def _run_main(self, env):
+        import io
+        import json as _json
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch.dict(os.environ, env):
+            with redirect_stdout(buf):
+                rc = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(FIXTURE),
+                        "--task",
+                        "jwt",
+                    ]
+                )
+        self.assertEqual(rc, 0)
+        return _json.loads(buf.getvalue())
+
+    def test_env_override_changes_default(self) -> None:
+        out = self._run_main({"JEV_LIMIT": "1"})
+        self.assertLessEqual(len(out["shortlist"]), 1)
+
+    def test_env_invalid_falls_back(self) -> None:
+        out = self._run_main({"JEV_LIMIT": "bogus"})
+        self.assertGreaterEqual(len(out["shortlist"]), 1)
 
 
 class HookRetriesEnvTests(unittest.TestCase):

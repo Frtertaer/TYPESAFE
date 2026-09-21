@@ -1379,6 +1379,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--spill-dir", help="Override spill directory for --prune-spill/--list-spill.")
     parser.add_argument(
+        "--out",
+        default="",
+        metavar="PATH",
+        help="With --list-spill/--prune-spill: write the listing to PATH instead of stdout.",
+    )
+    parser.add_argument(
         "--list-spill",
         action="store_true",
         help="List spill files (name, bytes, mtime) and exit.",
@@ -1421,16 +1427,34 @@ def main(argv: list[str] | None = None) -> int:
     if args.list_spill:
         directory = Path(args.spill_dir) if args.spill_dir else None
         rows = list_spill(directory)
-        for path, size, mtime in rows:
-            sys.stdout.write("%s %d %d\n" % (path, size, int(mtime)))
-        sys.stdout.write("%d spill files\n" % len(rows))
+        text = "".join(
+            "%s %d %d\n" % (path, size, int(mtime)) for path, size, mtime in rows
+        ) + "%d spill files\n" % len(rows)
+        if args.out:
+            try:
+                Path(args.out).write_text(text, encoding="utf-8")
+            except OSError as exc:
+                sys.stderr.write("--out failed: %s\n" % exc)
+                return 1
+            sys.stderr.write("wrote %s\n" % args.out)
+        else:
+            sys.stdout.write(text)
         return 0
     if args.prune_spill is not None:
         directory = Path(args.spill_dir) if args.spill_dir else None
         removed = prune_spill(directory, args.prune_spill)
-        for path in removed:
-            sys.stdout.write("pruned: %s\n" % path)
-        sys.stdout.write("pruned %d spill files\n" % len(removed))
+        text = "".join("pruned: %s\n" % path for path in removed) + (
+            "pruned %d spill files\n" % len(removed)
+        )
+        if args.out:
+            try:
+                Path(args.out).write_text(text, encoding="utf-8")
+            except OSError as exc:
+                sys.stderr.write("--out failed: %s\n" % exc)
+                return 1
+            sys.stderr.write("wrote %s\n" % args.out)
+        else:
+            sys.stdout.write(text)
         return 0
     if args.dir:
         batch = Path(args.dir)

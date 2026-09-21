@@ -1405,6 +1405,29 @@ class ListSpillTests(unittest.TestCase):
             self.assertIn("%s 5 " % f, out)
             self.assertIn("1 spill files", out)
 
+    def test_cli_list_spill_out_writes_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            (target / "f.txt").write_text("y" * 5, encoding="utf-8")
+            out_path = Path(tmp) / "list.txt"
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = C.main(
+                    [
+                        "--list-spill",
+                        "--spill-dir",
+                        str(target),
+                        "--out",
+                        str(out_path),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            text = out_path.read_text(encoding="utf-8")
+            self.assertIn("f.txt 5 ", text)
+            self.assertIn("1 spill files", text)
+            self.assertIn("wrote", err.getvalue())
+
 
 class KeepTextTests(unittest.TestCase):
     def setUp(self):

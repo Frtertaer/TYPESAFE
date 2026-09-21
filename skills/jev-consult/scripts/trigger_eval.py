@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -217,6 +218,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the resolved config (paths, margin, scorer) as JSON and exit.",
     )
     parser.add_argument(
+        "--watch",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Re-evaluate every S seconds, printing one verdict tick per pass.",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help=(
@@ -312,6 +320,44 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.id:
         result["ok"] = all(row["ok"] for row in result["cases"])
+    if args.watch and args.watch > 0:
+        import time as _time
+
+        try:
+            max_ticks = int(os.environ.get("JEV_TRIGGER_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        cur = result
+        while max_ticks <= 0 or ticks < max_ticks:
+            tick = {
+                "ts": int(_time.time()),
+                "ok": cur["ok"],
+                "worst_positive": cur["worst_positive"],
+                "best_negative": cur["best_negative"],
+            }
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            _time.sleep(args.watch)
+            try:
+                cur = evaluate(
+                    Path(args.cases),
+                    Path(args.skill),
+                    case_id=args.id,
+                    desc_text=args.desc,
+                    margin_override=args.margin,
+                )
+            except (OSError, ValueError, KeyError):
+                cur = None
+            if cur is None:
+                sys.stdout.write(
+                    json.dumps({"ts": int(_time.time()), "ok": None}) + "\n"
+                )
+                sys.stdout.flush()
+                ticks += 1
+                cur = result
+        return 0
     if args.out:
         try:
             Path(args.out).write_text(

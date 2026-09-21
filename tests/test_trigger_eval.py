@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -431,6 +432,19 @@ class TriggerEvalTests(unittest.TestCase):
         payload = json.loads(buf.getvalue())
         self.assertEqual(payload["margin"], 2.5)
         self.assertTrue(payload["desc_override"])
+
+    def test_watch_emits_ticks(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "2"}):
+            with redirect_stdout(buf):
+                rc = te.main(["--watch", "0.01", "--quiet"])
+        self.assertEqual(rc, 0)
+        ticks = [
+            json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertTrue(all(t["ok"] for t in ticks))
+        self.assertIn("worst_positive", ticks[0])
 
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

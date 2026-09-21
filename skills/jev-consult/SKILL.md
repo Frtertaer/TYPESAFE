@@ -140,7 +140,7 @@ python skills/jev-consult/scripts/catalog_fill.py --from-miss
 python skills/jev-consult/scripts/apply_fill.py --from-miss
 ```
 
-`peer_fill.py` first: Jev picks one skill already on this machine and copies it. If stdout is `no_peer`, `catalog_fill.py` searches Hermes find-skill, Jev picks one identifier (exploit/attack/hack names dropped), inspects, then `hermes skills install --yes`. If stdout is `no_catalog`, `apply_fill.py` searches Hermes plugins + official MCP, Jev picks **one** plugin (`install --no-enable`) or **one** official MCP (`mcp install`). Hermes only. Other harness markets stay human. Codex: same three commands if `/hooks` has not trusted `hooks.json`.
+`peer_fill.py` first: Jev picks one skill already on this machine and copies it (`--json` emits `{"outcome": ...}` objects instead of bare tokens). If stdout is `no_peer`, `catalog_fill.py` searches Hermes find-skill, Jev picks one identifier (exploit/attack/hack names dropped), inspects, then `hermes skills install --yes`. If stdout is `no_catalog`, `apply_fill.py` searches Hermes plugins + official MCP, Jev picks **one** plugin (`install --no-enable`) or **one** official MCP (`mcp install`). Hermes only. Other harness markets stay human. Codex: same three commands if `/hooks` has not trusted `hooks.json`.
 
 If you are stuck on an installed set that does not fit:
 

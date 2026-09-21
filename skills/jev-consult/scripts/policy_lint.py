@@ -59,6 +59,12 @@ NONNEG_NUM_FIELDS = ("sidecar_ttl_seconds",)
 NONEMPTY_STR_FIELDS = ("model", "endpoint", "default", "role", "coder_role")
 ESCALATE_BOOL_FIELDS = ("irreversible",)
 KNOWN_ESCALATE_KEYS = ESCALATE_PROB_FIELDS + ESCALATE_BOOL_FIELDS
+KNOWN_TOP_KEYS = REQUIRED_KEYS + (
+    "catalogs",
+    "hallucination",
+    "hook_budget_seconds",
+    "stop_words",
+)
 
 
 def _num(value) -> bool:
@@ -85,6 +91,16 @@ def lint_policy(policy) -> list[dict]:
                 key,
                 "missing required key %r" % key,
                 "jev.py reads this field; without it a fallback fires silently",
+            )
+
+    for key in policy:
+        if key not in KNOWN_TOP_KEYS:
+            add(
+                "P011",
+                "warn",
+                key,
+                "unknown top-level key %r" % key,
+                "typo guard: this key is never read; rename or drop it",
             )
 
     for key in PROB_FIELDS:

@@ -73,6 +73,17 @@ class PolicyLintTests(unittest.TestCase):
         self.assertIn("P010", rule_ids(findings))
         self.assertFalse(errors(findings))
 
+    def test_unknown_top_level_key_warns(self) -> None:
+        policy = base_policy()
+        policy["noul_yess"] = 0.8
+        findings = policy_lint.lint_policy(policy)
+        self.assertIn("P011", rule_ids(findings))
+        self.assertFalse(errors(findings))
+
+    def test_real_policy_has_no_unknown_keys(self) -> None:
+        findings = policy_lint.lint_policy(base_policy())
+        self.assertNotIn("P011", rule_ids(findings))
+
     def test_endpoint_must_be_https(self) -> None:
         policy = base_policy()
         policy["endpoint"] = "http://api.typesafe.ai/v1/systemone"

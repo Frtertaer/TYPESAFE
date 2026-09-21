@@ -477,6 +477,38 @@ class CliTest(unittest.TestCase):
             stats = json.loads(proc.stdout)
             self.assertEqual(stats["total"], 0)
 
+    def test_jsonl_prints_raw_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"harness": "a", "ts": 1},
+                    {"harness": "b", "outcome": "human"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--jsonl")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = proc.stdout.strip().splitlines()
+            self.assertEqual(len(lines), 2)
+            self.assertEqual(json.loads(lines[0])["harness"], "a")
+            self.assertEqual(json.loads(lines[1])["outcome"], "human")
+
+    def test_jsonl_respects_filters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [{"harness": "a"}, {"harness": "b"}],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--jsonl", "--harness", "a"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = proc.stdout.strip().splitlines()
+            self.assertEqual(len(lines), 1)
+            self.assertEqual(json.loads(lines[0])["harness"], "a")
+
     def test_fields_lists_all_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

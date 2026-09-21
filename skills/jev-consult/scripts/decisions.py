@@ -296,6 +296,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print filtered entries as a Markdown table",
     )
+    parser.add_argument(
+        "--jsonl",
+        action="store_true",
+        help="Print filtered entries as raw JSON lines (for piping)",
+    )
     args = parser.parse_args(argv)
     path = Path(args.file) if args.file else inventory.decisions_log_path()
     if path is None:
@@ -373,6 +378,10 @@ def main(argv: list[str] | None = None) -> int:
                     counts[value] = counts.get(value, 0) + 1
         for value, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
             sys.stdout.write("%s %d\n" % (value, n))
+        return 0
+    if args.jsonl:
+        for item in entries:
+            sys.stdout.write(json.dumps(item, sort_keys=True) + "\n")
         return 0
     if args.csv or args.md:
         rows = []

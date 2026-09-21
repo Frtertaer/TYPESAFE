@@ -309,6 +309,45 @@ class CatalogFillTests(unittest.TestCase):
             )
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
 
+    def test_json_no_task_emits_object(self) -> None:
+        import io
+
+        buf = io.StringIO()
+        with patch.object(
+            sys, "argv", ["catalog_fill.py", "--json"]
+        ), patch("sys.stdout", buf):
+            rc = FILL.main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(buf.getvalue().strip())["outcome"], "no_task")
+
+    def test_json_fill_no_catalog_emits_object(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=[]), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "unrelated zebra task",
+                    "--harness",
+                    "claude-code",
+                    "--cwd",
+                    str(tmp),
+                    "--home",
+                    str(Path(tmp) / "home"),
+                    "--hermes-home",
+                    str(Path(tmp) / "hermes"),
+                    "--json",
+                ],
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            row = json.loads(buf.getvalue().strip())
+            self.assertEqual(row["outcome"], "no_catalog")
+
     def test_show_dumps_one_hit(self) -> None:
         import io
 

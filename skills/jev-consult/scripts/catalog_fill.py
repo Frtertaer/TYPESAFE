@@ -304,9 +304,15 @@ def fill(
     pick: str | None,
     dry_run: bool,
     ask_path: Path,
+    as_json: bool = False,
 ) -> int:
     def emit(msg: str) -> None:
-        sys.stdout.write(msg + "\n")
+        if as_json:
+            sys.stdout.write(
+                json.dumps({"outcome": msg.split()[0], "message": msg}) + "\n"
+            )
+        else:
+            sys.stdout.write(msg + "\n")
         append_decision(
             {
                 "ts": int(time.time()),
@@ -405,7 +411,7 @@ def main() -> int:
     parser.add_argument(
         "--json",
         action="store_true",
-        help="With --list: emit a JSON array of hits instead of text lines.",
+        help="With --list: emit a JSON array of hits; in fill mode emit one JSON object per outcome.",
     )
     parser.add_argument(
         "--show",
@@ -423,7 +429,9 @@ def main() -> int:
         if dest == "auto":
             dest = str(miss.get("harness") or "auto")
     if not task.strip():
-        sys.stdout.write("no_task\n")
+        sys.stdout.write(
+            json.dumps({"outcome": "no_task"}) + "\n" if args.json else "no_task\n"
+        )
         return 0
     home = Path(args.home) if args.home else user_home()
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home()
@@ -475,9 +483,12 @@ def main() -> int:
             args.pick.strip() or None,
             args.dry_run,
             ask_path,
+            as_json=args.json,
         )
     except Exception:
-        sys.stdout.write("fail_open\n")
+        sys.stdout.write(
+            json.dumps({"outcome": "fail_open"}) + "\n" if args.json else "fail_open\n"
+        )
         return 0
 
 

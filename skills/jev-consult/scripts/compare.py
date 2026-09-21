@@ -163,14 +163,22 @@ def strict_failures(rows: list[dict[str, Any]], live: bool) -> list[str]:
     return failures
 
 
-def run(live: bool, as_json: bool, path: Path | None = None) -> dict[str, Any]:
+def run(
+    live: bool,
+    as_json: bool,
+    path: Path | None = None,
+    only: set[str] | None = None,
+) -> dict[str, Any]:
     blob = load_cases(path)
-    rows = [row_offline(case) for case in blob["cases"]]
+    cases = list(blob["cases"])
+    if only:
+        cases = [case for case in cases if str(case.get("id") or "") in only]
+    rows = [row_offline(case) for case in cases]
     live_error = ""
     if live:
         jev = load_jev()
         policy = jev.load_policy()
-        for index, case in enumerate(blob["cases"]):
+        for index, case in enumerate(cases):
             before = score_live(jev, policy, case, case.get("before") or {})
             after = score_live(jev, policy, case, case.get("after") or {})
             rows[index]["before"]["noul"] = before.get("noul")
@@ -192,12 +200,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--cases", help="Path to compare-cases.json")
     parser.add_argument(
+        "--only",
+        default="",
+        help="Comma-separated case ids to run (default: all).",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="Exit 1 when any case's guarded side skipped Jev (or scored below noul_yes with --live).",
     )
     args = parser.parse_args(argv)
-    result = run(live=args.live, as_json=args.as_json, path=Path(args.cases) if args.cases else None)
+    only = {s.strip() for s in args.only.split(",") if s.strip()} or None
+    result = run(
+        live=args.live,
+        as_json=args.as_json,
+        path=Path(args.cases) if args.cases else None,
+        only=only,
+    )
     if args.as_json:
         json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
         sys.stdout.write("\n")

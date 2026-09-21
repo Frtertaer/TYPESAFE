@@ -206,6 +206,23 @@ class CliTest(unittest.TestCase):
         self.assertFalse(payload["live"])
         self.assertEqual(len(payload["rows"]), 2)
 
+    def test_cli_only_filters_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            proc = self.run_cli(
+                "--json", "--cases", str(path), "--only", "drift_case"
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual([r["id"] for r in payload["rows"]], ["drift_case"])
+
+    def test_cli_only_unknown_id_yields_no_rows(self) -> None:
+        proc = self.run_cli("--json", "--only", "nope")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["rows"], [])
+
     def test_cli_bad_cases_exits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cases.json"

@@ -131,6 +131,31 @@ def fix_name(path: Path) -> bool:
     return True
 
 
+def fix_case(path: Path) -> bool:
+    """Rewrite the frontmatter name as lowercase-hyphenated. Returns True if changed."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    start = text.index("---") + 3 if text.lstrip().startswith("---") else -1
+    end = text.find("\n---", start) if start >= 0 else -1
+    if end < 0:
+        return False
+    block = text[start:end]
+
+    def normalize(m: "re.Match[str]") -> str:
+        if m.group(1) != "name":
+            return m.group(0)
+        value = re.sub(r"[^a-z0-9]+", "-", m.group(2).strip().lower()).strip("-")
+        return "name: %s" % value
+
+    new_block, n = re.subn(r"^(name|description):\s*(.*)$", normalize, block, flags=re.M)
+    if n == 0 or new_block == block:
+        return False
+    path.write_text(text[:start] + new_block + text[end:], encoding="utf-8")
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     do_fix = "--fix" in argv
@@ -155,6 +180,9 @@ def main(argv: list[str] | None = None) -> int:
             if any(f["rule"] == "S005" for f in lint_skill(path)):
                 if fix_name(path):
                     sys.stderr.write("fixed S005 %s\n" % path)
+            if any(f["rule"] == "S008" for f in lint_skill(path)):
+                if fix_case(path):
+                    sys.stderr.write("fixed S008 %s\n" % path)
     if as_json:
         import json as _json
 

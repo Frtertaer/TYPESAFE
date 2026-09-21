@@ -2,7 +2,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -81,6 +83,17 @@ class LintSkillTests(unittest.TestCase):
             findings = skill_lint.lint_skill(path)
             rules = [f["rule"] for f in findings]
             self.assertIn("S008", rules)
+
+    def test_fix_normalizes_casing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = write_skill(root, "MySkill", GOOD.format(name="MySkill"))
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = skill_lint.main([str(path), "--fix"])
+            self.assertEqual(rc, 0)
+            self.assertIn("name: myskill", path.read_text(encoding="utf-8"))
+            self.assertIn("fixed S008", buf.getvalue())
 
     def test_name_clean_casing_no_s008(self):
         with tempfile.TemporaryDirectory() as tmp:

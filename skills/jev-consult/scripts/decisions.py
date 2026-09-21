@@ -413,8 +413,11 @@ def main(argv: list[str] | None = None) -> int:
         rows = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
         if args.top > 0:
             rows = rows[: args.top]
-        for value, n in rows:
-            sys.stdout.write("%s %d\n" % (value, n))
+        if args.json:
+            sys.stdout.write(json.dumps({"counts": dict(rows)}, indent=2) + "\n")
+        else:
+            for value, n in rows:
+                sys.stdout.write("%s %d\n" % (value, n))
         return 0
     if args.jsonl:
         for item in entries:

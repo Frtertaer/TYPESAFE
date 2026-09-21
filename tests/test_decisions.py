@@ -730,6 +730,22 @@ class FilterSinceTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(len(proc.stdout.strip().splitlines()), 3)
 
+    def test_counts_json_emits_object(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "winner"},
+                    {"ts": 2, "jev_status": "winner"},
+                    {"ts": 3, "jev_status": "idf"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--statuses", "--json")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            out = json.loads(proc.stdout)
+            self.assertEqual(out, {"counts": {"winner": 2, "idf": 1}})
+
     def test_days_overrides_week(self):
         import time as _time
         with tempfile.TemporaryDirectory() as tmp:

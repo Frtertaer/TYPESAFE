@@ -407,6 +407,12 @@ def main() -> int:
         action="store_true",
         help="With --list: emit a JSON array of hits instead of text lines.",
     )
+    parser.add_argument(
+        "--show",
+        default="",
+        metavar="NAME",
+        help="Print one catalog hit's full JSON record by name and exit.",
+    )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     task = args.task
@@ -441,6 +447,20 @@ def main() -> int:
                         "%s %s\n"
                         % (item.get("name") or "?", item.get("identifier") or "")
                     )
+        except Exception:
+            pass
+        return 0
+    if args.show:
+        try:
+            hits = search_hits(task)
+            match = next(
+                (item for item in (hits or []) if item.get("name") == args.show),
+                None,
+            )
+            if match is None:
+                sys.stdout.write("not found: %s\n" % args.show)
+            else:
+                sys.stdout.write(json.dumps(match, indent=2) + "\n")
         except Exception:
             pass
         return 0

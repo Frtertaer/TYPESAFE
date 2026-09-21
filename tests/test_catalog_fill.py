@@ -309,6 +309,53 @@ class CatalogFillTests(unittest.TestCase):
             )
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
 
+    def test_show_dumps_one_hit(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hits = [
+                {
+                    "name": "jwt-auth",
+                    "identifier": "owner/jwt-auth",
+                    "description": "d",
+                }
+            ]
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--harness",
+                    "claude-code",
+                    "--cwd",
+                    str(base),
+                    "--show",
+                    "jwt-auth",
+                ],
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["name"], "jwt-auth")
+            self.assertEqual(out["identifier"], "owner/jwt-auth")
+
+    def test_show_missing_name_reports_not_found(self) -> None:
+        import io
+
+        buf = io.StringIO()
+        with patch.object(
+            FILL, "search_hits", return_value=[{"name": "jwt-auth"}]
+        ), patch.object(
+            sys, "argv", ["catalog_fill.py", "--task", "jwt", "--show", "nope"]
+        ), patch("sys.stdout", buf):
+            rc = FILL.main()
+        self.assertEqual(rc, 0)
+        self.assertIn("not found: nope", buf.getvalue())
+
     def test_list_flag_hermes_down_fails_open(self) -> None:
         import io
 

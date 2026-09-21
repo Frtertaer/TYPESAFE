@@ -2028,6 +2028,29 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("out of range", err.getvalue())
 
+    def test_skip_drops_first_n(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1, "winner": {"name": "a"}},
+                             {"ts": 2, "winner": {"name": "b"}},
+                             {"ts": 3, "winner": {"name": "c"}}])
+            import io
+            from unittest.mock import patch
+
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = decisions.main(["--file", str(path), "--skip", "2", "--count"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "1")
+
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = decisions.main(
+                    ["--file", str(path), "--skip", "1", "--jq", "winner.name"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().split(), ["b", "c"])
+
     def test_status_outcome_fill_winner_accept_comma_lists(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

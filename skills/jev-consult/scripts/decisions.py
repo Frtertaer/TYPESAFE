@@ -630,6 +630,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Print only the Nth matching entry (1-based, after --reverse) as JSON",
     )
     parser.add_argument(
+        "--skip",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Drop the first N matching entries (after filters, before --first/--tail/--jq)",
+    )
+    parser.add_argument(
         "--out",
         metavar="PATH",
         default="",
@@ -856,6 +863,9 @@ def main(argv: list[str] | None = None) -> int:
                 if needle in str(item.get("prompt_head") or "").lower()
                 or needle in str(item.get("prompt_tail") or "").lower()
             ]
+        skip = getattr(args, "skip", 0) or 0
+        if skip > 0:
+            items = items[skip:]
         return items
     entries = _filtered(entries)
     if getattr(args, "watch", 0) > 0:

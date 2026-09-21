@@ -101,6 +101,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Score one ad-hoc prompt against the skill description and exit.",
     )
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--csv",
+        action="store_true",
+        help="Print rows as CSV: id,should_trigger,lexical,score,ok.",
+    )
     parser.add_argument("--quiet", action="store_true", help="Print only the verdict line.")
     parser.add_argument(
         "--fail",
@@ -209,6 +214,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.ids:
         for row in _rows():
             sys.stdout.write("%s\n" % row["id"])
+        return 0 if result["ok"] else 1
+    if args.csv:
+        sys.stdout.write("id,should_trigger,lexical,score,ok\n")
+        for row in _rows():
+            score = "" if row["score"] is None else "%.3f" % row["score"]
+            sys.stdout.write(
+                "%s,%s,%s,%s,%s\n"
+                % (
+                    row["id"],
+                    row["should_trigger"],
+                    row["lexical"],
+                    score,
+                    row["ok"],
+                )
+            )
         return 0 if result["ok"] else 1
     if args.json:
         payload = dict(result)

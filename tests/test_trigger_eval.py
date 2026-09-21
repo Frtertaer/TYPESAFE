@@ -255,6 +255,17 @@ class TriggerEvalTests(unittest.TestCase):
                 rc = te.main(["--cases", str(path), "--strict"])
             self.assertEqual(rc, 1)
 
+    def test_csv_prints_table(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--csv"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(lines[0], "id,should_trigger,lexical,score,ok")
+        self.assertGreater(len(lines), 2)
+        row = [l for l in lines if l.startswith("pos-approach,")][0]
+        self.assertEqual(row.split(",")[1], "True")
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

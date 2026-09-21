@@ -276,33 +276,64 @@ def cmd_history(args: argparse.Namespace) -> int:
     data = load(path)
     history = data.get("history")
     history = [h for h in history if isinstance(h, dict)] if isinstance(history, list) else []
-    needle = (getattr(args, "grep", "") or os.environ.get("JEV_TRACE_HISTORY_GREP", "")).strip().lower()
-    if needle:
-        history = [
-            h
-            for h in history
-            if needle in str(h.get("pick") or "").lower()
-            or needle in str(h.get("kind") or "").lower()
-        ]
-    for bound, op in ((getattr(args, "since", None), ">="), (getattr(args, "before", None), "<=")):
-        if bound is None:
-            continue
-        bound_ts = _ts_arg(bound)
-        if bound_ts is None:
-            sys.stderr.write("bad time bound: %s\n" % bound)
-            return 2
-        history = [
-            h
-            for h in history
-            if isinstance(h.get("ts"), (int, float))
-            and not isinstance(h.get("ts"), bool)
-            and (h["ts"] >= bound_ts if op == ">=" else h["ts"] <= bound_ts)
-        ]
-    limit = getattr(args, "limit", None)
-    if isinstance(limit, int) and limit >= 0:
-        history = history[-limit:] if limit else []
-    if getattr(args, "reverse", False):
-        history = history[::-1]
+    def _filtered(items: list) -> list | None:
+        needle = (
+            getattr(args, "grep", "") or os.environ.get("JEV_TRACE_HISTORY_GREP", "")
+        ).strip().lower()
+        if needle:
+            items = [
+                h
+                for h in items
+                if needle in str(h.get("pick") or "").lower()
+                or needle in str(h.get("kind") or "").lower()
+            ]
+        for bound, op in ((getattr(args, "since", None), ">="), (getattr(args, "before", None), "<=")):
+            if bound is None:
+                continue
+            bound_ts = _ts_arg(bound)
+            if bound_ts is None:
+                sys.stderr.write("bad time bound: %s\n" % bound)
+                return None
+            items = [
+                h
+                for h in items
+                if isinstance(h.get("ts"), (int, float))
+                and not isinstance(h.get("ts"), bool)
+                and (h["ts"] >= bound_ts if op == ">=" else h["ts"] <= bound_ts)
+            ]
+        limit = getattr(args, "limit", None)
+        if isinstance(limit, int) and limit >= 0:
+            items = items[-limit:] if limit else []
+        if getattr(args, "reverse", False):
+            items = items[::-1]
+        return items
+
+    history = _filtered(history)
+    if history is None:
+        return 2
+
+    if getattr(args, "watch", 0.0) and args.watch > 0:
+        import time as _time
+
+        try:
+            max_ticks = int(os.environ.get("JEV_TRACE_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        while max_ticks <= 0 or ticks < max_ticks:
+            fresh = load(path).get("history")
+            fresh = (
+                [h for h in fresh if isinstance(h, dict)]
+                if isinstance(fresh, list)
+                else []
+            )
+            filtered = _filtered(fresh)
+            tick = {"ts": int(_time.time()), "picks": len(filtered) if filtered is not None else None}
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            _time.sleep(args.watch)
+        return 0
     field = getattr(args, "field", "") or ""
     if field:
         values = [_dig(entry, field) for entry in history]
@@ -632,6 +663,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--since", default=None, help="Only picks with ts >= epoch seconds or ISO8601")
     hist_cmd.add_argument("--grep", default="", help="Only picks whose pick/kind contains SUBSTR (case-insensitive; default JEV_TRACE_HISTORY_GREP)")
     hist_cmd.add_argument("--before", default=None, help="Only picks with ts <= epoch seconds or ISO8601")
+    hist_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,picks} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     hist_cmd.set_defaults(func=cmd_history)
     return parser
 

@@ -1004,6 +1004,35 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(len(ticks), 2)
             self.assertTrue(all(t["notes"] == 2 for t in ticks))
 
+    def test_history_watch_emits_pick_ticks(self) -> None:
+        import io
+        import os as _os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps(
+                    {"history": [{"ts": 1, "kind": "skill", "pick": "a"},
+                                 {"ts": 2, "kind": "skill", "pick": "b"}]}
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = tr.main(
+                        ["--file", str(path), "history", "--watch", "0.01"]
+                    )
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(t["picks"] == 2 for t in ticks))
+
     def test_jev_apply_trace_fills_forgotten_plan(self) -> None:
         jev_path = ROOT / "skills" / "jev-consult" / "scripts" / "jev.py"
         spec = importlib.util.spec_from_file_location("jev_consult_jev", jev_path)

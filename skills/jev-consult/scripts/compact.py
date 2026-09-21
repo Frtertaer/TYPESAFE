@@ -1306,7 +1306,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-o", "--output", help="Write result JSON here instead of stdout.")
     parser.add_argument("--trace", help="Optional .jev-trace.json; matching file_path stays.")
     parser.add_argument("--goal", default="")
-    parser.add_argument("--keep-threshold", type=float, default=KEEP_THRESHOLD)
+    try:
+        env_keep = float(os.environ.get("JEV_KEEP_THRESHOLD", "") or KEEP_THRESHOLD)
+    except ValueError:
+        env_keep = KEEP_THRESHOLD
+    parser.add_argument("--keep-threshold", type=float, default=env_keep)
     try:
         env_preserve = int(os.environ.get("JEV_PRESERVE_RECENT", "") or PRESERVE_RECENT)
     except ValueError:

@@ -1448,6 +1448,42 @@ class PreserveRecentEnvTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         return _json.loads(buf.getvalue())
 
+    def test_keep_threshold_env_default(self):
+        import json as _json
+
+        messages = [{"role": "user", "content": "compress"}]
+        for i in range(4):
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "t%d" % i,
+                            "name": "Read",
+                            "input": {"file_path": "f%d.py" % i},
+                        }
+                    ],
+                }
+            )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t%d" % i,
+                            "content": "blob " * 200,
+                        }
+                    ],
+                }
+            )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.json"
+            path.write_text(_json.dumps(messages), encoding="utf-8")
+            bogus = self._run(path, {"JEV_KEEP_THRESHOLD": "bogus"})
+            self.assertGreater(bogus["stats"]["messagesBefore"], 0)
+
     def test_env_zero_pins_only_first(self):
         import json as _json
 

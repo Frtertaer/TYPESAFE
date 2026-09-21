@@ -533,6 +533,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the FIELD value of each entry, one per line (a.b digs into nested objects)",
     )
     parser.add_argument(
+        "--uniq",
+        action="store_true",
+        default=os.environ.get("JEV_DECISIONS_UNIQ", "").strip().lower() in ("1", "true", "yes"),
+        help="With --jq: print each value only once (first occurrence wins)",
+    )
+    parser.add_argument(
         "--errors",
         action="store_true",
         help="Print the unparseable jsonl lines with line numbers",
@@ -805,6 +811,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.jq:
         values = [_dig(item, args.jq) for item in (entries[::-1] if getattr(args, "reverse", False) else entries)]
+        if getattr(args, "uniq", False):
+            seen = set()
+            uniq_values = []
+            for value in values:
+                key = json.dumps(value, sort_keys=True) if not isinstance(value, str) else value
+                if key in seen:
+                    continue
+                seen.add(key)
+                uniq_values.append(value)
+            values = uniq_values
         if args.json:
             sys.stdout.write(json.dumps({"field": args.jq, "values": values}, indent=2) + "\n")
         else:

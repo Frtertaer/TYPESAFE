@@ -1760,5 +1760,22 @@ class PruneTest(unittest.TestCase):
             line = jsonl_path.read_text(encoding="utf-8").strip()
             self.assertEqual(json.loads(line)["harness"], "claude")
 
+    def test_jq_uniq_dedupes_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "harness": "claude"},
+                    {"ts": 2, "harness": "codex"},
+                    {"ts": 3, "harness": "claude"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--jq", "harness", "--uniq")
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(proc.stdout.split(), ["claude", "codex"])
+            proc = self.run_cli("--file", str(path), "--jq", "harness")
+            self.assertEqual(proc.stdout.split(), ["claude", "codex", "claude"])
+
 if __name__ == "__main__":
     unittest.main()

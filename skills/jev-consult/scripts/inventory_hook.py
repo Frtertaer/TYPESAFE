@@ -331,9 +331,10 @@ def handle(
             write_sidecar(cwd / SIDECAR_NAME, harness, prompt, picked, extra)
         except OSError:
             pass
+        no_miss = os.environ.get("JEV_HOOK_NOMISS", "").strip() in {"1", "true", "yes"}
         miss_path = cwd / MISS_NAME
         try:
-            if picked:
+            if picked or no_miss:
                 clear_miss(miss_path)
             elif tokens(prompt):
                 write_miss(miss_path, harness, prompt)

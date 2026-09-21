@@ -102,6 +102,23 @@ class InventoryHookTests(unittest.TestCase):
             self.assertIn("jwt-auth", out["hookSpecificOutput"]["additionalContext"])
             self.assertFalse((Path(tmp) / ".jev-tools.json").exists())
 
+    def test_no_miss_env_skips_miss_write(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_NOMISS": "1"}):
+                out = HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "paint a mural today",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            self.assertFalse((Path(tmp) / ".jev-tools-miss.json").exists())
+            self.assertTrue((Path(tmp) / ".jev-tools.json").exists())
+
     def test_hook_off_env_short_circuits(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

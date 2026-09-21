@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -289,6 +290,66 @@ class ApplyFillInternalsTests(unittest.TestCase):
         self.assertEqual(FILL.item_for_pick("plugin:jwt", hits)["kind"], "plugin")
         self.assertEqual(FILL.item_for_pick(hits[0]["id"], hits)["name"], "jwt")
         self.assertEqual(FILL.item_for_pick("jwt", hits)["kind"], "plugin")
+
+
+class ApplyFillE2ETests(unittest.TestCase):
+    """Subprocess: stable fail-open tags without network or Hermes."""
+
+    SCRIPT = SCRIPTS / "apply_fill.py"
+
+    def _run(self, argv: list[str], cwd: str | None = None, home: str | None = None):
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        if home:
+            env["USERPROFILE"] = home
+            env["HOME"] = home
+        proc = subprocess.run(
+            [sys.executable, str(self.SCRIPT)] + argv,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            env=env,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stdout.strip()
+
+    def test_no_task_tag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self._run(["--cwd", tmp], cwd=tmp, home=tmp), "no_task")
+
+    def test_non_hermes_dest_is_human(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(
+                ["--task", "x", "--harness", "codex", "--cwd", tmp], cwd=tmp, home=tmp
+            )
+            self.assertEqual(out, "human")
+
+    def test_from_miss_missing_is_no_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(["--from-miss", "--cwd", tmp], cwd=tmp, home=tmp)
+            self.assertEqual(out, "no_task")
+
+    def test_blocked_pick_tag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(
+                [
+                    "--task",
+                    "x",
+                    "--harness",
+                    "hermes",
+                    "--cwd",
+                    tmp,
+                    "--pick",
+                    "plugin:exploit kit",
+                ],
+                cwd=tmp,
+                home=tmp,
+            )
+            self.assertEqual(out, "blocked")
 
 
 if __name__ == "__main__":

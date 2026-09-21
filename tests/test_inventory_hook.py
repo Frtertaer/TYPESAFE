@@ -1585,6 +1585,23 @@ class DedupeTests(unittest.TestCase):
             )
         self.assertEqual(len(calls), 2)
 
+    def test_corrupt_sidecar_does_not_dedupe(self) -> None:
+        calls = []
+
+        def counting_pick(prompt, harness, picked):
+            calls.append(prompt)
+            return skip_pick(prompt, harness, picked)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".jev-tools.json").write_text("{broken", encoding="utf-8")
+            HOOK.handle(
+                self._payload("Add JWT access tokens in Python", tmp),
+                items=self._items(),
+                harness="claude-code",
+                pick_fn=counting_pick,
+            )
+        self.assertEqual(len(calls), 1)
+
     def test_stale_sidecar_does_not_dedupe(self) -> None:
         import time as _time
         calls = []

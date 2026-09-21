@@ -385,6 +385,18 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(scored, sorted(scored))
         self.assertTrue(all(s is None for s in scores[len(scored):]))
 
+    def test_min_covers_fails_thin_tags(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--min-covers", "1", "--quiet"])
+        self.assertEqual(rc, 0)
+        with redirect_stdout(buf):
+            rc = te.main(["--min-covers", "4", "--quiet"])
+        self.assertEqual(rc, 1)
+        with redirect_stdout(buf):
+            te.main(["--min-covers", "4", "--covers"])
+        self.assertIn("below --min-covers", buf.getvalue())
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

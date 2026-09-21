@@ -142,6 +142,13 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Sort rows by score ascending (weakest first, unscored last).",
     )
+    parser.add_argument(
+        "--min-covers",
+        metavar="N",
+        type=int,
+        default=0,
+        help="Exit 1 when any covers tag has fewer than N cases.",
+    )
     parser.add_argument("--quiet", action="store_true", help="Print only the verdict line.")
     parser.add_argument(
         "--summary",
@@ -299,25 +306,39 @@ def main(argv: list[str] | None = None) -> int:
             rows = sorted(rows, key=lambda r: (r["score"] is None, r["score"]))
         return rows
 
-    if args.covers or args.covers_map:
+    def _covers_counts() -> dict[str, int]:
         counts: dict[str, int] = {}
+        for row in result["cases"]:
+            for tag in row["covers"] or []:
+                counts[tag] = counts.get(tag, 0) + 1
+        return counts
+
+    def _covers_ok() -> bool:
+        return not args.min_covers or all(
+            n >= args.min_covers for n in _covers_counts().values()
+        )
+
+    if args.covers or args.covers_map:
+        counts = _covers_counts()
         id_map: dict[str, list[str]] = {}
         uncovered: list[str] = []
         for row in _rows():
             tags = row["covers"] or []
             for tag in tags:
-                counts[tag] = counts.get(tag, 0) + 1
                 id_map.setdefault(tag, []).append(row["id"])
             if not tags:
                 uncovered.append(row["id"])
         for tag in sorted(counts):
+            low = "  <-- below --min-covers" if (
+                args.min_covers and counts[tag] < args.min_covers
+            ) else ""
             if args.covers_map:
-                sys.stdout.write("%s: %s\n" % (tag, ", ".join(id_map[tag])))
+                sys.stdout.write("%s: %s%s\n" % (tag, ", ".join(id_map[tag]), low))
             else:
-                sys.stdout.write("%s %d\n" % (tag, counts[tag]))
+                sys.stdout.write("%s %d%s\n" % (tag, counts[tag], low))
         for cid in uncovered:
             sys.stdout.write("uncovered: %s\n" % cid)
-        return 0 if result["ok"] else 1
+        return 0 if (result["ok"] and _covers_ok()) else 1
     if args.dist:
         buckets: dict[int, int] = {}
         unscored = 0
@@ -393,6 +414,8 @@ def main(argv: list[str] | None = None) -> int:
         not row["ok"] or (not row["should_trigger"] and (row["score"] or 0) > 0)
         for row in result["cases"]
     ):
+        return 1
+    if not _covers_ok():
         return 1
     return 0 if result["ok"] else 1
 

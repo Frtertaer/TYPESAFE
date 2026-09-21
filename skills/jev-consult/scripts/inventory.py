@@ -718,6 +718,15 @@ def hook_budget_seconds() -> float:
     return _policy_float_key(HOOK_BUDGET_KEY, DEFAULT_HOOK_BUDGET_SECONDS)
 
 
+HOOK_JEV_TIMEOUT_KEY = "hook_jev_timeout_seconds"
+DEFAULT_HOOK_JEV_TIMEOUT_SECONDS = 8.0
+
+
+def hook_jev_timeout_seconds() -> float:
+    """HTTP timeout for the one Jev call inside the prompt hook."""
+    return _policy_float_key(HOOK_JEV_TIMEOUT_KEY, DEFAULT_HOOK_JEV_TIMEOUT_SECONDS)
+
+
 def stop_words() -> set:
     """IDF stop-words. Tunable in policy.json (stop_words); falls back to STOP."""
     words = _policy_dict().get("stop_words")

@@ -55,7 +55,12 @@ REQUIRED_KEYS = (
 PROB_FIELDS = ("confidence_floor", "noul_yes", "noul_no", "noul_unsure", "strong_pick", "tight_gap")
 ESCALATE_PROB_FIELDS = ("confidence_below", "noul_near", "choice_gap_below")
 POSITIVE_INT_FIELDS = ("version", "question_soft_max", "question_hard_max", "choice_option_hard_max")
-NONNEG_NUM_FIELDS = ("catalog_cache_seconds", "sidecar_ttl_seconds")
+NONNEG_NUM_FIELDS = (
+    "catalog_cache_seconds",
+    "hook_budget_seconds",
+    "hook_jev_timeout_seconds",
+    "sidecar_ttl_seconds",
+)
 NONEMPTY_STR_FIELDS = ("model", "endpoint", "default", "role", "coder_role")
 ESCALATE_BOOL_FIELDS = ("irreversible",)
 KNOWN_ESCALATE_KEYS = ESCALATE_PROB_FIELDS + ESCALATE_BOOL_FIELDS
@@ -64,6 +69,7 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "catalogs",
     "hallucination",
     "hook_budget_seconds",
+    "hook_jev_timeout_seconds",
     "stop_words",
 )
 

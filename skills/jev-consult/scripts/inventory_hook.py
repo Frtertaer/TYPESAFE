@@ -30,6 +30,7 @@ from inventory import (  # noqa: E402
     format_note,
     format_winner_note,
     hook_budget_seconds,
+    hook_jev_timeout_seconds,
     picker_request,
     read_sidecar,
     resolve_picker,
@@ -43,7 +44,7 @@ from inventory import (  # noqa: E402
 )
 
 FILL_SCRIPT = _SCRIPTS / "peer_fill.py"
-HOOK_JEV_TIMEOUT = 8.0
+HOOK_JEV_TIMEOUT = hook_jev_timeout_seconds()
 
 LAST_DECISION: dict | None = None
 
@@ -94,9 +95,11 @@ def pick_with_jev(
     task: str,
     harness: str,
     picked: list[dict],
-    timeout: float = HOOK_JEV_TIMEOUT,
+    timeout: float | None = None,
 ) -> dict:
     """One Jev call. Never prints keys. Fail-open on missing key, timeout, or errors."""
+    if timeout is None:
+        timeout = hook_jev_timeout_seconds()
     if not picked:
         return {"status": "empty", "winner": None}
     try:

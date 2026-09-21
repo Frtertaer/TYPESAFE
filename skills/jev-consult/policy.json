@@ -16,6 +16,7 @@
   "tight_gap": 0.08,
   "sidecar_ttl_seconds": 14400,
   "hook_budget_seconds": 12,
+  "hook_jev_timeout_seconds": 8,
   "must_ask": [
     "approach",
     "keep_vs_change",

@@ -591,6 +591,31 @@ class PickWithJevTests(unittest.TestCase):
         self.assertEqual(out["probabilities"], {"skill:beta": 0.95})
         self.assertIsInstance(out["latency_ms"], int)
 
+    def test_timeout_defaults_to_policy_value(self) -> None:
+        seen = {}
+
+        class FakeJev:
+            @staticmethod
+            def load_api_key():
+                return "k"
+
+            @staticmethod
+            def load_policy(path=None):
+                return {}
+
+            @staticmethod
+            def post_systemone(state, questions, policy, **kwargs):
+                seen.update(kwargs)
+                return {"answers": {}, "model": "fake-0"}
+
+            @staticmethod
+            def decide(ans, policy, irreversible=False):
+                return {"action": "proceed", "picks": {}, "probabilities": {}}
+
+        sys.modules["jev"] = FakeJev
+        HOOK.pick_with_jev("t", "hermes", PICKED)
+        self.assertEqual(seen.get("timeout"), INV.hook_jev_timeout_seconds())
+
     def test_non_numeric_need_still_attached_as_none(self) -> None:
         sys.modules["jev"] = fake_jev(
             decide_ret={
@@ -909,6 +934,13 @@ class BudgetGuardTests(unittest.TestCase):
             self.assertEqual(INV.hook_budget_seconds(), INV.DEFAULT_HOOK_BUDGET_SECONDS)
         with patch.object(INV.json, "loads", return_value={"hook_budget_seconds": -5}):
             self.assertEqual(INV.hook_budget_seconds(), 0.0)
+
+    def test_hook_jev_timeout_seconds_policy(self) -> None:
+        self.assertEqual(INV.hook_jev_timeout_seconds(), 8.0)
+        with patch.object(INV.json, "loads", side_effect=ValueError):
+            self.assertEqual(INV.hook_jev_timeout_seconds(), INV.DEFAULT_HOOK_JEV_TIMEOUT_SECONDS)
+        with patch.object(INV.json, "loads", return_value={"hook_jev_timeout_seconds": 2.5}):
+            self.assertEqual(INV.hook_jev_timeout_seconds(), 2.5)
 
 
 class InventoryInternalsTests(unittest.TestCase):

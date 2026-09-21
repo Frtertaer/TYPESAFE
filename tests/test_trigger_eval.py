@@ -787,6 +787,7 @@ class TriggerEvalTests(unittest.TestCase):
             next(l for l in buf.getvalue().splitlines() if l.startswith("{"))
         )
         self.assertFalse(tick["coverage_ok"])
+        self.assertAlmostEqual(tick["min_coverage"], 0.99)
 
     def test_watch_appends_ticks_to_out_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

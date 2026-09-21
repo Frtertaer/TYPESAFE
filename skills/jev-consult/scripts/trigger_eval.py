@@ -408,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:
                 "worst_positive": cur["worst_positive"],
                 "best_negative": cur["best_negative"],
                 "coverage": cur["coverage"],
+                "min_coverage": args.min_coverage,
                 "coverage_ok": (
                     args.min_coverage is None
                     or cur["coverage"] >= args.min_coverage

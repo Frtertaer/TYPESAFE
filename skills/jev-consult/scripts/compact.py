@@ -176,8 +176,10 @@ def abridge_live(
     return abridge(text, LIVE_HEAD, LIVE_TAIL)
 
 
-def is_pinned(index: int, total: int, preserve_recent: int) -> bool:
-    return index == 0 or index >= total - preserve_recent
+def is_pinned(
+    index: int, total: int, preserve_recent: int, keep_first: int = 0
+) -> bool:
+    return index == 0 or index < keep_first or index >= total - preserve_recent
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -562,6 +564,7 @@ class ToolCall:
 def collect_tool_calls(
     messages: list[dict[str, Any]],
     preserve_recent: int,
+    keep_first: int = 0,
 ) -> list[ToolCall]:
     results: dict[str, tuple[int, dict[str, Any]]] = {}
     for index, message in enumerate(messages):
@@ -585,8 +588,8 @@ def collect_tool_calls(
                     result_index=result_index,
                     result_chars=len(result.get("text") or ""),
                     is_error=bool(result.get("isError")),
-                    pinned=is_pinned(call_index, total, preserve_recent)
-                    or is_pinned(result_index, total, preserve_recent),
+                    pinned=is_pinned(call_index, total, preserve_recent, keep_first)
+                    or is_pinned(result_index, total, preserve_recent, keep_first),
                 )
             )
     return calls
@@ -761,6 +764,7 @@ def fit_state(
     max_tokens = int(options.get("max_state_tokens") or MAX_STATE_TOKENS)
     preserve_raw = options.get("preserve_recent")
     preserve = int(preserve_raw) if preserve_raw is not None else PRESERVE_RECENT
+    keep_first = int(options.get("keep_first") or 0)
     keep_pattern = options.get("keep_text") or ""
     keep_re = None
     if keep_pattern:
@@ -810,7 +814,7 @@ def fit_state(
     def pinned(entry: dict[str, Any]) -> bool:
         if keep_re is not None and keep_re.search(str(entry.get("text") or "")):
             return True
-        return is_pinned(int(entry["i"]), len(messages), preserve)
+        return is_pinned(int(entry["i"]), len(messages), preserve, keep_first)
 
     indices = list(range(len(history)))
     order = [i for i in indices if not pinned(history[i])] + [
@@ -1075,10 +1079,11 @@ def compact(
         messages = flatten_session_records(messages)
     preserve_raw = opts.get("preserve_recent")
     preserve = int(preserve_raw) if preserve_raw is not None else PRESERVE_RECENT
+    keep_first = int(opts.get("keep_first") or 0)
     keep_threshold = float(opts.get("keep_threshold") if opts.get("keep_threshold") is not None else KEEP_THRESHOLD)
     head_chars = int(opts.get("truncate_head_chars") if opts.get("truncate_head_chars") is not None else TRUNCATE_HEAD_CHARS)
     messages = [normalize_message(item) for item in messages]
-    calls = collect_tool_calls(messages, preserve)
+    calls = collect_tool_calls(messages, preserve, keep_first)
     pin_errors_and_trace(calls, opts.get("trace"))
     keep_re = None
     if opts.get("keep_text"):
@@ -1206,6 +1211,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
         "goal": args.goal,
         "keep_threshold": args.keep_threshold,
         "preserve_recent": args.preserve_recent,
+        "keep_first": args.keep_first,
         "truncate_head_chars": args.truncate_head_chars,
         "min_reduction": args.min_reduction,
         "keep_text": args.keep_text or os.environ.get("JEV_KEEP_TEXT", ""),
@@ -1320,6 +1326,11 @@ def main(argv: list[str] | None = None) -> int:
         env_preserve = PRESERVE_RECENT
     parser.add_argument("--preserve-recent", type=int, default=max(0, env_preserve))
     try:
+        env_first = int(os.environ.get("JEV_KEEP_FIRST", "") or 0)
+    except ValueError:
+        env_first = 0
+    parser.add_argument("--keep-first", type=int, default=max(0, env_first), help="Always keep the first N messages pinned")
+    try:
         env_head = int(os.environ.get("JEV_TRUNCATE_HEAD", "") or TRUNCATE_HEAD_CHARS)
     except ValueError:
         env_head = TRUNCATE_HEAD_CHARS
@@ -1423,6 +1434,7 @@ def main(argv: list[str] | None = None) -> int:
                     "goal": args.goal,
                     "keep_threshold": args.keep_threshold,
                     "preserve_recent": args.preserve_recent,
+                    "keep_first": args.keep_first,
                     "truncate_head_chars": args.truncate_head_chars,
                     "min_reduction": args.min_reduction,
                     "keep_text": args.keep_text or os.environ.get("JEV_KEEP_TEXT", ""),

@@ -74,6 +74,21 @@ class CompactTests(unittest.TestCase):
         self.assertTrue(C.is_pinned(0, 10, 3))
         self.assertTrue(C.is_pinned(9, 10, 3))
         self.assertFalse(C.is_pinned(5, 10, 3))
+        self.assertTrue(C.is_pinned(1, 10, 3, keep_first=2))
+        self.assertFalse(C.is_pinned(2, 10, 3, keep_first=2))
+
+    def test_collect_tool_calls_keep_first_pins_head(self):
+        messages = [
+            msg("user", "Fix the failing test. Never edit src/generated."),
+            msg("assistant", "", [use("tool-1", "Read", {"file_path": "src/a.ts"})]),
+            msg("user", "", results=[result("tool-1", "file contents here")]),
+            msg("assistant", "", [use("tool-2", "Read", {"file_path": "src/b.ts"})]),
+            msg("user", "", results=[result("tool-2", "other contents")]),
+            msg("assistant", "done"),
+        ]
+        calls = C.collect_tool_calls(messages, preserve_recent=1, keep_first=3)
+        pinned = {c.tool_use_id: c.pinned for c in calls}
+        self.assertEqual(pinned, {"tool-1": True, "tool-2": False})
 
     def test_collect_pairs_and_renumbers(self):
         messages = [

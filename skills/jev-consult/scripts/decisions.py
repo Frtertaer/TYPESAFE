@@ -350,8 +350,12 @@ def main(argv: list[str] | None = None) -> int:
         env_tail = int(os.environ.get("JEV_DECISIONS_TAIL", "") or 0)
     except ValueError:
         env_tail = 0
+    try:
+        env_first = int(os.environ.get("JEV_DECISIONS_FIRST", "") or 0)
+    except ValueError:
+        env_first = 0
     parser.add_argument("--tail", type=int, default=max(0, env_tail), help="Print last N entries")
-    parser.add_argument("--first", type=int, default=0, help="Print first N entries")
+    parser.add_argument("--first", type=int, default=max(0, env_first), help="Print first N entries")
     parser.add_argument(
         "--top", type=int, default=0, help="Cap count-list output (--statuses et al.) to N rows"
     )

@@ -269,6 +269,34 @@ class CliTest(unittest.TestCase):
             ]
             self.assertEqual(len(shown), 2)
 
+    def test_first_env_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {
+                        "ts": 1700000000,
+                        "jev_status": "winner",
+                        "prompt_head": "alpha-entry",
+                    },
+                    {
+                        "ts": 1700000001,
+                        "jev_status": "winner",
+                        "prompt_head": "beta-entry",
+                    },
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), env={"JEV_DECISIONS_FIRST": "1"}
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            shown = [
+                l for l in proc.stdout.splitlines() if re.match(r"^\d{2}-\d{2} ", l)
+            ]
+            self.assertEqual(len(shown), 1)
+            self.assertIn("alpha-entry", shown[0])
+
     def test_stats_iso_fields(self):
         entries = [{"ts": 1700000000}, {"ts": 1700086400}]
         stats = decisions.summarize(entries)

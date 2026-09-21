@@ -198,7 +198,9 @@ def cmd_record(args: argparse.Namespace) -> int:
         notes = data.get("notes")
         if not isinstance(notes, list):
             notes = []
-        notes.append({"ts": time.time(), "text": args.note})
+        now = time.time()
+        iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+        notes.append({"ts": now, "iso": iso, "text": args.note})
         data["notes"] = notes[-50:]
     save(data, path)
     emit({"path": str(path), "trace": data})

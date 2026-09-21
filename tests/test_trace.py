@@ -281,6 +281,7 @@ class TraceTests(unittest.TestCase):
             data = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(len(data["notes"]), 2)
             self.assertEqual(data["notes"][0]["text"], "waiting on CI")
+            self.assertRegex(data["notes"][0]["iso"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
             self.assertGreater(data["notes"][0]["ts"], 0)
             self.assertEqual(data["notes"][1]["text"], "second")
 

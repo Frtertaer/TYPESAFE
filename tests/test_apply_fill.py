@@ -110,6 +110,27 @@ class ApplyFillTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(calls, [])
 
+    def test_json_outcome_emits_object(self) -> None:
+        import io
+
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            with patch("sys.stdout", buf):
+                rc = FILL.fill(
+                    "JWT",
+                    "claude-code",
+                    cwd,
+                    "plugin:fmsg-platform",
+                    False,
+                    cwd / "ask.json",
+                    as_json=True,
+                )
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["outcome"], "human")
+            self.assertEqual(out["detail"], "human")
+
     def test_blocked_pick_skips(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)

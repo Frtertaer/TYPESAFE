@@ -263,9 +263,15 @@ def fill(
     pick: str | None,
     dry_run: bool,
     ask_path: Path,
+    as_json: bool = False,
 ) -> int:
     def emit(msg: str) -> None:
-        sys.stdout.write(msg + "\n")
+        if as_json:
+            sys.stdout.write(
+                json.dumps({"outcome": msg.split()[0], "detail": msg}) + "\n"
+            )
+        else:
+            sys.stdout.write(msg + "\n")
         append_decision(
             {
                 "ts": int(time.time()),
@@ -344,6 +350,11 @@ def main() -> int:
     parser.add_argument("--from-miss", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--ask-file", default="")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the outcome as a JSON object instead of a text line.",
+    )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     task = args.task
@@ -354,7 +365,10 @@ def main() -> int:
         if dest == "auto":
             dest = str(miss.get("harness") or "auto")
     if not task.strip():
-        sys.stdout.write("no_task\n")
+        if args.json:
+            sys.stdout.write(json.dumps({"outcome": "no_task"}) + "\n")
+        else:
+            sys.stdout.write("no_task\n")
         return 0
     if dest == "auto":
         dest = detect_harness(Path(__file__))
@@ -367,9 +381,13 @@ def main() -> int:
             args.pick.strip() or None,
             args.dry_run,
             ask_path,
+            args.json,
         )
     except Exception:
-        sys.stdout.write("fail_open\n")
+        if args.json:
+            sys.stdout.write(json.dumps({"outcome": "fail_open"}) + "\n")
+        else:
+            sys.stdout.write("fail_open\n")
         return 0
 
 

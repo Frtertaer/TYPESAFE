@@ -39,6 +39,7 @@ from inventory import (  # noqa: E402
     resolve_picker,
     scan_cached,
     shortlist,
+    sidecar_age_seconds,
     sidecar_fresh,
     sidecar_items,
     tokens,
@@ -255,8 +256,12 @@ def handle(
     cwd = extract_cwd(payload)
     deduped = None
     stale_match = False
+    sidecar_age_s = None
     if cwd is not None:
         prior = read_sidecar(cwd / SIDECAR_NAME)
+        age = sidecar_age_seconds(prior)
+        if age is not None:
+            sidecar_age_s = int(age)
         norm = lambda s: " ".join(str(s or "").split())[:500].lower()
         if prior and norm(prior.get("task")) == norm(prompt):
             if sidecar_fresh(prior):
@@ -305,6 +310,7 @@ def handle(
             "winner": {"kind": winner_out.get("kind"), "name": winner_out.get("name")}
             if winner_out
             else None,
+            "sidecar_age_s": sidecar_age_s,
         }
         append_decision(LAST_DECISION)
         if not note:
@@ -390,6 +396,7 @@ def handle(
             and picker["latency_ms"] > hook_budget_seconds() * 1000
         ),
         "stale_sidecar": stale_match,
+        "sidecar_age_s": sidecar_age_s,
     }
     append_decision(LAST_DECISION)
     if note:
@@ -465,6 +472,7 @@ def main(argv: list[str] | None = None) -> int:
             "dedupe": LAST_DECISION.get("dedupe"),
             "shortlist": len(LAST_DECISION.get("shortlist") or []),
             "latency_ms": LAST_DECISION.get("latency_ms"),
+            "sidecar_age_s": LAST_DECISION.get("sidecar_age_s"),
         }
         line = " ".join("%s=%s" % (k, v) for k, v in parts.items() if v is not None)
         if _debug_enabled(argv):

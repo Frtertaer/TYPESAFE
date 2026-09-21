@@ -704,6 +704,15 @@ class TtlEnvOverrideTests(unittest.TestCase):
             self.assertFalse(inv.sidecar_fresh(prior))
 
 
+class SidecarAgeTests(unittest.TestCase):
+    def test_age_seconds(self) -> None:
+        self.assertEqual(inv.sidecar_age_seconds({"written_at": 100.0}, now=140.0), 40.0)
+        self.assertEqual(inv.sidecar_age_seconds({"written_at": 140.0}, now=100.0), 0.0)
+        self.assertIsNone(inv.sidecar_age_seconds({}, now=100.0))
+        self.assertIsNone(inv.sidecar_age_seconds({"written_at": "x"}, now=100.0))
+        self.assertIsNone(inv.sidecar_age_seconds({"written_at": True}, now=100.0))
+
+
 class JevTimeoutEnvTests(unittest.TestCase):
     def test_env_override_wins(self) -> None:
         import os

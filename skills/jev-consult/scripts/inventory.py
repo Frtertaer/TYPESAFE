@@ -843,6 +843,14 @@ def sidecar_fresh(
     return age <= ttl
 
 
+def sidecar_age_seconds(payload: dict, now: float | None = None) -> float | None:
+    """Seconds since written_at, or None when the payload lacks a valid timestamp."""
+    written = payload.get("written_at") if isinstance(payload, dict) else None
+    if not isinstance(written, (int, float)) or isinstance(written, bool):
+        return None
+    return max(0.0, (time.time() if now is None else float(now)) - float(written))
+
+
 def sidecar_status(
     path: Path,
     ttl_seconds: float | None = None,

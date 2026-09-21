@@ -508,6 +508,28 @@ def cmd_notes(args: argparse.Namespace) -> int:
 def cmd_stats(args: argparse.Namespace) -> int:
     """One-shot summary: attempts, history/inspected counts, last pick, file age."""
     path = Path(args.file) if args.file else default_path()
+    if getattr(args, "watch", 0.0) and args.watch > 0:
+        import time as _time
+
+        try:
+            max_ticks = int(os.environ.get("JEV_TRACE_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        while max_ticks <= 0 or ticks < max_ticks:
+            cur = load(path)
+            tick = {
+                "ts": int(_time.time()),
+                "exists": path.is_file(),
+                "attempt_count": int(cur.get("attempt_count") or 0),
+                "history": len(cur.get("history") or []),
+                "inspected": len(cur.get("inspected") or []),
+            }
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            _time.sleep(args.watch)
+        return 0
     data = load(path)
     out: dict[str, Any] = {
         "exists": path.is_file(),
@@ -640,6 +662,7 @@ def build_parser() -> argparse.ArgumentParser:
     state_cmd.set_defaults(func=cmd_state)
     stats_cmd = sub.add_parser("stats", help="Summary: counts, last pick, file age")
     stats_cmd.add_argument("--out", default="", help="Write the stats JSON to PATH instead of stdout")
+    stats_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,exists,attempt_count,history,inspected} tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     stats_cmd.set_defaults(func=cmd_stats)
     notes_cmd = sub.add_parser("notes", help="List recorded notes (iso + text)")
     notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")

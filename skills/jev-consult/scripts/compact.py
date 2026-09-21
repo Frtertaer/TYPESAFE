@@ -1316,7 +1316,11 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         env_preserve = PRESERVE_RECENT
     parser.add_argument("--preserve-recent", type=int, default=max(0, env_preserve))
-    parser.add_argument("--truncate-head-chars", type=int, default=TRUNCATE_HEAD_CHARS)
+    try:
+        env_head = int(os.environ.get("JEV_TRUNCATE_HEAD", "") or TRUNCATE_HEAD_CHARS)
+    except ValueError:
+        env_head = TRUNCATE_HEAD_CHARS
+    parser.add_argument("--truncate-head-chars", type=int, default=max(0, env_head))
     parser.add_argument("--min-reduction", type=float, default=MIN_REDUCTION)
     parser.add_argument(
         "--dry-run",

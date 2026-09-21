@@ -392,6 +392,11 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         ids = buf.getvalue().split()
         self.assertEqual(len(ids), 2)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--uncovered", "--json"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(json.loads(buf.getvalue())["uncovered"]), 2)
 
     def test_csv_prints_table(self) -> None:
         buf = io.StringIO()

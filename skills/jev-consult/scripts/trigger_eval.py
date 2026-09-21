@@ -541,8 +541,11 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write("unscored %d\n" % unscored)
         return 0 if result["ok"] else 1
     if args.uncovered:
-        for cid in _uncovered():
-            sys.stdout.write("%s\n" % cid)
+        if args.json:
+            sys.stdout.write(json.dumps({"uncovered": _uncovered()}) + "\n")
+        else:
+            for cid in _uncovered():
+                sys.stdout.write("%s\n" % cid)
         strict_cov_ok = not args.strict or result["coverage"] >= 1.0
         return 0 if (result["ok"] and _coverage_ok() and strict_cov_ok) else 1
     if args.coverage:

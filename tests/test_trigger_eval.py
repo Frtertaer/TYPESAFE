@@ -448,6 +448,14 @@ class TriggerEvalTests(unittest.TestCase):
         row = json.loads(buf.getvalue())["cases"][0]
         self.assertIn("matched", row)
         self.assertTrue(row["matched"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--tokens", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertIn("pos-approach", payload)
+        self.assertIsInstance(payload["pos-approach"], list)
+        self.assertTrue(payload["pos-approach"])
 
     def test_unmatched_shows_missed_tokens(self) -> None:
         buf = io.StringIO()

@@ -110,6 +110,9 @@ def extract_cwd(payload: dict) -> Path | None:
 
 
 def event_name(payload: dict) -> str:
+    override = os.environ.get("JEV_HOOK_EVENT", "").strip()
+    if override:
+        return override
     return str(payload.get("hook_event_name") or payload.get("event") or "").strip()
 
 

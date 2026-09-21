@@ -740,6 +740,8 @@ class HandleBranchTests(unittest.TestCase):
                 self.assertEqual(HOOK.extract_cwd({"cwd": "/no/such/dir"}), Path(tmp))
             with patch.dict(os.environ, {"JEV_HOOK_CWD": "/no/such/dir"}):
                 self.assertIsNone(HOOK.extract_cwd({}))
+        with patch.dict(os.environ, {"JEV_HOOK_EVENT": "post_llm"}):
+            self.assertEqual(HOOK.event_name({"event": "UserPromptSubmit"}), "post_llm")
         self.assertEqual(
             HOOK.extract_prompt(
                 {

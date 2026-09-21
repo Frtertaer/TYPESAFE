@@ -80,6 +80,24 @@ class SmokeTests(unittest.TestCase):
         out = json.loads(proc.stdout)
         self.assertEqual({s["name"] for s in out["steps"]}, {"doctor_json"})
 
+    def test_fail_fast_stops_after_first_failure(self) -> None:
+        def boom(tmp):
+            raise RuntimeError("explode")
+
+        with patch.object(MOD, "_run", return_value=(1, "nope")), patch.object(
+            MOD, "step_policy", side_effect=boom
+        ):
+            import io
+
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = MOD.main(["--fail-fast"])
+        self.assertEqual(rc, 1)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(len(out["steps"]), 1)
+        self.assertEqual(out["steps"][0]["name"], "step")
+        self.assertIn("explode", out["steps"][0]["detail"])
+
     def test_step_failure_marks_not_ok(self) -> None:
         def boom(tmp):
             raise RuntimeError("explode")

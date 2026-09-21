@@ -288,6 +288,11 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="Comma-separated step names to run (default: all).",
     )
+    parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Stop after the first failing step.",
+    )
     args = parser.parse_args(argv)
     wanted = {s.strip() for s in args.only.split(",") if s.strip()}
     names = {name for name, _ in STEPS}
@@ -308,6 +313,8 @@ def main(argv: list[str] | None = None) -> int:
                 steps.append(fn(tmp))
             except Exception as exc:  # a crash is a failed step, not a crash
                 steps.append(_step(getattr(fn, "__name__", "step"), False, "raised %r" % exc))
+            if args.fail_fast and not steps[-1]["ok"]:
+                break
     ok = all(s["ok"] for s in steps)
     sys.stdout.write(json.dumps({"ok": ok, "steps": steps}, indent=2) + "\n")
     return 0 if ok else 1

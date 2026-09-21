@@ -72,6 +72,7 @@ KIND_SKILL = "skill"
 KIND_PLUGIN = "plugin"
 KIND_MCP = "mcp"
 HOOK_LIMIT = 6
+HOOK_LIMIT_KEY = "hook_limit"
 SIDECAR_NAME = ".jev-tools.json"
 MISS_NAME = ".jev-tools-miss.json"
 HARNESSES = ("hermes", "claude-code", "codex", "grok")
@@ -740,6 +741,23 @@ def hook_jev_timeout_seconds() -> float:
     except ValueError:
         pass
     return _policy_float_key(HOOK_JEV_TIMEOUT_KEY, DEFAULT_HOOK_JEV_TIMEOUT_SECONDS)
+
+
+def hook_limit() -> int:
+    """Shortlist size inside the prompt hook. Env JEV_HOOK_LIMIT > policy > default."""
+    try:
+        env = int(os.environ.get("JEV_HOOK_LIMIT", "") or -1)
+        if env >= 1:
+            return env
+    except ValueError:
+        pass
+    try:
+        policy = int(_policy_float_key(HOOK_LIMIT_KEY, float(HOOK_LIMIT)))
+        if policy >= 1:
+            return policy
+    except (TypeError, ValueError):
+        pass
+    return HOOK_LIMIT
 
 
 HOOK_JEV_RETRIES_KEY = "hook_jev_retries"

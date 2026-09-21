@@ -635,5 +635,23 @@ class JevTimeoutEnvTests(unittest.TestCase):
             )
 
 
+class HookLimitEnvTests(unittest.TestCase):
+    def test_env_override_wins(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"JEV_HOOK_LIMIT": "3"}):
+            self.assertEqual(inv.hook_limit(), 3)
+
+    def test_env_invalid_and_zero_fall_back(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"JEV_HOOK_LIMIT": "bogus"}):
+            self.assertGreaterEqual(inv.hook_limit(), 1)
+        with patch.dict(os.environ, {"JEV_HOOK_LIMIT": "0"}):
+            self.assertGreaterEqual(inv.hook_limit(), 1)
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

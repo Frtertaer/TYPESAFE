@@ -20,7 +20,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 from inventory import (  # noqa: E402
-    HOOK_LIMIT,
+    hook_limit,
     MISS_NAME,
     SIDECAR_NAME,
     append_decision,
@@ -266,7 +266,7 @@ def handle(
         picked = [explicit_winner]
         picker = {"status": "winner", "winner": explicit_winner}
     else:
-        picked = shortlist(catalog, prompt, HOOK_LIMIT, [hit["name"] for hit in hits])
+        picked = shortlist(catalog, prompt, hook_limit(), [hit["name"] for hit in hits])
         if picked and time.monotonic() - t0 >= hook_budget_seconds():
             picker = {"status": "budget", "winner": None}
         elif picked:

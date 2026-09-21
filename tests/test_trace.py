@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -162,6 +163,29 @@ class TraceTests(unittest.TestCase):
             want = hashlib.sha256("first".encode("utf-8")).hexdigest()[:12]
             self.assertEqual(notes[0]["sha"], want)
             self.assertEqual(notes[1]["sha"], want)
+
+    def test_notes_grep_filters_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            from io import StringIO
+            from contextlib import redirect_stdout
+
+            with redirect_stdout(StringIO()):
+                tr.main(["--file", str(path), "record", "--pick", "a", "--note", "jwt tokens"])
+                tr.main(["--file", str(path), "record", "--pick", "b", "--note", "unrelated"])
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = tr.main(["--file", str(path), "notes", "--grep", "JWT"])
+            self.assertEqual(code, 0)
+            out = buf.getvalue()
+            self.assertIn("jwt tokens", out)
+            self.assertNotIn("unrelated", out)
+            buf = StringIO()
+            with patch.dict(os.environ, {"JEV_TRACE_GREP": "unrel"}):
+                with redirect_stdout(buf):
+                    tr.main(["--file", str(path), "notes"])
+            self.assertNotIn("jwt tokens", buf.getvalue())
+            self.assertIn("unrelated", buf.getvalue())
 
     def test_notes_reverse_lists_newest_first(self) -> None:
         import time

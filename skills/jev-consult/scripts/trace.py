@@ -386,6 +386,9 @@ def cmd_notes(args: argparse.Namespace) -> int:
     want_harness = getattr(args, "harness", "") or ""
     if want_harness:
         notes = [n for n in notes if isinstance(n, dict) and n.get("harness") == want_harness]
+    needle = (getattr(args, "grep", "") or os.environ.get("JEV_TRACE_GREP", "")).strip().lower()
+    if needle:
+        notes = [n for n in notes if isinstance(n, dict) and needle in str(n.get("text") or "").lower()]
     limit = getattr(args, "limit", None)
     if isinstance(limit, int) and limit >= 0:
         notes = notes[-limit:] if limit else []
@@ -543,6 +546,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--out", default="", help="Write the notes output to PATH instead of stdout")
     notes_cmd.add_argument("--field", default="", help="Print only this field per note (a.b digs into nested objects)")
     notes_cmd.add_argument("--reverse", action="store_true", help="List notes newest-first")
+    notes_cmd.add_argument("--grep", default="", help="Only notes whose text contains SUBSTR (case-insensitive; default JEV_TRACE_GREP)")
     notes_cmd.set_defaults(func=cmd_notes)
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")

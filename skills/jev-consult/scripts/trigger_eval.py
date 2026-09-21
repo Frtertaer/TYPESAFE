@@ -516,7 +516,8 @@ def main(argv: list[str] | None = None) -> int:
                 "coverage: %d/%d (%.0f%%)\n"
                 % (result["hits"], len(result["cases"]), result["coverage"] * 100)
             )
-        return 0 if (result["ok"] and _coverage_ok()) else 1
+        strict_cov_ok = not args.strict or result["coverage"] >= 1.0
+        return 0 if (result["ok"] and _coverage_ok() and strict_cov_ok) else 1
     if args.ids:
         for row in _rows():
             sys.stdout.write("%s\n" % row["id"])

@@ -334,6 +334,32 @@ class TriggerEvalTests(unittest.TestCase):
                 rc = te.main(["--cases", str(path), "--strict"])
             self.assertEqual(rc, 1)
 
+    def test_strict_coverage_requires_all_hits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(
+                tmp,
+                [
+                    {
+                        "id": "p",
+                        "prompt": "jev consult pick decide between options choose approach wisely",
+                        "should_trigger": True,
+                    },
+                    {
+                        "id": "skip",
+                        "prompt": "something with no lexical tier",
+                        "should_trigger": True,
+                        "lexical": False,
+                    },
+                ],
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(["--cases", str(path), "--coverage"])
+            self.assertEqual(rc, 0)  # coverage gate not requested
+            with redirect_stdout(buf):
+                rc = te.main(["--cases", str(path), "--coverage", "--strict"])
+            self.assertEqual(rc, 1)  # non-lexical positive is a coverage miss
+
     def test_csv_prints_table(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

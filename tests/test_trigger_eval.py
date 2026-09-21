@@ -551,6 +551,7 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(len(ticks), 2)
         self.assertTrue(all(t["ok"] for t in ticks))
         self.assertIn("worst_positive", ticks[0])
+        self.assertAlmostEqual(ticks[0]["coverage"], 0.92)
 
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

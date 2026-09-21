@@ -365,6 +365,7 @@ def main(argv: list[str] | None = None) -> int:
                 "ok": cur["ok"],
                 "worst_positive": cur["worst_positive"],
                 "best_negative": cur["best_negative"],
+                "coverage": cur["coverage"],
             }
             sys.stdout.write(json.dumps(tick) + "\n")
             sys.stdout.flush()

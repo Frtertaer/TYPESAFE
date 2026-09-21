@@ -187,6 +187,26 @@ class TraceTests(unittest.TestCase):
             picks = json.loads(buf.getvalue())
             self.assertEqual([h["pick"] for h in picks], ["b", "a"])
 
+    def test_prune_dry_run_reports_without_deleting(self) -> None:
+        import os
+        import time
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.save({"plan": "p"}, path)
+            old = time.time() - 3600
+            os.utime(path, (old, old))
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "prune", "--older-than", "60", "--dry-run"])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertFalse(out["removed"])
+            self.assertTrue(out["would_remove"])
+            self.assertTrue(path.is_file())
+
     def test_load_missing_is_empty(self) -> None:
         data = tr.load(Path("definitely-missing-jev-trace.json"))
         self.assertEqual(data["plan"], "")

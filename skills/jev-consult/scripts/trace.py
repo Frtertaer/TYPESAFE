@@ -328,6 +328,9 @@ def cmd_prune(args: argparse.Namespace) -> int:
     if age < float(args.older_than):
         emit({"path": str(path), "removed": False, "reason": "fresh", "age_seconds": round(age, 3)})
         return 0
+    if getattr(args, "dry_run", False):
+        emit({"path": str(path), "removed": False, "reason": "dry-run", "age_seconds": round(age, 3), "would_remove": True})
+        return 0
     try:
         path.unlink()
     except OSError as exc:
@@ -503,6 +506,11 @@ def build_parser() -> argparse.ArgumentParser:
     rec.set_defaults(func=cmd_record)
     prune_cmd = sub.add_parser(
         "prune", help="Delete the trace file when older than --older-than seconds"
+    )
+    prune_cmd.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report whether the file would be deleted without deleting it",
     )
     prune_cmd.add_argument(
         "--older-than",

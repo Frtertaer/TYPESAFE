@@ -167,6 +167,40 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertEqual(buf.getvalue().strip(), "pos-dead")
 
+    def test_coverage_prints_hit_rate(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--coverage"])
+        self.assertEqual(rc, 0)
+        import re as _re
+
+        m = _re.search(r"coverage: (\d+)/(\d+) \((\d+)%\)", buf.getvalue())
+        self.assertIsNotNone(m)
+        hits, total = int(m.group(1)), int(m.group(2))
+        self.assertEqual(total, 25)
+        self.assertLessEqual(hits, total)
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = write_cases(
+                tmp,
+                [
+                    {
+                        "id": "pos-dead",
+                        "prompt": "zzz qqq xxx",
+                        "should_trigger": True,
+                    },
+                    {
+                        "id": "neg-x",
+                        "prompt": "unrelated words here",
+                        "should_trigger": False,
+                    },
+                ],
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(["--cases", str(cases), "--coverage"])
+            self.assertEqual(rc, 1)
+            self.assertIn("coverage: 1/2 (50%)", buf.getvalue())
+
     def test_id_evaluates_single_case(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

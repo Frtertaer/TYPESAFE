@@ -94,6 +94,15 @@ def evaluate(
     worst_pos = min(pos) if pos else 0.0
     best_neg = max(neg) if neg else 0.0
     ok = bool(pos) and worst_pos > 0 and worst_pos > best_neg * margin
+    hits = sum(
+        1
+        for row in rows
+        if (row["should_trigger"] and row["score"] is not None and row["score"] > 0)
+        or (
+            not row["should_trigger"]
+            and (not row["lexical"] or not row["score"])
+        )
+    )
     return {
         "ok": ok,
         "margin": margin,
@@ -101,6 +110,8 @@ def evaluate(
         "best_negative": best_neg,
         "n_positives": len(pos),
         "n_negatives": len(neg),
+        "hits": hits,
+        "coverage": (hits / len(rows)) if rows else 0.0,
         "cases": rows,
     }
 
@@ -132,6 +143,11 @@ def main(argv: list[str] | None = None) -> int:
         "--covers-map",
         action="store_true",
         help="Print each covers tag followed by the case ids that carry it.",
+    )
+    parser.add_argument(
+        "--coverage",
+        action="store_true",
+        help="Print the case hit rate (positives scoring >0 plus negatives scoring 0) and exit.",
     )
     parser.add_argument(
         "--dist",
@@ -468,6 +484,12 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write("%.2f-%.2f %d\n" % (b * 0.25, (b + 1) * 0.25, buckets[b]))
         if unscored:
             sys.stdout.write("unscored %d\n" % unscored)
+        return 0 if result["ok"] else 1
+    if args.coverage:
+        sys.stdout.write(
+            "coverage: %d/%d (%.0f%%)\n"
+            % (result["hits"], len(result["cases"]), result["coverage"] * 100)
+        )
         return 0 if result["ok"] else 1
     if args.ids:
         for row in _rows():

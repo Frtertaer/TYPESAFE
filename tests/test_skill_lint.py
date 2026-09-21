@@ -6,11 +6,13 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "skills" / "jev-consult" / "scripts" / "skill_lint.py"
@@ -89,6 +91,26 @@ class LintSkillTests(unittest.TestCase):
             with contextlib.redirect_stdout(buf):
                 rc = skill_lint.main([str(bad), "--severity", "bogus"])
             self.assertEqual(rc, 2)
+
+    def test_severity_env_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            warn_path = write_skill(tmp, "x", "---\nname: x\n---\n")
+            bad = Path(tmp) / "nope" / "SKILL.md"
+            with mock.patch.dict(os.environ, {"JEV_SLINT_SEVERITY": "warn"}):
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = skill_lint.main([str(warn_path), str(bad)])
+            out = buf.getvalue()
+            self.assertEqual(rc, 1)
+            self.assertIn("S004", out)
+            self.assertNotIn("S001", out)
+            with mock.patch.dict(os.environ, {"JEV_SLINT_SEVERITY": "warn"}):
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = skill_lint.main([str(warn_path), str(bad), "--severity", "error"])
+            out = buf.getvalue()
+            self.assertIn("S001", out)
+            self.assertNotIn("S004", out)
 
     def test_quiet_still_prints_errors(self):
         with tempfile.TemporaryDirectory() as tmp:

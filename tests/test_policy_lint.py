@@ -289,6 +289,30 @@ class PolicyLintTests(unittest.TestCase):
                 rc = policy_lint.main([str(p), "--severity", "bogus"])
             self.assertEqual(rc, 2)
 
+    def test_severity_env_default(self) -> None:
+        import os
+        from unittest import mock
+
+        policy = base_policy()
+        policy["escalate_if"]["confidene_below"] = 0.4
+        policy["noul_yes"] = 1.7
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "policy.json"
+            p.write_text(json.dumps(policy), encoding="utf-8")
+            with mock.patch.dict(os.environ, {"JEV_PLINT_SEVERITY": "warn"}):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = policy_lint.main([str(p)])
+            self.assertEqual(rc, 1)
+            head = buf.getvalue().split("policy_lint:")[0]
+            self.assertIn("P010", head)
+            self.assertNotIn("P002", head)
+            with mock.patch.dict(os.environ, {"JEV_PLINT_SEVERITY": "warn"}):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    policy_lint.main([str(p), "--severity", "error"])
+            self.assertIn("P002", buf.getvalue())
+
     def test_json_emits_machine_readable(self) -> None:
         policy = base_policy()
         policy["escalate_if"]["confidene_below"] = 0.4

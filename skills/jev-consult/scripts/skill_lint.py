@@ -6,6 +6,7 @@ Exit 0 clean/warn, 1 on any error, 2 on bad args.
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -173,6 +174,10 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("bad --severity %r (want error|warn|info)\n" % severity)
             return 2
         argv = argv[:idx] + argv[idx + 2 :]
+    else:
+        env_sev = os.environ.get("JEV_SLINT_SEVERITY", "").strip().lower()
+        if env_sev in ("error", "warn", "info"):
+            severity = env_sev
     argv = [a for a in argv if a not in ("--fix", "--json", "--strict", "--quiet")]
     if not argv:
         sys.stderr.write(

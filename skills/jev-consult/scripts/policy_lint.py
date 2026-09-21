@@ -18,6 +18,7 @@ Exit 0 when no errors (warnings are fine), 1 on any error,
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -389,6 +390,10 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("bad --severity %r (want error|warn|info)\n" % severity)
             return 2
         del argv[i : i + 2]
+    else:
+        env_sev = os.environ.get("JEV_PLINT_SEVERITY", "").strip().lower()
+        if env_sev in ("error", "warn", "info"):
+            severity = env_sev
     diff_path = None
     if "--diff" in argv:
         i = argv.index("--diff")

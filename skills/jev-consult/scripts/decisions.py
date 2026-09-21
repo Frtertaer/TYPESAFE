@@ -909,7 +909,7 @@ def main(argv: list[str] | None = None) -> int:
                 entries = _filtered(fresh)
             except Exception:
                 pass
-        return 0
+        return 1 if tick.get("removed") else 0
 
     if args.prune:
         if since is None and until is None and not (

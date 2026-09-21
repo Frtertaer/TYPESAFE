@@ -1986,7 +1986,7 @@ class PruneTest(unittest.TestCase):
                         rc = decisions.main(
                             ["--file", str(path), "--watch", "0.001"]
                         )
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 1)
         ticks = [
             json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
         ]
@@ -1998,6 +1998,32 @@ class PruneTest(unittest.TestCase):
         self.assertEqual(ticks[2]["added"], 0)
         self.assertEqual(ticks[2]["removed"], 1)
         self.assertEqual(ticks[2]["delta_pct"], -50.0)
+
+    def test_watch_rc_0_when_last_tick_shows_growth(self):
+        import os as _os
+        from unittest.mock import patch
+
+        results = [
+            ([{"sha": "a"}], 0),
+            ([{"sha": "a"}, {"sha": "b"}], 0),
+            ([{"sha": "a"}, {"sha": "b"}, {"sha": "c"}], 0),
+        ]
+
+        def fake_load(p):
+            return results.pop(0) if results else ([{"sha": "c"}], 0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text('{"sha":"a"}\n', encoding="utf-8")
+            with patch.dict(_os.environ, {"JEV_DECISIONS_WATCH_MAX": "3"}):
+                with patch.object(decisions, "load_entries", side_effect=fake_load):
+                    import io
+
+                    with patch.object(sys, "stdout", io.StringIO()):
+                        rc = decisions.main(
+                            ["--file", str(path), "--watch", "0.001"]
+                        )
+        self.assertEqual(rc, 0)
 
     def test_nth_prints_nth_entry(self):
         with tempfile.TemporaryDirectory() as tmp:

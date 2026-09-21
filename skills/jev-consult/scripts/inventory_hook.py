@@ -184,6 +184,8 @@ def handle(
 ) -> dict:
     global LAST_DECISION
     LAST_DECISION = None
+    if os.environ.get("JEV_HOOK_OFF", "").strip() in {"1", "true", "yes"}:
+        return {}
     t0 = time.monotonic()
     event = event_name(payload)
     if event and event not in {"UserPromptSubmit", "pre_llm_call"}:

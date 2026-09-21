@@ -857,10 +857,20 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError:
             max_ticks = 0
         ticks = 0
+        prev_keys: set | None = None
         while max_ticks <= 0 or ticks < max_ticks:
+            cur_keys = {
+                str(e.get("sha") or e.get("ts") or json.dumps(e, sort_keys=True, default=str))
+                for e in entries
+                if isinstance(e, dict)
+            }
             tick = {"ts": int(time.time()), "count": len(entries)}
+            if prev_keys is not None:
+                tick["added"] = len(cur_keys - prev_keys)
+                tick["removed"] = len(prev_keys - cur_keys)
             sys.stdout.write(json.dumps(tick) + "\n")
             sys.stdout.flush()
+            prev_keys = cur_keys
             ticks += 1
             time.sleep(args.watch)
             try:

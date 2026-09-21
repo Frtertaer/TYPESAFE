@@ -1961,6 +1961,42 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(len(ticks), 2)
             self.assertTrue(all(t["count"] == 2 for t in ticks))
 
+    def test_watch_ticks_report_added_removed(self):
+        import os as _os
+        from unittest.mock import patch
+
+        results = [
+            ([{"sha": "a"}], 0),  # initial load (pre-watch)
+            ([{"sha": "a"}, {"sha": "b"}], 0),  # tick 2 reload
+            ([{"sha": "b"}], 0),  # tick 3 reload
+        ]
+
+        def fake_load(p):
+            return results.pop(0) if results else ([{"sha": "b"}], 0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text('{"sha":"a"}\n', encoding="utf-8")
+            with patch.dict(_os.environ, {"JEV_DECISIONS_WATCH_MAX": "3"}):
+                with patch.object(decisions, "load_entries", side_effect=fake_load):
+                    import io
+
+                    buf = io.StringIO()
+                    with patch.object(sys, "stdout", buf):
+                        rc = decisions.main(
+                            ["--file", str(path), "--watch", "0.001"]
+                        )
+        self.assertEqual(rc, 0)
+        ticks = [
+            json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 3)
+        self.assertNotIn("added", ticks[0])
+        self.assertEqual(ticks[1]["added"], 1)
+        self.assertEqual(ticks[1]["removed"], 0)
+        self.assertEqual(ticks[2]["added"], 0)
+        self.assertEqual(ticks[2]["removed"], 1)
+
     def test_status_outcome_fill_winner_accept_comma_lists(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

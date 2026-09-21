@@ -543,6 +543,37 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertIn("- coverage: 23/25 (92%)", text)
             self.assertIn("| pos-approach | True | True |", text)
 
+    def test_report_notes_gate_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.md"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(
+                    [
+                        "--report",
+                        str(path),
+                        "--quiet",
+                        "--min-coverage",
+                        "0.5",
+                        "--min-covers",
+                        "1",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("- min-coverage gate: 0.50 -> PASS", text)
+            self.assertIn("- min-covers gate: 1 -> PASS", text)
+            path2 = Path(tmp) / "report2.md"
+            with redirect_stdout(buf):
+                rc = te.main(
+                    ["--report", str(path2), "--quiet", "--min-coverage", "0.99"]
+                )
+            self.assertEqual(rc, 1)
+            self.assertIn(
+                "- min-coverage gate: 0.99 -> FAIL",
+                path2.read_text(encoding="utf-8"),
+            )
+
     def test_positive_cases_declare_covers(self) -> None:
         cases = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
         missing = [

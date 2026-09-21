@@ -350,6 +350,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.id:
         result["ok"] = all(row["ok"] for row in result["cases"])
+
+    def _covers_counts() -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for row in result["cases"]:
+            for tag in row["covers"] or []:
+                counts[tag] = counts.get(tag, 0) + 1
+        return counts
+
+    def _covers_ok() -> bool:
+        return not args.min_covers or all(
+            n >= args.min_covers for n in _covers_counts().values()
+        )
+
+    def _coverage_ok() -> bool:
+        return args.min_coverage is None or result["coverage"] >= args.min_coverage
+
     if args.watch and args.watch > 0:
         import time as _time
 
@@ -411,6 +427,18 @@ def main(argv: list[str] | None = None) -> int:
             "- worst positive: %.3f" % result["worst_positive"],
             "- best negative: %.3f" % result["best_negative"],
             "- margin: %.2f" % result["margin"],
+        ]
+        if args.min_coverage is not None:
+            lines.append(
+                "- min-coverage gate: %.2f -> %s"
+                % (args.min_coverage, "PASS" if _coverage_ok() else "FAIL")
+            )
+        if args.min_covers:
+            lines.append(
+                "- min-covers gate: %d -> %s"
+                % (args.min_covers, "PASS" if _covers_ok() else "FAIL")
+            )
+        lines += [
             "",
             "| id | should_trigger | lexical | score | ok |",
             "|---|---|---|---|---|",
@@ -448,21 +476,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.top > 0:
             rows = rows[: args.top]
         return rows
-
-    def _covers_counts() -> dict[str, int]:
-        counts: dict[str, int] = {}
-        for row in result["cases"]:
-            for tag in row["covers"] or []:
-                counts[tag] = counts.get(tag, 0) + 1
-        return counts
-
-    def _covers_ok() -> bool:
-        return not args.min_covers or all(
-            n >= args.min_covers for n in _covers_counts().values()
-        )
-
-    def _coverage_ok() -> bool:
-        return args.min_coverage is None or result["coverage"] >= args.min_coverage
 
     if args.covers or args.covers_map:
         counts = _covers_counts()

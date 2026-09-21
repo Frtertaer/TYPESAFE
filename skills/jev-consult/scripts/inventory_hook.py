@@ -464,6 +464,8 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         out = {}
     sys.stdout.write(json.dumps(out) + "\n")
+    if "--json" in argv and LAST_DECISION is not None:
+        sys.stderr.write(json.dumps(LAST_DECISION, sort_keys=True) + "\n")
     debug_file = os.environ.get("JEV_HOOK_DEBUG_FILE", "").strip()
     if (_debug_enabled(argv) or debug_file) and LAST_DECISION is not None:
         parts = {

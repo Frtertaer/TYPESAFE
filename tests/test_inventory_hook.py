@@ -1592,6 +1592,44 @@ class HookE2ETests(unittest.TestCase):
         out = json.loads(self._run(json.dumps({"event": "PostToolUse", "prompt": "x"})))
         self.assertEqual(out, {})
 
+    def test_json_flag_echoes_last_decision_to_stderr(self) -> None:
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            skill = home / ".hermes" / "skills" / "jwt-stuff"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: jwt-stuff\ndescription: jwt\n---\n", encoding="utf-8"
+            )
+            cwd = Path(tmp) / "work"
+            cwd.mkdir()
+            env["USERPROFILE"] = str(home)
+            env["HOME"] = str(home)
+            proc = subprocess.run(
+                [sys.executable, str(self.HOOK_PATH), "--json"],
+                input=json.dumps(
+                    {
+                        "event": "UserPromptSubmit",
+                        "prompt": "jwt stuff please",
+                        "cwd": str(cwd),
+                    }
+                ),
+                capture_output=True,
+                text=True,
+                cwd=str(cwd),
+                env=env,
+                timeout=60,
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        decision = json.loads(proc.stderr.strip().splitlines()[-1])
+        self.assertIn("jev_status", decision)
+        self.assertIn("prompt_sha", decision)
+        self.assertIn("jwt", json.dumps(proc.stdout))
+
     def _run_script(self, script: Path, stdin_text: str, home: str, cwd: str):
         import subprocess
 

@@ -454,6 +454,29 @@ class CliTest(unittest.TestCase):
                 proc.stdout.strip().splitlines(), ["apply 2", "peer 1", "unknown 1"]
             )
 
+    def test_field_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"harness": "codex", "custom": "x"},
+                    {"harness": "codex", "custom": "y"},
+                    {"harness": "grok", "custom": "x"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--field", "custom=x", "--json")
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 2)
+
+    def test_field_filter_bad_spec_matches_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"harness": "codex"}])
+            proc = self.run_cli("--file", str(path), "--field", "noequals", "--json")
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 0)
+
     def test_prune_no_filter_still_rc2(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

@@ -201,6 +201,39 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertIn("coverage: 1/2 (50%)", buf.getvalue())
 
+    def test_min_coverage_gates_hit_rate(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--min-coverage", "0.5"])
+        self.assertEqual(rc, 0)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--min-coverage", "1.0", "--quiet"])
+        self.assertEqual(rc, 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = write_cases(
+                tmp,
+                [
+                    {
+                        "id": "pos-dead",
+                        "prompt": "zzz qqq xxx",
+                        "should_trigger": True,
+                    },
+                    {
+                        "id": "neg-x",
+                        "prompt": "unrelated words here",
+                        "should_trigger": False,
+                    },
+                ],
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(
+                    ["--cases", str(cases), "--coverage", "--min-coverage", "0.9"]
+                )
+            self.assertEqual(rc, 1)
+            self.assertIn("coverage: 1/2", buf.getvalue())
+
     def test_id_evaluates_single_case(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

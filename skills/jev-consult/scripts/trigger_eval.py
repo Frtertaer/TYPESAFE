@@ -150,6 +150,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the case hit rate (positives scoring >0 plus negatives scoring 0) and exit.",
     )
     parser.add_argument(
+        "--min-coverage",
+        type=float,
+        default=None,
+        metavar="F",
+        help="Fail (rc 1) when the case hit rate is below F (0-1).",
+    )
+    parser.add_argument(
         "--dist",
         action="store_true",
         help="Print a histogram of lexical scores (0.25-wide buckets).",
@@ -451,6 +458,9 @@ def main(argv: list[str] | None = None) -> int:
             n >= args.min_covers for n in _covers_counts().values()
         )
 
+    def _coverage_ok() -> bool:
+        return args.min_coverage is None or result["coverage"] >= args.min_coverage
+
     if args.covers or args.covers_map:
         counts = _covers_counts()
         id_map: dict[str, list[str]] = {}
@@ -490,7 +500,7 @@ def main(argv: list[str] | None = None) -> int:
             "coverage: %d/%d (%.0f%%)\n"
             % (result["hits"], len(result["cases"]), result["coverage"] * 100)
         )
-        return 0 if result["ok"] else 1
+        return 0 if (result["ok"] and _coverage_ok()) else 1
     if args.ids:
         for row in _rows():
             sys.stdout.write("%s\n" % row["id"])
@@ -554,7 +564,7 @@ def main(argv: list[str] | None = None) -> int:
         for row in result["cases"]
     ):
         return 1
-    if not _covers_ok():
+    if not _covers_ok() or not _coverage_ok():
         return 1
     return 0 if result["ok"] else 1
 

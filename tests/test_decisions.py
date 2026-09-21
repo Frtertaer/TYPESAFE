@@ -275,6 +275,37 @@ class CliTest(unittest.TestCase):
             kept = [json.loads(l) for l in lines]
             self.assertTrue(all(e["harness"] == "codex" for e in kept))
 
+    def test_statuses_sorted_desc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"jev_status": "winner"},
+                    {"jev_status": "idf"},
+                    {"jev_status": "winner"},
+                    {"jev_status": "fill"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--statuses")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(
+                proc.stdout.strip().splitlines(), ["winner 2", "fill 1", "idf 1"]
+            )
+
+    def test_statuses_respects_harness_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"harness": "a", "jev_status": "winner"},
+                    {"harness": "b", "jev_status": "idf"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--statuses", "--harness", "b")
+            self.assertEqual(proc.stdout.strip(), "idf 1")
+
     def test_prune_no_filter_still_rc2(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

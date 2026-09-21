@@ -226,6 +226,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--harness", default="", help="Only entries for this harness")
     parser.add_argument("--status", default="", help="Only entries with this jev_status")
     parser.add_argument(
+        "--statuses",
+        action="store_true",
+        help="Print unique jev_status values with counts, sorted desc",
+    )
+    parser.add_argument(
         "--prune",
         action="store_true",
         help="Rewrite the log keeping only entries matching --days/--since/--harness/--status filters",
@@ -273,6 +278,14 @@ def main(argv: list[str] | None = None) -> int:
             "pruned %d of %d entries (kept %d)\n"
             % (len(total) - len(entries), len(total), len(entries))
         )
+    if args.statuses:
+        counts: dict[str, int] = {}
+        for item in entries:
+            status = str(item.get("jev_status") or "unknown")
+            counts[status] = counts.get(status, 0) + 1
+        for status, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+            sys.stdout.write("%s %d\n" % (status, n))
+        return 0
     if args.csv or args.md:
         rows = []
         for item in entries:

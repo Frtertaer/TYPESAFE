@@ -212,6 +212,28 @@ class InventoryTests(unittest.TestCase):
         self.assertIn("jwt-auth", names)
         self.assertNotIn("ascii-art", names)
 
+    def test_cli_kind_filter(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--kind",
+                    "mcp",
+                    "--limit",
+                    "8",
+                ]
+            )
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertTrue(all(i["kind"] == "mcp" for i in payload["shortlist"]))
+
     def _write_skill(self, tmp: str, name: str, frontmatter: str) -> Path:
         skill = Path(tmp) / name
         skill.mkdir(parents=True)

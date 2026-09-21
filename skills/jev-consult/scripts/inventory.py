@@ -1040,6 +1040,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--all-names", action="store_true", help="Include every installed name (no descriptions).")
     parser.add_argument("--scores", action="store_true", help="Add IDF score to each shortlist item.")
     parser.add_argument("--csv", action="store_true", help="Emit the shortlist as CSV rows instead of JSON.")
+    parser.add_argument(
+        "--kind",
+        default="",
+        help="Comma filter: only shortlist these kinds (skill,plugin,mcp).",
+    )
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
     args = parser.parse_args(argv)
@@ -1090,6 +1095,9 @@ def main(argv: list[str] | None = None) -> int:
     home = Path(args.home) if args.home else None
     hermes = Path(args.hermes_home) if args.hermes_home else None
     items = scan(harness, home=home, hermes=hermes)
+    kinds = {part.strip() for part in args.kind.split(",") if part.strip()}
+    if kinds:
+        items = [item for item in items if item["kind"] in kinds]
     extra = [part.strip() for part in args.include.split(",") if part.strip()]
     limit = max(1, min(args.limit, 24))
     picked = shortlist(items, args.task, limit, extra)

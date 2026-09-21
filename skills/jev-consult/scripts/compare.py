@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -198,11 +199,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--live", action="store_true", help="Call Jev Noul for each side")
     parser.add_argument("--json", action="store_true", dest="as_json")
-    parser.add_argument("--cases", help="Path to compare-cases.json")
+    parser.add_argument("--cases", default=os.environ.get("JEV_COMPARE_CASES", "") or None, help="Path to compare-cases.json")
     parser.add_argument(
         "--only",
-        default="",
-        help="Comma-separated case ids to run (default: all).",
+        default=os.environ.get("JEV_COMPARE_ONLY", ""),
+        help="Comma-separated case ids to run (default: all; JEV_COMPARE_ONLY presets).",
     )
     parser.add_argument(
         "--strict",

@@ -223,6 +223,27 @@ class CliTest(unittest.TestCase):
         payload = json.loads(proc.stdout)
         self.assertEqual(payload["rows"], [])
 
+    def test_env_cases_and_only(self) -> None:
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            env = dict(
+                os.environ,
+                JEV_COMPARE_CASES=str(path),
+                JEV_COMPARE_ONLY="drift_case",
+            )
+            proc = subprocess.run(
+                [sys.executable, str(COMPARE), "--json"],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual([r["id"] for r in payload["rows"]], ["drift_case"])
+
     def test_cli_bad_cases_exits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cases.json"

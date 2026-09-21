@@ -254,6 +254,33 @@ class InventoryHookTests(unittest.TestCase):
             self.assertEqual(HOOK.LAST_DECISION["sidecar_age_s"], 42)
             self.assertEqual(HOOK.LAST_DECISION["question"], "dedupe")
 
+    def test_stale_sidecar_triggers_repick(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        calls = []
+
+        def counting_pick(*args, **kwargs):
+            calls.append(1)
+            return skip_pick(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "Add JWT access tokens in Python",
+                "cwd": tmp,
+            }
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=counting_pick)
+            self.assertEqual(len(calls), 1)
+            self.assertFalse(HOOK.LAST_DECISION["stale_sidecar"])
+            sidecar_path = Path(tmp) / ".jev-tools.json"
+            blob = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            blob["written_at"] = int(blob["written_at"]) - (INV.sidecar_ttl_seconds() + 60)
+            sidecar_path.write_text(json.dumps(blob), encoding="utf-8")
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=counting_pick)
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(HOOK.LAST_DECISION["stale_sidecar"])
+            self.assertNotEqual(HOOK.LAST_DECISION["question"], "dedupe")
+            self.assertFalse(HOOK.LAST_DECISION.get("dedupe"))
+
     def test_over_budget_flag_when_pick_exceeds_budget(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
 

@@ -4,7 +4,8 @@
 
 Runs each script's offline path in a temp dir: policy loads + policy_lint,
 jev scaffold + lint (no network ask), inventory scan, compact --fake,
-doctor. Prints JSON {ok, steps:[{name, ok, detail}]}; exit 0/1. Never calls
+decisions.py stats over a fixture log, trace.py init + state, doctor.
+Prints JSON {ok, steps:[{name, ok, detail}]}; exit 0/1. Never calls
 the Jev API. Safe for CI.
 """
 from __future__ import annotations
@@ -117,6 +118,45 @@ def step_compact_fake(tmp: Path) -> dict:
     return _step("compact_fake", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 
+def step_decisions(tmp: Path) -> dict:
+    log = tmp / "decisions.jsonl"
+    log.write_text(
+        '\n'.join(
+            json.dumps({"ts": 1700000000, "jev_status": s, "harness": "smoke"})
+            for s in ("winner", "none")
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rc, out = _run([str(SCRIPTS / "decisions.py"), "--file", str(log), "--json"])
+    ok = False
+    if rc == 0:
+        try:
+            ok = json.loads(out).get("total") == 2
+        except ValueError:
+            ok = False
+    return _step("decisions", ok, "rc=%d" % rc if ok else out.strip()[:160])
+
+
+def step_trace(tmp: Path) -> dict:
+    trace_file = tmp / ".jev-trace.json"
+    rc, out = _run(
+        [str(SCRIPTS / "trace.py"), "--file", str(trace_file), "init", "--plan", "smoke"]
+    )
+    if rc != 0 or not trace_file.is_file():
+        return _step("trace", False, out.strip()[:160] or "rc=%d" % rc)
+    rc, out = _run(
+        [str(SCRIPTS / "trace.py"), "--file", str(trace_file), "state"]
+    )
+    ok = False
+    if rc == 0:
+        try:
+            ok = isinstance(json.loads(out), dict)
+        except ValueError:
+            ok = False
+    return _step("trace", ok, "rc=%d" % rc if ok else out.strip()[:160])
+
+
 def step_doctor(tmp: Path) -> dict:
     rc, out = _run(
         [
@@ -148,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
             step_jev_scaffold_lint,
             step_inventory,
             step_compact_fake,
+            step_decisions,
+            step_trace,
             step_doctor,
         ):
             try:

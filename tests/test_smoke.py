@@ -27,11 +27,20 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         out = json.loads(proc.stdout)
         self.assertTrue(out["ok"])
-        self.assertEqual(len(out["steps"]), 6)
+        self.assertEqual(len(out["steps"]), 8)
         names = {s["name"] for s in out["steps"]}
         self.assertEqual(
             names,
-            {"policy", "policy_lint", "jev_scaffold_lint", "inventory", "compact_fake", "doctor_json"},
+            {
+                "policy",
+                "policy_lint",
+                "jev_scaffold_lint",
+                "inventory",
+                "compact_fake",
+                "decisions",
+                "trace",
+                "doctor_json",
+            },
         )
 
     def test_step_failure_marks_not_ok(self) -> None:

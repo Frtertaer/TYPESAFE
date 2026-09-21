@@ -563,6 +563,22 @@ class CliTest(unittest.TestCase):
             self.assertEqual(len(lines), 1)
             self.assertEqual(json.loads(lines[0])["harness"], "codex")
 
+    def test_prompt_filter_matches_head_and_tail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "prompt_head": "fix the flaky test", "prompt_tail": "tail-a"},
+                    {"ts": 2, "prompt_head": "add oauth", "prompt_tail": "tail-b"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--prompt", "flaky", "--count")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip(), "1")
+            proc = self.run_cli("--file", str(path), "--prompt", "TAIL-B", "--count")
+            self.assertEqual(proc.stdout.strip(), "1")
+
     def test_out_writes_filtered_jsonl(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

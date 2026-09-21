@@ -408,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
                     request = fresh
             except (OSError, ValueError):
                 pass
-        return 0
+        return 1 if (tick["errors"] or (strict and tick["findings"])) else 0
     if do_fix:
         applied = apply_fixes(request)
         Path(argv[0]).write_text(json.dumps(request, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

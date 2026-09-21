@@ -747,6 +747,37 @@ class StandaloneCliTests(unittest.TestCase):
         self.assertTrue(all("errors" in t for t in ticks))
         self.assertTrue(all("warnings" in t and "infos" in t for t in ticks))
 
+    def test_watch_rc_reflects_last_lint(self) -> None:
+        import os as _os
+
+        bad = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Is it not true? Isn't it wrong?")},
+        }
+        good = {"state": {"task": "x"}, "questions": {"q": noul("Pick an approach.")}}
+        with tempfile.TemporaryDirectory() as tmp:
+            badp = Path(tmp) / "bad.json"
+            badp.write_text(json.dumps(bad), encoding="utf-8")
+            env = dict(_os.environ, JEV_QLINT_WATCH_MAX="1")
+            proc = subprocess.run(
+                [sys.executable, str(self.QLINT_PATH), str(badp), "--watch", "0.01"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 1)
+            goodp = Path(tmp) / "good.json"
+            goodp.write_text(json.dumps(good), encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(self.QLINT_PATH), str(goodp), "--watch", "0.01"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+
 
 class LintStateEdgeTests(unittest.TestCase):
     def test_dict_state_over_limit_is_j020(self) -> None:

@@ -378,6 +378,30 @@ class CliTests(unittest.TestCase):
         self.assertTrue(all("findings" in t and "errors" in t for t in ticks))
         self.assertTrue(all("warnings" in t and "infos" in t for t in ticks))
 
+    def test_watch_rc_reflects_last_lint(self):
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_skill(tmp, "bad", "# nope\n")
+            env = dict(_os.environ, JEV_SLINT_WATCH_MAX="1")
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPT), str(bad), "--watch", "0.01"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 1)
+            good = write_skill(tmp, "ok", GOOD.format(name="ok"))
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPT), str(good), "--watch", "0.01"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

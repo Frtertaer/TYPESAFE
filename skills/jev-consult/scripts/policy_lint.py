@@ -521,7 +521,7 @@ def main(argv: list[str] | None = None) -> int:
                 policy = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 pass
-        return 0
+        return 1 if (tick["errors"] or (strict and tick["findings"])) else 0
     findings = lint_policy(policy)
     shown_rows = [
         f

@@ -489,6 +489,24 @@ class WatchFlagTests(unittest.TestCase):
             rc = policy_lint.main(["--watch", "bogus"])
         self.assertEqual(rc, 2)
 
+    def test_watch_rc_reflects_last_lint(self) -> None:
+        import os
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad.json"
+            bad.write_text('{"escalate_if": "x"}', encoding="utf-8")
+            buf = io.StringIO()
+            with mock.patch.dict(os.environ, {"JEV_PLINT_WATCH_MAX": "1"}):
+                with redirect_stdout(buf):
+                    rc = policy_lint.main([str(bad), "--watch", "0.01"])
+            self.assertEqual(rc, 1)
+            with mock.patch.dict(os.environ, {"JEV_PLINT_WATCH_MAX": "1"}):
+                with redirect_stdout(io.StringIO()):
+                    rc = policy_lint.main(["--watch", "0.01"])
+            self.assertEqual(rc, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

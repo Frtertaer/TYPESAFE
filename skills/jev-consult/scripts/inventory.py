@@ -1280,11 +1280,13 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         max_ticks = 0
     ticks = 0
+    prev_ids: set | None = None
     while max_ticks <= 0 or ticks < max_ticks:
         time.sleep(watch_seconds)
         fresh = scan(harness, home=home, hermes=hermes)
         if kinds:
             fresh = [item for item in fresh if item["kind"] in kinds]
+        cur_ids = {item.get("id") for item in fresh}
         tick = {
             "ts": int(time.time()),
             "counts": {
@@ -1294,6 +1296,10 @@ def main(argv: list[str] | None = None) -> int:
             },
             "shortlist": [item.get("id") for item in shortlist(fresh, args.task, limit, extra)],
         }
+        if prev_ids is not None:
+            tick["added"] = sorted(cur_ids - prev_ids)
+            tick["removed"] = sorted(prev_ids - cur_ids)
+        prev_ids = cur_ids
         sys.stdout.write(json.dumps(tick) + "\n")
         sys.stdout.flush()
         ticks += 1

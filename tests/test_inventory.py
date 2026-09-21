@@ -187,6 +187,48 @@ class InventoryTests(unittest.TestCase):
         self.assertGreater(ticks[0]["counts"]["skill"], 0)
         self.assertIn("shortlist", ticks[0])
 
+    def test_watch_ticks_report_added_removed(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        results = [
+            [{"id": "a", "kind": "skill", "name": "a"}],
+            [{"id": "b", "kind": "skill", "name": "b"},
+             {"id": "c", "kind": "plugin", "name": "c"}],
+        ]
+
+        def fake_scan(harness, home=None, hermes=None):
+            if results:
+                return results.pop(0)
+            return []
+
+        buf = StringIO()
+        with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+            with patch.object(inv, "scan", side_effect=fake_scan):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness",
+                            "hermes",
+                            "--hermes-home",
+                            str(FIXTURE),
+                            "--watch",
+                            "0.01",
+                        ]
+                    )
+        self.assertEqual(code, 0)
+        ticks = [
+            json.loads(l)
+            for l in buf.getvalue().splitlines()
+            if l.startswith('{"ts"')
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertNotIn("added", ticks[0])
+        self.assertNotIn("removed", ticks[0])
+        self.assertEqual(ticks[1]["added"], [])
+        self.assertEqual(ticks[1]["removed"], ["b", "c"])
+
     def test_cli_json_shortlist(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

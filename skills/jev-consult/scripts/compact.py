@@ -760,6 +760,13 @@ def fit_state(
     goal = options.get("goal") or goal_from_messages(messages)
     max_tokens = int(options.get("max_state_tokens") or MAX_STATE_TOKENS)
     preserve = int(options.get("preserve_recent") or PRESERVE_RECENT)
+    keep_pattern = options.get("keep_text") or ""
+    keep_re = None
+    if keep_pattern:
+        try:
+            keep_re = re.compile(keep_pattern)
+        except re.error:
+            keep_re = None
 
     def state_of(history: list[dict[str, Any]]) -> dict[str, Any]:
         return {"context": STATE_CONTEXT, "goal": goal, "history": history}
@@ -800,6 +807,8 @@ def fit_state(
             return fitted("inputs<=%s" % limit)
 
     def pinned(entry: dict[str, Any]) -> bool:
+        if keep_re is not None and keep_re.search(str(entry.get("text") or "")):
+            return True
         return is_pinned(int(entry["i"]), len(messages), preserve)
 
     indices = list(range(len(history)))
@@ -1069,6 +1078,16 @@ def compact(
     messages = [normalize_message(item) for item in messages]
     calls = collect_tool_calls(messages, preserve)
     pin_errors_and_trace(calls, opts.get("trace"))
+    keep_re = None
+    if opts.get("keep_text"):
+        try:
+            keep_re = re.compile(str(opts["keep_text"]))
+        except re.error:
+            keep_re = None
+    if keep_re is not None:
+        for call in calls:
+            if keep_re.search(call.tool) or keep_re.search(_dumps(call.input)):
+                call.pinned = True
     candidates = [call for call in calls if not call.pinned]
     chars_before = sum(message_chars(message) for message in messages)
     fitted = {"tokens": 0, "stage": ""}
@@ -1082,6 +1101,7 @@ def compact(
                 "goal": opts.get("goal"),
                 "max_state_tokens": opts.get("max_state_tokens") or MAX_STATE_TOKENS,
                 "preserve_recent": preserve,
+                "keep_text": opts.get("keep_text"),
             },
         )
         fitted = fitted_state
@@ -1186,6 +1206,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
         "preserve_recent": args.preserve_recent,
         "truncate_head_chars": args.truncate_head_chars,
         "min_reduction": args.min_reduction,
+        "keep_text": args.keep_text,
         "trace": load_trace(args.trace),
     }
     asker: Asker
@@ -1282,7 +1303,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--truncate-head-chars", type=int, default=TRUNCATE_HEAD_CHARS)
     parser.add_argument("--min-reduction", type=float, default=MIN_REDUCTION)
     parser.add_argument(
-        "--history",
+        "--keep-text",
+        default="",
+        help="Pin messages/tool calls whose text or input matches this regex (never dropped).",
+    )
+    parser.add_argument(
+        "--history",       
         action="store_true",
         help="Opt-in Tamara session drop. Not the default (Hermes eval did not adopt it).",
     )
@@ -1362,6 +1388,7 @@ def main(argv: list[str] | None = None) -> int:
                     "preserve_recent": args.preserve_recent,
                     "truncate_head_chars": args.truncate_head_chars,
                     "min_reduction": args.min_reduction,
+                    "keep_text": args.keep_text,
                     "trace": load_trace(args.trace),
                 }
                 asker = (

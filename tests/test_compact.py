@@ -1331,5 +1331,53 @@ class ListSpillTests(unittest.TestCase):
             self.assertIn("1 spill files", out)
 
 
+class KeepTextTests(unittest.TestCase):
+    def setUp(self):
+        self._spill_env = patch.dict(os.environ, {"JEV_CONSULT_SPILL": "0"})
+        self._spill_env.start()
+        self.addCleanup(self._spill_env.stop)
+
+    def _messages(self):
+        messages = [msg("user", "compress this session")]
+        messages.append(
+            msg("assistant", "", [use("k1", "SeekTool", {"file_path": "src/a.ts"})])
+        )
+        messages.append(msg("user", "", results=[result("k1", "blob " * 500)]))
+        for i in range(12):
+            messages.append(msg("assistant" if i % 2 else "user", "filler %d" % i))
+        return messages
+
+    def _kept_ids(self, out):
+        ids = set()
+        for item in out["messages"]:
+            for tool in item.get("toolUses") or []:
+                ids.add(tool["tool_use_id"])
+        return ids
+
+    def test_keep_text_pins_matching_tool(self):
+        messages = self._messages()
+        options = {"min_reduction": 0, "keep_text": "SeekTool"}
+        out = C.compact_or_keep(messages, drop_asker, options)
+        self.assertIn("k1", self._kept_ids(out))
+        self.assertEqual(out["stats"]["callsDropped"], 0)
+
+    def test_keep_text_matches_input_text(self):
+        messages = self._messages()
+        options = {"min_reduction": 0, "keep_text": "a\\.ts"}
+        out = C.compact_or_keep(messages, drop_asker, options)
+        self.assertIn("k1", self._kept_ids(out))
+
+    def test_without_keep_text_call_drops(self):
+        messages = self._messages()
+        out = C.compact_or_keep(messages, drop_asker, {"min_reduction": 0})
+        self.assertNotIn("k1", self._kept_ids(out))
+
+    def test_bad_regex_falls_back_to_positional(self):
+        messages = self._messages()
+        options = {"min_reduction": 0, "keep_text": "["}
+        out = C.compact_or_keep(messages, drop_asker, options)
+        self.assertNotIn("k1", self._kept_ids(out))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

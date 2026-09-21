@@ -425,6 +425,12 @@ def main(argv: list[str] | None = None) -> int:
     env_stale = os.environ.get("JEV_DECISIONS_STALE", "").strip().lower() in ("1", "true", "yes")
     parser.add_argument("--stale", action="store_true", default=env_stale, help="Only entries with stale_sidecar=true")
     parser.add_argument("--sha", default=os.environ.get("JEV_DECISIONS_SHA", ""), help="Only entries whose prompt_sha starts with PREFIX")
+    env_max_need = os.environ.get("JEV_DECISIONS_MAX_NEED", "")
+    try:
+        env_max_need = float(env_max_need) if env_max_need else None
+    except ValueError:
+        env_max_need = None
+    parser.add_argument("--max-need", type=float, default=env_max_need, help="Only entries with numeric need <= F")
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -562,6 +568,14 @@ def main(argv: list[str] | None = None) -> int:
         entries = filter_fill(entries, args.fill)
     if args.field:
         entries = filter_field(entries, args.field)
+    if args.max_need is not None:
+        entries = [
+            item
+            for item in entries
+            if isinstance(item.get("need"), (int, float))
+            and not isinstance(item.get("need"), bool)
+            and item["need"] <= args.max_need
+        ]
     if args.min_need is not None:
         entries = [
             item
@@ -638,9 +652,10 @@ def main(argv: list[str] | None = None) -> int:
             or getattr(args, "stale", False)
             or args.question
             or args.sha
+            or args.max_need is not None
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, or --prompt\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, or --prompt\n"
             )
             return 2
         total, total_bad = load_entries(path)

@@ -303,6 +303,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print step names (for --only) and exit.",
     )
     parser.add_argument(
+        "--json",
+        action="store_true",
+        help="With --list, emit the step names as a JSON array.",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=0.0,
@@ -325,8 +330,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     names = {name for name, _ in STEPS}
     if args.list:
-        for name in sorted(names):
-            sys.stdout.write(name + "\n")
+        if getattr(args, "json", False):
+            sys.stdout.write(json.dumps(sorted(names)) + "\n")
+        else:
+            for name in sorted(names):
+                sys.stdout.write(name + "\n")
         return 0
     wanted = {s.strip() for s in args.only.split(",") if s.strip()}
     unknown = wanted - names

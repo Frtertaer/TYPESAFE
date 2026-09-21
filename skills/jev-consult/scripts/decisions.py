@@ -480,6 +480,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print filtered entries as raw JSON lines (for piping)",
     )
+    parser.add_argument(
+        "--out",
+        metavar="PATH",
+        default="",
+        help="Write the filtered entries as JSONL to PATH instead of printing",
+    )
     args = parser.parse_args(argv)
     file_arg = args.file or os.environ.get("JEV_DECISIONS", "").strip()
     path = Path(file_arg) if file_arg else inventory.decisions_log_path()
@@ -598,6 +604,17 @@ def main(argv: list[str] | None = None) -> int:
         else:
             for value, n in rows:
                 sys.stdout.write("%s %d\n" % (value, n))
+        return 0
+    if args.out:
+        out_path = Path(args.out)
+        try:
+            with out_path.open("w", encoding="utf-8") as fh:
+                for item in entries:
+                    fh.write(json.dumps(item, sort_keys=True) + "\n")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+        sys.stderr.write("wrote %d entries to %s\n" % (len(entries), out_path))
         return 0
     if args.jsonl:
         for item in entries:

@@ -563,6 +563,27 @@ class CliTest(unittest.TestCase):
             self.assertEqual(len(lines), 1)
             self.assertEqual(json.loads(lines[0])["harness"], "codex")
 
+    def test_out_writes_filtered_jsonl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            out = Path(tmp) / "sub.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "harness": "codex", "jev_status": "winner"},
+                    {"ts": 2, "harness": "hermes", "jev_status": "winner"},
+                    {"ts": 3, "harness": "codex", "jev_status": "fail_open"},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--out", str(out), "--harness", "codex"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("wrote 2 entries", proc.stderr)
+            rows = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 2)
+            self.assertTrue(all(r["harness"] == "codex" for r in rows))
+
     def test_prune_dry_run_keeps_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

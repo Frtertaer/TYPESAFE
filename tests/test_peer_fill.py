@@ -77,6 +77,44 @@ class PeerFillTests(unittest.TestCase):
             sidecar = json.loads((cwd / INV.SIDECAR_NAME).read_text(encoding="utf-8"))
             self.assertEqual(sidecar["names"][0]["name"], "jwt-auth")
 
+    def test_list_prints_peer_items(self) -> None:
+        import io
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hermes = base / "hermes"
+            home = base / "home"
+            write_skill(hermes / "skills", "jwt-auth", JWT_MD)
+            write_skill(hermes / "skills", "ascii-art", NOISE_MD)
+            env = dict(__import__("os").environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env["JEV_CONSULT_LOG"] = "0"
+            env["USERPROFILE"] = str(home)
+            env["HOME"] = str(home)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--task",
+                    "jwt tokens",
+                    "--harness",
+                    "claude-code",
+                    "--home",
+                    str(home),
+                    "--hermes-home",
+                    str(hermes),
+                    "--list",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=str(base),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("jwt-auth", proc.stdout)
+            self.assertFalse((base / INV.SIDECAR_NAME).exists())
+
     def test_dry_run_does_not_copy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

@@ -272,6 +272,11 @@ def main() -> int:
     parser.add_argument("--from-miss", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--ask-file", default="")
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="Print shortlisted peer items (kind, name, path) and exit; no writes.",
+    )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     task = args.task
@@ -281,13 +286,29 @@ def main() -> int:
         task = task or str(miss.get("task") or "")
         if dest == "auto":
             dest = str(miss.get("harness") or "auto")
-    if not task.strip():
-        sys.stdout.write("no_task\n")
-        return 0
     home = Path(args.home) if args.home else user_home()
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home()
     if dest == "auto":
         dest = detect_harness(Path(__file__))
+    if args.list:
+        try:
+            peers = peer_skills(dest, home, hermes)
+            items = shortlist(peers, task, PEER_LIMIT, []) if tokens(task) else peers
+            for item in items:
+                sys.stdout.write(
+                    "%s %s %s\n"
+                    % (
+                        item.get("kind") or "skill",
+                        item.get("name") or "?",
+                        item.get("path") or "",
+                    )
+                )
+        except Exception:
+            pass
+        return 0
+    if not task.strip():
+        sys.stdout.write("no_task\n")
+        return 0
     ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
     try:
         return fill(

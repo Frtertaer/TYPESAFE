@@ -285,15 +285,21 @@ class CatalogInternalsTests(unittest.TestCase):
         self.assertEqual(hits, [])
 
     def test_search_hits_hermes_missing(self) -> None:
-        with patch.object(FILL, "run_hermes", return_value=(127, "")):
-            self.assertIsNone(FILL.search_hits("jwt tokens"))
-        with patch.object(FILL, "run_hermes", return_value=(1, "boom")):
-            self.assertEqual(FILL.search_hits("jwt tokens"), [])
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache.json"
+            with patch.object(FILL, "catalog_cache_path", return_value=cache):
+                with patch.object(FILL, "run_hermes", return_value=(127, "")):
+                    self.assertIsNone(FILL.search_hits("jwt tokens"))
+                with patch.object(FILL, "run_hermes", return_value=(1, "boom")):
+                    self.assertEqual(FILL.search_hits("jwt tokens"), [])
 
     def test_search_hits_parses_and_drops_blocked(self) -> None:
         raw = json.dumps(HITS)
-        with patch.object(FILL, "run_hermes", return_value=(0, raw)):
-            hits = FILL.search_hits("jwt tokens")
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache.json"
+            with patch.object(FILL, "catalog_cache_path", return_value=cache):
+                with patch.object(FILL, "run_hermes", return_value=(0, raw)):
+                    hits = FILL.search_hits("jwt tokens")
         self.assertEqual([h["name"] for h in hits], ["jwt-auth"])
 
     def test_search_hits_blank_task(self) -> None:
@@ -327,6 +333,63 @@ class CatalogInternalsTests(unittest.TestCase):
             self.assertEqual(found, hermes / "skills" / "jwt-auth")  # leaf fallback
             found2 = FILL.installed_dir(hermes, {"identifier": "a/b/c", "name": ""})
             self.assertIsNone(found2)
+
+
+class CatalogCacheTests(unittest.TestCase):
+    def test_write_then_read_fresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cache.json"
+            FILL.write_catalog_cache("jwt tokens", HITS[:1], path=path)
+            hits = FILL.read_catalog_cache("jwt tokens", path=path)
+            self.assertEqual(hits, HITS[:1])
+            self.assertIsNone(FILL.read_catalog_cache("other", path=path))
+
+    def test_stale_entry_missed(self) -> None:
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cache.json"
+            FILL.write_catalog_cache("q", HITS[:1], path=path)
+            future = _time.time() + 100000
+            self.assertIsNone(
+                FILL.read_catalog_cache("q", ttl_seconds=60, now=future, path=path)
+            )
+
+    def test_invalid_cache_file_missed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cache.json"
+            path.write_text("not-json", encoding="utf-8")
+            self.assertIsNone(FILL.read_catalog_cache("q", path=path))
+            path.write_text('[{"no_written_at": true}]', encoding="utf-8")
+            self.assertIsNone(FILL.read_catalog_cache("q", path=path))
+
+    def test_search_hits_uses_cache_then_hermes(self) -> None:
+        calls = []
+
+        def fake_run(argv, timeout=120):
+            calls.append(argv)
+            return 0, json.dumps(HITS[:1])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "cache.json"
+            with patch.object(FILL, "run_hermes", side_effect=fake_run), patch.object(
+                FILL, "catalog_cache_path", return_value=cache_path
+            ):
+                first = FILL.search_hits("jwt tokens")
+                self.assertEqual([h["identifier"] for h in first], ["skills-sh/acme/jwt-auth"])
+                second = FILL.search_hits("jwt tokens")
+        self.assertEqual(len(calls), 1)  # second call hit the cache
+        self.assertEqual(
+            [h["identifier"] for h in second], ["skills-sh/acme/jwt-auth"]
+        )
+
+    def test_cache_cap_evicts_oldest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cache.json"
+            for i in range(FILL.CACHE_MAX_QUERIES + 5):
+                FILL.write_catalog_cache("q%d" % i, [], path=path)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(len(data), FILL.CACHE_MAX_QUERIES)
+            self.assertNotIn("q0", data)
 
 
 if __name__ == "__main__":

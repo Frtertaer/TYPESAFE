@@ -216,5 +216,6 @@
       "name": "smithery",
       "url": "https://smithery.ai"
     }
-  ]
+  ],
+  "catalog_cache_seconds": 900
 }

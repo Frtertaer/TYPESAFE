@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -31,11 +32,14 @@ from inventory import (  # noqa: E402
     tokens,
     user_home,
     write_sidecar,
+    _policy_float_key,
 )
 from peer_fill import copy_one, read_miss, run_jev, skill_dirs  # noqa: E402
 
 ASK_NAME = ".jev-catalog-fill.request.json"
 SEARCH_LIMIT = 8
+DEFAULT_CATALOG_CACHE_SECONDS = 900.0
+CACHE_MAX_QUERIES = 50
 BLOCK_RE = re.compile(
     r"(exploit|attack|hack|malware|phishing|privesc|ransom|payload|\bcve\b|weapon)",
     re.I,
@@ -98,6 +102,71 @@ def drop_blocked(hits: list[dict]) -> list[dict]:
     return out
 
 
+def catalog_cache_seconds() -> float:
+    """TTL for cached catalog search hits. Threshold lives in policy.json."""
+    return _policy_float_key("catalog_cache_seconds", DEFAULT_CATALOG_CACHE_SECONDS)
+
+
+def catalog_cache_path() -> Path:
+    return user_home() / ".cache" / "jev-consult" / "catalog-cache.json"
+
+
+def read_catalog_cache(
+    query: str,
+    ttl_seconds: float | None = None,
+    now: float | None = None,
+    path: Path | None = None,
+) -> list[dict] | None:
+    """Fresh cached hits for query, or None. Stale/invalid entries ignored."""
+    target = path or catalog_cache_path()
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    entry = raw.get(query)
+    if not isinstance(entry, dict):
+        return None
+    written = entry.get("written_at")
+    if not isinstance(written, (int, float)) or isinstance(written, bool):
+        return None
+    ttl = catalog_cache_seconds() if ttl_seconds is None else float(ttl_seconds)
+    age = (time.time() if now is None else float(now)) - float(written)
+    if age > ttl:
+        return None
+    hits = entry.get("hits")
+    if not isinstance(hits, list):
+        return None
+    return [item for item in hits if isinstance(item, dict)]
+
+
+def write_catalog_cache(query: str, hits: list[dict], path: Path | None = None) -> None:
+    target = path or catalog_cache_path()
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    raw[query] = {"written_at": int(time.time()), "hits": hits}
+    while len(raw) > CACHE_MAX_QUERIES:
+        oldest = min(
+            raw,
+            key=lambda k: (
+                raw[k].get("written_at", 0) if isinstance(raw[k], dict) else 0
+            ),
+        )
+        del raw[oldest]
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            json.dumps(raw, indent=2) + "\n", encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
 def parse_search(raw: str) -> list[dict]:
     try:
         data = json.loads(raw)
@@ -108,10 +177,14 @@ def parse_search(raw: str) -> list[dict]:
     return []
 
 
-def search_hits(task: str) -> list[dict] | None:
+def search_hits(task: str, cache: bool = True) -> list[dict] | None:
     query = " ".join(sorted(tokens(task))[:8]) or task[:80]
     if not query.strip():
         return []
+    if cache:
+        cached = read_catalog_cache(query)
+        if cached is not None:
+            return drop_blocked(cached)
     code, out = run_hermes(
         ["skills", "search", query, "--json", "--limit", str(SEARCH_LIMIT)]
     )
@@ -119,7 +192,9 @@ def search_hits(task: str) -> list[dict] | None:
         return None
     if code != 0:
         return []
-    return drop_blocked(parse_search(out))
+    hits = drop_blocked(parse_search(out))
+    write_catalog_cache(query, hits)
+    return hits
 
 
 def inspect_ok(identifier: str) -> bool:

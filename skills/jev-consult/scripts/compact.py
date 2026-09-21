@@ -1443,6 +1443,9 @@ def main(argv: list[str] | None = None) -> int:
         files = sorted(
             [p for p in batch.iterdir() if p.is_file() and p.suffix in (".json", ".jsonl")]
         )
+        total_in = 0
+        total_out = 0
+        n_ok = 0
         for p in files:
             row = {"file": p.name}
             try:
@@ -1471,11 +1474,18 @@ def main(argv: list[str] | None = None) -> int:
                 row["messages_out"] = stats.get("messagesAfter")
                 row["chars_in"] = stats.get("charsBefore")
                 row["chars_out"] = stats.get("charsAfter")
+                n_ok += 1
+                if isinstance(row["chars_in"], (int, float)):
+                    total_in += row["chars_in"]
+                if isinstance(row["chars_out"], (int, float)):
+                    total_out += row["chars_out"]
             except (Exception, SystemExit) as exc:
                 row["ok"] = False
                 row["error"] = str(exc)[:200]
             sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
-        sys.stdout.write("batch: %d file(s)\n" % len(files))
+        sys.stdout.write(
+            "batch: %d file(s), %d ok, %d -> %d chars\n" % (len(files), n_ok, total_in, total_out)
+        )
         return 0
     if args.file is None:
         parser.error("file is required unless --prune-spill or --dir is given")

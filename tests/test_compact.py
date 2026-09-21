@@ -1214,7 +1214,7 @@ class BatchDirTests(unittest.TestCase):
             self.assertEqual(len(rows), 2)
             self.assertTrue(all(r["ok"] for r in rows))
             self.assertEqual({r["file"] for r in rows}, {"a.json", "b.json"})
-            self.assertEqual(lines[-1], "batch: 2 file(s)")
+            self.assertTrue(lines[-1].startswith("batch: 2 file(s), 2 ok,"))
 
     def test_dir_per_file_fail_open(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -75,6 +75,26 @@ def _present(value: Any) -> bool:
     return value not in (None, "", [], {})
 
 
+def _ts_arg(raw: str) -> float | None:
+    """Parse an epoch-seconds or ISO8601 timestamp argument. Empty -> 0."""
+    text = (raw or "").strip()
+    if not text:
+        return 0.0
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    try:
+        import datetime as _dt
+
+        parsed = _dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_dt.timezone.utc)
+    return parsed.timestamp()
+
+
 def merge_state(state: Any, trace: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(state, dict):
         return {"trace": dict(trace), "request": state}
@@ -248,6 +268,17 @@ def cmd_notes(args: argparse.Namespace) -> int:
             sys.stderr.write("prune failed: %s\n" % exc)
             return 1
         notes = data["notes"]
+    since = getattr(args, "since", None)
+    if since is not None:
+        since_ts = _ts_arg(since)
+        if since_ts is None:
+            sys.stderr.write("bad --since: %s\n" % since)
+            return 2
+        notes = [
+            n
+            for n in notes
+            if isinstance(n, dict) and isinstance(n.get("ts"), (int, float)) and n["ts"] >= since_ts
+        ]
     limit = getattr(args, "limit", None)
     if isinstance(limit, int) and limit >= 0:
         notes = notes[-limit:] if limit else []
@@ -356,6 +387,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")
     notes_cmd.add_argument("--limit", type=int, help="Show only the last N notes")
     notes_cmd.add_argument("--prune", type=int, help="Rewrite the trace keeping only the last N notes")
+    notes_cmd.add_argument("--since", default=None, help="Only notes with ts >= epoch seconds or ISO8601")
     notes_cmd.set_defaults(func=cmd_notes)
     return parser
 

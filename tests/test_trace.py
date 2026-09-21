@@ -337,6 +337,32 @@ class TraceTests(unittest.TestCase):
             self.assertIn("c", out)
             self.assertIn("2 note(s)", out)
 
+    def test_cli_notes_since_filters_old(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "notes": [
+                            {"ts": 100.0, "iso": "x", "text": "old-note"},
+                            {"ts": 200.0, "iso": "y", "text": "new-note"},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--since", "150"])
+            self.assertEqual(rc, 0)
+            self.assertIn("new-note", buf.getvalue())
+            self.assertNotIn("old-note", buf.getvalue())
+            rc = tr.main(["--file", str(path), "notes", "--since", "bogus"])
+            self.assertEqual(rc, 2)
+
     def test_cli_notes_prune_rewrites_file(self) -> None:
         import io
         from contextlib import redirect_stdout

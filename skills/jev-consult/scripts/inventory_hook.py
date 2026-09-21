@@ -369,6 +369,8 @@ def handle(
         "stale_sidecar": stale_match,
     }
     append_decision(LAST_DECISION)
+    if note:
+        extra["note_sha"] = hashlib.sha256(note.encode("utf-8")).hexdigest()[:12]
     no_sidecar = os.environ.get("JEV_HOOK_NOSIDECAR", "").strip() in {"1", "true", "yes"}
     if cwd is not None and not no_sidecar:
         try:

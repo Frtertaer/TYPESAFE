@@ -1739,5 +1739,26 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0)
             self.assertIn("1", proc.stdout)
 
+    def test_out_honors_csv_and_md(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1, "harness": "claude", "jev_status": "ok"}])
+            csv_path = Path(tmp) / "out.csv"
+            proc = self.run_cli("--file", str(path), "--csv", "--out", str(csv_path))
+            self.assertEqual(proc.returncode, 0)
+            text = csv_path.read_text(encoding="utf-8")
+            self.assertTrue(text.startswith("ts,harness,jev_status"))
+            self.assertIn("claude", text)
+            md_path = Path(tmp) / "out.md"
+            proc = self.run_cli("--file", str(path), "--md", "--out", str(md_path))
+            self.assertEqual(proc.returncode, 0)
+            text = md_path.read_text(encoding="utf-8")
+            self.assertTrue(text.startswith("| ts | harness"))
+            jsonl_path = Path(tmp) / "out.jsonl"
+            proc = self.run_cli("--file", str(path), "--out", str(jsonl_path))
+            self.assertEqual(proc.returncode, 0)
+            line = jsonl_path.read_text(encoding="utf-8").strip()
+            self.assertEqual(json.loads(line)["harness"], "claude")
+
 if __name__ == "__main__":
     unittest.main()

@@ -872,22 +872,11 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write("%s %d\n" % (value, n))
         return 0
     emit_entries = entries[::-1] if getattr(args, "reverse", False) else entries
-    if args.out:
-        out_path = Path(args.out)
-        try:
-            with out_path.open("w", encoding="utf-8") as fh:
-                for item in emit_entries:
-                    fh.write(json.dumps(item, sort_keys=True) + "\n")
-        except OSError as exc:
-            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
-            return 1
-        sys.stderr.write("wrote %d entries to %s\n" % (len(entries), out_path))
-        return 0
-    if args.jsonl:
-        for item in emit_entries:
-            sys.stdout.write(json.dumps(item, sort_keys=True) + "\n")
-        return 0
-    if args.csv or args.md:
+
+    def _cell(value: str) -> str:
+        return value.replace("|", "\\|").replace("\n", " ")
+
+    def _rows():
         rows = []
         for item in emit_entries:
             winner = item.get("winner")
@@ -905,18 +894,46 @@ def main(argv: list[str] | None = None) -> int:
                 ]
             )
         header = ["ts", "harness", "jev_status", "winner", "dedupe", "fill", "outcome", "prompt_head"]
+        return header, rows
+
+    def _md_text(header, rows) -> str:
+        out = ["| " + " | ".join(header) + " |", "|" + " --- |" * len(header)]
+        out.extend("| " + " | ".join(_cell(cell) for cell in row) + " |" for row in rows)
+        return "\n".join(out) + "\n"
+
+    if args.out:
+        out_path = Path(args.out)
+        try:
+            if args.csv:
+                header, rows = _rows()
+                with out_path.open("w", encoding="utf-8", newline="") as fh:
+                    writer = csv.writer(fh, lineterminator="\n")
+                    writer.writerow(header)
+                    writer.writerows(rows)
+            elif args.md:
+                header, rows = _rows()
+                out_path.write_text(_md_text(header, rows), encoding="utf-8")
+            else:
+                with out_path.open("w", encoding="utf-8") as fh:
+                    for item in emit_entries:
+                        fh.write(json.dumps(item, sort_keys=True) + "\n")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+        sys.stderr.write("wrote %d entries to %s\n" % (len(entries), out_path))
+        return 0
+    if args.jsonl:
+        for item in emit_entries:
+            sys.stdout.write(json.dumps(item, sort_keys=True) + "\n")
+        return 0
+    if args.csv or args.md:
+        header, rows = _rows()
         if args.csv:
             writer = csv.writer(sys.stdout, lineterminator="\n")
             writer.writerow(header)
             writer.writerows(rows)
         else:
-            def _cell(value: str) -> str:
-                return value.replace("|", "\\|").replace("\n", " ")
-
-            sys.stdout.write("| " + " | ".join(header) + " |\n")
-            sys.stdout.write("|" + " --- |" * len(header) + "\n")
-            for row in rows:
-                sys.stdout.write("| " + " | ".join(_cell(c) for c in row) + " |\n")
+            sys.stdout.write(_md_text(header, rows))
         return 0
     stats = summarize(entries, bad)
     stats["filtered"] = len(entries)

@@ -80,6 +80,19 @@ class SmokeTests(unittest.TestCase):
         out = json.loads(proc.stdout)
         self.assertEqual({s["name"] for s in out["steps"]}, {"doctor_json"})
 
+    def test_list_prints_step_names(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--list"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0)
+        names = set(proc.stdout.strip().splitlines())
+        self.assertEqual(len(names), 13)
+        self.assertIn("doctor_json", names)
+        self.assertIn("hook", names)
+
     def test_fail_fast_stops_after_first_failure(self) -> None:
         def boom(tmp):
             raise RuntimeError("explode")

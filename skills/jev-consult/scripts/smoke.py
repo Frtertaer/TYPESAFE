@@ -293,9 +293,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Stop after the first failing step.",
     )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="Print step names (for --only) and exit.",
+    )
     args = parser.parse_args(argv)
-    wanted = {s.strip() for s in args.only.split(",") if s.strip()}
     names = {name for name, _ in STEPS}
+    if args.list:
+        for name in sorted(names):
+            sys.stdout.write(name + "\n")
+        return 0
+    wanted = {s.strip() for s in args.only.split(",") if s.strip()}
     unknown = wanted - names
     if unknown:
         sys.stderr.write(

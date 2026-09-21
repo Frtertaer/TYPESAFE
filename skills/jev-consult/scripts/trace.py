@@ -276,6 +276,14 @@ def cmd_history(args: argparse.Namespace) -> int:
     data = load(path)
     history = data.get("history")
     history = [h for h in history if isinstance(h, dict)] if isinstance(history, list) else []
+    needle = (getattr(args, "grep", "") or os.environ.get("JEV_TRACE_HISTORY_GREP", "")).strip().lower()
+    if needle:
+        history = [
+            h
+            for h in history
+            if needle in str(h.get("pick") or "").lower()
+            or needle in str(h.get("kind") or "").lower()
+        ]
     for bound, op in ((getattr(args, "since", None), ">="), (getattr(args, "before", None), "<=")):
         if bound is None:
             continue
@@ -554,6 +562,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--reverse", action="store_true", help="List picks newest-first")
     hist_cmd.add_argument("--field", default="", help="Print only this field per pick (a.b digs into nested objects)")
     hist_cmd.add_argument("--since", default=None, help="Only picks with ts >= epoch seconds or ISO8601")
+    hist_cmd.add_argument("--grep", default="", help="Only picks whose pick/kind contains SUBSTR (case-insensitive; default JEV_TRACE_HISTORY_GREP)")
     hist_cmd.add_argument("--before", default=None, help="Only picks with ts <= epoch seconds or ISO8601")
     hist_cmd.set_defaults(func=cmd_history)
     return parser

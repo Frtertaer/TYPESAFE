@@ -164,6 +164,30 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(notes[0]["sha"], want)
             self.assertEqual(notes[1]["sha"], want)
 
+    def test_history_grep_filters_picks(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            data = tr.empty()
+            data = tr.record(data, pick="scaffold", kind="approach")
+            data = tr.record(data, pick="jwt-auth", kind="skill")
+            tr.save(data, path)
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = tr.main(["--file", str(path), "history", "--grep", "jwt"])
+            self.assertEqual(code, 0)
+            out = buf.getvalue()
+            self.assertIn("jwt-auth", out)
+            self.assertNotIn("scaffold", out)
+            buf = StringIO()
+            with patch.dict(os.environ, {"JEV_TRACE_HISTORY_GREP": "approach"}):
+                with redirect_stdout(buf):
+                    tr.main(["--file", str(path), "history"])
+            self.assertIn("scaffold", buf.getvalue())
+            self.assertNotIn("jwt-auth", buf.getvalue())
+
     def test_notes_grep_filters_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "trace.json"

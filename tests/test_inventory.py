@@ -292,6 +292,61 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertTrue(buf.getvalue().strip().startswith("stale (age "))
 
+    def test_check_sidecar_ttl_override(self) -> None:
+        import time as time_mod
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            path.write_text(
+                json.dumps({"written_at": time_mod.time() - 10}), encoding="utf-8"
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--check-sidecar", str(path), "--ttl", "5"])
+            self.assertEqual(code, 0)
+            self.assertTrue(buf.getvalue().strip().startswith("stale"))
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--check-sidecar", str(path), "--ttl", "99999"])
+            self.assertEqual(code, 0)
+            self.assertTrue(buf.getvalue().strip().startswith("fresh"))
+
+    def test_prune_sidecars_ttl_override(self) -> None:
+        import time as time_mod
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / ".jev-tools.json"
+            path.write_text(
+                json.dumps({"written_at": time_mod.time() - 10}), encoding="utf-8"
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--prune-sidecars", str(root), "--ttl", "5"])
+            self.assertEqual(code, 0)
+            self.assertIn("pruned 1", buf.getvalue())
+            self.assertFalse(path.exists())
+
+    def test_show_ttl_override(self) -> None:
+        import time as time_mod
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            path.write_text(
+                json.dumps({"written_at": time_mod.time() - 10}), encoding="utf-8"
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--show", str(path), "--ttl", "5"])
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(buf.getvalue())["status"], "stale")
+
     def test_check_sidecar_dir_lists_all(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

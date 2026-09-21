@@ -971,6 +971,12 @@ def main(argv: list[str] | None = None) -> int:
         const=SIDECAR_NAME,
         help="Print parsed sidecar/miss JSON plus status and exit.",
     )
+    parser.add_argument(
+        "--ttl",
+        type=float,
+        default=None,
+        help="Override sidecar_ttl_seconds for --check-sidecar/--prune-sidecars/--show.",
+    )
     parser.add_argument("--all-names", action="store_true", help="Include every installed name (no descriptions).")
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
@@ -980,11 +986,11 @@ def main(argv: list[str] | None = None) -> int:
         if target.is_dir():
             found = sorted(target.rglob(".jev-tools*.json"))
             for path in found:
-                sys.stdout.write("%s: %s\n" % (sidecar_status(path), path))
+                sys.stdout.write("%s: %s\n" % (sidecar_status(path, args.ttl), path))
             if not found:
                 sys.stdout.write("no sidecars under %s\n" % target)
             return 0
-        status = sidecar_status(target)
+        status = sidecar_status(target, args.ttl)
         suffix = ""
         if status in ("fresh", "stale"):
             written = read_sidecar(target).get("written_at")
@@ -993,7 +999,9 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(status + suffix + "\n")
         return 0
     if args.prune_sidecars:
-        removed = prune_stale_sidecars(Path(args.prune_sidecars), dry_run=args.dry_run)
+        removed = prune_stale_sidecars(
+            Path(args.prune_sidecars), ttl_seconds=args.ttl, dry_run=args.dry_run
+        )
         tag = "would prune" if args.dry_run else "pruned"
         for path in removed:
             sys.stdout.write("%s: %s\n" % (tag, path))
@@ -1001,7 +1009,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.show:
         path = Path(args.show)
-        status = sidecar_status(path)
+        status = sidecar_status(path, args.ttl)
         payload = read_sidecar(path) or {}
         out = {"path": str(path), "status": status, "payload": payload}
         written = payload.get("written_at")

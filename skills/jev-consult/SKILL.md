@@ -1,6 +1,6 @@
 ---
 name: jev-consult
-description: Use on every coding or planning task. Jev decides; you inspect and implement. Also use when off-track, stuck, looping, you do not know, you do not remember, or picking skills/plugins/MCP. Call it before choosing an approach, library, architecture, or keep vs change.
+description: Use on every coding or planning task. Jev decides; you inspect and implement. Also use when off-track, stuck, looping, you do not know, you do not remember, or picking skills/plugins/MCP. Call it before choosing an approach, library, architecture, name, or between delete, refactor, rewrite, keep vs change; before the next move; and when deciding if the work is good enough.
 compatibility: >-
   Makes network calls: scripts/jev.py POSTs to the TypeSafe API using
   TYPESAFE_API_KEY from the environment. Python 3 stdlib only, no install-time

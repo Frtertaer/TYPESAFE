@@ -52,6 +52,8 @@ class SkillEvalsTests(unittest.TestCase):
         pos: list[tuple[float, str]] = []
         neg: list[tuple[float, str]] = []
         for case in cases:
+            if case.get("lexical") is False:
+                continue
             s = TRIGGER.score(TRIGGER.tokens(case["prompt"]), desc_toks)
             (pos if case["should_trigger"] else neg).append((s, case["id"]))
         for s, cid in pos:
@@ -64,6 +66,25 @@ class SkillEvalsTests(unittest.TestCase):
             "weakest positive %.3f does not clear strongest negative %.3f "
             "(margin %.2f); scores: %s"
             % (worst_pos, best_neg, TRIGGER.MARGIN, pos + neg),
+        )
+
+    def test_trigger_cases_cover_must_ask_kinds(self) -> None:
+        cases_path = ROOT / "tests" / "fixtures" / "jev-consult.trigger-cases.json"
+        cases = json.loads(cases_path.read_text(encoding="utf-8"))["cases"]
+        policy = json.loads((SKILL / "policy.json").read_text(encoding="utf-8"))
+        must_ask = set(policy["must_ask"])
+        covered: set[str] = set()
+        for case in cases:
+            for kind in case.get("covers", []):
+                self.assertIn(
+                    kind, must_ask, "case %r covers unknown kind %r" % (case["id"], kind)
+                )
+                if case["should_trigger"] and case.get("lexical", True):
+                    covered.add(kind)
+        self.assertEqual(
+            must_ask - covered,
+            set(),
+            "must_ask kinds without a positive trigger case: %s" % sorted(must_ask - covered),
         )
 
 

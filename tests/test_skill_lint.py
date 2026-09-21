@@ -355,6 +355,28 @@ class CliTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 1)
             self.assertIn(str(bad), proc.stdout)
 
+    def test_watch_emits_ticks(self):
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            good = write_skill(tmp, "ok", GOOD.format(name="ok"))
+            env = dict(_os.environ, JEV_SLINT_WATCH_MAX="2")
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPT), str(good), "--watch", "0.01"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+        self.assertEqual(proc.returncode, 0)
+        ticks = [
+            json.loads(l)
+            for l in proc.stdout.splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertTrue(all("findings" in t and "errors" in t for t in ticks))
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

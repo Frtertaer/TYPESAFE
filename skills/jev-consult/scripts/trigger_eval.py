@@ -591,8 +591,16 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write("%s\n" % row["id"])
         return 0 if result["ok"] else 1
     if args.prompts:
-        for row in _rows():
-            sys.stdout.write("%s: %s\n" % (row["id"], row["prompt"]))
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {row["id"]: row["prompt"] for row in _rows()}, indent=2
+                )
+                + "\n"
+            )
+        else:
+            for row in _rows():
+                sys.stdout.write("%s: %s\n" % (row["id"], row["prompt"]))
         return 0 if result["ok"] else 1
     if args.csv:
         sys.stdout.write("id,should_trigger,lexical,score,ok\n")

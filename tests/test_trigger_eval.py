@@ -474,6 +474,14 @@ class TriggerEvalTests(unittest.TestCase):
         lines = buf.getvalue().splitlines()
         self.assertTrue(lines[0].startswith("pos-approach: "))
         self.assertTrue(any(l.startswith("neg-format: ") for l in lines))
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--prompts", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertIn("pos-approach", payload)
+        self.assertIn("neg-format", payload)
+        self.assertIsInstance(payload["pos-approach"], str)
 
     def test_summary_prints_aggregate_only(self) -> None:
         buf = io.StringIO()

@@ -1289,6 +1289,44 @@ class StatsFlagTests(unittest.TestCase):
             self.assertIn("charsBefore", stats)
             self.assertIn("kept", stats)
 
+    def test_report_writes_stats_json_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._transcript_file(tmp)
+            report = Path(tmp) / "report.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                rc = C.main(
+                    [
+                        str(path),
+                        "--history",
+                        "--fake",
+                        "--min-reduction",
+                        "0",
+                        "--report",
+                        str(report),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            stats = json.loads(report.read_text(encoding="utf-8"))
+            self.assertIn("charsBefore", stats)
+            self.assertIn("kept", stats)
+            # unwritable report path -> rc 1, no crash
+            bad = Path(tmp) / "no-dir" / "r.json"
+            with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", io.StringIO()
+            ):
+                rc = C.main(
+                    [
+                        str(path),
+                        "--history",
+                        "--fake",
+                        "--min-reduction",
+                        "0",
+                        "--report",
+                        str(bad),
+                    ]
+                )
+            self.assertEqual(rc, 1)
+
 
 class PruneSpillTests(unittest.TestCase):
     def _spill_dir(self, tmp: str) -> Path:

@@ -1239,6 +1239,17 @@ def cmd_compact(args: argparse.Namespace) -> int:
         Path(args.output).write_text(text, encoding="utf-8")
     else:
         sys.stdout.write(text)
+    report_path = getattr(args, "report", "") or ""
+    if report_path:
+        stats = result.get("stats") if isinstance(result, dict) else {}
+        try:
+            Path(report_path).write_text(
+                json.dumps(stats or {}, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            sys.stderr.write("cannot write report %s: %s\n" % (report_path, exc))
+            return 1
     if getattr(args, "stats_json", False):
         stats = result.get("stats") if isinstance(result, dict) else {}
         sys.stderr.write(json.dumps(stats or {}, ensure_ascii=False) + "\n")
@@ -1381,6 +1392,12 @@ def main(argv: list[str] | None = None) -> int:
         "--stats-json",
         action="store_true",
         help="Print the stats dict as JSON to stderr after the result.",
+    )
+    parser.add_argument(
+        "--report",
+        metavar="PATH",
+        default="",
+        help="Write the stats dict as JSON to PATH after the run.",
     )
     parser.add_argument(
         "--version",

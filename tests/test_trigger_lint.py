@@ -112,6 +112,40 @@ class CliTests(unittest.TestCase):
                 rc = trigger_lint.main([str(bad)])
             self.assertEqual(rc, 1)
 
+    def test_multiple_paths_lint_each_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            good = write_cases(tmp, [dict(GOOD_CASE)])
+            bad = Path(tmp) / "bad.json"
+            bad.write_text(
+                json.dumps({"cases": [{"id": "pos-x", "should_trigger": True}]}),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main([str(good), str(bad)])
+            self.assertEqual(rc, 1)
+            out = buf.getvalue()
+            self.assertIn(str(good) + ":", out)
+            self.assertIn(str(bad) + ":", out)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main([str(good), str(good)])
+            self.assertEqual(rc, 0)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main([str(good), str(bad), "--json"])
+            self.assertEqual(rc, 1)
+            rows = json.loads(buf.getvalue())
+            self.assertEqual(len(rows), 2)
+            self.assertTrue(rows[0]["path"].endswith("cases.json"))
+            self.assertGreaterEqual(rows[1]["errors"], 1)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main(
+                    [str(good), str(bad), "--watch", "0.01"]
+                )
+            self.assertEqual(rc, 2)
+
     def test_json_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = write_cases(tmp, [{"id": "pos-x", "should_trigger": True}])

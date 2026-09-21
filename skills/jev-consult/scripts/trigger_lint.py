@@ -202,8 +202,58 @@ def main(argv: list[str] | None = None) -> int:
     do_fix = "--fix" in argv
     argv = [a for a in argv if a not in ("--json", "--quiet", "--strict", "--fix")]
     if len(argv) > 1:
-        sys.stderr.write("usage: trigger_lint.py [CASES.json] [--json] [--quiet] [--strict] [--fix] [--severity L] [--out PATH] [--policy PATH]\n")
-        return 2
+        if watch_seconds > 0 or do_fix:
+            sys.stderr.write("multiple paths support neither --watch nor --fix\n")
+            return 2
+        results = []
+        for arg in argv:
+            fpath = Path(arg)
+            frows = lint_cases(fpath, policy_path=policy_path)
+            ferr = sum(1 for f in frows if f["severity"] == "error")
+            fwarn = sum(1 for f in frows if f["severity"] == "warn")
+            finfo = sum(1 for f in frows if f["severity"] == "info")
+            fshown = [
+                f
+                for f in frows
+                if (not severity or f["severity"] == severity)
+                and (not quiet or f["severity"] == "error")
+            ]
+            results.append(
+                {
+                    "path": str(fpath),
+                    "findings": fshown,
+                    "errors": ferr,
+                    "warnings": fwarn,
+                    "infos": finfo,
+                }
+            )
+        if as_json:
+            sys.stdout.write(json.dumps(results, indent=2) + "\n")
+        else:
+            for res in results:
+                sys.stdout.write("%s:\n" % res["path"])
+                for f in res["findings"]:
+                    sys.stdout.write(
+                        "%s %s %s: %s\n"
+                        % (f["severity"].upper(), f["rule"], f["id"], f["message"])
+                    )
+                sys.stdout.write(
+                    "  %d error(s), %d warning(s), %d info\n"
+                    % (res["errors"], res["warnings"], res["infos"])
+                )
+        if out_path:
+            try:
+                Path(out_path).write_text(
+                    json.dumps(results, indent=2) + "\n", encoding="utf-8"
+                )
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                return 1
+        any_err = any(r["errors"] for r in results)
+        any_find = any(
+            (r["errors"] or r["warnings"] or r["infos"]) for r in results
+        )
+        return 1 if any_err or (strict and any_find) else 0
     path = Path(argv[0]) if argv else DEFAULT_CASES
     if watch_seconds > 0:
         import time as _time

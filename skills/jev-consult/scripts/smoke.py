@@ -183,6 +183,12 @@ def step_question_lint(tmp: Path) -> dict:
     return _step("question_lint", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 
+def step_compare(tmp: Path) -> dict:
+    rc, out = _run([str(SCRIPTS / "compare.py"), "--strict"])
+    ok = rc == 0 and "after_jev" in out
+    return _step("compare", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
+
+
 def step_doctor(tmp: Path) -> dict:
     rc, out = _run(
         [
@@ -218,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
             step_trace,
             step_skill_lint,
             step_question_lint,
+            step_compare,
             step_doctor,
         ):
             try:

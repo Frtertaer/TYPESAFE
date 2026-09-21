@@ -417,6 +417,8 @@ def main(argv: list[str] | None = None) -> int:
         env_min_lat = None
     parser.add_argument("--min-latency", type=float, default=env_min_lat, help="Only entries with numeric latency_ms >= MS")
     parser.add_argument("--winner", default=os.environ.get("JEV_DECISIONS_WINNER", ""), help="Only entries whose winner name or kind:name equals NAME")
+    env_explicit = os.environ.get("JEV_DECISIONS_EXPLICIT", "").strip().lower() in ("1", "true", "yes")
+    parser.add_argument("--explicit", action="store_true", default=env_explicit, help="Only entries with explicit=true")
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -562,6 +564,8 @@ def main(argv: list[str] | None = None) -> int:
             and not isinstance(item.get("need"), bool)
             and float(item.get("need")) >= args.min_need
         ]
+    if getattr(args, "explicit", False):
+        entries = [item for item in entries if item.get("explicit") is True]
     if args.winner:
         want = args.winner.strip().lower()
         entries = [
@@ -605,9 +609,10 @@ def main(argv: list[str] | None = None) -> int:
             or args.min_need is not None
             or args.min_latency is not None
             or args.winner
+            or getattr(args, "explicit", False)
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, or --prompt\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, or --prompt\n"
             )
             return 2
         total, total_bad = load_entries(path)

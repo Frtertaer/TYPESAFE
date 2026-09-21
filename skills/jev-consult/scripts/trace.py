@@ -126,7 +126,12 @@ def record(trace: dict[str, Any], pick: str, kind: str = "") -> dict[str, Any]:
     data = dict(trace)
     data["last_pick"] = pick
     history = list(data.get("history") or [])
-    entry: dict[str, Any] = {"pick": pick}
+    now = time.time()
+    entry: dict[str, Any] = {
+        "pick": pick,
+        "ts": now,
+        "iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+    }
     if kind:
         entry["kind"] = kind
     history.append(entry)
@@ -253,6 +258,20 @@ def cmd_history(args: argparse.Namespace) -> int:
     data = load(path)
     history = data.get("history")
     history = [h for h in history if isinstance(h, dict)] if isinstance(history, list) else []
+    for bound, op in ((getattr(args, "since", None), ">="), (getattr(args, "before", None), "<=")):
+        if bound is None:
+            continue
+        bound_ts = _ts_arg(bound)
+        if bound_ts is None:
+            sys.stderr.write("bad time bound: %s\n" % bound)
+            return 2
+        history = [
+            h
+            for h in history
+            if isinstance(h.get("ts"), (int, float))
+            and not isinstance(h.get("ts"), bool)
+            and (h["ts"] >= bound_ts if op == ">=" else h["ts"] <= bound_ts)
+        ]
     limit = getattr(args, "limit", None)
     if isinstance(limit, int) and limit >= 0:
         history = history[-limit:] if limit else []
@@ -486,6 +505,8 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--json", action="store_true")
     hist_cmd.add_argument("--limit", type=int, help="Show only the last N picks")
     hist_cmd.add_argument("--field", default="", help="Print only this field per pick (a.b digs into nested objects)")
+    hist_cmd.add_argument("--since", default=None, help="Only picks with ts >= epoch seconds or ISO8601")
+    hist_cmd.add_argument("--before", default=None, help="Only picks with ts <= epoch seconds or ISO8601")
     hist_cmd.set_defaults(func=cmd_history)
     return parser
 

@@ -400,6 +400,18 @@ class TraceTests(unittest.TestCase):
             payload = json.loads(buf.getvalue())
             self.assertEqual(payload["field"], "missing")
             self.assertEqual(payload["values"], [None, None])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--since", "9999999999"])
+            self.assertEqual(rc, 0)
+            self.assertIn("0 pick(s)", buf.getvalue())
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--before", "9999999999"])
+            self.assertEqual(rc, 0)
+            self.assertIn("2 pick(s)", buf.getvalue())
+            rc = tr.main(["--file", str(path), "history", "--since", "bogus"])
+            self.assertEqual(rc, 2)
 
     def test_cli_notes_out_writes_file(self) -> None:
         import io

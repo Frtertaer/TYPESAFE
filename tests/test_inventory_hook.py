@@ -1070,6 +1070,28 @@ class InventoryInternalsTests(unittest.TestCase):
         self.assertEqual(INV._policy_float(None, "x", 0.5), 0.5)
         self.assertEqual(INV._policy_float({}, "x", 0.5), 0.5)
 
+    def test_stop_words_and_catalogs_from_policy(self) -> None:
+        # real policy.json carries both keys
+        self.assertIn("skill", INV.stop_words())
+        self.assertEqual(len(INV.catalogs()), 4)
+        # policy override
+        with patch.object(INV, "_policy_dict", return_value={"stop_words": ["zztop"]}):
+            self.assertEqual(INV.stop_words(), {"zztop"})
+            self.assertEqual(INV.tokens("zztop keepme"), {"keepme"})
+        with patch.object(
+            INV,
+            "_policy_dict",
+            return_value={"catalogs": [{"name": "x", "url": "https://x"}, {"name": "y"}]},
+        ):
+            self.assertEqual(INV.catalogs(), (("x", "https://x"),))
+        # missing/malformed keys fall back to module defaults
+        with patch.object(INV, "_policy_dict", return_value={}):
+            self.assertEqual(INV.stop_words(), INV.STOP)
+            self.assertEqual(INV.catalogs(), INV.CATALOGS)
+        with patch.object(INV, "_policy_dict", return_value={"stop_words": "nope", "catalogs": "nope"}):
+            self.assertEqual(INV.stop_words(), INV.STOP)
+            self.assertEqual(INV.catalogs(), INV.CATALOGS)
+
 
 class ScanMergeTests(unittest.TestCase):
     def _tree(self, tmp: str):

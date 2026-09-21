@@ -151,5 +151,70 @@
       "type": "noul",
       "instructions": "Does state contain enough inspected evidence that the next fact and the next step are grounded rather than invented?"
     }
-  }
+  },
+  "stop_words": [
+    "all",
+    "and",
+    "any",
+    "are",
+    "but",
+    "choice",
+    "choose",
+    "cli",
+    "for",
+    "from",
+    "harness",
+    "harnesses",
+    "how",
+    "installed",
+    "into",
+    "load",
+    "loading",
+    "loads",
+    "marketplace",
+    "mcp",
+    "not",
+    "pick",
+    "picking",
+    "plugin",
+    "plugins",
+    "running",
+    "session",
+    "skill",
+    "skills",
+    "start",
+    "task",
+    "that",
+    "the",
+    "this",
+    "tool",
+    "tools",
+    "use",
+    "user",
+    "using",
+    "was",
+    "when",
+    "with",
+    "without",
+    "you",
+    "your"
+  ],
+  "catalogs": [
+    {
+      "name": "skills.sh",
+      "url": "https://skills.sh"
+    },
+    {
+      "name": "claude-plugins-official",
+      "url": "https://github.com/anthropics/claude-plugins-official"
+    },
+    {
+      "name": "mcp-servers",
+      "url": "https://github.com/modelcontextprotocol/servers"
+    },
+    {
+      "name": "smithery",
+      "url": "https://smithery.ai"
+    }
+  ]
 }

@@ -144,7 +144,7 @@ def roots_for(harness: str, home: Path | None = None, hermes: Path | None = None
 
 def tokens(text: str) -> set[str]:
     words = re.findall(r"[a-z0-9]{3,}", text.lower())
-    return {word for word in words if word not in STOP}
+    return {word for word in words if word not in stop_words()}
 
 
 def slug(kind: str, name: str) -> str:
@@ -653,14 +653,25 @@ def write_sidecar(
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def sidecar_ttl_seconds() -> float:
-    """TTL for .jev-tools*.json sidecars. Threshold lives in policy.json."""
+def _policy_dict() -> dict:
     try:
         policy_path = Path(__file__).resolve().parent.parent / "policy.json"
         data = json.loads(policy_path.read_text(encoding="utf-8"))
-        return max(0.0, float(data.get(SIDECAR_TTL_KEY, DEFAULT_SIDECAR_TTL_SECONDS)))
-    except (OSError, ValueError, TypeError, AttributeError):
-        return DEFAULT_SIDECAR_TTL_SECONDS
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _policy_float_key(key: str, default: float) -> float:
+    try:
+        return max(0.0, float(_policy_dict().get(key, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def sidecar_ttl_seconds() -> float:
+    """TTL for .jev-tools*.json sidecars. Threshold lives in policy.json."""
+    return _policy_float_key(SIDECAR_TTL_KEY, DEFAULT_SIDECAR_TTL_SECONDS)
 
 
 HOOK_BUDGET_KEY = "hook_budget_seconds"
@@ -669,12 +680,26 @@ DEFAULT_HOOK_BUDGET_SECONDS = 12.0
 
 def hook_budget_seconds() -> float:
     """Max seconds handle() may spend before skipping the Jev pick."""
-    try:
-        policy_path = Path(__file__).resolve().parent.parent / "policy.json"
-        data = json.loads(policy_path.read_text(encoding="utf-8"))
-        return max(0.0, float(data.get(HOOK_BUDGET_KEY, DEFAULT_HOOK_BUDGET_SECONDS)))
-    except (OSError, ValueError, TypeError, AttributeError):
-        return DEFAULT_HOOK_BUDGET_SECONDS
+    return _policy_float_key(HOOK_BUDGET_KEY, DEFAULT_HOOK_BUDGET_SECONDS)
+
+
+def stop_words() -> set:
+    """IDF stop-words. Tunable in policy.json (stop_words); falls back to STOP."""
+    words = _policy_dict().get("stop_words")
+    if isinstance(words, list) and words and all(isinstance(w, str) for w in words):
+        return {w.lower() for w in words}
+    return set(STOP)
+
+
+def catalogs() -> tuple:
+    """Marketplace catalogs. Tunable in policy.json (catalogs); falls back to CATALOGS."""
+    raw = _policy_dict().get("catalogs")
+    out = []
+    if isinstance(raw, list):
+        for entry in raw:
+            if isinstance(entry, dict) and entry.get("name") and entry.get("url"):
+                out.append((str(entry["name"]), str(entry["url"])))
+    return tuple(out) if out else CATALOGS
 
 
 def read_sidecar(path: Path) -> dict:
@@ -838,7 +863,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(sidecar_status(Path(args.check_sidecar)) + "\n")
         return 0
     if args.catalogs:
-        for name, url in CATALOGS:
+        for name, url in catalogs():
             sys.stdout.write("%s\t%s\n" % (name, url))
         return 0
     harness = detect_harness(Path(__file__)) if args.harness == "auto" else args.harness
@@ -858,7 +883,7 @@ def main(argv: list[str] | None = None) -> int:
         "task": args.task,
         "counts": counts,
         "shortlist": picked,
-        "catalogs": [{"name": name, "url": url} for name, url in CATALOGS],
+        "catalogs": [{"name": name, "url": url} for name, url in catalogs()],
     }
     if args.all_names:
         payload["installed_names"] = ["%s:%s" % (item["kind"], item["name"]) for item in items]

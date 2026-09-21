@@ -35,16 +35,24 @@ def _load_scorer(path: Path):
     return module
 
 
-def evaluate(cases_path: Path, skill_dir: Path, case_id: str = "") -> dict | None:
+def evaluate(
+    cases_path: Path,
+    skill_dir: Path,
+    case_id: str = "",
+    desc_text: str = "",
+) -> dict | None:
     """Per-case scores plus the aggregate margin verdict; None on missing inputs.
-    With `case_id`, only that case is evaluated (margin still computed across it)."""
+    With `case_id`, only that case is evaluated (margin still computed across it).
+    With `desc_text`, prompts score against that text instead of SKILL.md."""
     if not VENDORED_SCORER.is_file() or not cases_path.is_file():
         return None
     scorer = _load_scorer(VENDORED_SCORER)
     cases = json.loads(cases_path.read_text(encoding="utf-8"))["cases"]
     if case_id:
         cases = [case for case in cases if case.get("id") == case_id]
-    desc_tokens = scorer.tokens(scorer.description_of(str(skill_dir)))
+    desc_tokens = scorer.tokens(
+        desc_text if desc_text else scorer.description_of(str(skill_dir))
+    )
     margin = getattr(scorer, "MARGIN", 1.15)
     rows: list[dict] = []
     pos: list[float] = []
@@ -118,6 +126,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Show only rows whose lexical score reaches F (after --fail).",
     )
     parser.add_argument(
+        "--desc",
+        metavar="TEXT",
+        default="",
+        help="Score prompts against TEXT instead of the skill's SKILL.md description.",
+    )
+    parser.add_argument(
         "--out",
         metavar="PATH",
         default="",
@@ -132,7 +146,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             score = scorer.score(
                 scorer.tokens(args.score),
-                scorer.tokens(scorer.description_of(args.skill)),
+                scorer.tokens(
+                    args.desc if args.desc else scorer.description_of(args.skill)
+                ),
             )
         except OSError as exc:
             sys.stderr.write("trigger_eval failed: %s\n" % exc)
@@ -145,7 +161,9 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write("score=%.3f\n" % score)
         return 0
     try:
-        result = evaluate(Path(args.cases), Path(args.skill), case_id=args.id)
+        result = evaluate(
+            Path(args.cases), Path(args.skill), case_id=args.id, desc_text=args.desc
+        )
     except (OSError, ValueError, KeyError) as exc:
         sys.stderr.write("trigger_eval failed: %s\n" % exc)
         return 2

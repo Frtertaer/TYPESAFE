@@ -212,6 +212,23 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertIn("margin:", buf.getvalue())
         self.assertNotIn("should_trigger=", buf.getvalue())
 
+    def test_desc_overrides_skill_description(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--score", "jev consult", "--desc", "banana bread recipes"])
+        self.assertEqual(rc, 0)
+        score_off = buf.getvalue()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            te.main(["--score", "jev consult"])
+        score_on = buf.getvalue()
+        self.assertNotEqual(score_off, score_on)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--desc", "unrelated plumbing text", "--json"])
+        payload = json.loads(buf.getvalue())
+        self.assertFalse(payload["ok"])
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

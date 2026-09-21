@@ -394,6 +394,14 @@ def main(argv: list[str] | None = None) -> int:
         env_sev = os.environ.get("JEV_PLINT_SEVERITY", "").strip().lower()
         if env_sev in ("error", "warn", "info"):
             severity = env_sev
+    out_path = ""
+    if "--out" in argv:
+        i = argv.index("--out")
+        if i + 1 >= len(argv):
+            sys.stderr.write("--out needs a PATH value\n")
+            return 2
+        out_path = argv[i + 1].strip()
+        del argv[i : i + 2]
     diff_path = None
     if "--diff" in argv:
         i = argv.index("--diff")
@@ -425,21 +433,44 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(json.dumps({"path": str(path), "policy": policy}, indent=2) + "\n")
         return 0
     findings = lint_policy(policy)
+    shown_rows = [
+        f
+        for f in findings
+        if (not severity or f["severity"] == severity)
+        and (not quiet or f["severity"] == "error")
+    ]
+    errors = sum(1 for f in findings if f["severity"] == "error")
+    warns = sum(1 for f in findings if f["severity"] == "warn")
+    infos = sum(1 for f in findings if f["severity"] == "info")
+    if out_path:
+        try:
+            Path(out_path).write_text(
+                json.dumps(
+                    {
+                        "path": str(path),
+                        "findings": shown_rows,
+                        "errors": errors,
+                        "warnings": warns,
+                        "infos": infos,
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+        sys.stderr.write("wrote %d finding(s) to %s\n" % (len(shown_rows), out_path))
     if as_json:
-        shown_rows = [
-            f
-            for f in findings
-            if (not severity or f["severity"] == severity)
-            and (not quiet or f["severity"] == "error")
-        ]
         sys.stdout.write(
             json.dumps(
                 {
                     "path": str(path),
                     "findings": shown_rows,
-                    "errors": sum(1 for f in findings if f["severity"] == "error"),
-                    "warnings": sum(1 for f in findings if f["severity"] == "warn"),
-                    "infos": sum(1 for f in findings if f["severity"] == "info"),
+                    "errors": errors,
+                    "warnings": warns,
+                    "infos": infos,
                 },
                 indent=2,
             )
@@ -452,9 +483,6 @@ def main(argv: list[str] | None = None) -> int:
             if quiet and finding["severity"] != "error":
                 continue
             sys.stdout.write(format_finding(finding) + "\n")
-    errors = sum(1 for f in findings if f["severity"] == "error")
-    warns = sum(1 for f in findings if f["severity"] == "warn")
-    infos = sum(1 for f in findings if f["severity"] == "info")
     if not quiet and not as_json:
         sys.stdout.write("policy_lint: %d error(s), %d warning(s), %d info\n" % (errors, warns, infos))
     if errors or (strict and warns):

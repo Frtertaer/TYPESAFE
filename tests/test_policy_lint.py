@@ -271,6 +271,27 @@ class PolicyLintTests(unittest.TestCase):
         self.assertNotIn("P010", buf.getvalue())
         self.assertNotIn("policy_lint:", buf.getvalue())
 
+    def test_out_writes_findings_json(self) -> None:
+        policy = base_policy()
+        policy["escalate_if"]["confidene_below"] = 0.4
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "policy.json"
+            p.write_text(json.dumps(policy), encoding="utf-8")
+            out_path = Path(tmp) / "findings.json"
+            err = io.StringIO()
+            from contextlib import redirect_stderr
+
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = policy_lint.main([str(p), "--out", str(out_path)])
+            self.assertEqual(rc, 0)
+            self.assertIn("wrote", err.getvalue())
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertIn("findings", payload)
+            self.assertTrue(any(f["rule"] == "P010" for f in payload["findings"]))
+            with redirect_stderr(err := io.StringIO()):
+                rc = policy_lint.main([str(p), "--out"])
+            self.assertEqual(rc, 2)
+
     def test_severity_filters_lines(self) -> None:
         policy = base_policy()
         policy["escalate_if"]["confidene_below"] = 0.4

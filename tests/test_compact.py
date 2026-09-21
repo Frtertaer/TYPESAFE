@@ -1154,6 +1154,25 @@ class CompactCliTests(unittest.TestCase):
         self.assertTrue(out["stats"]["fallback"])
         self.assertEqual(out["stats"]["messagesAfter"], out["stats"]["messagesBefore"])
 
+    def test_check_exits_1_below_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0.99", "--check"]
+                )
+            self.assertEqual(rc, 1)
+            self.assertIn("check: FAIL", buf.getvalue())
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0", "--check"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertIn("check: ok", buf.getvalue())
+
     def test_trace_file_loads(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

@@ -1170,7 +1170,8 @@ def compact_or_keep(
     min_reduction = float(opts.pop("min_reduction") if "min_reduction" in opts else MIN_REDUCTION)
     original = [normalize_message(item) for item in messages]
     result = compact(original, asker, opts)
-    if min_reduction > 0 and reduction_ratio(result) < min_reduction:
+    result["stats"]["reduction"] = reduction_ratio(result)
+    if min_reduction > 0 and result["stats"]["reduction"] < min_reduction:
         result["messages"] = original
         result["stats"]["charsAfter"] = result["stats"]["charsBefore"]
         result["stats"]["messagesAfter"] = len(original)
@@ -1228,6 +1229,17 @@ def cmd_compact(args: argparse.Namespace) -> int:
     else:
         asker = jev_asker
     result = compact_or_keep(messages, asker, options)
+    if getattr(args, "check", False):
+        stats = result.get("stats") or {}
+        ratio = stats.get("reduction", reduction_ratio(result))
+        if stats.get("fallback"):
+            sys.stdout.write(
+                "check: FAIL reduction %.3f below --min-reduction %s\n"
+                % (ratio, args.min_reduction)
+            )
+            return 1
+        sys.stdout.write("check: ok reduction %.3f\n" % ratio)
+        return 0
     if getattr(args, "dry_run", False):
         result["messages"] = messages
         stats = result.setdefault("stats", {})
@@ -1405,6 +1417,11 @@ def main(argv: list[str] | None = None) -> int:
         "--json",
         action="store_true",
         help="Emit --verify-spill/--orphan-spill results as JSON.",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Dry check: exit 1 when the transcript would compact below the --min-reduction gate; prints only a check line.",
     )
     parser.add_argument(
         "--stats",

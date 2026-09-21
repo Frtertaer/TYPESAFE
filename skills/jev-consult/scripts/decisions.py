@@ -460,6 +460,12 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         env_min_sl = None
     parser.add_argument("--min-shortlist", type=float, default=env_min_sl, help="Only entries with numeric shortlist_n >= N")
+    env_min_plen = os.environ.get("JEV_DECISIONS_MIN_PROMPT_LEN", "")
+    try:
+        env_min_plen = float(env_min_plen) if env_min_plen else None
+    except ValueError:
+        env_min_plen = None
+    parser.add_argument("--min-prompt-len", type=float, default=env_min_plen, help="Only entries with numeric prompt_len >= N")
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -623,6 +629,14 @@ def main(argv: list[str] | None = None) -> int:
         entries = [item for item in entries if item.get("over_budget") is True]
     if getattr(args, "strong", False):
         entries = [item for item in entries if item.get("strong_pick") is True]
+    if getattr(args, "min_prompt_len", None) is not None:
+        entries = [
+            item
+            for item in entries
+            if isinstance(item.get("prompt_len"), (int, float))
+            and not isinstance(item.get("prompt_len"), bool)
+            and float(item.get("prompt_len")) >= args.min_prompt_len
+        ]
     if getattr(args, "min_shortlist", None) is not None:
         entries = [
             item
@@ -724,9 +738,10 @@ def main(argv: list[str] | None = None) -> int:
             or getattr(args, "min_score", None) is not None
             or getattr(args, "min_catalog", None) is not None
             or getattr(args, "min_shortlist", None) is not None
+            or getattr(args, "min_prompt_len", None) is not None
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, --min-catalog, --min-shortlist, or --prompt (--reverse does not affect --prune)\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, --min-catalog, --min-shortlist, --min-prompt-len, or --prompt (--reverse does not affect --prune)\n"
             )
             return 2
         total, total_bad = load_entries(path)

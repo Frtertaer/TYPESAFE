@@ -79,6 +79,37 @@ class SummarizeTest(unittest.TestCase):
         self.assertIsNone(stats["need_skill"]["mean"])
         self.assertIsNone(stats["latency_ms"]["p50"])
 
+    def test_malformed_fields_tolerated(self):
+        entries = [
+            {"jev_status": "winner", "winner": "just-a-string", "need": "high", "latency_ms": "fast"},
+            {"jev_status": "winner", "winner": {"name": ""}, "need": True, "latency_ms": None},
+            {},
+        ]
+        stats = decisions.summarize(entries)
+        self.assertEqual(stats["total"], 3)
+        self.assertEqual(stats["top_winners"], {})
+        self.assertEqual(stats["need_skill"]["n"], 1)  # bool counts as numeric
+        self.assertEqual(stats["by_status"]["unknown"], 1)
+
+    def test_percentile_bounds(self):
+        self.assertIsNone(decisions._percentile([], 0.5))
+        self.assertEqual(decisions._percentile([5.0], 0.9), 5.0)
+        self.assertEqual(decisions._percentile([1.0, 2.0, 3.0], 0.0), 1.0)
+        self.assertEqual(decisions._percentile([1.0, 2.0, 3.0], 1.0), 3.0)
+
+    def test_time_str_bad_values(self):
+        self.assertEqual(decisions.time_str(None), "?")
+        self.assertEqual(decisions.time_str("nope"), "?")
+        self.assertRegex(decisions.time_str(1700000000), r"\d{2}-\d{2} \d{2}:\d{2}")
+
+    def test_format_entry_non_dict_winner(self):
+        line = decisions.format_entry(
+            {"ts": 1700000000, "harness": "hermes", "jev_status": "winner", "winner": "x", "prompt_head": "hi"}
+        )
+        self.assertIn("hermes", line)
+        self.assertIn("-", line)
+        self.assertIn("hi", line)
+
 
 class CliTest(unittest.TestCase):
     def run_cli(self, *argv: str, env: dict | None = None) -> subprocess.CompletedProcess:

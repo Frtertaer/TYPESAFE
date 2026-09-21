@@ -26,18 +26,22 @@ def _step(name: str, ok: bool, detail: str) -> dict:
     return {"name": name, "ok": bool(ok), "detail": detail}
 
 
+STEP_TIMEOUT = 60.0
+
+
 def _run(
     argv: list[str],
     cwd: Path | None = None,
     env: dict | None = None,
     inp: str | None = None,
+    timeout: float | None = None,
 ) -> tuple[int, str]:
     proc = subprocess.run(
         [sys.executable, *argv],
         capture_output=True,
         text=True,
         cwd=str(cwd) if cwd else None,
-        timeout=60,
+        timeout=STEP_TIMEOUT if timeout is None else timeout,
         env=env,
         input=inp,
     )
@@ -298,6 +302,13 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print step names (for --only) and exit.",
     )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="Per-step subprocess timeout (default 60; JEV_SMOKE_TIMEOUT overrides).",
+    )
     args = parser.parse_args(argv)
     names = {name for name, _ in STEPS}
     if args.list:
@@ -311,6 +322,16 @@ def main(argv: list[str] | None = None) -> int:
             "unknown step(s): %s (valid: %s)\n" % (", ".join(sorted(unknown)), ", ".join(sorted(names)))
         )
         return 2
+    global STEP_TIMEOUT
+    if args.timeout > 0:
+        STEP_TIMEOUT = float(args.timeout)
+    else:
+        try:
+            env_timeout = float(os.environ.get("JEV_SMOKE_TIMEOUT", "") or "0")
+        except ValueError:
+            env_timeout = 0.0
+        if env_timeout > 0:
+            STEP_TIMEOUT = env_timeout
     steps: list[dict] = []
     with tempfile.TemporaryDirectory() as tmp_raw:
         tmp = Path(tmp_raw)

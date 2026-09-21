@@ -128,6 +128,41 @@ class SmokeTests(unittest.TestCase):
         self.assertFalse(out["ok"])
         self.assertIn("explode", out["steps"][0]["detail"])
 
+    def test_timeout_flag_sets_step_timeout(self) -> None:
+        def boom(tmp):
+            raise RuntimeError("explode")
+
+        with patch.object(MOD, "_run", return_value=(1, "nope")), patch.object(
+            MOD, "step_policy", side_effect=boom
+        ):
+            import io
+
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = MOD.main(["--timeout", "7", "--fail-fast"])
+        self.assertEqual(rc, 1)
+        self.assertEqual(MOD.STEP_TIMEOUT, 7.0)
+        MOD.STEP_TIMEOUT = 60.0
+
+    def test_timeout_env_sets_step_timeout(self) -> None:
+        import os
+
+        def boom(tmp):
+            raise RuntimeError("explode")
+
+        with patch.dict(os.environ, {"JEV_SMOKE_TIMEOUT": "9"}):
+            with patch.object(MOD, "_run", return_value=(1, "nope")), patch.object(
+                MOD, "step_policy", side_effect=boom
+            ):
+                import io
+
+                buf = io.StringIO()
+                with patch.object(sys, "stdout", buf):
+                    rc = MOD.main(["--fail-fast"])
+        self.assertEqual(rc, 1)
+        self.assertEqual(MOD.STEP_TIMEOUT, 9.0)
+        MOD.STEP_TIMEOUT = 60.0
+
     def test_policy_step_real(self) -> None:
         from pathlib import Path as P
         import tempfile

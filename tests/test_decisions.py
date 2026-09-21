@@ -212,5 +212,59 @@ class FilterSinceTest(unittest.TestCase):
             self.assertIsNone(stats["since"])
 
 
+class PruneTest(unittest.TestCase):
+    run_cli = staticmethod(run_cli)
+
+    def test_prune_keeps_window(self):
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            now = _time.time()
+            write_log(
+                path,
+                [
+                    {"ts": now - 10 * 86400, "jev_status": "idf"},
+                    {"ts": now - 100, "jev_status": "winner"},
+                    "not-json",
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--days", "1", "--prune", "--json"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("pruned 1 of 2", proc.stderr)
+            kept = [
+                json.loads(line)
+                for line in path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(len(kept), 1)
+            self.assertEqual(kept[0]["jev_status"], "winner")
+            proc = self.run_cli("--file", str(path), "--json")
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 1)
+            self.assertEqual(stats["bad_lines"], 0)
+
+    def test_prune_requires_window(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1.0, "jev_status": "idf"}])
+            proc = self.run_cli("--file", str(path), "--prune")
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("requires", proc.stderr)
+            kept = path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(kept), 1)
+
+    def test_prune_entries_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"a": 1}, {"b": "x"}])
+            decisions.prune_entries(path, [{"b": "x"}])
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 1)
+            self.assertEqual(json.loads(lines[0]), {"b": "x"})
+            leftovers = [p for p in Path(tmp).iterdir() if p.name != "decisions.jsonl"]
+            self.assertEqual(leftovers, [])
+
+
 if __name__ == "__main__":
     unittest.main()

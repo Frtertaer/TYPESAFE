@@ -7,7 +7,9 @@ status mix, explicit/strong-pick rates, need_skill mean, latency percentiles.
 import argparse
 import datetime
 import json
+import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -166,6 +168,23 @@ def filter_since(entries: list[dict], since: float | None) -> list[dict]:
     return out
 
 
+def prune_entries(path: Path, entries: list[dict]) -> None:
+    fd, tmp = tempfile.mkstemp(
+        prefix=path.name + ".", dir=str(path.parent), suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as out:
+            for item in entries:
+                out.write(json.dumps(item, sort_keys=True) + "\n")
+        os.replace(tmp, str(path))
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Stats over ~/.cache/jev-consult/decisions.jsonl."
@@ -174,6 +193,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tail", type=int, default=0, help="Print last N entries")
     parser.add_argument("--days", type=float, default=0.0, help="Only entries from the last N days")
     parser.add_argument("--since", type=float, default=0.0, help="Only entries with ts >= epoch seconds")
+    parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="Rewrite the log keeping only entries inside the --days/--since window",
+    )
     parser.add_argument("--json", action="store_true", help="Machine-readable stats")
     args = parser.parse_args(argv)
     path = Path(args.file) if args.file else inventory.decisions_log_path()
@@ -189,6 +213,20 @@ def main(argv: list[str] | None = None) -> int:
         since = time.time() - args.days * 86400
     if since is not None:
         entries = filter_since(entries, since)
+    if args.prune:
+        if since is None:
+            sys.stderr.write("--prune requires --days or --since\n")
+            return 2
+        total, _ = load_entries(path)
+        try:
+            prune_entries(path, entries)
+        except OSError as exc:
+            sys.stderr.write("prune failed: %s\n" % exc)
+            return 1
+        sys.stderr.write(
+            "pruned %d of %d entries (kept %d)\n"
+            % (len(total) - len(entries), len(total), len(entries))
+        )
     stats = summarize(entries, bad)
     stats["filtered"] = len(entries)
     stats["since"] = since

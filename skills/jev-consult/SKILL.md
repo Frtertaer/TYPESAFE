@@ -126,6 +126,8 @@ Hook may call Jev **once** on the IDF shortlist (`load_tools` + `need_skill`). T
 
 `.jev-tools.json` and `.jev-tools-miss.json` sidecars carry `written_at`. They are fresh for `sidecar_ttl_seconds` (policy.json, 4h default). Check with `python scripts/inventory.py --check-sidecar` (`fresh` / `stale` / `missing` / `invalid`). Stale sidecar → ignore it and re-run `inventory.py`; `read_miss` already returns `{}` on stale miss files.
 
+Log maintenance: `python skills/jev-consult/scripts/decisions.py` prints stats (`--days N` / `--since EPOCH` filter the window, `--tail N`, `--json`); `--prune` rewrites decisions.jsonl keeping only the filtered window (requires `--days` or `--since`).
+
 If `.jev-tools-miss.json` exists, do not ask the user. Run:
 
 ```text

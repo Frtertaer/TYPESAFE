@@ -31,6 +31,7 @@ from inventory import (  # noqa: E402
     format_note,
     format_winner_note,
     hook_budget_seconds,
+    hook_dedupe_ttl_seconds,
     hook_note_limit,
     hook_jev_retries,
     hook_jev_timeout_seconds,
@@ -277,7 +278,12 @@ def handle(
             sidecar_age_s = int(age)
         norm = lambda s: " ".join(str(s or "").split())[:500].lower()
         if prior and norm(prior.get("task")) == norm(prompt):
-            if sidecar_fresh(prior):
+            dedupe_ttl = hook_dedupe_ttl_seconds()
+            within_ttl = (
+                dedupe_ttl <= 0
+                or (age is not None and age <= dedupe_ttl)
+            )
+            if sidecar_fresh(prior) and within_ttl:
                 deduped = prior
             else:
                 stale_match = True

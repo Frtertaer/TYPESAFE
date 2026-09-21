@@ -15,6 +15,7 @@
   "noul_unsure": 0.5,
   "tight_gap": 0.08,
   "sidecar_ttl_seconds": 14400,
+  "dedupe_ttl_seconds": 0,
   "hook_budget_seconds": 12,
   "hook_jev_timeout_seconds": 8,
   "hook_jev_retries": 0,

@@ -376,6 +376,38 @@ class InventoryHookTests(unittest.TestCase):
                 )
                 self.assertIn("hookSpecificOutput", out)
 
+    def test_dedupe_ttl_forces_repick(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        calls = []
+
+        def counting_pick(*args, **kwargs):
+            calls.append(1)
+            return skip_pick(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "Add JWT access tokens in Python",
+                "cwd": tmp,
+            }
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=counting_pick)
+            self.assertEqual(len(calls), 1)
+            sidecar_path = Path(tmp) / ".jev-tools.json"
+            blob = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            blob["written_at"] = int(blob["written_at"]) - 120
+            sidecar_path.write_text(json.dumps(blob), encoding="utf-8")
+            # dedupe TTL off (0): fresh sidecar still dedupes the same prompt
+            with patch.dict(os.environ, {"JEV_HOOK_DEDUPE_TTL": "0"}):
+                HOOK.handle(payload, items=items, harness="claude-code", pick_fn=counting_pick)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(HOOK.LAST_DECISION["question"], "dedupe")
+            # TTL 30 < age 120: repeat prompt re-runs the pick instead of deduping
+            with patch.dict(os.environ, {"JEV_HOOK_DEDUPE_TTL": "30"}):
+                HOOK.handle(payload, items=items, harness="claude-code", pick_fn=counting_pick)
+            self.assertEqual(len(calls), 2)
+            self.assertNotEqual(HOOK.LAST_DECISION["question"], "dedupe")
+            self.assertFalse(HOOK.LAST_DECISION.get("dedupe"))
+
     def test_no_sidecar_env_skips_sidecar_write(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

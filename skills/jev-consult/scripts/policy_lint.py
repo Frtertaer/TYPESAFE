@@ -58,6 +58,7 @@ ESCALATE_PROB_FIELDS = ("confidence_below", "noul_near", "choice_gap_below")
 POSITIVE_INT_FIELDS = ("version", "question_soft_max", "question_hard_max", "choice_option_hard_max")
 NONNEG_NUM_FIELDS = (
     "catalog_cache_seconds",
+    "dedupe_ttl_seconds",
     "hook_budget_seconds",
     "hook_jev_retries",
     "hook_jev_timeout_seconds",
@@ -69,6 +70,7 @@ KNOWN_ESCALATE_KEYS = ESCALATE_PROB_FIELDS + ESCALATE_BOOL_FIELDS
 KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "catalog_cache_seconds",
     "catalogs",
+    "dedupe_ttl_seconds",
     "hallucination",
     "hook_budget_seconds",
     "hook_jev_retries",

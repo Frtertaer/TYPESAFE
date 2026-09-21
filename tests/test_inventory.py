@@ -858,6 +858,19 @@ class TtlEnvOverrideTests(unittest.TestCase):
             prior = {"written_at": time_mod.time() - 99999}
             self.assertFalse(inv.sidecar_fresh(prior))
 
+    def test_dedupe_ttl_env_override(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        self.assertEqual(inv.hook_dedupe_ttl_seconds(), 0.0)
+        with patch.dict(os.environ, {"JEV_HOOK_DEDUPE_TTL": "45"}):
+            self.assertEqual(inv.hook_dedupe_ttl_seconds(), 45.0)
+        with patch.dict(os.environ, {"JEV_HOOK_DEDUPE_TTL": "bogus"}):
+            self.assertEqual(
+                inv.hook_dedupe_ttl_seconds(),
+                inv._policy_float_key("dedupe_ttl_seconds", 0.0),
+            )
+
 
 class SidecarAgeTests(unittest.TestCase):
     def test_age_seconds(self) -> None:

@@ -753,6 +753,21 @@ def hook_budget_seconds() -> float:
 
 HOOK_JEV_TIMEOUT_KEY = "hook_jev_timeout_seconds"
 DEFAULT_HOOK_JEV_TIMEOUT_SECONDS = 8.0
+HOOK_DEDUPE_TTL_KEY = "dedupe_ttl_seconds"
+DEFAULT_HOOK_DEDUPE_TTL_SECONDS = 0.0
+
+
+def hook_dedupe_ttl_seconds() -> float:
+    """Max age of a sidecar that may answer a repeat of the same prompt
+    (0 = disabled, any fresh sidecar dedupes). Env JEV_HOOK_DEDUPE_TTL
+    > policy dedupe_ttl_seconds > default."""
+    try:
+        env = float(os.environ.get("JEV_HOOK_DEDUPE_TTL", "") or -1)
+        if env >= 0:
+            return env
+    except ValueError:
+        pass
+    return _policy_float_key(HOOK_DEDUPE_TTL_KEY, DEFAULT_HOOK_DEDUPE_TTL_SECONDS)
 
 
 def hook_jev_timeout_seconds() -> float:

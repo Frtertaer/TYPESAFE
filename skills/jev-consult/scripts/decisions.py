@@ -44,6 +44,27 @@ def load_entries(path: Path) -> tuple[list[dict], int]:
     return entries, bad
 
 
+def load_bad_lines(path: Path) -> list[tuple[int, str]]:
+    """Return [(lineno, raw)] for lines that failed to parse as JSON objects."""
+    bad_rows: list[tuple[int, str]] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return bad_rows
+    for lineno, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            item = json.loads(stripped)
+        except ValueError:
+            bad_rows.append((lineno, stripped))
+            continue
+        if not isinstance(item, dict):
+            bad_rows.append((lineno, stripped))
+    return bad_rows
+
+
 def _percentile(values: list[float], q: float) -> float | None:
     if not values:
         return None
@@ -372,6 +393,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print only the number of entries matching the filters",
     )
     parser.add_argument(
+        "--errors",
+        action="store_true",
+        help="Print the unparseable jsonl lines with line numbers",
+    )
+    parser.add_argument(
         "--prune",
         action="store_true",
         help="Rewrite the log keeping only entries matching the time/status filters",
@@ -443,6 +469,10 @@ def main(argv: list[str] | None = None) -> int:
             "pruned %d of %d entries (kept %d)\n"
             % (len(total) - len(entries), len(total), len(entries))
         )
+    if args.errors:
+        for lineno, raw in load_bad_lines(path):
+            sys.stdout.write("%d: %s\n" % (lineno, raw[:200]))
+        return 0
     if args.count:
         sys.stdout.write("%d\n" % len(entries))
         return 0

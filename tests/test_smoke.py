@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -59,6 +60,28 @@ class SmokeTests(unittest.TestCase):
         out = json.loads(proc.stdout)
         self.assertTrue(out["ok"])
         self.assertEqual({s["name"] for s in out["steps"]}, {"policy", "trace"})
+
+    def test_only_env_presets_steps(self) -> None:
+        env = dict(os.environ, JEV_SMOKE_ONLY="policy,trace")
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+        out = json.loads(proc.stdout)
+        self.assertEqual({s["name"] for s in out["steps"]}, {"policy", "trace"})
+        env = dict(os.environ, JEV_SMOKE_ONLY="trace")
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "policy"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+        out = json.loads(proc.stdout)
+        self.assertEqual({s["name"] for s in out["steps"]}, {"policy"})
 
     def test_only_unknown_step_rc2(self) -> None:
         proc = subprocess.run(

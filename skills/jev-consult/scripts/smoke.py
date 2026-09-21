@@ -289,8 +289,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Offline sanity for the jev-consult pack.")
     parser.add_argument(
         "--only",
-        default="",
-        help="Comma-separated step names to run (default: all).",
+        default=os.environ.get("JEV_SMOKE_ONLY", ""),
+        help="Comma-separated step names to run (default: all; JEV_SMOKE_ONLY presets).",
     )
     parser.add_argument(
         "--fail-fast",

@@ -962,7 +962,17 @@ class TraceTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "trace.json"
-            path.write_text(json.dumps({"plan": "P"}), encoding="utf-8")
+            path.write_text(
+                json.dumps(
+                    {
+                        "plan": "P",
+                        "attempt_count": 2,
+                        "history": [{"ts": 1, "pick": "a"}],
+                        "inspected": [{"name": "x"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
             buf = io.StringIO()
             with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "2"}):
                 with patch.object(sys, "stdout", buf):
@@ -977,6 +987,9 @@ class TraceTests(unittest.TestCase):
             ]
             self.assertEqual(len(ticks), 2)
             self.assertEqual(ticks[0]["state"]["plan"], "P")
+            self.assertEqual(ticks[0]["attempt_count"], 2)
+            self.assertEqual(ticks[0]["history"], 1)
+            self.assertEqual(ticks[0]["inspected"], 1)
 
     def test_notes_watch_emits_count_ticks(self) -> None:
         import io

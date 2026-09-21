@@ -575,7 +575,13 @@ def cmd_state(args: argparse.Namespace) -> int:
             state = {key: value for key, value in data.items() if _present(value)}
             sys.stdout.write(
                 json.dumps(
-                    {"ts": int(_time.time()), "state": state},
+                    {
+                        "ts": int(_time.time()),
+                        "state": state,
+                        "attempt_count": int(data.get("attempt_count") or 0),
+                        "history": len(data.get("history") or []),
+                        "inspected": len(data.get("inspected") or []),
+                    },
                     ensure_ascii=False,
                 )
                 + "\n"
@@ -657,7 +663,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="S",
         type=float,
         default=0.0,
-        help="Re-read the trace every S seconds and print a {ts,state} JSON tick",
+        help="Re-read the trace every S seconds and print a {ts,state,attempt_count,history,inspected} JSON tick",
     )
     state_cmd.set_defaults(func=cmd_state)
     stats_cmd = sub.add_parser("stats", help="Summary: counts, last pick, file age")

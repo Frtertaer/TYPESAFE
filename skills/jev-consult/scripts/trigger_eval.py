@@ -137,6 +137,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print a histogram of lexical scores (0.25-wide buckets).",
     )
+    parser.add_argument(
+        "--sort",
+        action="store_true",
+        help="Sort rows by score ascending (weakest first, unscored last).",
+    )
     parser.add_argument("--quiet", action="store_true", help="Print only the verdict line.")
     parser.add_argument(
         "--summary",
@@ -290,6 +295,8 @@ def main(argv: list[str] | None = None) -> int:
                 for r in rows
                 if r["score"] is not None and r["score"] >= args.min_score
             ]
+        if args.sort:
+            rows = sorted(rows, key=lambda r: (r["score"] is None, r["score"]))
         return rows
 
     if args.covers or args.covers_map:

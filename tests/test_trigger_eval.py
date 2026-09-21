@@ -375,6 +375,16 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertTrue(int(count) > 0)
         self.assertIn("unscored 1\n", buf.getvalue())
 
+    def test_sort_orders_rows_by_score(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--sort", "--json"])
+        self.assertEqual(rc, 0)
+        scores = [r["score"] for r in json.loads(buf.getvalue())["cases"]]
+        scored = [s for s in scores if s is not None]
+        self.assertEqual(scored, sorted(scored))
+        self.assertTrue(all(s is None for s in scores[len(scored):]))
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

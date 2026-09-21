@@ -289,6 +289,30 @@ class PolicyLintTests(unittest.TestCase):
                 rc = policy_lint.main([str(p), "--severity", "bogus"])
             self.assertEqual(rc, 2)
 
+    def test_json_emits_machine_readable(self) -> None:
+        policy = base_policy()
+        policy["escalate_if"]["confidene_below"] = 0.4
+        policy["noul_yes"] = 1.7
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "policy.json"
+            p.write_text(json.dumps(policy), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = policy_lint.main([str(p), "--json"])
+            buf2 = io.StringIO()
+            with redirect_stdout(buf2):
+                policy_lint.main([str(p), "--json", "--severity", "warn"])
+        self.assertEqual(rc, 1)
+        payload = json.loads(buf.getvalue())
+        rules = {f["rule"] for f in payload["findings"]}
+        self.assertIn("P002", rules)
+        self.assertIn("P010", rules)
+        self.assertEqual(payload["errors"], 1)
+        self.assertGreaterEqual(payload["warnings"], 1)
+        payload = json.loads(buf2.getvalue())
+        self.assertTrue(all(f["severity"] == "warn" for f in payload["findings"]))
+        self.assertEqual(payload["errors"], 1)  # counts still on all findings
+
     def test_quiet_still_prints_errors(self) -> None:
         policy = base_policy()
         policy["noul_yes"] = 1.7

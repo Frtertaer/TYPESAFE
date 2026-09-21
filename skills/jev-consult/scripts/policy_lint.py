@@ -377,6 +377,7 @@ def main(argv: list[str] | None = None) -> int:
     strict = "--strict" in argv
     show = "--show" in argv
     quiet = "--quiet" in argv
+    as_json = "--json" in argv
     severity = ""
     if "--severity" in argv:
         i = argv.index("--severity")
@@ -396,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         diff_path = argv[i + 1]
         del argv[i : i + 2]
-    argv = [a for a in argv if a not in {"--strict", "--show", "--quiet"}]
+    argv = [a for a in argv if a not in {"--strict", "--show", "--quiet", "--json"}]
     path = Path(argv[0]) if argv else DEFAULT_POLICY
     try:
         policy = json.loads(path.read_text(encoding="utf-8"))
@@ -419,16 +420,37 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(json.dumps({"path": str(path), "policy": policy}, indent=2) + "\n")
         return 0
     findings = lint_policy(policy)
-    for finding in findings:
-        if severity and finding["severity"] != severity:
-            continue
-        if quiet and finding["severity"] != "error":
-            continue
-        sys.stdout.write(format_finding(finding) + "\n")
+    if as_json:
+        shown_rows = [
+            f
+            for f in findings
+            if (not severity or f["severity"] == severity)
+            and (not quiet or f["severity"] == "error")
+        ]
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "path": str(path),
+                    "findings": shown_rows,
+                    "errors": sum(1 for f in findings if f["severity"] == "error"),
+                    "warnings": sum(1 for f in findings if f["severity"] == "warn"),
+                    "infos": sum(1 for f in findings if f["severity"] == "info"),
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+    else:
+        for finding in findings:
+            if severity and finding["severity"] != severity:
+                continue
+            if quiet and finding["severity"] != "error":
+                continue
+            sys.stdout.write(format_finding(finding) + "\n")
     errors = sum(1 for f in findings if f["severity"] == "error")
     warns = sum(1 for f in findings if f["severity"] == "warn")
     infos = sum(1 for f in findings if f["severity"] == "info")
-    if not quiet:
+    if not quiet and not as_json:
         sys.stdout.write("policy_lint: %d error(s), %d warning(s), %d info\n" % (errors, warns, infos))
     if errors or (strict and warns):
         return 1

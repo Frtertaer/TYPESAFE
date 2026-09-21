@@ -223,7 +223,11 @@ def cmd_record(args: argparse.Namespace) -> int:
             notes = []
         now = time.time()
         iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
-        notes.append({"ts": now, "iso": iso, "text": note_text})
+        entry = {"ts": now, "iso": iso, "text": note_text}
+        harness = args.harness or os.environ.get("JEV_TRACE_HARNESS", "")
+        if harness:
+            entry["harness"] = harness
+        notes.append(entry)
         data["notes"] = notes[-50:]
     save(data, path)
     emit({"path": str(path), "trace": data})
@@ -279,6 +283,9 @@ def cmd_notes(args: argparse.Namespace) -> int:
             for n in notes
             if isinstance(n, dict) and isinstance(n.get("ts"), (int, float)) and n["ts"] >= since_ts
         ]
+    want_harness = getattr(args, "harness", "") or ""
+    if want_harness:
+        notes = [n for n in notes if isinstance(n, dict) and n.get("harness") == want_harness]
     limit = getattr(args, "limit", None)
     if isinstance(limit, int) and limit >= 0:
         notes = notes[-limit:] if limit else []
@@ -363,6 +370,7 @@ def build_parser() -> argparse.ArgumentParser:
     rec = sub.add_parser("record", help="Store a Jev pick")
     rec.add_argument("--pick", required=True)
     rec.add_argument("--kind", default="")
+    rec.add_argument("--harness", default="", help="Tag the --note entry with this harness (default JEV_TRACE_HARNESS)")
     rec.add_argument("--step", default="")
     rec.add_argument("--note", default=None, help="Append a freeform note to trace.notes ('-' reads stdin; default JEV_TRACE_NOTE)")
     rec.set_defaults(func=cmd_record)
@@ -388,6 +396,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--limit", type=int, help="Show only the last N notes")
     notes_cmd.add_argument("--prune", type=int, help="Rewrite the trace keeping only the last N notes")
     notes_cmd.add_argument("--since", default=None, help="Only notes with ts >= epoch seconds or ISO8601")
+    notes_cmd.add_argument("--harness", default="", help="Only notes tagged with this harness")
     notes_cmd.set_defaults(func=cmd_notes)
     return parser
 

@@ -363,6 +363,28 @@ class TraceTests(unittest.TestCase):
             rc = tr.main(["--file", str(path), "notes", "--since", "bogus"])
             self.assertEqual(rc, 2)
 
+    def test_cli_notes_harness_tags_and_filters(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            tr.main(
+                ["--file", str(path), "record", "--pick", "x", "--note", "for-hermes", "--harness", "hermes"]
+            )
+            tr.main(["--file", str(path), "record", "--pick", "x", "--note", "plain-note"])
+            data = json.loads(path.read_text(encoding="utf-8"))
+            tagged = [n for n in data["notes"] if n.get("harness") == "hermes"]
+            self.assertEqual(len(tagged), 1)
+            self.assertEqual(tagged[0]["text"], "for-hermes")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--harness", "hermes"])
+            self.assertEqual(rc, 0)
+            self.assertIn("for-hermes", buf.getvalue())
+            self.assertNotIn("plain-note", buf.getvalue())
+
     def test_cli_notes_prune_rewrites_file(self) -> None:
         import io
         from contextlib import redirect_stdout

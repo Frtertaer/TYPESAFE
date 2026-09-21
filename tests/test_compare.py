@@ -338,6 +338,33 @@ class StrictGateTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 1)
             self.assertIn("strict:", proc.stderr)
 
+    def test_watch_emits_ticks(self) -> None:
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            env = dict(_os.environ, JEV_COMPARE_WATCH_MAX="2")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "skills" / "jev-consult" / "scripts" / "compare.py"),
+                    "--watch", "0.01", "--cases", str(path),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            ticks = [
+                json.loads(l)
+                for l in proc.stdout.splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(t["cases"] == 2 for t in ticks))
+            self.assertTrue(all(t["failures"] == 0 for t in ticks))
+
 
 if __name__ == "__main__":
     unittest.main()

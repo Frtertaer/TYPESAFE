@@ -244,8 +244,40 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Exit 1 when any case's guarded side skipped Jev (or scored below noul_yes with --live).",
     )
+    parser.add_argument(
+        "--watch",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Re-run the cases every S seconds, printing a {ts,cases,failures} JSON tick (JEV_COMPARE_WATCH_MAX caps ticks).",
+    )
     args = parser.parse_args(argv)
     only = {s.strip() for s in args.only.split(",") if s.strip()} or None
+    if args.watch and args.watch > 0:
+        import time as _time
+
+        try:
+            max_ticks = int(os.environ.get("JEV_COMPARE_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        while max_ticks <= 0 or ticks < max_ticks:
+            cur = run(
+                live=args.live,
+                as_json=args.as_json,
+                path=Path(args.cases) if args.cases else None,
+                only=only,
+            )
+            tick = {
+                "ts": int(_time.time()),
+                "cases": len(cur["rows"]),
+                "failures": len(strict_failures(cur["rows"], args.live)),
+            }
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            _time.sleep(args.watch)
+        return 0
     result = run(
         live=args.live,
         as_json=args.as_json,

@@ -259,6 +259,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tail", type=int, default=0, help="Print last N entries")
     parser.add_argument("--first", type=int, default=0, help="Print first N entries")
     parser.add_argument("--days", type=float, default=0.0, help="Only entries from the last N days")
+    parser.add_argument(
+        "--week", action="store_true", help="Alias for --days 7"
+    )
     parser.add_argument("--since", type=float, default=0.0, help="Only entries with ts >= epoch seconds")
     parser.add_argument("--until", type=float, default=0.0, help="Only entries with ts <= epoch seconds")
     parser.add_argument("--harness", default="", help="Only entries for this harness")
@@ -332,8 +335,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     entries, bad = load_entries(path)
     since = args.since or None
-    if args.days > 0:
-        since = time.time() - args.days * 86400
+    days = args.days if args.days > 0 else (7.0 if args.week else 0.0)
+    if days > 0:
+        since = time.time() - days * 86400
     until = args.until or None
     if since is not None:
         entries = filter_since(entries, since)

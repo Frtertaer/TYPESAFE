@@ -683,6 +683,43 @@ class FilterSinceTest(unittest.TestCase):
             self.assertEqual(stats["total"], 2)
             self.assertIsNone(stats["since"])
 
+    def test_week_alias_filters_last_7_days(self):
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            now = _time.time()
+            write_log(
+                path,
+                [
+                    {"ts": now - 8 * 86400, "jev_status": "idf"},
+                    {"ts": now - 6 * 86400, "jev_status": "winner"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--json", "--week")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 1)
+            self.assertEqual(stats["by_status"]["winner"], 1)
+            self.assertIsNotNone(stats["since"])
+
+    def test_days_overrides_week(self):
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            now = _time.time()
+            write_log(
+                path,
+                [
+                    {"ts": now - 6 * 86400, "jev_status": "idf"},
+                    {"ts": now - 100, "jev_status": "winner"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--json", "--week", "--days", "1")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 1)
+            self.assertEqual(stats["by_status"]["winner"], 1)
+
 
 class FilterHarnessTest(unittest.TestCase):
     run_cli = staticmethod(run_cli)

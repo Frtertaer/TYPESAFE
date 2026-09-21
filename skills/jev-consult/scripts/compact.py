@@ -1204,6 +1204,25 @@ def cmd_compact(args: argparse.Namespace) -> int:
         Path(args.output).write_text(text, encoding="utf-8")
     else:
         sys.stdout.write(text)
+    if args.stats:
+        stats = result.get("stats") if isinstance(result, dict) else None
+        stats = stats if isinstance(stats, dict) else {}
+        before = stats.get("charsBefore")
+        after = stats.get("charsAfter")
+        pct = ""
+        if isinstance(before, (int, float)) and isinstance(after, (int, float)) and before:
+            pct = " (%.0f%%)" % (100.0 * after / before)
+        sys.stderr.write(
+            "stats: kept=%s messages %s->%s chars %s->%s%s\n"
+            % (
+                stats.get("kept"),
+                stats.get("messagesBefore"),
+                stats.get("messagesAfter"),
+                before,
+                after,
+                pct,
+            )
+        )
     return 0
 
 
@@ -1262,6 +1281,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Unlink spill files older than SECONDS in the spill dir (or --spill-dir) and exit.",
     )
     parser.add_argument("--spill-dir", help="Override spill directory for --prune-spill.")
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="Print a one-line compaction summary to stderr after the result.",
+    )
     parser.add_argument(
         "--dir",
         metavar="DIR",

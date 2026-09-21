@@ -1216,6 +1216,43 @@ class BatchDirTests(unittest.TestCase):
             self.assertFalse(by_file["bad.json"]["ok"])
 
 
+class StatsFlagTests(unittest.TestCase):
+    def _transcript_file(self, tmp: str) -> Path:
+        path = Path(tmp) / "t.json"
+        path.write_text(
+            json.dumps(
+                [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"}]
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_stats_prints_summary_to_stderr(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._transcript_file(tmp)
+            err = io.StringIO()
+            with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", err
+            ):
+                rc = C.main(
+                    [str(path), "--history", "--fake", "--stats", "--min-reduction", "0"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertIn("stats: kept=", err.getvalue())
+            self.assertIn("chars", err.getvalue())
+
+    def test_stats_off_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._transcript_file(tmp)
+            err = io.StringIO()
+            with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", err
+            ):
+                rc = C.main([str(path), "--history", "--fake", "--min-reduction", "0"])
+            self.assertEqual(rc, 0)
+            self.assertNotIn("stats:", err.getvalue())
+
+
 class PruneSpillTests(unittest.TestCase):
     def _spill_dir(self, tmp: str) -> Path:
         target = Path(tmp) / "spill"

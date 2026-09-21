@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import io
 import json
+import os
+import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALL_PATH = ROOT / "scripts" / "install.py"
@@ -160,6 +165,168 @@ class CopyAndSnippetTests(unittest.TestCase):
             stripped = path.read_text(encoding="utf-8")
             self.assertNotIn(install.MARKER_START, stripped)
             self.assertIn("# keep", stripped)
+
+
+class InstallCoverageTests(unittest.TestCase):
+    def test_parse_agents(self) -> None:
+        self.assertEqual(install.parse_agents(None), list(install.ALLOWED))
+        self.assertEqual(install.parse_agents(""), list(install.ALLOWED))
+        self.assertEqual(install.parse_agents("claude-code"), ["claude-code"])
+        self.assertEqual(install.parse_agents(" codex , grok "), ["codex", "grok"])
+        with self.assertRaises(SystemExit):
+            install.parse_agents("cursor")
+        with self.assertRaises(SystemExit):
+            install.parse_agents("claude-code,copilot")
+        with self.assertRaises(SystemExit):
+            install.parse_agents(",,")
+
+    def test_targets_layout(self) -> None:
+        home = Path("/home/u")
+        hermes = Path("/hermes")
+        mapping = install.targets(home, hermes)
+        self.assertEqual(set(mapping), {"hermes", "claude-code", "codex", "grok"})
+        self.assertEqual(mapping["codex"]["skills"], [home / ".codex" / "skills", home / ".agents" / "skills"])
+        self.assertEqual(mapping["hermes"]["instructions"], [])
+        self.assertIn(home / ".claude" / "CLAUDE.md", mapping["claude-code"]["instructions"])
+
+    def test_env_file_has_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            self.assertFalse(install.env_file_has_key(path))
+            path.write_text("# TYPESAFE_API_KEY=abc\nOTHER=1\n", encoding="utf-8")
+            self.assertFalse(install.env_file_has_key(path))
+            path.write_text("TYPESAFE_API_KEY=\n", encoding="utf-8")
+            self.assertFalse(install.env_file_has_key(path))
+            path.write_text('TYPESAFE_API_KEY="abc123"\n', encoding="utf-8")
+            self.assertTrue(install.env_file_has_key(path))
+
+    def test_key_is_set_and_report_never_prints_value(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_home = Path(tmp) / "home"
+            fake_home.mkdir()
+            with patch.object(install, "user_home", return_value=fake_home), patch.object(
+                install, "hermes_home", return_value=Path(tmp) / "hermes"
+            ), patch.object(install, "repo_root", return_value=Path(tmp) / "repo"), patch.dict(
+                os.environ, {"TYPESAFE_API_KEY": ""}, clear=False
+            ):
+                os.environ.pop("TYPESAFE_API_KEY", None)
+                self.assertFalse(install.key_is_set())
+                (Path(tmp) / "repo").mkdir()
+                (Path(tmp) / "repo" / ".env").write_text(
+                    "TYPESAFE_API_KEY=secret123456\n", encoding="utf-8"
+                )
+                self.assertTrue(install.key_is_set())
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    install.report_key()
+                self.assertIn("set", buf.getvalue())
+                self.assertNotIn("secret123456", buf.getvalue())
+
+    def test_hook_script_marks(self) -> None:
+        skill = Path("/s/jev-consult")
+        self.assertEqual(install.hook_script(skill), skill / "scripts" / "compact_hook.py")
+        self.assertEqual(
+            install.hook_script(skill, "inventory_hook.py"),
+            skill / "scripts" / "inventory_hook.py",
+        )
+
+    def test_hermes_plugin_enable_disable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "config.yaml"
+            self.assertIn("missing", install.enable_hermes_plugin(config, "jev-compact", False))
+            config.write_text("server: {}\n", encoding="utf-8")
+            self.assertIn("no plugins.enabled", install.enable_hermes_plugin(config, "jev-compact", False))
+            config.write_text("plugins:\n  enabled:\n    - other\n", encoding="utf-8")
+            self.assertIn("enable", install.enable_hermes_plugin(config, "jev-compact", True))
+            self.assertNotIn("jev-compact", config.read_text(encoding="utf-8"))
+            self.assertIn("enabled", install.enable_hermes_plugin(config, "jev-compact", False))
+            text = config.read_text(encoding="utf-8")
+            self.assertIn("    - jev-compact", text)
+            self.assertIn("    - other", text)
+            self.assertIn("already enabled", install.enable_hermes_plugin(config, "jev-compact", False))
+            self.assertIn("disable", install.disable_hermes_plugin(config, "jev-compact", True))
+            self.assertIn("jev-compact", config.read_text(encoding="utf-8"))  # dry run kept it
+            self.assertIn("disabled", install.disable_hermes_plugin(config, "jev-compact", False))
+            self.assertNotIn("jev-compact", config.read_text(encoding="utf-8"))
+            self.assertIn("- other", config.read_text(encoding="utf-8"))
+            self.assertIn("not enabled", install.disable_hermes_plugin(config, "jev-compact", False))
+
+    def test_strip_codex_event_branches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "hooks.json"
+            self.assertIn("missing", install.strip_codex_event(path, "UserPromptSubmit", "inventory_hook.py", False))
+            self.assertIn("missing", install.strip_codex_event(path, "UserPromptSubmit", "inventory_hook.py", True))
+            path.write_text("not json", encoding="utf-8")
+            self.assertIn("invalid json", install.strip_codex_event(path, "UserPromptSubmit", "inventory_hook.py", False))
+            path.write_text('{"hooks": {}}', encoding="utf-8")
+            self.assertIn("no UserPromptSubmit", install.strip_codex_event(path, "UserPromptSubmit", "inventory_hook.py", False))
+            path.write_text('{"hooks": {"UserPromptSubmit": [{"hooks": [{"command": "other.py"}]}]}}', encoding="utf-8")
+            self.assertIn("no marker", install.strip_codex_event(path, "UserPromptSubmit", "inventory_hook.py", False))
+            # only our entry -> whole file removed
+            path.write_text(
+                '{"hooks": {"UserPromptSubmit": [{"hooks": [{"command": "x inventory_hook.py"}]}]}}',
+                encoding="utf-8",
+            )
+            self.assertIn("removed hook file", install.strip_codex_event(path, "UserPromptSubmit", "inventory_hook.py", False))
+            self.assertFalse(path.exists())
+            # mixed -> event kept with other entries
+            path.write_text(
+                json.dumps(
+                    {
+                        "hooks": {
+                            "UserPromptSubmit": [
+                                {"hooks": [{"command": "x inventory_hook.py"}]},
+                                {"hooks": [{"command": "keep.py"}]},
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertIn("stripped hook", install.strip_codex_event(path, "UserPromptSubmit", "inventory_hook.py", False))
+            data = json.loads(path.read_text(encoding="utf-8"))
+            entries = data["hooks"]["UserPromptSubmit"]
+            self.assertEqual(len(entries), 1)
+            self.assertIn("keep.py", json.dumps(entries))
+
+    def test_install_and_uninstall_dry_run_write_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_home = Path(tmp) / "home"
+            fake_hermes = Path(tmp) / "hermes"
+            with patch.object(install, "user_home", return_value=fake_home), patch.object(
+                install, "hermes_home", return_value=fake_hermes
+            ):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = install.install(["claude-code"], True)
+                self.assertEqual(rc, 0)
+                self.assertIn("claude-code skill ->", buf.getvalue())
+                self.assertFalse(fake_home.exists())
+                buf2 = io.StringIO()
+                with redirect_stdout(buf2):
+                    rc2 = install.uninstall(["claude-code"], True)
+                self.assertEqual(rc2, 0)
+                self.assertIn("claude-code remove", buf2.getvalue())
+                self.assertFalse(fake_home.exists())
+
+    def test_main_check_key(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"TYPESAFE_API_KEY": "fakekey"}), redirect_stdout(buf):
+            rc = install.main(["--check-key"])
+        self.assertEqual(rc, 0)
+        self.assertIn("set", buf.getvalue())
+        self.assertNotIn("fakekey", buf.getvalue())
+
+    def test_main_refuses_blocked_agent(self) -> None:
+        with self.assertRaises(SystemExit):
+            install.main(["--agents", "windsurf"])
+
+    def test_write_repo_instructions_dry_run(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            install.write_repo_instructions(True)
+        for name in install.REPO_FILES:
+            self.assertIn(name, buf.getvalue())
 
 
 def sys_exe_slash() -> str:

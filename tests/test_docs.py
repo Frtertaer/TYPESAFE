@@ -41,22 +41,23 @@ class DocFlagsTests(unittest.TestCase):
         lines = skill_md.read_text(encoding="utf-8").splitlines()
         missing = []
         for line in lines:
-            match = re.search(r"(?:scripts/)?([a-z_]+\.py)", line)
-            if not match:
+            names = re.findall(r"(?:scripts/)?([a-z_]+\.py)", line)
+            if not names:
                 continue
-            script = SCRIPTS / match.group(1)
-            if not script.is_file():
-                script = ROOT / "scripts" / match.group(1)
-            if not script.is_file():
-                continue
-            have = _script_flags(script)
+            have: set[str] = set()
+            for name in names:
+                script = SCRIPTS / name
+                if not script.is_file():
+                    script = ROOT / "scripts" / name
+                if script.is_file():
+                    have |= _script_flags(script)
             for flag in set(FLAG_RE.findall(line)):
                 # --force/--yes/--no-enable belong to external CLIs
                 # (hermes skills install, claude plugin) quoted in prose.
                 if flag in {"--force", "--yes", "--no-enable"}:
                     continue
                 if flag not in have:
-                    missing.append("SKILL.md %s: %s absent" % (match.group(1), flag))
+                    missing.append("SKILL.md %s: %s absent" % (names[0], flag))
         self.assertEqual(missing, [])
 
     def test_policy_lint_reads_real_policy(self) -> None:

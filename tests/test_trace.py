@@ -251,6 +251,46 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(data["last_pick"], "ask_human")
             self.assertEqual(data["current_step"], "blocked")
 
+    def test_cli_record_note_appends(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            rc = tr.main(
+                [
+                    "--file",
+                    str(path),
+                    "record",
+                    "--pick",
+                    "ask_human",
+                    "--note",
+                    "waiting on CI",
+                ]
+            )
+            self.assertEqual(rc, 0)
+            tr.main(
+                [
+                    "--file",
+                    str(path),
+                    "record",
+                    "--pick",
+                    "retry",
+                    "--note",
+                    "second",
+                ]
+            )
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(len(data["notes"]), 2)
+            self.assertEqual(data["notes"][0]["text"], "waiting on CI")
+            self.assertGreater(data["notes"][0]["ts"], 0)
+            self.assertEqual(data["notes"][1]["text"], "second")
+
+    def test_cli_record_no_note_no_notes_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "record", "--pick", "x"])
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["notes"], [])
+
     def test_state_subcommand_stdout_and_out(self) -> None:
         import io
         from unittest.mock import patch

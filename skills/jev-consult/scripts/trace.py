@@ -20,6 +20,7 @@ EMPTY: dict[str, Any] = {
     "inspected": [],
     "last_pick": "",
     "history": [],
+    "notes": [],
 }
 
 
@@ -54,6 +55,8 @@ def load(path: Path | None = None) -> dict[str, Any]:
         data["attempt_count"] = int(data.get("attempt_count") or 0)
     except (TypeError, ValueError):
         data["attempt_count"] = 0
+    if not isinstance(data.get("notes"), list):
+        data["notes"] = []
     if not isinstance(data.get("inspected"), list):
         data["inspected"] = []
     if not isinstance(data.get("history"), list):
@@ -191,6 +194,12 @@ def cmd_record(args: argparse.Namespace) -> int:
     data = record(load(path), pick=args.pick, kind=args.kind or "")
     if args.step:
         data["current_step"] = args.step
+    if args.note:
+        notes = data.get("notes")
+        if not isinstance(notes, list):
+            notes = []
+        notes.append({"ts": time.time(), "text": args.note})
+        data["notes"] = notes[-50:]
     save(data, path)
     emit({"path": str(path), "trace": data})
     return 0
@@ -289,6 +298,7 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--pick", required=True)
     rec.add_argument("--kind", default="")
     rec.add_argument("--step", default="")
+    rec.add_argument("--note", default="", help="Append a freeform note to trace.notes")
     rec.set_defaults(func=cmd_record)
     prune_cmd = sub.add_parser(
         "prune", help="Delete the trace file when older than --older-than seconds"

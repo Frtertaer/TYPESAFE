@@ -1932,6 +1932,35 @@ class PruneTest(unittest.TestCase):
             )
             self.assertEqual(json.loads(proc.stdout)["values"], ["sqlite"])
 
+    def test_watch_emits_count_ticks(self):
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1}, {"ts": 2}])
+            env = dict(_os.environ, JEV_DECISIONS_WATCH_MAX="2")
+            import subprocess as _sp
+
+            proc = _sp.run(
+                [
+                    sys.executable,
+                    str(ROOT / "skills/jev-consult/scripts/decisions.py"),
+                    "--file", str(path), "--watch", "0.01",
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            ticks = [
+                json.loads(l)
+                for l in proc.stdout.splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(t["count"] == 2 for t in ticks))
+
     def test_status_outcome_fill_winner_accept_comma_lists(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

@@ -628,6 +628,13 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="Write the filtered entries as JSONL to PATH instead of printing",
     )
+    parser.add_argument(
+        "--watch",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Re-read the log every S seconds and print a {\"ts\",\"count\"} JSON tick",
+    )
     args = parser.parse_args(argv)
     file_arg = args.file or os.environ.get("JEV_DECISIONS", "").strip()
     path = Path(file_arg) if file_arg else inventory.decisions_log_path()
@@ -685,162 +692,184 @@ def main(argv: list[str] | None = None) -> int:
     days = args.days if args.days > 0 else (7.0 if args.week else 0.0)
     if days > 0:
         since = time.time() - days * 86400
-    if since is not None:
-        entries = filter_since(entries, since)
-    if until is not None:
-        entries = filter_until(entries, until)
-    if args.harness:
-        entries = filter_harness(entries, args.harness)
-    if args.status:
-        entries = filter_status(entries, args.status)
-    if args.outcome:
-        entries = filter_outcome(entries, args.outcome)
-    if args.fill:
-        entries = filter_fill(entries, args.fill)
-    if args.field:
-        entries = filter_field(entries, args.field)
-    if args.max_need is not None:
-        entries = [
-            item
-            for item in entries
-            if isinstance(item.get("need"), (int, float))
-            and not isinstance(item.get("need"), bool)
-            and item["need"] <= args.max_need
-        ]
-    if args.min_need is not None:
-        entries = [
-            item
-            for item in entries
-            if isinstance(item.get("need"), (int, float))
-            and not isinstance(item.get("need"), bool)
-            and float(item.get("need")) >= args.min_need
-        ]
-    if getattr(args, "explicit", False):
-        entries = [item for item in entries if item.get("explicit") is True]
-    if getattr(args, "dedupe_only", False):
-        entries = [item for item in entries if item.get("dedupe") is True]
-    if getattr(args, "stale", False):
-        entries = [item for item in entries if item.get("stale_sidecar") is True]
-    if getattr(args, "over_budget", False):
-        entries = [item for item in entries if item.get("over_budget") is True]
-    if getattr(args, "strong", False):
-        entries = [item for item in entries if item.get("strong_pick") is True]
-    if getattr(args, "min_prompt_len", None) is not None:
-        entries = [
-            item
-            for item in entries
-            if isinstance(item.get("prompt_len"), (int, float))
-            and not isinstance(item.get("prompt_len"), bool)
-            and float(item.get("prompt_len")) >= args.min_prompt_len
-        ]
-    if getattr(args, "min_shortlist", None) is not None:
-        entries = [
-            item
-            for item in entries
-            if isinstance(item.get("shortlist_n"), (int, float))
-            and not isinstance(item.get("shortlist_n"), bool)
-            and float(item.get("shortlist_n")) >= args.min_shortlist
-        ]
-    if getattr(args, "min_catalog", None) is not None:
-        entries = [
-            item
-            for item in entries
-            if isinstance(item.get("n_catalog"), (int, float))
-            and not isinstance(item.get("n_catalog"), bool)
-            and float(item.get("n_catalog")) >= args.min_catalog
-        ]
-    if getattr(args, "min_score", None) is not None:
-        entries = [
-            item
-            for item in entries
-            if isinstance(item.get("shortlist_score_avg"), (int, float))
-            and not isinstance(item.get("shortlist_score_avg"), bool)
-            and float(item.get("shortlist_score_avg")) >= args.min_score
-        ]
-    if args.sha:
-        want_sha = args.sha.strip().lower()
-        entries = [
-            item
-            for item in entries
-            if str(item.get("prompt_sha") or "").lower().startswith(want_sha)
-        ]
-    if args.question:
-        want_q = args.question.strip().lower()
-        entries = [
-            item
-            for item in entries
-            if str(item.get("question") or "").lower() == want_q
-        ]
-    if args.winner:
-        wants = {part.strip().lower() for part in args.winner.split(",") if part.strip()}
-        entries = [
-            item
-            for item in entries
-            if isinstance(item.get("winner"), dict)
-            and (
-                str(item["winner"].get("name") or "").lower() in wants
-                or "%s:%s"
-                % (
-                    str(item["winner"].get("kind") or "").lower(),
-                    str(item["winner"].get("name") or "").lower(),
-                )
-                in wants
-            )
-        ]
-    if args.max_latency is not None:
-        entries = [
-            item
-            for item in entries
-            if isinstance(item.get("latency_ms"), (int, float))
-            and not isinstance(item.get("latency_ms"), bool)
-            and float(item.get("latency_ms")) <= args.max_latency
-        ]
-    if args.min_latency is not None:
-        entries = [
-            item
-            for item in entries
-            if isinstance(item.get("latency_ms"), (int, float))
-            and not isinstance(item.get("latency_ms"), bool)
-            and float(item.get("latency_ms")) >= args.min_latency
-        ]
-    for pair in args.where or []:
-        if "=" not in pair:
-            continue
-        wkey, wval = pair.split("=", 1)
-        wkey = wkey.strip()
-        wvals = {part.strip().lower() for part in wval.split(",") if part.strip()} or {""}
-        entries = [
-            item
-            for item in entries
-            if str(_dig(item, wkey) if _dig(item, wkey) is not None else "").lower() in wvals
-        ]
     missing_field = getattr(args, "missing", "") or ""
-    if missing_field:
-        missing_keys = [part.strip() for part in missing_field.split(",") if part.strip()]
-        entries = [
-            item
-            for item in entries
-            if any(_dig(item, key) is None for key in missing_keys)
-        ]
-    for pair in getattr(args, "where_not", None) or []:
-        if "=" not in pair:
-            continue
-        wkey, wval = pair.split("=", 1)
-        wkey = wkey.strip()
-        wvals = {part.strip().lower() for part in wval.split(",") if part.strip()} or {""}
-        entries = [
-            item
-            for item in entries
-            if str(_dig(item, wkey) if _dig(item, wkey) is not None else "").lower() not in wvals
-        ]
-    if args.prompt:
-        needle = args.prompt.lower()
-        entries = [
-            item
-            for item in entries
-            if needle in str(item.get("prompt_head") or "").lower()
-            or needle in str(item.get("prompt_tail") or "").lower()
-        ]
+    def _filtered(items):
+        if since is not None:
+            items = filter_since(items, since)
+        if until is not None:
+            items = filter_until(items, until)
+        if args.harness:
+            items = filter_harness(items, args.harness)
+        if args.status:
+            items = filter_status(items, args.status)
+        if args.outcome:
+            items = filter_outcome(items, args.outcome)
+        if args.fill:
+            items = filter_fill(items, args.fill)
+        if args.field:
+            items = filter_field(items, args.field)
+        if args.max_need is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("need"), (int, float))
+                and not isinstance(item.get("need"), bool)
+                and item["need"] <= args.max_need
+            ]
+        if args.min_need is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("need"), (int, float))
+                and not isinstance(item.get("need"), bool)
+                and float(item.get("need")) >= args.min_need
+            ]
+        if getattr(args, "explicit", False):
+            items = [item for item in items if item.get("explicit") is True]
+        if getattr(args, "dedupe_only", False):
+            items = [item for item in items if item.get("dedupe") is True]
+        if getattr(args, "stale", False):
+            items = [item for item in items if item.get("stale_sidecar") is True]
+        if getattr(args, "over_budget", False):
+            items = [item for item in items if item.get("over_budget") is True]
+        if getattr(args, "strong", False):
+            items = [item for item in items if item.get("strong_pick") is True]
+        if getattr(args, "min_prompt_len", None) is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("prompt_len"), (int, float))
+                and not isinstance(item.get("prompt_len"), bool)
+                and float(item.get("prompt_len")) >= args.min_prompt_len
+            ]
+        if getattr(args, "min_shortlist", None) is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("shortlist_n"), (int, float))
+                and not isinstance(item.get("shortlist_n"), bool)
+                and float(item.get("shortlist_n")) >= args.min_shortlist
+            ]
+        if getattr(args, "min_catalog", None) is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("n_catalog"), (int, float))
+                and not isinstance(item.get("n_catalog"), bool)
+                and float(item.get("n_catalog")) >= args.min_catalog
+            ]
+        if getattr(args, "min_score", None) is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("shortlist_score_avg"), (int, float))
+                and not isinstance(item.get("shortlist_score_avg"), bool)
+                and float(item.get("shortlist_score_avg")) >= args.min_score
+            ]
+        if args.sha:
+            want_sha = args.sha.strip().lower()
+            items = [
+                item
+                for item in items
+                if str(item.get("prompt_sha") or "").lower().startswith(want_sha)
+            ]
+        if args.question:
+            want_q = args.question.strip().lower()
+            items = [
+                item
+                for item in items
+                if str(item.get("question") or "").lower() == want_q
+            ]
+        if args.winner:
+            wants = {part.strip().lower() for part in args.winner.split(",") if part.strip()}
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("winner"), dict)
+                and (
+                    str(item["winner"].get("name") or "").lower() in wants
+                    or "%s:%s"
+                    % (
+                        str(item["winner"].get("kind") or "").lower(),
+                        str(item["winner"].get("name") or "").lower(),
+                    )
+                    in wants
+                )
+            ]
+        if args.max_latency is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("latency_ms"), (int, float))
+                and not isinstance(item.get("latency_ms"), bool)
+                and float(item.get("latency_ms")) <= args.max_latency
+            ]
+        if args.min_latency is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("latency_ms"), (int, float))
+                and not isinstance(item.get("latency_ms"), bool)
+                and float(item.get("latency_ms")) >= args.min_latency
+            ]
+        for pair in args.where or []:
+            if "=" not in pair:
+                continue
+            wkey, wval = pair.split("=", 1)
+            wkey = wkey.strip()
+            wvals = {part.strip().lower() for part in wval.split(",") if part.strip()} or {""}
+            items = [
+                item
+                for item in items
+                if str(_dig(item, wkey) if _dig(item, wkey) is not None else "").lower() in wvals
+            ]
+        if missing_field:
+            missing_keys = [part.strip() for part in missing_field.split(",") if part.strip()]
+            items = [
+                item
+                for item in items
+                if any(_dig(item, key) is None for key in missing_keys)
+            ]
+        for pair in getattr(args, "where_not", None) or []:
+            if "=" not in pair:
+                continue
+            wkey, wval = pair.split("=", 1)
+            wkey = wkey.strip()
+            wvals = {part.strip().lower() for part in wval.split(",") if part.strip()} or {""}
+            items = [
+                item
+                for item in items
+                if str(_dig(item, wkey) if _dig(item, wkey) is not None else "").lower() not in wvals
+            ]
+        if args.prompt:
+            needle = args.prompt.lower()
+            items = [
+                item
+                for item in items
+                if needle in str(item.get("prompt_head") or "").lower()
+                or needle in str(item.get("prompt_tail") or "").lower()
+            ]
+        return items
+    entries = _filtered(entries)
+    if getattr(args, "watch", 0) > 0:
+        try:
+            max_ticks = int(os.environ.get("JEV_DECISIONS_WATCH_MAX", "") or 0)
+        except ValueError:
+            max_ticks = 0
+        ticks = 0
+        while max_ticks <= 0 or ticks < max_ticks:
+            tick = {"ts": int(time.time()), "count": len(entries)}
+            sys.stdout.write(json.dumps(tick) + "\n")
+            sys.stdout.flush()
+            ticks += 1
+            time.sleep(args.watch)
+            try:
+                fresh, _bad = load_entries(path)
+                entries = _filtered(fresh)
+            except Exception:
+                pass
+        return 0
+
     if args.prune:
         if since is None and until is None and not (
             args.harness

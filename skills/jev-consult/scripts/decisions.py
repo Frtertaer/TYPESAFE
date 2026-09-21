@@ -547,7 +547,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--errors",
         action="store_true",
-        help="Print the unparseable jsonl lines with line numbers",
+        help="Print the unparseable jsonl lines with line numbers (rc 1 when any)",
     )
     parser.add_argument(
         "--validate",
@@ -844,9 +844,10 @@ def main(argv: list[str] | None = None) -> int:
                 % (len(total) - len(entries), len(total), len(entries), total_bad)
             )
     if args.errors:
-        for lineno, raw in load_bad_lines(path):
+        bad_rows = load_bad_lines(path)
+        for lineno, raw in bad_rows:
             sys.stdout.write("%d: %s\n" % (lineno, raw[:200]))
-        return 0
+        return 1 if bad_rows else 0
     if args.count:
         sys.stdout.write("%d\n" % len(entries))
         return 0

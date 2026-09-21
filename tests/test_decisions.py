@@ -850,10 +850,14 @@ class CliTest(unittest.TestCase):
                 encoding="utf-8",
             )
             proc = self.run_cli("--file", str(path), "--errors")
-            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.returncode, 1, proc.stderr)
             self.assertIn("2: not json", proc.stdout)
             self.assertIn("3: [1, 2]", proc.stdout)
             self.assertNotIn('"ts": 1', proc.stdout)
+            path.write_text('{"ts": 1}\n{"ts": 2}\n', encoding="utf-8")
+            proc = self.run_cli("--file", str(path), "--errors")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip(), "")
 
     def test_json_output(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -201,6 +201,20 @@ class InventoryHookTests(unittest.TestCase):
             self.assertIn("ascii-art", note)
             self.assertTrue(HOOK.LAST_DECISION["explicit"])
             self.assertEqual(HOOK.LAST_DECISION["jev_status"], "winner")
+            self.assertEqual(HOOK.LAST_DECISION["question"], "env")
+
+    def test_question_marks_pick_source(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "Add JWT access tokens in Python",
+                "cwd": tmp,
+            }
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=skip_pick)
+            self.assertIsNone(HOOK.LAST_DECISION["question"])
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=skip_pick)
+            self.assertEqual(HOOK.LAST_DECISION["question"], "dedupe")
 
     def test_no_sidecar_env_skips_sidecar_write(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)

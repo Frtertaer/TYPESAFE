@@ -204,6 +204,7 @@ def pick_with_jev(
     picker["need"] = need
     picker["probabilities"] = (decision.get("probabilities") or {}).get("load_tools") or {}
     picker["latency_ms"] = latency_ms
+    picker["question"] = "load_tools"
     return picker
 
 
@@ -295,6 +296,7 @@ def handle(
             "explicit": False,
             "dedupe": True,
             "jev_status": extra["jev_status"],
+            "question": "dedupe",
             "winner": {"kind": winner_out.get("kind"), "name": winner_out.get("name")}
             if winner_out
             else None,
@@ -329,7 +331,11 @@ def handle(
     picker = {"status": "idf", "winner": None}
     if explicit_winner is not None:
         picked = [explicit_winner]
-        picker = {"status": "winner", "winner": explicit_winner}
+        picker = {
+            "status": "winner",
+            "winner": explicit_winner,
+            "question": "env" if env_winner else "explicit",
+        }
     else:
         picked = shortlist(catalog, prompt, hook_limit(), [hit["name"] for hit in hits])
         if picked and time.monotonic() - t0 >= hook_budget_seconds():
@@ -365,6 +371,7 @@ def handle(
         "shortlist": [item.get("id") for item in picked],
         "explicit": explicit_winner is not None,
         "jev_status": extra["jev_status"],
+        "question": picker.get("question"),
         "need": picker.get("need"),
         "probabilities": picker.get("probabilities") or {},
         "winner": {"kind": winner.get("kind"), "name": winner.get("name")}

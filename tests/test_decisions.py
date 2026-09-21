@@ -552,6 +552,25 @@ class CliTest(unittest.TestCase):
             self.assertEqual(len(kept), 1)
             self.assertEqual(kept[0]["harness"], "a")
 
+    def test_dedupes_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"harness": "a", "dedupe": True},
+                    {"harness": "b", "dedupe": True},
+                    {"harness": "c"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--dedupes")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = dict(
+                line.rsplit(" ", 1) for line in proc.stdout.strip().splitlines()
+            )
+            self.assertEqual(lines["True"], "2")
+            self.assertEqual(lines["unknown"], "1")
+
     def test_fields_lists_all_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

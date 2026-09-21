@@ -296,6 +296,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print all field names seen in entries with counts, sorted desc",
     )
     parser.add_argument(
+        "--dedupes",
+        action="store_true",
+        help="Print counts of dedupe true/false, sorted desc",
+    )
+    parser.add_argument(
         "--prune",
         action="store_true",
         help="Rewrite the log keeping only entries matching the time/status filters",
@@ -368,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.outcomes
         or args.fills
         or args.fields
+        or args.dedupes
     ):
         counts: dict[str, int] = {}
         if args.winners:
@@ -379,6 +385,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if args.fields:
                 field = None
+            elif args.dedupes:
+                field = "dedupe"
             elif args.outcomes:
                 field = "outcome"
             elif args.fills:

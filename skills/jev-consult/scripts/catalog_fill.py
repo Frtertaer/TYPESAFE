@@ -402,6 +402,11 @@ def main() -> int:
         action="store_true",
         help="Print catalog hits for --task (name, identifier) and exit; no installs.",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="With --list: emit a JSON array of hits instead of text lines.",
+    )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     task = args.task
@@ -421,11 +426,21 @@ def main() -> int:
     if args.list:
         try:
             hits = search_hits(task)
-            for item in (hits or []):
-                sys.stdout.write(
-                    "%s %s\n"
-                    % (item.get("name") or "?", item.get("identifier") or "")
-                )
+            if args.json:
+                rows = [
+                    {
+                        "name": item.get("name") or "?",
+                        "identifier": item.get("identifier") or "",
+                    }
+                    for item in (hits or [])
+                ]
+                sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+            else:
+                for item in (hits or []):
+                    sys.stdout.write(
+                        "%s %s\n"
+                        % (item.get("name") or "?", item.get("identifier") or "")
+                    )
         except Exception:
             pass
         return 0

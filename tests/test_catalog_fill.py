@@ -279,6 +279,36 @@ class CatalogFillTests(unittest.TestCase):
             self.assertIn("jwt-auth", buf.getvalue())
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
 
+    def test_list_json_emits_array(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hits = [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--harness",
+                    "claude-code",
+                    "--cwd",
+                    str(base),
+                    "--list",
+                    "--json",
+                ],
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            rows = json.loads(buf.getvalue())
+            self.assertEqual(
+                rows, [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            )
+            self.assertFalse((base / INV.SIDECAR_NAME).exists())
+
     def test_list_flag_hermes_down_fails_open(self) -> None:
         import io
 

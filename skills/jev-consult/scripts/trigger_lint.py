@@ -91,6 +91,18 @@ def lint_cases(path: Path, policy_path: Path = DEFAULT_POLICY) -> list[dict]:
                 add("T009", "warn", cid, "positive case declares no covers kind")
     if cases and n_pos == 0:
         add("T010", "warn", "-", "no positive cases: the margin eval cannot pass")
+    if must_ask is not None:
+        covered = {
+            kind
+            for case in cases
+            if isinstance(case, dict)
+            and case.get("should_trigger") is True
+            and isinstance(case.get("covers"), list)
+            for kind in case["covers"]
+            if isinstance(kind, str)
+        }
+        for kind in sorted(must_ask - covered):
+            add("T011", "warn", "-", "must_ask kind %r has no positive coverage case" % kind)
     return findings
 
 

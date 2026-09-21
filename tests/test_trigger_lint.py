@@ -35,6 +35,7 @@ class LintCasesTests(unittest.TestCase):
         findings = trigger_lint.lint_cases(FIXTURE)
         errors = [f for f in findings if f["severity"] == "error"]
         self.assertEqual(errors, [])
+        self.assertFalse(any(f["rule"] == "T011" for f in findings))
 
     def test_unreadable_file_t001(self) -> None:
         findings = trigger_lint.lint_cases(Path("no-such-file.json"))
@@ -81,6 +82,18 @@ class LintCasesTests(unittest.TestCase):
             path = write_cases(tmp, [case])
             findings = trigger_lint.lint_cases(path)
         self.assertTrue(any(f["rule"] == "T009" for f in findings))
+
+    def test_uncovered_must_ask_kind_t011(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(tmp, [dict(GOOD_CASE)])
+            findings = trigger_lint.lint_cases(path)
+        t011 = [f for f in findings if f["rule"] == "T011"]
+        self.assertTrue(t011)
+        self.assertTrue(all(f["severity"] == "warn" for f in t011))
+        kinds = json.loads((SCRIPTS.parent / "policy.json").read_text(encoding="utf-8"))["must_ask"]
+        uncovered = {f["message"] for f in t011}
+        self.assertEqual(len(t011), len(set(kinds) - {"approach"}))
+        self.assertTrue(all("'approach'" not in m for m in uncovered))
 
 
 class CliTests(unittest.TestCase):

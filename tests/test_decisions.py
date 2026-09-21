@@ -1777,5 +1777,25 @@ class PruneTest(unittest.TestCase):
             proc = self.run_cli("--file", str(path), "--jq", "harness")
             self.assertEqual(proc.stdout.split(), ["claude", "codex", "claude"])
 
+    def test_last_prints_newest_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "harness": "claude", "jev_status": "ok"},
+                    {"ts": 2, "harness": "codex", "jev_status": "ok"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--last")
+            self.assertEqual(proc.returncode, 0)
+            entry = json.loads(proc.stdout)
+            self.assertEqual(entry["harness"], "codex")
+            proc = self.run_cli("--file", str(path), "--last", "--harness", "claude")
+            entry = json.loads(proc.stdout)
+            self.assertEqual(entry["harness"], "claude")
+            proc = self.run_cli("--file", str(path), "--last", "--status", "nope")
+            self.assertEqual(proc.stdout.strip(), "")
+
 if __name__ == "__main__":
     unittest.main()

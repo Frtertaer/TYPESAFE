@@ -575,6 +575,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Print filtered entries as raw JSON lines (for piping)",
     )
     parser.add_argument(
+        "--last",
+        action="store_true",
+        default=os.environ.get("JEV_DECISIONS_LAST", "").strip().lower() in ("1", "true", "yes"),
+        help="Print only the newest matching entry as JSON",
+    )
+    parser.add_argument(
         "--out",
         metavar="PATH",
         default="",
@@ -888,6 +894,10 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write("%s %d\n" % (value, n))
         return 0
     emit_entries = entries[::-1] if getattr(args, "reverse", False) else entries
+    if getattr(args, "last", False):
+        if emit_entries:
+            sys.stdout.write(json.dumps(entries[-1], indent=2, sort_keys=True) + "\n")
+        return 0
 
     def _cell(value: str) -> str:
         return value.replace("|", "\\|").replace("\n", " ")

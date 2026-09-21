@@ -714,6 +714,17 @@ class FilterSinceTest(unittest.TestCase):
             self.assertEqual(stats["total"], 2)
             self.assertIsNone(stats["since"])
 
+    def test_env_decisions_overrides_default_path(self):
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": _time.time(), "jev_status": "winner"}])
+            proc = self.run_cli("--json", env={"JEV_DECISIONS": str(path)})
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            stats = json.loads(proc.stdout)
+            self.assertEqual(stats["total"], 1)
+            self.assertEqual(stats["by_status"]["winner"], 1)
+
     def test_week_alias_filters_last_7_days(self):
         import time as _time
         with tempfile.TemporaryDirectory() as tmp:

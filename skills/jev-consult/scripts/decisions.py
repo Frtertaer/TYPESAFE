@@ -354,7 +354,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Print filtered entries as raw JSON lines (for piping)",
     )
     args = parser.parse_args(argv)
-    path = Path(args.file) if args.file else inventory.decisions_log_path()
+    file_arg = args.file or os.environ.get("JEV_DECISIONS", "").strip()
+    path = Path(file_arg) if file_arg else inventory.decisions_log_path()
     if path is None:
         sys.stderr.write("decisions log disabled (JEV_CONSULT_LOG=0)\n")
         return 2

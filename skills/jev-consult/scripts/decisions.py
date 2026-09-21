@@ -278,6 +278,31 @@ def filter_field(entries: list[dict], spec: str | None) -> list[dict]:
     return [item for item in entries if str(dig(item) or "") == value]
 
 
+def _dig(item: dict, key: str):
+    node = item
+    for part in key.split("."):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(part)
+    return node
+
+
+def group_by(entries: list[dict], field: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in entries:
+        value = _dig(item, field)
+        if value is None or value == "":
+            value = "unknown"
+        elif isinstance(value, bool):
+            value = str(value)
+        elif not isinstance(value, (int, float, str)):
+            value = json.dumps(value, sort_keys=True)
+        else:
+            value = str(value)
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
 def _ts_arg(raw: str) -> float | None:
     """Parse an epoch-seconds or ISO8601 timestamp argument. Empty -> None."""
     text = (raw or "").strip()
@@ -419,6 +444,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Print only the number of entries matching the filters",
     )
     parser.add_argument(
+        "--group-by",
+        metavar="FIELD",
+        default=os.environ.get("JEV_DECISIONS_GROUP_BY", ""),
+        help="Count entries grouped by FIELD (a.b digs into nested objects)",
+    )
+    parser.add_argument(
         "--errors",
         action="store_true",
         help="Print the unparseable jsonl lines with line numbers",
@@ -501,6 +532,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.count:
         sys.stdout.write("%d\n" % len(entries))
+        return 0
+    if args.group_by:
+        rows = sorted(group_by(entries, args.group_by).items(), key=lambda kv: (-kv[1], kv[0]))
+        if args.top > 0:
+            rows = rows[: args.top]
+        if args.json:
+            sys.stdout.write(json.dumps({"field": args.group_by, "counts": dict(rows)}, indent=2) + "\n")
+        else:
+            for value, n in rows:
+                sys.stdout.write("%s %d\n" % (value, n))
         return 0
     if (
         args.statuses

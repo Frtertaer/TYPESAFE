@@ -234,6 +234,27 @@ class CliTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(proc.stdout.strip(), "2")
 
+    def test_group_by_counts_nested_field(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "harness": "codex", "winner": {"kind": "skill", "name": "jwt-auth"}},
+                    {"ts": 2, "harness": "codex"},
+                    {"ts": 3, "harness": "hermes", "winner": {"kind": "skill", "name": "jwt-auth"}},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--group-by", "winner.name")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("jwt-auth 2", proc.stdout)
+            self.assertIn("unknown 1", proc.stdout)
+            proc = self.run_cli("--file", str(path), "--group-by", "harness", "--json")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["counts"], {"codex": 2, "hermes": 1})
+            self.assertEqual(payload["field"], "harness")
+
     def test_tail_env_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

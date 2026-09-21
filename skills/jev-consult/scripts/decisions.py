@@ -59,6 +59,7 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
     needs: list[float] = []
     latencies: list[float] = []
     prompts: dict[str, int] = {}
+    stamps: list[float] = []
     explicit = strong = 0
     for item in entries:
         status = str(item.get("jev_status") or "unknown")
@@ -82,9 +83,14 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
         latency = item.get("latency_ms")
         if isinstance(latency, (int, float)):
             latencies.append(float(latency))
+        ts = item.get("ts")
+        if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+            stamps.append(float(ts))
     return {
         "total": len(entries),
         "bad_lines": bad,
+        "first_ts": min(stamps) if stamps else None,
+        "last_ts": max(stamps) if stamps else None,
         "by_status": by_status,
         "by_harness": by_harness,
         "explicit": explicit,
@@ -122,6 +128,10 @@ def format_stats(stats: dict) -> str:
         ),
         "explicit: %d  strong_pick: %d" % (stats["explicit"], stats["strong_pick"]),
     ]
+    if stats.get("first_ts") is not None:
+        lines.append(
+            "span: first_ts=%s last_ts=%s" % (stats["first_ts"], stats["last_ts"])
+        )
     need = stats["need_skill"]
     if need["n"]:
         lines.append(

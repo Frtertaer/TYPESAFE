@@ -74,6 +74,20 @@ class SummarizeTest(unittest.TestCase):
         self.assertEqual(stats["latency_ms"]["max"], 300)
         self.assertAlmostEqual(stats["latency_ms"]["mean"], 200.0, places=1)
         self.assertEqual(stats["top_winners"]["skill:alpha"], 2)
+        self.assertIsNone(stats["first_ts"])
+
+    def test_first_last_ts(self):
+        entries = [
+            {"ts": 1000.0, "jev_status": "winner"},
+            {"ts": 3000, "jev_status": "none"},
+            {"jev_status": "winner"},  # no ts
+            {"ts": "bogus", "jev_status": "winner"},
+            {"ts": True, "jev_status": "winner"},
+            {"ts": 2000.5, "jev_status": "winner"},
+        ]
+        stats = decisions.summarize(entries)
+        self.assertEqual(stats["first_ts"], 1000.0)
+        self.assertEqual(stats["last_ts"], 3000.0)
 
     def test_empty(self):
         stats = decisions.summarize([])

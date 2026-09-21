@@ -435,15 +435,6 @@ def main(argv: list[str] | None = None) -> int:
                 ticks += 1
                 cur = result
         return 0
-    if args.out:
-        try:
-            Path(args.out).write_text(
-                json.dumps(result, indent=2) + "\n", encoding="utf-8"
-            )
-        except OSError as exc:
-            sys.stderr.write("--out failed: %s\n" % exc)
-            return 1
-        sys.stderr.write("wrote %s\n" % args.out)
     if args.report:
         if args.json:
             uncovered_ids = _uncovered()
@@ -544,6 +535,17 @@ def main(argv: list[str] | None = None) -> int:
             rows = rows[: args.top]
         return rows
 
+    if args.out:
+        out_payload = dict(result)
+        out_payload["cases"] = _rows()
+        try:
+            Path(args.out).write_text(
+                json.dumps(out_payload, indent=2) + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            sys.stderr.write("--out failed: %s\n" % exc)
+            return 1
+        sys.stderr.write("wrote %s\n" % args.out)
     if args.covers or args.covers_map:
         counts = _covers_counts()
         id_map: dict[str, list[str]] = {}

@@ -103,6 +103,30 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertEqual(len(payload["cases"]), len(payload["cases"]))
 
+    def test_out_honors_row_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "eval.json"
+            buf = io.StringIO()
+            with redirect_stdout(buf), patch("sys.stderr", io.StringIO()):
+                rc = te.main(["--top", "3", "--out", str(target)])
+            self.assertEqual(rc, 0)
+            payload = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["cases"]), 3)
+            target2 = Path(tmp) / "eval2.json"
+            buf = io.StringIO()
+            with redirect_stdout(buf), patch("sys.stderr", io.StringIO()):
+                rc = te.main(
+                    ["--min-score", "0.5", "--out", str(target2)]
+                )
+            self.assertEqual(rc, 0)
+            payload2 = json.loads(target2.read_text(encoding="utf-8"))
+            self.assertTrue(
+                all(
+                    r["score"] is not None and r["score"] >= 0.5
+                    for r in payload2["cases"]
+                )
+            )
+
     def test_fail_flag_filters_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cases = write_cases(

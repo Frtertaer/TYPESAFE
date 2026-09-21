@@ -177,6 +177,41 @@ class LintCliTests(unittest.TestCase):
         path.write_text(json.dumps(request), encoding="utf-8")
         return path
 
+    def test_multi_paths_lint_each_request(self) -> None:
+        good = {"state": {"task": "x"}, "questions": {"q": noul("Ship the fix?")}}
+        bad = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Is it not true that the fix cannot ship?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            p1 = Path(tmp) / "a.json"
+            p1.write_text(json.dumps(good), encoding="utf-8")
+            p2 = Path(tmp) / "b.json"
+            p2.write_text(json.dumps(bad), encoding="utf-8")
+            import io
+            from contextlib import redirect_stdout
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = question_lint.main([str(p1), str(p2)])
+            self.assertEqual(rc, 1)
+            out = buf.getvalue()
+            self.assertIn(str(p1) + ":", out)
+            self.assertIn(str(p2) + ":", out)
+            self.assertIn("J002", out)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = question_lint.main([str(p1), str(p1)])
+            self.assertEqual(rc, 0)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = question_lint.main([str(p1), str(p2), "--json"])
+            self.assertEqual(rc, 1)
+            rows = json.loads(buf.getvalue())
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["errors"], 0)
+            self.assertEqual(rows[1]["errors"], 1)
+
     def test_lint_cli_error_returns_1(self) -> None:
         request = {
             "state": {"task": "x"},

@@ -318,8 +318,56 @@ def main(argv: list[str] | None = None) -> int:
         argv = argv[:idx] + argv[idx + 2 :]
     argv = [a for a in argv if a not in ("--json", "--fix", "--strict", "--quiet")]
     if not argv:
-        sys.stderr.write("usage: question_lint.py FILE [--json] [--fix] [--strict]\n")
+        sys.stderr.write("usage: question_lint.py FILE... [--json] [--fix] [--strict]\n")
         return 2
+    if len(argv) > 1:
+        if watch_seconds > 0 or do_fix:
+            sys.stderr.write("multiple paths support neither --watch nor --fix\n")
+            return 2
+        results = []
+        for arg in argv:
+            fpath = Path(arg)
+            try:
+                freq = json.loads(fpath.read_text(encoding="utf-8"))
+            except OSError as exc:
+                sys.stderr.write("cannot read %s (%s)\n" % (arg, exc))
+                return 2
+            except ValueError as exc:
+                sys.stderr.write("cannot parse %s (%s)\n" % (arg, exc))
+                return 2
+            if not isinstance(freq, dict):
+                sys.stderr.write("request JSON must be an object (%s)\n" % arg)
+                return 2
+            ffind = lint_request(freq)
+            ferr = sum(1 for f in ffind if f["severity"] == "error")
+            fshown = [
+                f
+                for f in ffind
+                if (not severity or f["severity"] == severity)
+                and (not quiet or f["severity"] == "error")
+            ]
+            results.append(
+                {"path": arg, "findings": fshown, "errors": ferr, "total": len(ffind)}
+            )
+        if as_json:
+            sys.stdout.write(json.dumps(results, indent=2) + "\n")
+        else:
+            for res in results:
+                sys.stdout.write("%s:\n" % res["path"])
+                for f in res["findings"]:
+                    sys.stdout.write(format_finding(f) + "\n")
+                sys.stdout.write("  %d error(s) of %d finding(s)\n" % (res["errors"], res["total"]))
+        if out_path:
+            try:
+                Path(out_path).write_text(
+                    json.dumps(results, indent=2) + "\n", encoding="utf-8"
+                )
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                return 1
+        any_err = any(r["errors"] for r in results)
+        any_find = any(r["total"] for r in results)
+        return 1 if any_err or (strict and any_find) else 0
     try:
         text = Path(argv[0]).read_text(encoding="utf-8")
     except OSError as exc:

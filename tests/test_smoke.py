@@ -27,7 +27,7 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         out = json.loads(proc.stdout)
         self.assertTrue(out["ok"])
-        self.assertEqual(len(out["steps"]), 12)
+        self.assertEqual(len(out["steps"]), 13)
         names = {s["name"] for s in out["steps"]}
         self.assertEqual(
             names,
@@ -43,6 +43,7 @@ class SmokeTests(unittest.TestCase):
                 "question_lint",
                 "compare",
                 "apply_fill",
+                "hook",
                 "doctor_json",
             },
         )

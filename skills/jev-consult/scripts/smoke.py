@@ -27,7 +27,10 @@ def _step(name: str, ok: bool, detail: str) -> dict:
 
 
 def _run(
-    argv: list[str], cwd: Path | None = None, env: dict | None = None
+    argv: list[str],
+    cwd: Path | None = None,
+    env: dict | None = None,
+    inp: str | None = None,
 ) -> tuple[int, str]:
     proc = subprocess.run(
         [sys.executable, *argv],
@@ -36,6 +39,7 @@ def _run(
         cwd=str(cwd) if cwd else None,
         timeout=60,
         env=env,
+        input=inp,
     )
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
@@ -210,6 +214,31 @@ def step_apply_fill(tmp: Path) -> dict:
     return _step("apply_fill", ok, out.strip()[:120] or "rc=%d" % rc)
 
 
+def step_hook(tmp: Path) -> dict:
+    env = dict(os.environ)
+    env["JEV_CONSULT_LOG"] = "0"
+    env.pop("TYPESAFE_API_KEY", None)
+    env["USERPROFILE"] = str(tmp / "home")
+    env["HOME"] = str(tmp / "home")
+    payload = json.dumps(
+        {
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": "smoke test task",
+            "cwd": str(tmp / "cwd"),
+        }
+    )
+    rc, out = _run(
+        [str(SCRIPTS / "inventory_hook.py")], cwd=tmp, env=env, inp=payload
+    )
+    ok = False
+    if rc == 0:
+        try:
+            ok = isinstance(json.loads(out.strip().splitlines()[0]), dict)
+        except (ValueError, IndexError):
+            ok = False
+    return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
+
+
 def step_compare(tmp: Path) -> dict:
     rc, out = _run([str(SCRIPTS / "compare.py"), "--strict"])
     ok = rc == 0 and "after_jev" in out
@@ -253,6 +282,7 @@ def main(argv: list[str] | None = None) -> int:
             step_question_lint,
             step_compare,
             step_apply_fill,
+            step_hook,
             step_doctor,
         ):
             try:

@@ -373,11 +373,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--since", default="", help="Only entries with ts >= epoch seconds or ISO8601")
     parser.add_argument("--until", default="", help="Only entries with ts <= epoch seconds or ISO8601")
-    parser.add_argument("--harness", default="", help="Only entries for this harness")
-    parser.add_argument("--status", default="", help="Only entries with this jev_status")
-    parser.add_argument("--outcome", default="", help="Only entries with this outcome (e.g. human, blocked)")
-    parser.add_argument("--fill", default="", help="Only entries with this fill kind (apply, catalog, peer)")
-    parser.add_argument("--field", default="", help="Generic filter: KEY=VALUE equality on any entry field (a.b digs into nested objects)")
+    parser.add_argument("--harness", default=os.environ.get("JEV_DECISIONS_HARNESS", ""), help="Only entries for this harness")
+    parser.add_argument("--status", default=os.environ.get("JEV_DECISIONS_STATUS", ""), help="Only entries with this jev_status")
+    parser.add_argument("--outcome", default=os.environ.get("JEV_DECISIONS_OUTCOME", ""), help="Only entries with this outcome (e.g. human, blocked)")
+    parser.add_argument("--fill", default=os.environ.get("JEV_DECISIONS_FILL", ""), help="Only entries with this fill kind (apply, catalog, peer)")
+    parser.add_argument("--field", default=os.environ.get("JEV_DECISIONS_FIELD", ""), help="Generic filter: KEY=VALUE equality on any entry field (a.b digs into nested objects)")
     parser.add_argument(
         "--statuses",
         action="store_true",

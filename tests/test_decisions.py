@@ -348,6 +348,30 @@ class CliTest(unittest.TestCase):
             )
             self.assertIn("entries: 2", proc.stdout)
 
+    def test_filter_env_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"jev_status": "winner", "harness": "hermes"},
+                    {"jev_status": "none", "harness": "codex"},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), env={"JEV_DECISIONS_STATUS": "none"}
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("entries: 1", proc.stdout)
+            proc = self.run_cli(
+                "--file",
+                str(path),
+                "--status",
+                "winner",
+                env={"JEV_DECISIONS_STATUS": "none"},
+            )
+            self.assertIn("entries: 1", proc.stdout)
+
     def test_stats_iso_fields(self):
         entries = [{"ts": 1700000000}, {"ts": 1700086400}]
         stats = decisions.summarize(entries)

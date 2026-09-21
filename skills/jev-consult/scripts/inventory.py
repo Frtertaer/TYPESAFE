@@ -767,6 +767,12 @@ DEFAULT_HOOK_JEV_RETRIES = 0
 def hook_jev_retries() -> int:
     """Retry count for the hook's Jev call (0 = single attempt, fail fast)."""
     try:
+        env = int(os.environ.get("JEV_HOOK_RETRIES", "") or -1)
+        if env >= 0:
+            return env
+    except ValueError:
+        pass
+    try:
         return max(0, int(_policy_dict().get(HOOK_JEV_RETRIES_KEY, DEFAULT_HOOK_JEV_RETRIES)))
     except (TypeError, ValueError):
         return DEFAULT_HOOK_JEV_RETRIES

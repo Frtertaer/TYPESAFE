@@ -653,5 +653,21 @@ class HookLimitEnvTests(unittest.TestCase):
             self.assertGreaterEqual(inv.hook_limit(), 1)
 
 
+class HookRetriesEnvTests(unittest.TestCase):
+    def test_env_override_wins(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"JEV_HOOK_RETRIES": "2"}):
+            self.assertEqual(inv.hook_jev_retries(), 2)
+
+    def test_env_invalid_falls_back(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"JEV_HOOK_RETRIES": "bogus"}):
+            self.assertGreaterEqual(inv.hook_jev_retries(), 0)
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

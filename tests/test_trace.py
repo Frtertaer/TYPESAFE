@@ -434,6 +434,32 @@ class TraceTests(unittest.TestCase):
             rc = tr.main(["--file", str(path), "notes", "--since", "bogus"])
             self.assertEqual(rc, 2)
 
+    def test_cli_notes_before_filters_new(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "notes": [
+                            {"ts": 100.0, "iso": "x", "text": "old-note"},
+                            {"ts": 200.0, "iso": "y", "text": "new-note"},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--before", "150"])
+            self.assertEqual(rc, 0)
+            self.assertIn("old-note", buf.getvalue())
+            self.assertNotIn("new-note", buf.getvalue())
+            rc = tr.main(["--file", str(path), "notes", "--before", "bogus"])
+            self.assertEqual(rc, 2)
+
     def test_cli_notes_harness_tags_and_filters(self) -> None:
         import io
         from contextlib import redirect_stdout

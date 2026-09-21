@@ -316,6 +316,17 @@ def cmd_notes(args: argparse.Namespace) -> int:
             for n in notes
             if isinstance(n, dict) and isinstance(n.get("ts"), (int, float)) and n["ts"] >= since_ts
         ]
+    before = getattr(args, "before", None)
+    if before is not None:
+        before_ts = _ts_arg(before)
+        if before_ts is None:
+            sys.stderr.write("bad --before: %s\n" % before)
+            return 2
+        notes = [
+            n
+            for n in notes
+            if isinstance(n, dict) and isinstance(n.get("ts"), (int, float)) and n["ts"] <= before_ts
+        ]
     want_harness = getattr(args, "harness", "") or ""
     if want_harness:
         notes = [n for n in notes if isinstance(n, dict) and n.get("harness") == want_harness]
@@ -452,6 +463,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--limit", type=int, help="Show only the last N notes")
     notes_cmd.add_argument("--prune", type=int, help="Rewrite the trace keeping only the last N notes")
     notes_cmd.add_argument("--since", default=None, help="Only notes with ts >= epoch seconds or ISO8601")
+    notes_cmd.add_argument("--before", default=None, help="Only notes with ts <= epoch seconds or ISO8601")
     notes_cmd.add_argument("--harness", default="", help="Only notes tagged with this harness")
     notes_cmd.add_argument("--out", default="", help="Write the notes output to PATH instead of stdout")
     notes_cmd.add_argument("--field", default="", help="Print only this field per note (a.b digs into nested objects)")

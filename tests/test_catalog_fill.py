@@ -260,5 +260,74 @@ class CatalogFillTests(unittest.TestCase):
         self.assertIn("--from-miss", note)
 
 
+class CatalogInternalsTests(unittest.TestCase):
+    def test_parse_search_edges(self) -> None:
+        self.assertEqual(FILL.parse_search("not json"), [])
+        self.assertEqual(FILL.parse_search('{"a": 1}'), [])
+        self.assertEqual(FILL.parse_search('[{"x": 1}, "junk", 3]'), [{"x": 1}])
+
+    def test_slug_id(self) -> None:
+        self.assertEqual(FILL.slug_id("skills-sh/acme/jwt-auth"), "skills_sh_acme_jwt_auth")
+        self.assertEqual(FILL.slug_id("___"), "item")
+        self.assertEqual(len(FILL.slug_id("x" * 200)), 80)
+
+    def test_item_for_pick(self) -> None:
+        hits = FILL.drop_blocked(HITS)
+        self.assertIsNone(FILL.item_for_pick("", hits))
+        self.assertIsNone(FILL.item_for_pick("none", hits))
+        self.assertIsNone(FILL.item_for_pick("missing", hits))
+        pick = hits[0]["id"]
+        self.assertEqual(FILL.item_for_pick(pick, hits)["name"], "jwt-auth")
+        self.assertEqual(FILL.item_for_pick("jwt-auth", hits)["id"], pick)
+
+    def test_drop_blocked_skips_bad_rows(self) -> None:
+        hits = FILL.drop_blocked([{"name": "no-ident"}, "junk", {"identifier": ""}])
+        self.assertEqual(hits, [])
+
+    def test_search_hits_hermes_missing(self) -> None:
+        with patch.object(FILL, "run_hermes", return_value=(127, "")):
+            self.assertIsNone(FILL.search_hits("jwt tokens"))
+        with patch.object(FILL, "run_hermes", return_value=(1, "boom")):
+            self.assertEqual(FILL.search_hits("jwt tokens"), [])
+
+    def test_search_hits_parses_and_drops_blocked(self) -> None:
+        raw = json.dumps(HITS)
+        with patch.object(FILL, "run_hermes", return_value=(0, raw)):
+            hits = FILL.search_hits("jwt tokens")
+        self.assertEqual([h["name"] for h in hits], ["jwt-auth"])
+
+    def test_search_hits_blank_task(self) -> None:
+        with patch.object(FILL, "run_hermes") as run:
+            self.assertEqual(FILL.search_hits("   "), [])
+        run.assert_not_called()
+
+    def test_inspect_ok(self) -> None:
+        with patch.object(FILL, "run_hermes", return_value=(0, "looks fine")):
+            self.assertTrue(FILL.inspect_ok("skills-sh/acme/jwt-auth"))
+        with patch.object(FILL, "run_hermes", return_value=(0, "verdict: blocked")):
+            self.assertFalse(FILL.inspect_ok("x"))
+        with patch.object(FILL, "run_hermes", return_value=(1, "")):
+            self.assertFalse(FILL.inspect_ok("x"))
+
+    def test_install_one(self) -> None:
+        self.assertTrue(FILL.install_one("skills-sh/acme/jwt-auth", dry_run=True))
+        with patch.object(FILL, "run_hermes", return_value=(0, "")):
+            self.assertTrue(FILL.install_one("skills-sh/acme/jwt-auth", dry_run=False))
+        with patch.object(FILL, "run_hermes", return_value=(1, "")):
+            self.assertFalse(FILL.install_one("skills-sh/acme/jwt-auth", dry_run=False))
+
+    def test_installed_dir_fallbacks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = Path(tmp)
+            hit = {"identifier": "skills-sh/acme/jwt-auth", "name": "JWT Auth"}
+            self.assertIsNone(FILL.installed_dir(hermes, hit))  # no skills dir at all
+            (hermes / "skills" / "jwt-auth").mkdir(parents=True)
+            (hermes / "skills" / "jwt-auth" / "SKILL.md").write_text("x", encoding="utf-8")
+            found = FILL.installed_dir(hermes, hit)
+            self.assertEqual(found, hermes / "skills" / "jwt-auth")  # leaf fallback
+            found2 = FILL.installed_dir(hermes, {"identifier": "a/b/c", "name": ""})
+            self.assertIsNone(found2)
+
+
 if __name__ == "__main__":
     unittest.main()

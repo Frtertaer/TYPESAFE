@@ -188,5 +188,108 @@ class ApplyFillTests(unittest.TestCase):
         self.assertIn("catalog_fill.py", note)
 
 
+class ApplyFillInternalsTests(unittest.TestCase):
+    def test_bare_name(self) -> None:
+        self.assertEqual(FILL.bare_name(" jwt-auth "), "jwt-auth")
+        self.assertEqual(FILL.bare_name(""), "")
+        self.assertEqual(FILL.bare_name("https://evil.example/x"), "")
+        self.assertEqual(FILL.bare_name("a/b"), "")
+        self.assertEqual(FILL.bare_name("a\\b"), "")
+
+    def test_parse_kind_pick(self) -> None:
+        self.assertIsNone(FILL.parse_kind_pick(""))
+        self.assertIsNone(FILL.parse_kind_pick("none"))
+        self.assertEqual(FILL.parse_kind_pick("plugin:jwt"), ("plugin", "jwt"))
+        self.assertEqual(FILL.parse_kind_pick("MCP:Airtable"), ("mcp", "Airtable"))
+        self.assertEqual(FILL.parse_kind_pick("jwt-auth"), ("plugin", "jwt-auth"))
+        self.assertIsNone(FILL.parse_kind_pick("plugin:https://evil.example"))
+        self.assertIsNone(FILL.parse_kind_pick("mcp:a/b"))
+
+    def test_as_item(self) -> None:
+        item = FILL.as_item("plugin", "jwt", "desc")
+        self.assertEqual(item["kind"], "plugin")
+        self.assertEqual(item["name"], "jwt")
+        self.assertEqual(item["identifier"], "plugin:jwt")
+        self.assertTrue(item["id"])
+
+    def test_parse_plugin_search_shapes(self) -> None:
+        self.assertEqual(FILL.parse_plugin_search("not json"), [])
+        self.assertEqual(FILL.parse_plugin_search('"str"'), [])
+        self.assertEqual(FILL.parse_plugin_search('{"results": "junk"}'), [])
+        rows = FILL.parse_plugin_search(
+            json.dumps({"plugins": [{"name": "jwt"}, {"no_name": 1}, "junk"]})
+        )
+        self.assertEqual([r["name"] for r in rows], ["jwt"])
+
+    def test_parse_mcp_catalog(self) -> None:
+        hits = FILL.parse_mcp_catalog(MCP_TEXT, {"jwt"})
+        self.assertEqual([h["name"] for h in hits], ["jwt-auth"])
+        self.assertEqual(hits[0]["kind"], "mcp")
+        # empty query admits every well-formed row except blocked names
+        all_hits = FILL.parse_mcp_catalog(MCP_TEXT, set())
+        self.assertEqual(
+            [h["name"] for h in all_hits], ["airtable", "jwt-auth"]
+        )  # hack-shell dropped by blocked_text
+
+    def test_search_hits_missing_hermes(self) -> None:
+        calls = []
+
+        def fake(argv, timeout=120):
+            calls.append(argv[0])
+            if argv[0] == "plugins":
+                return 127, ""
+            return 0, ""
+
+        with patch.object(FILL, "run_hermes", side_effect=fake):
+            self.assertIsNone(FILL.search_hits("jwt"))
+
+    def test_search_hits_merges(self) -> None:
+        def fake(argv, timeout=120):
+            if argv[0] == "plugins":
+                return 0, json.dumps({"results": [{"name": "jwt"}]})
+            if argv[0] == "mcp":
+                return 0, MCP_TEXT
+            return 1, ""
+
+        with patch.object(FILL, "run_hermes", side_effect=fake):
+            hits = FILL.search_hits("jwt auth")
+        self.assertEqual(
+            {h["identifier"] for h in hits}, {"plugin:jwt", "mcp:jwt-auth"}
+        )
+
+    def test_inspect_ok(self) -> None:
+        good = json.dumps({"results": [{"name": "jwt"}]})
+        with patch.object(FILL, "run_hermes", return_value=(0, good)):
+            self.assertTrue(FILL.inspect_ok("plugin", "jwt"))
+        with patch.object(FILL, "run_hermes", return_value=(0, good)):
+            self.assertFalse(FILL.inspect_ok("plugin", "other"))  # name not in hits
+        with patch.object(FILL, "run_hermes", return_value=(0, "verdict: blocked " + good)):
+            self.assertFalse(FILL.inspect_ok("plugin", "jwt"))
+        with patch.object(FILL, "run_hermes", return_value=(1, "")):
+            self.assertFalse(FILL.inspect_ok("plugin", "jwt"))
+        self.assertTrue(FILL.inspect_ok("mcp", "airtable"))  # no hermes call needed
+        self.assertFalse(FILL.inspect_ok("mcp", "a/b"))
+        self.assertFalse(FILL.inspect_ok("skill", "x"))
+
+    def test_install_one(self) -> None:
+        self.assertTrue(FILL.install_one("plugin", "jwt", dry_run=True))
+        self.assertTrue(FILL.install_one("mcp", "airtable", dry_run=True))
+        self.assertFalse(FILL.install_one("skill", "x", dry_run=True))  # empty argv
+        with patch.object(FILL, "run_hermes", return_value=(0, "")) as run:
+            self.assertTrue(FILL.install_one("plugin", "jwt", dry_run=False))
+        self.assertIn("--no-enable", run.call_args[0][0])
+        with patch.object(FILL, "run_hermes", return_value=(1, "")):
+            self.assertFalse(FILL.install_one("plugin", "jwt", dry_run=False))
+
+    def test_item_for_pick(self) -> None:
+        hits = [FILL.as_item("plugin", "jwt"), FILL.as_item("mcp", "airtable")]
+        self.assertIsNone(FILL.item_for_pick("none", hits))
+        self.assertIsNone(FILL.item_for_pick("missing", hits))
+        self.assertEqual(FILL.item_for_pick("mcp:airtable", hits)["name"], "airtable")
+        self.assertEqual(FILL.item_for_pick("plugin:jwt", hits)["kind"], "plugin")
+        self.assertEqual(FILL.item_for_pick(hits[0]["id"], hits)["name"], "jwt")
+        self.assertEqual(FILL.item_for_pick("jwt", hits)["kind"], "plugin")
+
+
 if __name__ == "__main__":
     unittest.main()

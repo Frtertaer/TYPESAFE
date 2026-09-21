@@ -230,5 +230,84 @@ class PeerFillTests(unittest.TestCase):
             self.assertFalse((cwd / INV.MISS_NAME).exists())
 
 
+class PeerFillInternalsTests(unittest.TestCase):
+    def test_item_for_pick(self) -> None:
+        candidates = [
+            {"id": "skill_jwt_auth", "name": "jwt-auth"},
+            {"id": "skill_ascii", "name": "ascii-art"},
+        ]
+        self.assertIsNone(FILL.item_for_pick("", candidates))
+        self.assertIsNone(FILL.item_for_pick("none", candidates))
+        self.assertIsNone(FILL.item_for_pick("missing", candidates))
+        self.assertEqual(FILL.item_for_pick("skill_jwt_auth", candidates)["name"], "jwt-auth")
+        self.assertEqual(FILL.item_for_pick("ascii-art", candidates)["id"], "skill_ascii")
+
+    def test_ignore_drops_cruft(self) -> None:
+        skipped = FILL.ignore(
+            "x",
+            ["SKILL.md", ".git", "node_modules", "__pycache__", "mod.pyc", "notes.txt"],
+        )
+        self.assertEqual(skipped, {".git", "node_modules", "__pycache__", "mod.pyc"})
+
+    def test_names_in_lowercases(self) -> None:
+        self.assertEqual(FILL.names_in([{"name": "JWT-Auth"}, {"name": "x"}]), {"jwt-auth", "x"})
+        self.assertIn("", FILL.names_in([{}]))
+
+    def test_under_any(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "skills"
+            root.mkdir()
+            inside = root / "jwt-auth"
+            inside.mkdir()
+            self.assertTrue(FILL.under_any(inside, [root]))
+            self.assertFalse(FILL.under_any(Path(tmp) / "elsewhere", [root]))
+
+    def test_peer_skills_skips_dest_and_pack(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hermes = base / "hermes"
+            home = base / "home"
+            write_skill(hermes / "skills", "jwt-auth", JWT_MD)
+            write_skill(home / ".grok" / "skills", "jwt-auth", JWT_MD)  # dup name across peers
+            write_skill(home / ".codex" / "skills", "jev-consult", JWT_MD)  # pack itself
+            write_skill(home / ".claude" / "skills", "jwt-auth", JWT_MD)  # already in dest
+            peers = FILL.peer_skills("claude-code", home, hermes)
+            self.assertEqual(peers, [])  # jwt-auth already installed in dest; pack skipped
+
+    def test_peer_skills_lists_other_harnesses(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hermes = base / "hermes"
+            home = base / "home"
+            write_skill(hermes / "skills", "jwt-auth", JWT_MD)
+            peers = FILL.peer_skills("claude-code", home, hermes)
+            self.assertEqual(len(peers), 1)
+            self.assertEqual(peers[0]["name"], "jwt-auth")
+            self.assertEqual(peers[0]["source_harness"], "hermes")
+
+    def test_run_jev_fail_open(self) -> None:
+        class FakeProc:
+            def __init__(self, rc, out):
+                self.returncode = rc
+                self.stdout = out
+
+        with patch("subprocess.run", return_value=FakeProc(2, "{}")):
+            self.assertIsNone(FILL.run_jev(Path("ask.json")))
+        with patch("subprocess.run", return_value=FakeProc(0, "not json")):
+            self.assertIsNone(FILL.run_jev(Path("ask.json")))
+        with patch("subprocess.run", return_value=FakeProc(0, "[1]")):
+            self.assertIsNone(FILL.run_jev(Path("ask.json")))
+        with patch("subprocess.run", return_value=FakeProc(0, '{"decision": {}}')):
+            self.assertEqual(FILL.run_jev(Path("ask.json")), {"decision": {}})
+        with patch("subprocess.run", side_effect=OSError("no python")):
+            self.assertIsNone(FILL.run_jev(Path("ask.json")))
+
+    def test_run_jev_timeout(self) -> None:
+        import subprocess
+
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("jev", 90)):
+            self.assertIsNone(FILL.run_jev(Path("ask.json")))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -385,6 +385,14 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(buf.getvalue().strip(), "skip")
 
+    def test_uncovered_flag_lists_ids(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--uncovered"])
+        self.assertEqual(rc, 0)
+        ids = buf.getvalue().split()
+        self.assertEqual(len(ids), 2)
+
     def test_csv_prints_table(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

@@ -150,6 +150,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the case hit rate (positives scoring >0 plus negatives scoring 0) and exit.",
     )
     parser.add_argument(
+        "--uncovered",
+        action="store_true",
+        help="Print only the uncovered case ids (coverage misses), one per line.",
+    )
+    parser.add_argument(
         "--min-coverage",
         type=float,
         default=None,
@@ -366,6 +371,23 @@ def main(argv: list[str] | None = None) -> int:
     def _coverage_ok() -> bool:
         return args.min_coverage is None or result["coverage"] >= args.min_coverage
 
+    def _uncovered() -> list:
+        return [
+            row["id"]
+            for row in result["cases"]
+            if not (
+                (
+                    row["should_trigger"]
+                    and row["score"] is not None
+                    and row["score"] > 0
+                )
+                or (
+                    not row["should_trigger"]
+                    and (not row["lexical"] or not row["score"])
+                )
+            )
+        ]
+
     if args.watch and args.watch > 0:
         import time as _time
 
@@ -442,21 +464,7 @@ def main(argv: list[str] | None = None) -> int:
                 "- min-covers gate: %d -> %s"
                 % (args.min_covers, "PASS" if _covers_ok() else "FAIL")
             )
-        uncovered_ids = [
-            row["id"]
-            for row in result["cases"]
-            if not (
-                (
-                    row["should_trigger"]
-                    and row["score"] is not None
-                    and row["score"] > 0
-                )
-                or (
-                    not row["should_trigger"]
-                    and (not row["lexical"] or not row["score"])
-                )
-            )
-        ]
+        uncovered_ids = _uncovered()
         if uncovered_ids:
             lines.append("- uncovered: %s" % ", ".join(str(i) for i in uncovered_ids))
         lines += [
@@ -532,24 +540,14 @@ def main(argv: list[str] | None = None) -> int:
         if unscored:
             sys.stdout.write("unscored %d\n" % unscored)
         return 0 if result["ok"] else 1
+    if args.uncovered:
+        for cid in _uncovered():
+            sys.stdout.write("%s\n" % cid)
+        strict_cov_ok = not args.strict or result["coverage"] >= 1.0
+        return 0 if (result["ok"] and _coverage_ok() and strict_cov_ok) else 1
     if args.coverage:
         if args.ids:
-            uncovered_ids = [
-                row["id"]
-                for row in result["cases"]
-                if not (
-                    (
-                        row["should_trigger"]
-                        and row["score"] is not None
-                        and row["score"] > 0
-                    )
-                    or (
-                        not row["should_trigger"]
-                        and (not row["lexical"] or not row["score"])
-                    )
-                )
-            ]
-            for cid in uncovered_ids:
+            for cid in _uncovered():
                 sys.stdout.write("%s\n" % cid)
             strict_cov_ok = not args.strict or result["coverage"] >= 1.0
             return 0 if (result["ok"] and _coverage_ok() and strict_cov_ok) else 1
@@ -560,21 +558,7 @@ def main(argv: list[str] | None = None) -> int:
                         "hits": result["hits"],
                         "total": len(result["cases"]),
                         "coverage": result["coverage"],
-                        "uncovered": [
-                            row["id"]
-                            for row in result["cases"]
-                            if not (
-                                (
-                                    row["should_trigger"]
-                                    and row["score"] is not None
-                                    and row["score"] > 0
-                                )
-                                or (
-                                    not row["should_trigger"]
-                                    and (not row["lexical"] or not row["score"])
-                                )
-                            )
-                        ],
+                        "uncovered": _uncovered(),
                         "ok": result["ok"] and _coverage_ok(),
                     }
                 )

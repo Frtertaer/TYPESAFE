@@ -420,6 +420,8 @@ def main(argv: list[str] | None = None) -> int:
     env_explicit = os.environ.get("JEV_DECISIONS_EXPLICIT", "").strip().lower() in ("1", "true", "yes")
     parser.add_argument("--explicit", action="store_true", default=env_explicit, help="Only entries with explicit=true")
     parser.add_argument("--question", default=os.environ.get("JEV_DECISIONS_QUESTION", ""), help="Only entries with this question kind (e.g. load_tools, explicit, env, dedupe)")
+    env_dedupe = os.environ.get("JEV_DECISIONS_DEDUPE", "").strip().lower() in ("1", "true", "yes")
+    parser.add_argument("--dedupe-only", dest="dedupe_only", action="store_true", default=env_dedupe, help="Only entries with dedupe=true")
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -567,6 +569,8 @@ def main(argv: list[str] | None = None) -> int:
         ]
     if getattr(args, "explicit", False):
         entries = [item for item in entries if item.get("explicit") is True]
+    if getattr(args, "dedupe_only", False):
+        entries = [item for item in entries if item.get("dedupe") is True]
     if args.question:
         want_q = args.question.strip().lower()
         entries = [
@@ -618,6 +622,7 @@ def main(argv: list[str] | None = None) -> int:
             or args.min_latency is not None
             or args.winner
             or getattr(args, "explicit", False)
+            or getattr(args, "dedupe_only", False)
             or args.question
         ):
             sys.stderr.write(

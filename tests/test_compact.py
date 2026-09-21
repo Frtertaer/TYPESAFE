@@ -1290,6 +1290,15 @@ class PruneSpillTests(unittest.TestCase):
             self.assertFalse(stale.exists())
 
 
+class VersionFlagTests(unittest.TestCase):
+    def test_version_prints_policy_version(self) -> None:
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            rc = C.main(["--version"])
+        self.assertEqual(rc, 0)
+        self.assertRegex(buf.getvalue().strip(), r"^jev-consult \(policy v\d+\)$")
+
+
 class ListSpillTests(unittest.TestCase):
     def test_lists_files_with_size_and_mtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -1309,11 +1309,24 @@ def main(argv: list[str] | None = None) -> int:
         help="Print a one-line compaction summary to stderr after the result.",
     )
     parser.add_argument(
+        "--version",
+        action="store_true",
+        help="Print the jev-consult policy version and exit.",
+    )
+    parser.add_argument(
         "--dir",
         metavar="DIR",
         help="Compact every *.json/*.jsonl transcript in DIR; one JSON line per file on stdout.",
     )
     args = parser.parse_args(argv)
+    if args.version:
+        policy_path = Path(__file__).resolve().parent.parent / "policy.json"
+        try:
+            version = json.loads(policy_path.read_text(encoding="utf-8")).get("version", "?")
+        except (OSError, ValueError):
+            version = "?"
+        sys.stdout.write("jev-consult (policy v%s)\n" % version)
+        return 0
     if args.list_spill:
         directory = Path(args.spill_dir) if args.spill_dir else None
         rows = list_spill(directory)

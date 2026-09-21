@@ -334,7 +334,7 @@ class InventoryHookTests(unittest.TestCase):
                     rc = HOOK.main(
                         ["--file", str(payload), "--watch", "0.01"]
                     )
-            self.assertEqual(rc, 0)
+            self.assertEqual(rc, 1)
             ticks = [
                 json.loads(l)
                 for l in buf.getvalue().splitlines()
@@ -343,6 +343,43 @@ class InventoryHookTests(unittest.TestCase):
             self.assertEqual(len(ticks), 2)
             self.assertTrue(all(t["keys"] == [] for t in ticks))
             self.assertTrue(all(t["winner"] is None for t in ticks))
+
+    def test_watch_rc_0_when_last_tick_has_winner(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {
+                        "event": "UserPromptSubmit",
+                        "prompt": "jwt",
+                        "cwd": str(cwd),
+                        "harness": "claude-code",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            env = {
+                "JEV_HOOK_WATCH_MAX": "1",
+                "JEV_HOOK_WINNER": "ascii-art",
+                "JEV_HOOK_NOSIDECAR": "1",
+                "JEV_HOOK_NOMISS": "1",
+            }
+            with patch.dict(os.environ, env):
+                with patch.object(HOOK, "scan_cached", return_value=items):
+                    with patch("sys.stdout", buf):
+                        rc = HOOK.main(
+                            ["--file", str(payload), "--watch", "0.01"]
+                        )
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(ticks[0]["winner"], "ascii-art")
 
     def test_file_flag_reads_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

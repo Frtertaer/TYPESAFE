@@ -590,7 +590,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.flush()
             ticks += 1
             time.sleep(watch_seconds)
-        return 0
+        return 0 if tick["winner"] else 1
     if not raw:
         raw = sys.stdin.read()
     if not raw.strip():

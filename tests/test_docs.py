@@ -60,6 +60,17 @@ class DocFlagsTests(unittest.TestCase):
                     missing.append("SKILL.md %s: %s absent" % (names[0], flag))
         self.assertEqual(missing, [])
 
+    def test_env_vars_used_in_scripts_are_documented(self) -> None:
+        env_re = re.compile(r'(?:environ\.(?:get|getenv)|environ)\s*\(?\s*\[?\s*"(JEV_[A-Z_]+|TYPESAFE_[A-Z_]+|HERMES_HOME)"')
+        used: set[str] = set()
+        for script in SCRIPTS.glob("*.py"):
+            used |= set(env_re.findall(script.read_text(encoding="utf-8")))
+        text = (
+            ROOT / "skills" / "jev-consult" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        undocumented = sorted(name for name in used if name not in text)
+        self.assertEqual(undocumented, [])
+
     def test_policy_lint_reads_real_policy(self) -> None:
         policy = json.loads(
             (ROOT / "skills" / "jev-consult" / "policy.json").read_text(encoding="utf-8")

@@ -74,6 +74,21 @@ class LintSkillTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(buf.getvalue(), "")
 
+    def test_out_writes_findings_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            warn_path = write_skill(tmp, "x", "---\nname: x\n---\n")
+            out_path = Path(tmp) / "findings.json"
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = skill_lint.main([str(warn_path), "--out", str(out_path)])
+            self.assertEqual(rc, 0)
+            self.assertIn("wrote", err.getvalue())
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertTrue(any(f["rule"] == "S004" for f in payload["findings"]))
+            with contextlib.redirect_stderr(io.StringIO()):
+                rc = skill_lint.main([str(warn_path), "--out"])
+            self.assertEqual(rc, 2)
+
     def test_severity_filters_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             warn_path = write_skill(tmp, "x", "---\nname: x\n---\n")

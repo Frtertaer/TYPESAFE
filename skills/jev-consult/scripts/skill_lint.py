@@ -178,6 +178,14 @@ def main(argv: list[str] | None = None) -> int:
         env_sev = os.environ.get("JEV_SLINT_SEVERITY", "").strip().lower()
         if env_sev in ("error", "warn", "info"):
             severity = env_sev
+    out_path = ""
+    if "--out" in argv:
+        idx = argv.index("--out")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--out needs a PATH value\n")
+            return 2
+        out_path = argv[idx + 1].strip()
+        argv = argv[:idx] + argv[idx + 2 :]
     argv = [a for a in argv if a not in ("--fix", "--json", "--strict", "--quiet")]
     if not argv:
         sys.stderr.write(
@@ -200,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
             if any(f["rule"] == "S008" for f in lint_skill(path)):
                 if fix_case(path):
                     sys.stderr.write("fixed S008 %s\n" % path)
-    if as_json:
+    if as_json or out_path:
         import json as _json
 
         all_rows = [
@@ -210,6 +218,18 @@ def main(argv: list[str] | None = None) -> int:
         def bad(r: dict) -> bool:
             return r["severity"] == "error" or (strict and r["severity"] == "warn")
 
+        if out_path:
+            try:
+                Path(out_path).write_text(
+                    _json.dumps({"findings": rows}, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                return 1
+            sys.stderr.write("wrote %d finding(s) to %s\n" % (len(rows), out_path))
+        if not as_json:
+            return 1 if any(bad(r) for r in all_rows) else 0
         sys.stdout.write(_json.dumps({"findings": rows}, indent=2) + "\n")
         return 1 if any(bad(r) for r in all_rows) else 0
     n_err = 0

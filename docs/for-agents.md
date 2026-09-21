@@ -22,7 +22,7 @@ python skills/jev-consult/scripts/inventory.py --show-policy            # effect
 python skills/jev-consult/scripts/inventory.py --out PATH               # write the payload JSON to a file instead of stdout
 python skills/jev-consult/scripts/policy_lint.py [--strict|--show|--diff other.json|--out PATH]  # validates policy.json
 python skills/jev-consult/scripts/question_lint.py request.json [--json|--fix|--out PATH]  # lint a request file standalone
-python skills/jev-consult/scripts/skill_lint.py skills/*/SKILL.md       # SKILL.md sanity; [--strict] warns fail, [--fix] rewrites name, [--json]
+python skills/jev-consult/scripts/skill_lint.py skills/*/SKILL.md       # SKILL.md sanity; [--strict] warns fail, [--fix] rewrites name, [--json] [--out PATH]
 python skills/jev-consult/scripts/doctor.py                             # verify per-harness install; exit 0 = all ok; --quiet/--out PATH
 python skills/jev-consult/scripts/smoke.py                              # offline e2e sanity, no API calls; --only/--list/--fail-fast/--out PATH
 python skills/jev-consult/scripts/decisions.py                          # stats + --days/--since/--harness/--status/--outcome/--fill

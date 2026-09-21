@@ -217,6 +217,31 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["plan"], "P")
 
+    def test_cli_set_kv_merges_arbitrary_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            rc = tr.main(["--file", str(path), "init", "--plan", "P"])
+            self.assertEqual(rc, 0)
+            rc = tr.main(
+                [
+                    "--file",
+                    str(path),
+                    "set",
+                    "--kv",
+                    "custom= val 1 ",
+                    "--kv",
+                    "branch=devin/x",
+                    "--kv",
+                    "no-equals-ignored",
+                ]
+            )
+            self.assertEqual(rc, 0)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["custom"], "val 1")
+            self.assertEqual(data["branch"], "devin/x")
+            self.assertNotIn("no-equals-ignored", data)
+            self.assertEqual(data["plan"], "P")
+
     def test_cli_record_with_step(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "trace.json"

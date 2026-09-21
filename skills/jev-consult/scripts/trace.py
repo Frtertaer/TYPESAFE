@@ -166,6 +166,13 @@ def cmd_set(args: argparse.Namespace) -> int:
         data["last_error"] = args.error
     if args.attempt is not None:
         data["attempt_count"] = int(args.attempt)
+    for pair in args.kv or []:
+        if "=" not in pair:
+            continue
+        key, value = pair.split("=", 1)
+        key = key.strip()
+        if key:
+            data[key] = value.strip()
     save(data, path)
     emit({"path": str(path), "trace": data})
     return 0
@@ -268,6 +275,12 @@ def build_parser() -> argparse.ArgumentParser:
     setter.add_argument("--unknown")
     setter.add_argument("--error")
     setter.add_argument("--attempt", type=int)
+    setter.add_argument(
+        "--kv",
+        action="append",
+        metavar="KEY=VALUE",
+        help="Set an arbitrary trace field (repeatable)",
+    )
     setter.set_defaults(func=cmd_set)
     bump_cmd = sub.add_parser("bump", help="Increment attempt_count")
     bump_cmd.add_argument("--error", default="")

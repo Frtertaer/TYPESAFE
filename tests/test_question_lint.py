@@ -103,6 +103,26 @@ class LintQuestionTests(unittest.TestCase):
         findings = question_lint.lint_question("q", q)
         self.assertIn(("J011", "error"), rules(findings))
 
+    def test_j015_info_on_too_few_options(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which option should the coder pick for this task?",
+                "criteria": {},
+            },
+        )
+        self.assertIn(("J015", "info"), rules(findings))
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which option should the coder pick for this task?",
+                "criteria": {"a": "pick a", "b": "pick b"},
+            },
+        )
+        self.assertNotIn(("J015", "info"), rules(findings))
+
     def test_j014_identical_true_false_is_error(self) -> None:
         findings = question_lint.lint_question(
             "q",

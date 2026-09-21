@@ -146,6 +146,13 @@ def lint_question(qid: str, q: dict, max_options: int = 255) -> list[dict]:
             )
     if qtype == "choice":
         options = criteria if isinstance(criteria, dict) else {}
+        if len(options) < 2:
+            add(
+                "J015",
+                "info",
+                "choice has %d option(s)" % len(options),
+                "A choice needs at least two options to pick between; policy templates may legitimately carry zero (options are injected at scaffold time). Add them to `criteria` or change the type.",
+            )
         if len(options) > max_options:
             add(
                 "J011",

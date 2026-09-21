@@ -385,6 +385,20 @@ class TraceTests(unittest.TestCase):
             self.assertIn("for-hermes", buf.getvalue())
             self.assertNotIn("plain-note", buf.getvalue())
 
+    def test_cli_init_plan_env_default(self) -> None:
+        import os as _os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with patch.dict(_os.environ, {"JEV_TRACE_PLAN": "env-plan"}):
+                rc = tr.main(["--file", str(path), "init"])
+            self.assertEqual(rc, 0)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["plan"], "env-plan")
+            rc = tr.main(["--file", str(Path(tmp) / "none.json"), "init"])
+            self.assertEqual(rc, 2)
+
     def test_cli_notes_prune_rewrites_file(self) -> None:
         import io
         from contextlib import redirect_stdout

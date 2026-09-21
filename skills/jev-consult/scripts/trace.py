@@ -131,8 +131,12 @@ def emit(payload: Any) -> None:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
+    plan = args.plan if args.plan is not None else os.environ.get("JEV_TRACE_PLAN", "")
+    if not plan.strip():
+        sys.stderr.write("trace init requires --plan or JEV_TRACE_PLAN\n")
+        return 2
     data = empty()
-    data["plan"] = args.plan
+    data["plan"] = plan
     if args.step:
         data["current_step"] = args.step
     path = Path(args.file) if args.file else default_path()
@@ -344,7 +348,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--file", help="Trace JSON path (default JEV_TRACE or .jev-trace.json)")
     sub = parser.add_subparsers(dest="command", required=True)
     init = sub.add_parser("init", help="Create a trace from the human plan")
-    init.add_argument("--plan", required=True)
+    init.add_argument("--plan", default=None, help="Plan text (default JEV_TRACE_PLAN env)")
     init.add_argument("--step", default="")
     init.set_defaults(func=cmd_init)
     show = sub.add_parser("show", help="Print the trace (empty object if missing)")

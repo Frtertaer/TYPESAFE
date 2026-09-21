@@ -337,6 +337,35 @@ class TraceTests(unittest.TestCase):
             self.assertIn("c", out)
             self.assertIn("2 note(s)", out)
 
+    def test_cli_history_lists_picks(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            tr.main(["--file", str(path), "record", "--pick", "jwt-auth", "--kind", "skill"])
+            tr.main(["--file", str(path), "record", "--pick", "sqlite", "--kind", "mcp"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history"])
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertIn("skill jwt-auth", out)
+            self.assertIn("mcp sqlite", out)
+            self.assertIn("2 pick(s)", out)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                tr.main(["--file", str(path), "history", "--limit", "1"])
+            self.assertIn("sqlite", buf.getvalue())
+            self.assertNotIn("jwt-auth", buf.getvalue())
+            self.assertIn("1 pick(s)", buf.getvalue())
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                tr.main(["--file", str(path), "history", "--json"])
+            rows = json.loads(buf.getvalue())
+            self.assertEqual([r["pick"] for r in rows], ["jwt-auth", "sqlite"])
+
     def test_cli_notes_out_writes_file(self) -> None:
         import io
         from contextlib import redirect_stderr, redirect_stdout

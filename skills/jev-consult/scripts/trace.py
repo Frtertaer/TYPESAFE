@@ -238,6 +238,26 @@ def cmd_record(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_history(args: argparse.Namespace) -> int:
+    """List recorded picks (trace.history), newest last."""
+    path = Path(args.file) if args.file else default_path()
+    data = load(path)
+    history = data.get("history")
+    history = [h for h in history if isinstance(h, dict)] if isinstance(history, list) else []
+    limit = getattr(args, "limit", None)
+    if isinstance(limit, int) and limit >= 0:
+        history = history[-limit:] if limit else []
+    if getattr(args, "json", False):
+        sys.stdout.write(json.dumps(history, ensure_ascii=False, indent=2) + "\n")
+        return 0
+    for entry in history:
+        kind = str(entry.get("kind") or "")
+        line = str(entry.get("pick") or "")
+        sys.stdout.write("%s %s\n" % (kind, line) if kind else line + "\n")
+    sys.stdout.write("%d pick(s)\n" % len(history))
+    return 0
+
+
 def cmd_prune(args: argparse.Namespace) -> int:
     """Delete the trace file when its mtime is older than --older-than seconds."""
     path = Path(args.file) if args.file else default_path()
@@ -415,6 +435,10 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--harness", default="", help="Only notes tagged with this harness")
     notes_cmd.add_argument("--out", default="", help="Write the notes output to PATH instead of stdout")
     notes_cmd.set_defaults(func=cmd_notes)
+    hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
+    hist_cmd.add_argument("--json", action="store_true")
+    hist_cmd.add_argument("--limit", type=int, help="Show only the last N picks")
+    hist_cmd.set_defaults(func=cmd_history)
     return parser
 
 

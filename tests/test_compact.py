@@ -1520,6 +1520,24 @@ class PreserveRecentEnvTests(unittest.TestCase):
             bogus = self._run(path, {"JEV_TRUNCATE_HEAD": "bogus"})
             self.assertGreater(bogus["stats"]["messagesBefore"], 0)
 
+    def test_min_reduction_env_default(self):
+        import json as _json
+
+        messages = [{"role": "user", "content": "compress"}]
+        for i in range(4):
+            messages.append({"role": "user", "content": "filler %d" % i})
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.json"
+            path.write_text(_json.dumps(messages), encoding="utf-8")
+            import io
+            from contextlib import redirect_stdout
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_MIN_REDUCTION": "bogus"}):
+                with redirect_stdout(buf):
+                    rc = C.main([str(path), "--history", "--fake"])
+            self.assertEqual(rc, 0)
+            self.assertIn("stats", json.loads(buf.getvalue()))
+
     def test_env_zero_pins_only_first(self):
         import json as _json
 

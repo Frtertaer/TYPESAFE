@@ -1321,7 +1321,11 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         env_head = TRUNCATE_HEAD_CHARS
     parser.add_argument("--truncate-head-chars", type=int, default=max(0, env_head))
-    parser.add_argument("--min-reduction", type=float, default=MIN_REDUCTION)
+    try:
+        env_min = float(os.environ.get("JEV_MIN_REDUCTION", "") or MIN_REDUCTION)
+    except ValueError:
+        env_min = MIN_REDUCTION
+    parser.add_argument("--min-reduction", type=float, default=env_min)
     parser.add_argument(
         "--dry-run",
         action="store_true",

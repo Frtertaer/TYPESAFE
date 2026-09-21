@@ -182,6 +182,20 @@ class TriggerEvalTests(unittest.TestCase):
             rc = te.main(["--id", "nope"])
         self.assertEqual(rc, 2)
 
+    def test_score_adhoc_prompt(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--score", "which approach should I pick"])
+        self.assertEqual(rc, 0)
+        self.assertIn("score=", buf.getvalue())
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--score", "zzz qqq", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["prompt"], "zzz qqq")
+        self.assertIsInstance(payload["score"], float)
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

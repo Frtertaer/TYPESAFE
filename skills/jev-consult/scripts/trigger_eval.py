@@ -86,6 +86,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--cases", default=str(DEFAULT_CASES))
     parser.add_argument("--skill", default=str(SKILL_DIR))
+    parser.add_argument(
+        "--score",
+        metavar="TEXT",
+        default="",
+        help="Score one ad-hoc prompt against the skill description and exit.",
+    )
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--quiet", action="store_true", help="Print only the verdict line.")
     parser.add_argument(
@@ -111,6 +117,26 @@ def main(argv: list[str] | None = None) -> int:
         help="Also write the result JSON to PATH.",
     )
     args = parser.parse_args(argv)
+    if args.score:
+        if not VENDORED_SCORER.is_file():
+            sys.stderr.write("missing vendored scorer (%s)\n" % VENDORED_SCORER)
+            return 2
+        scorer = _load_scorer(VENDORED_SCORER)
+        try:
+            score = scorer.score(
+                scorer.tokens(args.score),
+                scorer.tokens(scorer.description_of(args.skill)),
+            )
+        except OSError as exc:
+            sys.stderr.write("trigger_eval failed: %s\n" % exc)
+            return 2
+        if args.json:
+            sys.stdout.write(
+                json.dumps({"prompt": args.score, "score": score}) + "\n"
+            )
+        else:
+            sys.stdout.write("score=%.3f\n" % score)
+        return 0
     try:
         result = evaluate(Path(args.cases), Path(args.skill), case_id=args.id)
     except (OSError, ValueError, KeyError) as exc:

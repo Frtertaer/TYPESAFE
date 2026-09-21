@@ -459,6 +459,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Rewrite the log keeping only entries matching the time/status filters",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --prune: report what would be dropped without rewriting the log",
+    )
     parser.add_argument("--json", action="store_true", help="Machine-readable stats")
     parser.add_argument(
         "--csv",
@@ -517,15 +522,21 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         total, total_bad = load_entries(path)
-        try:
-            prune_entries(path, entries)
-        except OSError as exc:
-            sys.stderr.write("prune failed: %s\n" % exc)
-            return 1
-        sys.stderr.write(
-            "pruned %d of %d entries (kept %d, dropped %d bad line(s))\n"
-            % (len(total) - len(entries), len(total), len(entries), total_bad)
-        )
+        if getattr(args, "dry_run", False):
+            sys.stderr.write(
+                "dry-run: would prune %d of %d entries (kept %d, dropped %d bad line(s))\n"
+                % (len(total) - len(entries), len(total), len(entries), total_bad)
+            )
+        else:
+            try:
+                prune_entries(path, entries)
+            except OSError as exc:
+                sys.stderr.write("prune failed: %s\n" % exc)
+                return 1
+            sys.stderr.write(
+                "pruned %d of %d entries (kept %d, dropped %d bad line(s))\n"
+                % (len(total) - len(entries), len(total), len(entries), total_bad)
+            )
     if args.errors:
         for lineno, raw in load_bad_lines(path):
             sys.stdout.write("%d: %s\n" % (lineno, raw[:200]))

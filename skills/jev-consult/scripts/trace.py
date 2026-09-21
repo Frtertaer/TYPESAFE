@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -119,7 +120,14 @@ def cmd_init(args: argparse.Namespace) -> int:
 def cmd_show(args: argparse.Namespace) -> int:
     path = Path(args.file) if args.file else default_path()
     data = load(path)
-    emit({"path": str(path), "exists": path.is_file(), "trace": data})
+    exists = path.is_file()
+    age_seconds = None
+    if exists:
+        try:
+            age_seconds = max(0.0, round(time.time() - path.stat().st_mtime, 3))
+        except OSError:
+            age_seconds = None
+    emit({"path": str(path), "exists": exists, "age_seconds": age_seconds, "trace": data})
     return 0
 
 

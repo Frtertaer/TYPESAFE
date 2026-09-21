@@ -215,6 +215,33 @@ class TraceTests(unittest.TestCase):
             written = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual(written, state)
 
+    def test_show_reports_age(self) -> None:
+        import io
+        import os
+        import time
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "show"])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertFalse(out["exists"])
+            self.assertIsNone(out["age_seconds"])
+
+            with patch.object(sys, "stdout", io.StringIO()):
+                tr.main(["--file", str(path), "init", "--plan", "P"])
+            old = time.time() - 600
+            os.utime(path, (old, old))
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                tr.main(["--file", str(path), "show"])
+            out = json.loads(buf.getvalue())
+            self.assertTrue(out["exists"])
+            self.assertGreaterEqual(out["age_seconds"], 590)
+
     def test_state_missing_file_empty(self) -> None:
         import io
         from unittest.mock import patch

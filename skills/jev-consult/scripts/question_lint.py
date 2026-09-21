@@ -395,6 +395,8 @@ def main(argv: list[str] | None = None) -> int:
                 "ts": int(_time.time()),
                 "findings": len(current),
                 "errors": sum(1 for f in current if f["severity"] == "error"),
+                "warnings": sum(1 for f in current if f["severity"] == "warn"),
+                "infos": sum(1 for f in current if f["severity"] == "info"),
             }
             sys.stdout.write(json.dumps(tick) + "\n")
             sys.stdout.flush()

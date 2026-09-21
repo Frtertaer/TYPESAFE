@@ -318,6 +318,7 @@ class CliTests(unittest.TestCase):
         ]
         self.assertEqual(len(ticks), 2)
         self.assertTrue(all("errors" in t for t in ticks))
+        self.assertTrue(all("warnings" in t and "infos" in t for t in ticks))
 
 
 if __name__ == "__main__":

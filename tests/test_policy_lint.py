@@ -482,6 +482,7 @@ class WatchFlagTests(unittest.TestCase):
         ]
         self.assertEqual(len(ticks), 2)
         self.assertTrue(all("errors" in t for t in ticks))
+        self.assertTrue(all("warnings" in t and "infos" in t for t in ticks))
 
     def test_watch_bad_value_rc2(self) -> None:
         with redirect_stdout(io.StringIO()):

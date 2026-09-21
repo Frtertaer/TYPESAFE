@@ -510,6 +510,8 @@ def main(argv: list[str] | None = None) -> int:
                 "ts": int(_time.time()),
                 "findings": len(rows),
                 "errors": sum(1 for r in rows if r["severity"] == "error"),
+                "warnings": sum(1 for r in rows if r["severity"] == "warn"),
+                "infos": sum(1 for r in rows if r["severity"] == "info"),
             }
             sys.stdout.write(json.dumps(tick) + "\n")
             sys.stdout.flush()

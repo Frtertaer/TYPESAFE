@@ -335,6 +335,19 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertIn("negatives=", out)
         self.assertNotIn("should_trigger=", out)
 
+    def test_desc_tokens_prints_token_set(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--desc-tokens"])
+        self.assertEqual(rc, 0)
+        out = buf.getvalue().splitlines()
+        self.assertTrue(out)
+        self.assertEqual(out, sorted(set(out)))
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            te.main(["--desc-tokens", "--desc", "pick between two options"])
+        self.assertEqual(buf.getvalue().splitlines(), ["between", "option", "pick", "two"])
+
     def test_missing_cases_file_returns_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("sys.stderr", io.StringIO()):

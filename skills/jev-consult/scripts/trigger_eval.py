@@ -178,6 +178,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Show which prompt tokens missed the description per row.",
     )
     parser.add_argument(
+        "--desc-tokens",
+        action="store_true",
+        help="Print the scored description token set (or --desc tokens) and exit.",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help=(
@@ -192,6 +197,19 @@ def main(argv: list[str] | None = None) -> int:
         help="Also write the result JSON to PATH.",
     )
     args = parser.parse_args(argv)
+    if args.desc_tokens:
+        if not VENDORED_SCORER.is_file():
+            sys.stderr.write("missing vendored scorer (%s)\n" % VENDORED_SCORER)
+            return 2
+        scorer = _load_scorer(VENDORED_SCORER)
+        try:
+            text = args.desc if args.desc else scorer.description_of(args.skill)
+        except OSError as exc:
+            sys.stderr.write("trigger_eval failed: %s\n" % exc)
+            return 2
+        for tok in sorted(set(scorer.tokens(text))):
+            sys.stdout.write("%s\n" % tok)
+        return 0
     if args.score:
         if not VENDORED_SCORER.is_file():
             sys.stderr.write("missing vendored scorer (%s)\n" % VENDORED_SCORER)

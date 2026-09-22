@@ -932,6 +932,33 @@ def step_decisions(tmp: Path) -> dict:
         )
         ok = rc == 0 and "jev_status" in out and "harness" in out
     if ok:
+        # count lists: --harnesses/--outcomes/--fills/--dedupes group a field
+        kind_log = tmp / "decisions-kinds.jsonl"
+        kind_log.write_text(
+            '\n'.join(
+                [
+                    json.dumps({"ts": 1, "jev_status": "winner", "harness": "hermes", "outcome": "human", "fill": "trace", "dedupe": True}),
+                    json.dumps({"ts": 2, "jev_status": "none", "harness": "codex", "outcome": "auto", "fill": "peer", "dedupe": False}),
+                    json.dumps({"ts": 3, "jev_status": "winner", "harness": "hermes", "outcome": "human", "fill": "trace", "dedupe": True}),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        counts_ok = True
+        for flag, want in (
+            ("--harnesses", "hermes 2"),
+            ("--outcomes", "human 2"),
+            ("--fills", "trace 2"),
+            ("--dedupes", "True 2"),
+        ):
+            rc, out = _run(
+                [str(SCRIPTS / "decisions.py"), "--file", str(kind_log), flag]
+            )
+            if not (rc == 0 and want in out):
+                counts_ok = False
+        ok = counts_ok
+    if ok:
         # --csv emits a header plus one row per entry, no stats
         rc, out = _run(
             [

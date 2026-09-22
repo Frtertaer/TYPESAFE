@@ -381,6 +381,35 @@ class InventoryHookTests(unittest.TestCase):
             ]
             self.assertEqual(ticks[0]["winner"], "ascii-art")
 
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {"event": "UserPromptSubmit", "prompt": "jwt", "cwd": str(cwd)}
+                ),
+                encoding="utf-8",
+            )
+            out = cwd / "ticks.jsonl"
+            env = {
+                "JEV_HOOK_WATCH_MAX": "2",
+                "JEV_HOOK_OFF": "1",
+            }
+            with patch.dict(os.environ, env):
+                with patch("sys.stdout", io.StringIO()):
+                    HOOK.main(
+                        ["--file", str(payload), "--watch", "0.01",
+                         "--out", str(out)]
+                    )
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("winner" in t and "keys" in t for t in lines))
+
     def test_file_flag_reads_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)

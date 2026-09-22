@@ -566,6 +566,11 @@ def main(argv: list[str] | None = None) -> int:
             except ValueError:
                 watch_seconds = 0.0
     if watch_seconds > 0:
+        watch_out = ""
+        if "--out" in argv:
+            idx = argv.index("--out")
+            if idx + 1 < len(argv):
+                watch_out = argv[idx + 1]
         try:
             max_ticks = int(os.environ.get("JEV_HOOK_WATCH_MAX", "") or 0)
         except ValueError:
@@ -586,8 +591,15 @@ def main(argv: list[str] | None = None) -> int:
             tick["winner"] = (
                 ((LAST_DECISION or {}).get("winner") or {}).get("name") or None
             )
-            sys.stdout.write(json.dumps(tick) + "\n")
+            line = json.dumps(tick) + "\n"
+            sys.stdout.write(line)
             sys.stdout.flush()
+            if watch_out:
+                try:
+                    with Path(watch_out).open("a", encoding="utf-8") as fh:
+                        fh.write(line)
+                except OSError:
+                    pass
             ticks += 1
             time.sleep(watch_seconds)
         return 0 if tick["winner"] else 1

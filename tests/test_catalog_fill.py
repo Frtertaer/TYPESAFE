@@ -345,6 +345,73 @@ class CatalogFillTests(unittest.TestCase):
             self.assertTrue(all(t["hits"] == 1 and t["cached"] for t in ticks))
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
 
+    def test_watch_verdict_writes_final_state(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            verdict = base / "v.json"
+            with patch.object(
+                FILL, "search_hits", return_value=[{"name": "jwt"}]
+            ), patch.object(
+                FILL, "read_catalog_cache", return_value=[{"name": "jwt"}]
+            ), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--cwd",
+                    str(base),
+                    "--watch",
+                    "0.01",
+                    "--verdict",
+                    str(verdict),
+                ],
+            ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "1"}), patch(
+                "sys.stdout", io.StringIO()
+            ):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "hits")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertEqual(payload["hits"], 1)
+            self.assertTrue(payload["cached"])
+
+    def test_watch_verdict_none_when_no_hits(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            verdict = base / "v.json"
+            with patch.object(FILL, "search_hits", return_value=[]), patch.object(
+                FILL, "read_catalog_cache", return_value=None
+            ), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--cwd",
+                    str(base),
+                    "--watch",
+                    "0.01",
+                    "--verdict",
+                    str(verdict),
+                ],
+            ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "1"}), patch(
+                "sys.stdout", io.StringIO()
+            ):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "none")
+            self.assertEqual(payload["hits"], 0)
+            self.assertFalse(payload["cached"])
+
     def test_watch_appends_ticks_to_out_file(self) -> None:
         import io
 

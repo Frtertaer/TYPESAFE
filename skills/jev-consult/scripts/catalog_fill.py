@@ -431,6 +431,7 @@ def main() -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    parser.add_argument("--verdict", default="", metavar="PATH", help="With --watch: write a slim {verdict: hits|none, ticks, hits, cached} JSON when the loop ends.")
     parser.add_argument(
         "--out",
         default="",
@@ -457,6 +458,7 @@ def main() -> int:
         max_ticks = _watch.cap("JEV_CATALOG_WATCH_MAX", args.max_ticks)
         ticks = 0
         dead = _watch.deadline("JEV_CATALOG_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        tick: dict = {}
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             tick = {"ts": int(time.time())}
             try:
@@ -469,6 +471,16 @@ def main() -> int:
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["hits"]))
             ticks += 1
             time.sleep(args.watch)
+        if args.verdict and not _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "hits" if tick.get("hits") else "none",
+                "ticks": ticks,
+                "hits": tick.get("hits", 0),
+                "cached": bool(tick.get("cached")),
+            },
+        ):
+            return 1
         return 0
     if dest == "auto":
         dest = detect_harness(Path(__file__))

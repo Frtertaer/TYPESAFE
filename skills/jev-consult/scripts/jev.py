@@ -703,8 +703,7 @@ def cmd_lint(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_ping(args: argparse.Namespace) -> int:
-    policy = load_policy(args.policy)
+def _ping_once(policy: dict[str, Any], args: argparse.Namespace) -> dict:
     started = time.time()
     result = post_systemone(
         state="ping from jev-consult CLI; connectivity check, not a coding decision",
@@ -723,12 +722,80 @@ def cmd_ping(args: argparse.Namespace) -> int:
         retries=max(0, args.retries),
     )
     answer = (result.get("answers") or {}).get("ok") or {}
-    slim = {
+    return {
         "ok": True,
         "model": result.get("model"),
         "noul": answer.get("noul"),
         "ms": int((time.time() - started) * 1000),
     }
+
+
+def cmd_ping(args: argparse.Namespace) -> int:
+    policy = load_policy(args.policy)
+    watch = getattr(args, "watch", 0.0) or 0.0
+    if watch > 0 and _watch is not None:
+        max_ticks = _watch.cap("JEV_PING_WATCH_MAX", getattr(args, "max_ticks", 0))
+        dead = _watch.deadline("JEV_PING_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        quiet = _watch.quiet("JEV_PING_WATCH_QUIET", getattr(args, "quiet", False))
+        verdict_path = getattr(args, "verdict", "") or ""
+        ticks = 0
+        last_ok = True
+        verdict_ok = True
+        watch_t0 = time.time()
+
+        def _write_verdict() -> bool:
+            return _watch.write_verdict(
+                verdict_path,
+                {
+                    "verdict": "up" if last_ok else "down",
+                    "ticks": ticks,
+                    "ok": last_ok,
+                    "elapsed_s": round(time.time() - watch_t0, 2),
+                },
+            )
+
+        while (max_ticks <= 0 or ticks < max_ticks) and (
+            not dead or time.time() < dead
+        ):
+            now = time.time()
+            try:
+                slim_tick = _ping_once(policy, args)
+                tick = {
+                    "ts": int(now),
+                    "ok": True,
+                    "model": slim_tick.get("model"),
+                    "noul": slim_tick.get("noul"),
+                    "ms": slim_tick.get("ms"),
+                    "elapsed_s": round(now - watch_t0, 2),
+                }
+            except SystemExit as err:
+                tick = {
+                    "ts": int(now),
+                    "ok": False,
+                    "error": str(err.code)[:160],
+                    "elapsed_s": round(now - watch_t0, 2),
+                }
+            last_ok = bool(tick.get("ok"))
+            _watch.emit_or_jq(
+                tick,
+                getattr(args, "jq", ""),
+                getattr(args, "out", ""),
+                quiet=quiet,
+                bad=not last_ok,
+            )
+            ticks += 1
+            sys.stderr.write("watch tick=%d ok=%s\n" % (ticks, last_ok))
+            if verdict_path and verdict_ok and not _write_verdict():
+                verdict_ok = False
+            if getattr(args, "fail_fast", False) and not last_ok:
+                break
+            time.sleep(watch)
+        if verdict_path and verdict_ok and not _write_verdict():
+            return 1
+        if max_ticks and not last_ok:
+            return 1
+        return 0
+    slim = _ping_once(policy, args)
     verdict_path = getattr(args, "verdict", "") or ""
     if verdict_path and _watch is not None:
         _watch.write_verdict(verdict_path, slim)
@@ -749,7 +816,7 @@ def cmd_ping(args: argparse.Namespace) -> int:
         sys.stdout.write(json.dumps(slim) + "\n")
         return 0
     sys.stdout.write(
-        "ok model=%s noul=%s\n" % (result.get("model"), answer.get("noul"))
+        "ok model=%s noul=%s\n" % (slim.get("model"), slim.get("noul"))
     )
     return 0
 
@@ -1000,6 +1067,37 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         default="",
         help="Also write the slim {ok, model, noul, ms} JSON to PATH.",
+    )
+    ping.add_argument(
+        "--watch",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Re-ping every S seconds, emitting a {ts,ok,model,noul,ms,elapsed_s} tick per pass (failed pings emit {ts,ok:false,error,elapsed_s})",
+    )
+    ping.add_argument(
+        "--max-ticks",
+        metavar="N",
+        type=int,
+        default=0,
+        help="With --watch: stop after N ticks (overrides JEV_PING_WATCH_MAX)",
+    )
+    ping.add_argument(
+        "--watch-max",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="With --watch: stop after S elapsed seconds (JEV_PING_WATCH_SECS also caps)",
+    )
+    ping.add_argument(
+        "--quiet",
+        action="store_true",
+        help="With --watch: print only failing ticks to stdout (--out still logs all)",
+    )
+    ping.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="With --watch: stop after the first failed ping tick",
     )
     ping.set_defaults(func=cmd_ping)
     scaffold = sub.add_parser(

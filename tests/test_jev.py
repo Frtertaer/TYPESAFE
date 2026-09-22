@@ -868,6 +868,90 @@ class JevInternalsTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["model"], "m1")
 
+    def test_ping_watch_emits_ticks_capped(self) -> None:
+        fake = {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
+        buf = io.StringIO()
+        err = io.StringIO()
+        with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+            sys, "stdout", buf
+        ), patch.object(sys, "stderr", err):
+            rc = jev.main(["ping", "--watch", "0.01", "--max-ticks", "3"])
+        self.assertEqual(rc, 0)
+        ticks = [
+            json.loads(line)
+            for line in buf.getvalue().splitlines()
+            if line.startswith('{"ts"')
+        ]
+        self.assertEqual(len(ticks), 3)
+        self.assertTrue(all(t["ok"] and t["model"] == "m1" for t in ticks))
+        self.assertIn("watch tick=3", err.getvalue())
+
+    def test_ping_watch_failed_tick_exits_1_when_capped(self) -> None:
+        def boom(*_a, **_k):
+            raise SystemExit("Jev network error: refused")
+
+        buf = io.StringIO()
+        with patch.object(jev, "post_systemone", side_effect=boom), patch.object(
+            sys, "stdout", buf
+        ), patch.object(sys, "stderr", io.StringIO()):
+            rc = jev.main(["ping", "--watch", "0.01", "--max-ticks", "2"])
+        self.assertEqual(rc, 1)
+        ticks = [
+            json.loads(line)
+            for line in buf.getvalue().splitlines()
+            if line.startswith('{"ts"')
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertFalse(ticks[0]["ok"])
+        self.assertIn("refused", ticks[0]["error"])
+
+    def test_ping_watch_fail_fast_and_verdict(self) -> None:
+        def boom(*_a, **_k):
+            raise SystemExit("down")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            out = Path(tmp) / "t.jsonl"
+            with patch.object(jev, "post_systemone", side_effect=boom), patch.object(
+                sys, "stdout", io.StringIO()
+            ), patch.object(sys, "stderr", io.StringIO()):
+                rc = jev.main(
+                    [
+                        "ping",
+                        "--watch",
+                        "0.01",
+                        "--fail-fast",
+                        "--out",
+                        str(out),
+                        "--verdict",
+                        str(verdict),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "down")
+            self.assertEqual(payload["ticks"], 1)
+            lines = out.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(lines), 1)
+            self.assertFalse(json.loads(lines[0])["ok"])
+
+    def test_ping_watch_max_env_caps(self) -> None:
+        fake = {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
+        buf = io.StringIO()
+        with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+            sys, "stdout", buf
+        ), patch.object(sys, "stderr", io.StringIO()), patch.dict(
+            os.environ, {"JEV_PING_WATCH_MAX": "2"}
+        ):
+            rc = jev.main(["ping", "--watch", "0.01"])
+        self.assertEqual(rc, 0)
+        ticks = [
+            line
+            for line in buf.getvalue().splitlines()
+            if line.startswith('{"ts"')
+        ]
+        self.assertEqual(len(ticks), 2)
+
     def test_cmd_decide_out_writes_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "d.json"

@@ -36,12 +36,20 @@ def cap(env_name: str, override=None) -> int:
 
 def deadline(env_name: str, override=None) -> float:
     """Epoch deadline: --watch-max S wins, else the JEV_*_WATCH_SECS env
-    (0/invalid/missing = no deadline)."""
-    src = override if override else os.environ.get(env_name, "0")
-    try:
-        s = float(src or 0)
-    except (TypeError, ValueError):
-        s = 0.0
+    (0/missing = no deadline). A non-empty env value that is not a number
+    warns on stderr and falls back to no deadline — same rule as cap()."""
+    if override:
+        try:
+            s = float(override)
+        except (TypeError, ValueError):
+            return 0.0
+    else:
+        raw = os.environ.get(env_name, "")
+        try:
+            s = float(raw or 0)
+        except ValueError:
+            sys.stderr.write("bad %s %r (want seconds); no deadline\n" % (env_name, raw))
+            s = 0.0
     return time.time() + s if s > 0 else 0.0
 
 

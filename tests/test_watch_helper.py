@@ -101,6 +101,24 @@ class DeadlineTests(unittest.TestCase):
         with patch.dict("os.environ", {"JEV_X_WATCH_SECS": "junk"}):
             self.assertEqual(watch.deadline("JEV_X_WATCH_SECS"), 0.0)
 
+    def test_deadline_invalid_env_warns_on_stderr(self) -> None:
+        buf = io.StringIO()
+        with patch.dict("os.environ", {"JEV_X_WATCH_SECS": "junk"}):
+            with patch.object(sys, "stderr", buf):
+                self.assertEqual(watch.deadline("JEV_X_WATCH_SECS"), 0.0)
+        self.assertIn("bad JEV_X_WATCH_SECS", buf.getvalue())
+        # empty env stays silent
+        buf2 = io.StringIO()
+        with patch.dict("os.environ", {"JEV_X_WATCH_SECS": ""}):
+            with patch.object(sys, "stderr", buf2):
+                self.assertEqual(watch.deadline("JEV_X_WATCH_SECS"), 0.0)
+        self.assertEqual(buf2.getvalue(), "")
+        # override path stays silent on a bad value (argparse owns flags)
+        buf3 = io.StringIO()
+        with patch.object(sys, "stderr", buf3):
+            self.assertEqual(watch.deadline("JEV_X_WATCH_SECS", "junk"), 0.0)
+        self.assertEqual(buf3.getvalue(), "")
+
 
 class EmitTests(unittest.TestCase):
     def test_prints_json_line(self) -> None:

@@ -65,6 +65,49 @@ class LintSkillTests(unittest.TestCase):
                 any(f["rule"] == "S004" and f["severity"] == "warn" for f in findings)
             )
 
+    def test_cited_script_missing_warn_s009(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(
+                tmp,
+                "x",
+                GOOD.format(name="x") + "\nRun `scripts/missing.py` first.\n",
+            )
+            (path.parent / "scripts").mkdir()
+            (path.parent / "scripts" / "real.py").write_text("# ok\n")
+            findings = skill_lint.lint_skill(path)
+            rules = {f["rule"] for f in findings}
+            self.assertIn("S009", rules)
+            self.assertTrue(
+                any(
+                    f["rule"] == "S009" and "missing.py" in f["message"]
+                    for f in findings
+                )
+            )
+
+    def test_cited_script_present_no_s009(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(
+                tmp,
+                "x",
+                GOOD.format(name="x") + "\nRun `scripts/real.py` first.\n",
+            )
+            scripts = path.parent / "scripts"
+            scripts.mkdir()
+            (scripts / "real.py").write_text("# ok\n")
+            findings = skill_lint.lint_skill(path)
+            self.assertNotIn("S009", {f["rule"] for f in findings})
+
+    def test_no_scripts_dir_no_s009(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(
+                tmp,
+                "x",
+                GOOD.format(name="x") + "\nRun `scripts/missing.py` first.\n",
+            )
+            # no sibling scripts/ dir — nothing to check citations against
+            findings = skill_lint.lint_skill(path)
+            self.assertNotIn("S009", {f["rule"] for f in findings})
+
     def test_quiet_suppresses_warn_lines(self):
         with tempfile.TemporaryDirectory() as tmp:
             warn_path = write_skill(tmp, "x", "---\nname: x\n---\n")

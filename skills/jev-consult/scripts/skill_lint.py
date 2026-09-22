@@ -110,6 +110,24 @@ def lint_skill(path: Path) -> list[dict]:
                         "message": "cited policy.json key %r not found" % key,
                     }
                 )
+    scripts_dir = path.parent / "scripts"
+    script_roots = [scripts_dir]
+    if path.parent.parent.name == "skills":
+        # skills/<name>/SKILL.md may cite repo-root scripts/ paths too
+        script_roots.append(path.parent.parent.parent / "scripts")
+    if scripts_dir.is_dir():
+        cited_scripts = set(
+            re.findall(r"`?scripts/([A-Za-z0-9_-]+\.py)`?", text)
+        )
+        for script in sorted(cited_scripts):
+            if not any((root / script).is_file() for root in script_roots):
+                findings.append(
+                    {
+                        "rule": "S009",
+                        "severity": "warn",
+                        "message": "cited scripts/%s not found" % script,
+                    }
+                )
     return findings
 
 
@@ -172,6 +190,7 @@ RULES = {
     "S006": "description is over 1024 chars",
     "S007": "cited policy.json key does not exist in the sibling policy.json",
     "S008": "name is not lowercase-hyphenated",
+    "S009": "cited scripts/*.py file does not exist in the sibling scripts/ dir",
 }
 
 

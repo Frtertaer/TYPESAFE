@@ -2863,6 +2863,26 @@ def step_trigger_eval(tmp: Path) -> dict:
         if ok:
             rc, _ = _run([str(SCRIPTS / "trigger_eval.py"), "--uncovered"])
             ok = rc == 0
+    if ok:
+        # coverage/reporting flags: --covers counts per tag, --covers-map
+        # lists tag->ids, --dist prints the score histogram, --tokens shows
+        # matched tokens per row, --prompts lists id: prompt lines
+        rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--covers"])
+        ok = rc == 0 and len(out.strip().splitlines()) >= 1
+        if ok:
+            rc, out = _run(
+                [str(SCRIPTS / "trigger_eval.py"), "--covers-map"]
+            )
+            ok = rc == 0 and len(out.strip().splitlines()) >= 1
+        if ok:
+            rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--dist"])
+            ok = rc == 0 and "-" in out
+        if ok:
+            rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--tokens"])
+            ok = rc == 0 and "tokens=" in out
+        if ok:
+            rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--prompts"])
+            ok = rc == 0 and ":" in out
     return _step("trigger_eval", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

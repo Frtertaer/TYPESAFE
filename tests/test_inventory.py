@@ -1760,6 +1760,26 @@ class AtomicWriteTests(unittest.TestCase):
                 [p.name for p in Path(tmp).iterdir()], [".jev-tools-miss.json"]
             )
 
+    def test_write_miss_schema_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools-miss.json"
+            inv.write_miss(path, "hermes", "jwt task")
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                sorted(data), ["empty", "harness", "task", "written_at"]
+            )
+            self.assertEqual(data["harness"], "hermes")
+            self.assertEqual(data["task"], "jwt task")
+            self.assertIs(data["empty"], True)
+            self.assertIsInstance(data["written_at"], int)
+
+    def test_write_miss_truncates_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools-miss.json"
+            inv.write_miss(path, "hermes", "x" * 700)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(len(data["task"]), 500)
+
     def test_write_ask_leaves_no_tmp(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / ".jev-ask.json"

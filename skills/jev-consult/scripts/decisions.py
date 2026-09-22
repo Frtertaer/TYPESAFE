@@ -1144,10 +1144,19 @@ def main(argv: list[str] | None = None) -> int:
     entries = _filtered(entries)
     if getattr(args, "evidence", False):
         data = evidence_report(entries)
-        if args.json:
-            sys.stdout.write(json.dumps(data, indent=2) + "\n")
-        else:
-            sys.stdout.write(format_evidence(data) + "\n")
+        rendered = (
+            json.dumps(data, indent=2) + "\n" if args.json else format_evidence(data) + "\n"
+        )
+        if args.out:
+            out_path = Path(args.out)
+            try:
+                _atomic_write(out_path, rendered)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                return 1
+            sys.stderr.write("wrote evidence to %s\n" % out_path)
+            return 0
+        sys.stdout.write(rendered)
         return 0
     if getattr(args, "fill_gaps", False):
         rows = fill_gaps(entries)

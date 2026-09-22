@@ -3004,6 +3004,36 @@ class EvidenceTest(unittest.TestCase):
             self.assertIn("- entries: 0", proc.stdout)
             self.assertIn("- open misses: 0", proc.stdout)
 
+    def test_evidence_out_writes_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "evidence.md"
+            proc = run_cli("--file", str(self._log(tmp)), "--evidence", "--out", str(out))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout, "")
+            self.assertIn("wrote evidence", proc.stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("## Jev routing evidence", text)
+            self.assertIn("- entries: 4", text)
+            self.assertFalse((Path(tmp) / "evidence.md.tmp").exists())
+
+    def test_evidence_out_json_writes_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "evidence.json"
+            proc = run_cli(
+                "--file", str(self._log(tmp)), "--evidence", "--json", "--out", str(out)
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(data["entries"], 4)
+            self.assertEqual(data["open_misses"], 1)
+
+    def test_evidence_out_bad_path_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "no" / "dir" / "evidence.md"
+            proc = run_cli("--file", str(self._log(tmp)), "--evidence", "--out", str(out))
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("cannot write", proc.stderr)
+
 
 class ReasonFilterTest(unittest.TestCase):
     def _log(self, tmp: str) -> Path:

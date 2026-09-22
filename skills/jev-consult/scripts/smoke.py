@@ -169,7 +169,34 @@ def step_jev_scaffold_lint(tmp: Path) -> dict:
     if rc != 0 or not req.is_file():
         return _step("jev_scaffold", False, out.strip()[:160])
     rc, out = _run([str(SCRIPTS / "jev.py"), "lint", str(req)])
-    return _step("jev_scaffold_lint", rc == 0, out.strip()[:160] or "clean")
+    ok = rc == 0
+    if ok:
+        # a choice template with empty criteria and no --option fails
+        empty_policy = tmp / "policy-empty.json"
+        policy = json.loads(
+            (SKILL_DIR / "policy.json").read_text(encoding="utf-8")
+        )
+        policy["templates"] = {
+            "empty_t": {
+                "type": "choice",
+                "instructions": "pick",
+                "criteria": {},
+            }
+        }
+        empty_policy.write_text(json.dumps(policy), encoding="utf-8")
+        rc, out = _run(
+            [
+                str(SCRIPTS / "jev.py"),
+                "--policy",
+                str(empty_policy),
+                "scaffold",
+                "empty_t",
+                "--out",
+                str(tmp / "empty.json"),
+            ]
+        )
+        ok = rc == 2 and "empty template criteria" in out
+    return _step("jev_scaffold_lint", ok, out.strip()[:160] or "clean")
 
 
 def step_inventory(tmp: Path) -> dict:

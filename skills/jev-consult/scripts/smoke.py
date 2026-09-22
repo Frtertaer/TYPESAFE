@@ -1988,6 +1988,33 @@ def step_trigger_lint(tmp: Path) -> dict:
 def step_trigger_eval(tmp: Path) -> dict:
     rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--quiet"])
     ok = rc == 0 and "PASS" in out
+    if ok:
+        # --json emits the scored-case payload
+        rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--json"])
+        try:
+            payload = json.loads(out)
+            ok = (
+                rc == 0
+                and payload.get("ok") is True
+                and isinstance(payload.get("cases"), list)
+                and payload["cases"]
+            )
+        except ValueError:
+            ok = False
+    if ok:
+        # --coverage reports the positive-prompt hit ratio
+        rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--coverage"])
+        ok = rc == 0 and "coverage:" in out
+    if ok:
+        # --score rates an ad-hoc prompt against the description
+        rc, out = _run(
+            [str(SCRIPTS / "trigger_eval.py"), "--score", "refactor this function"]
+        )
+        ok = rc == 0 and "score=" in out
+    if ok:
+        # a bad --jq key exits 2
+        rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--json", "--jq", "nope"])
+        ok = rc == 2
     return _step("trigger_eval", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

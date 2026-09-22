@@ -343,6 +343,26 @@ def step_trace(tmp: Path) -> dict:
                 ok = False
         else:
             ok = False
+    if ok:
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trace.py"),
+                "--file",
+                str(trace_file),
+                "history",
+                "--json",
+            ]
+        )
+        if rc == 0:
+            try:
+                ok = any(
+                    "smoke-pick" in str(p.get("pick", ""))
+                    for p in json.loads(out)
+                )
+            except (ValueError, AttributeError):
+                ok = False
+        else:
+            ok = False
     return _step("trace", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

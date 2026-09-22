@@ -565,5 +565,20 @@ class WatchSecsEnvTests(unittest.TestCase):
             self.assertLessEqual(len(ticks), 10)
             self.assertGreaterEqual(len(ticks), 1)
 
+
+class FixtureSkillLintTests(unittest.TestCase):
+    """Every tests/fixtures SKILL.md must stay lint-clean — the fixtures
+    stand in for real installed skills across the suite."""
+
+    def test_fixture_skills_are_lint_clean(self) -> None:
+        fixtures = sorted(
+            (ROOT / "tests" / "fixtures").rglob("SKILL.md")
+        )
+        self.assertTrue(fixtures, "no fixture SKILL.md files found")
+        for path in fixtures:
+            with self.subTest(fixture=path.name):
+                rc = skill_lint.main([str(path), "--severity", "warn"])
+                self.assertEqual(rc, 0, "%s has lint errors" % path)
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

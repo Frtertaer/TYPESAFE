@@ -189,5 +189,38 @@ class EncodingConfinementTests(unittest.TestCase):
                 if sidecar.exists():
                     json.loads(sidecar.read_text(encoding="utf-8"))
 
+
+class ConcurrentHookTests(unittest.TestCase):
+    def test_racing_hooks_leave_parseable_sidecars(self) -> None:
+        """Two+ hooks writing the same cwd must not interleave bytes —
+        whatever lands parses, and no .tmp litter remains."""
+        import concurrent.futures
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "jwt auth",
+                "cwd": str(cwd),
+            }
+
+            def run_one(i: int) -> int:
+                return run_hook(cwd, cwd / "decisions.jsonl", payload).returncode
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+                rcs = list(pool.map(run_one, range(6)))
+            self.assertEqual(rcs, [0] * 6)
+            for f in cwd.iterdir():
+                self.assertNotIn(
+                    ".tmp", f.name, "atomic write littered: %s" % f.name
+                )
+                if f.name.endswith(".json") or f.name.endswith(".jsonl"):
+                    if f.name == "decisions.jsonl":
+                        for line in f.read_text(encoding="utf-8").splitlines():
+                            if line.strip():
+                                json.loads(line)
+                    else:
+                        json.loads(f.read_text(encoding="utf-8"))
+
 if __name__ == "__main__":
     unittest.main()

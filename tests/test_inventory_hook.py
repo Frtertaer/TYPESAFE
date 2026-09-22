@@ -3115,6 +3115,20 @@ class WatchJqTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertEqual(buf.getvalue().splitlines(), ["null", "null"])
 
+    def test_watch_jq_reads_payload_from_stdin(self) -> None:
+        payload_text = json.dumps(
+            {"event": "UserPromptSubmit", "prompt": "jwt", "cwd": "."}
+        )
+        buf = io.StringIO()
+        with patch.dict(
+            os.environ, {"JEV_HOOK_WATCH_MAX": "2", "JEV_HOOK_OFF": "1"}
+        ):
+            with patch.object(HOOK, "_read_stdin", return_value=payload_text):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(["--watch", "0.01", "--jq", "winner"])
+        self.assertEqual(rc, 1)
+        self.assertEqual(buf.getvalue().splitlines(), ["null", "null"])
+
 class WatchSecsEnvTests(unittest.TestCase):
     def test_watch_secs_env_bounds_loop(self) -> None:
         import time as _time

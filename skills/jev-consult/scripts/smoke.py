@@ -500,6 +500,20 @@ def step_decisions(tmp: Path) -> dict:
         )
         ok = rc == 0 and "none" in out.splitlines()[-1] and "winner" not in out.splitlines()[-1]
     if ok:
+        # --last prints the newest matching entry as JSON
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--last",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("jev_status") == "none"
+        except ValueError:
+            ok = False
+    if ok:
         rc, out = _run(
             [
                 str(SCRIPTS / "decisions.py"),

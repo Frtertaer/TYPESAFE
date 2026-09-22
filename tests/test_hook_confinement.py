@@ -109,5 +109,85 @@ class HookConfinementTests(unittest.TestCase):
             self.assertFalse((cwd / "decisions.jsonl").exists())
 
 
+
+class EncodingConfinementTests(unittest.TestCase):
+    def test_non_ascii_prompt_on_cp1252_stdio(self) -> None:
+        """Legacy Windows consoles (cp1252) must not crash the hook —
+        it still emits a parseable payload and rc 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            env = dict(os.environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env.update(
+                {
+                    "PYTHONIOENCODING": "cp1252",
+                    "USERPROFILE": tmp,
+                    "HOME": tmp,
+                    "HERMES_HOME": str(cwd / ".hermes"),
+                    "JEV_HOOK_CWD": tmp,
+                    "JEV_CONSULT_LOG": "0",
+                }
+            )
+            payload = {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "сжатие журналов — кириллица",
+                "cwd": str(cwd),
+            }
+            proc = subprocess.run(
+                [sys.executable, str(HOOK)],
+                input=json.dumps(payload).encode("utf-8"),
+                capture_output=True,
+                env=env,
+                cwd=str(cwd),
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr.decode("utf-8", "replace")[:300])
+            self.assertNotIn(
+                "Traceback", proc.stderr.decode("utf-8", "replace")
+            )
+            json.loads(proc.stdout.decode("utf-8", "replace"))
+
+    def test_non_ascii_sidecar_roundtrips_utf8(self) -> None:
+        """A pick whose item has non-ascii text lands in .jev-tools.json
+        as valid utf-8 JSON."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            skill = home / ".claude" / "skills" / "rus-skill"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: rus-skill\ndescription: сжатие и поиск журналов\n---\nbody\n",
+                encoding="utf-8",
+            )
+            env = dict(os.environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env.update(
+                {
+                    "USERPROFILE": tmp,
+                    "HOME": tmp,
+                    "HERMES_HOME": str(home / ".hermes"),
+                    "JEV_HOOK_CWD": tmp,
+                    "JEV_CONSULT_LOG": "0",
+                }
+            )
+            proc = subprocess.run(
+                [sys.executable, str(HOOK)],
+                input=json.dumps(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "rus-skill",
+                        "cwd": str(home),
+                    }
+                ).encode("utf-8"),
+                capture_output=True,
+                env=env,
+                cwd=str(home),
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr.decode("utf-8", "replace")[:300])
+            for name in (".jev-tools.json", ".jev-tools-miss.json"):
+                sidecar = home / name
+                if sidecar.exists():
+                    json.loads(sidecar.read_text(encoding="utf-8"))
+
 if __name__ == "__main__":
     unittest.main()

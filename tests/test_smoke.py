@@ -377,6 +377,20 @@ class SmokeTests(unittest.TestCase):
             self.assertIsNotNone(failure)
             self.assertIn("broke <x>", failure.text)
 
+    def test_junit_write_is_atomic(self) -> None:
+        def ok_step(tmp):
+            return {"name": "policy", "ok": True, "detail": "fake"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "j.xml"
+            with patch.object(MOD, "step_policy", side_effect=ok_step):
+                import io
+
+                with patch.object(sys, "stdout", io.StringIO()):
+                    rc = MOD.main(["--only", "policy", "--junit", str(out)])
+            self.assertEqual(rc, 0)
+            self.assertEqual([p.name for p in Path(tmp).iterdir()], ["j.xml"])
+
     def test_junit_escapes_quotes_in_names(self) -> None:
         import xml.etree.ElementTree as ET
 

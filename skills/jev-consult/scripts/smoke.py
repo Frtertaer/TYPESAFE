@@ -64,6 +64,19 @@ def _step(name: str, ok: bool, detail: str) -> dict:
     return {"name": name, "ok": bool(ok), "detail": detail}
 
 
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 STEP_TIMEOUT = 60.0
 
 
@@ -497,7 +510,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if args.junit:
             try:
-                Path(args.junit).write_text(junit_xml(last_steps), encoding="utf-8")
+                _atomic_write(Path(args.junit), junit_xml(last_steps))
             except OSError as exc:
                 sys.stderr.write("cannot write %s: %s\n" % (args.junit, exc))
                 return 1
@@ -549,7 +562,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("wrote %s\n" % args.report)
     if args.junit:
         try:
-            Path(args.junit).write_text(junit_xml(steps), encoding="utf-8")
+            _atomic_write(Path(args.junit), junit_xml(steps))
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (args.junit, exc))
             return 1

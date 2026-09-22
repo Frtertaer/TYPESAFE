@@ -323,6 +323,31 @@ def step_inventory(tmp: Path) -> dict:
                 ok = False
         else:
             ok = False
+    if ok:
+        # a scan with nothing installed reports an empty verdict
+        empty_home = tmp / "empty-home"
+        empty_home.mkdir(exist_ok=True)
+        empty_verdict = tmp / "inv-empty-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "inventory.py"),
+                "--harness",
+                "codex",
+                "--home",
+                str(empty_home),
+                "--hermes-home",
+                str(empty_home / "hermes"),
+                "--task",
+                "smoke",
+                "--verdict",
+                str(empty_verdict),
+            ]
+        )
+        try:
+            payload = json.loads(empty_verdict.read_text(encoding="utf-8"))
+            ok = rc == 0 and payload.get("verdict") == "empty"
+        except (OSError, ValueError):
+            ok = False
     return _step("inventory", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

@@ -816,6 +816,45 @@ class JevInternalsTests(unittest.TestCase):
             self.assertEqual(out["state"]["task"], "t")
             self.assertIn("q", out["questions"])
 
+    def test_cmd_ask_jq_prints_one_field(self) -> None:
+        req_obj = {
+            "state": {"task": "t"},
+            "questions": {
+                "q": {
+                    "type": "choice",
+                    "instructions": "pick one",
+                    "criteria": {"a": "x", "b": "y"},
+                }
+            },
+        }
+        fake = {
+            "model": "m1",
+            "answers": {"q": {"type": "choice", "choice": "a", "confidence": 0.9}},
+            "usage": {"n": 1},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "req.json"
+            req.write_text(json.dumps(req_obj), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+                sys, "stdout", buf
+            ):
+                rc = jev.main(["ask", str(req), "--jq", "answers.q.choice"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "a")
+            buf = io.StringIO()
+            with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+                sys, "stdout", buf
+            ):
+                rc = jev.main(["ask", str(req), "--jq", "decision.action"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "proceed")
+            with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+                sys, "stdout", io.StringIO()
+            ), patch.object(sys, "stderr", io.StringIO()):
+                rc = jev.main(["ask", str(req), "--jq", "nope.deep"])
+            self.assertEqual(rc, 2)
+
     def test_lint_json_emits_findings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             req = Path(tmp) / "req.json"

@@ -470,6 +470,17 @@ def emit(payload: dict[str, Any]) -> None:
     sys.stdout.write("\n")
 
 
+def jq_lookup(obj, path: str):
+    """Dotted-path lookup; (value, True) or (None, False) when any part misses."""
+    cur = obj
+    for part in path.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            return None, False
+    return cur, True
+
+
 def cmd_ask(args: argparse.Namespace) -> int:
     policy = load_policy(args.policy)
     request = read_json_arg(args.file)
@@ -516,15 +527,25 @@ def cmd_ask(args: argparse.Namespace) -> int:
         policy,
         irreversible=bool(request.get("irreversible", False)),
     )
-    emit(
-        {
-            "model": result.get("model"),
-            "answers": answers,
-            "decision": decision,
-            "usage": result.get("usage"),
-            "warnings": warnings,
-        }
-    )
+    payload = {
+        "model": result.get("model"),
+        "answers": answers,
+        "decision": decision,
+        "usage": result.get("usage"),
+        "warnings": warnings,
+    }
+    jq_key = getattr(args, "jq", "") or ""
+    if jq_key:
+        value, found = jq_lookup(payload, jq_key)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (jq_key, ", ".join(sorted(payload)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+    else:
+        emit(payload)
     verdict_path = getattr(args, "verdict", "") or ""
     if verdict_path and _watch is not None:
         picks = {}
@@ -805,6 +826,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         default="",
         help="Write a slim {verdict: proceed|escalate, action, picks, warnings} JSON to PATH after the ask (atomic via .tmp+rename).",
+    )
+    ask.add_argument(
+        "--jq",
+        metavar="KEY",
+        default="",
+        help="Print just one dotted-path field of the response (e.g. answers.approach.choice); unknown key exits 2.",
     )
     ask.set_defaults(func=cmd_ask)
     decide_cmd = sub.add_parser("decide", help="Apply policy to an answers object")

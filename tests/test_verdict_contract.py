@@ -29,6 +29,24 @@ class VerdictContractTests(unittest.TestCase):
             offenders, [], "scripts with --verdict but no write_verdict: %s" % offenders
         )
 
+    def test_every_watch_script_emits_via_shared_helper(self) -> None:
+        offenders = []
+        count = 0
+        for f in sorted(SCRIPTS.glob("*.py")):
+            if f.name.startswith("_"):
+                continue
+            src = f.read_text(encoding="utf-8")
+            has_watch = '"--watch"' in src or "'--watch'" in src
+            if not has_watch:
+                continue
+            count += 1
+            if "emit_or_jq(" not in src and "_watch.emit(" not in src:
+                offenders.append(f.name)
+        self.assertGreaterEqual(count, 10, "watch loops went missing")
+        self.assertEqual(
+            offenders, [], "watch loops not using _watch emit: %s" % offenders
+        )
+
     def test_write_verdict_injects_ts(self) -> None:
         import importlib.util
         import sys

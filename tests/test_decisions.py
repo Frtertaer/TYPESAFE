@@ -14,6 +14,7 @@ SCRIPTS = ROOT / "skills" / "jev-consult" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import decisions
+import inventory
 
 
 def write_log(path: Path, entries: list) -> None:
@@ -2694,6 +2695,44 @@ class WatchDeadlineEnvTests(unittest.TestCase):
             ]
             self.assertLessEqual(len(ticks), 10)
             self.assertGreaterEqual(len(ticks), 1)
+
+class ConcurrentAppendTests(unittest.TestCase):
+    def test_parallel_appends_all_lines_parse(self) -> None:
+        import threading
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            errors = []
+
+            def worker(n: int) -> None:
+                try:
+                    for i in range(20):
+                        inventory.append_decision(
+                            {"ts": 1700000000.0 + n, "harness": "h%d" % n,
+                             "jev_status": "ok", "winner": "w%d" % i},
+                            path=path,
+                        )
+                except Exception as exc:  # pragma: no cover
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=worker, args=(n,)) for n in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            self.assertEqual(errors, [])
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 160)
+            for line in lines:
+                obj = json.loads(line)
+                self.assertEqual(obj["harness"][:1], "h")
+
+    def test_append_to_missing_parent_creates_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "deep" / "nested" / "decisions.jsonl"
+            inventory.append_decision({"ts": 1.0}, path=path)
+            self.assertTrue(path.is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

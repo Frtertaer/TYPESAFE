@@ -1133,6 +1133,20 @@ class CompactCliTests(unittest.TestCase):
         self.assertEqual(out["stats"]["calls"], 1)
         self.assertIn(out["decisions"][0]["action"], ("drop_result", "drop_call", "keep", "kept"))
 
+    def test_jq_prints_one_field_of_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main([str(f), "--history", "--fake", "--min-reduction", "0", "--jq", "stats.calls"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), 1)
+            with patch.object(sys, "stderr", io.StringIO()) as err:
+                rc = C.main([str(f), "--history", "--fake", "--min-reduction", "0", "--jq", "nope.x"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --jq key", err.getvalue())
+
     def test_output_file_and_stdin(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out_f = Path(tmp) / "out.json"

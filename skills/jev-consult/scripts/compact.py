@@ -1348,6 +1348,23 @@ def cmd_compact(args: argparse.Namespace) -> int:
                 + "\n"
             )
             return 0
+    if getattr(args, "jq", ""):
+        node = result
+        found = True
+        for part in args.jq.split("."):
+            if isinstance(node, dict) and part in node:
+                node = node[part]
+            else:
+                found = False
+                break
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (args.jq, ", ".join(sorted(result)) if isinstance(result, dict) else "")
+            )
+            return 2
+        sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+        return 0
     text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     if args.output:
         Path(args.output).write_text(text, encoding="utf-8")
@@ -1530,6 +1547,12 @@ def main(argv: list[str] | None = None) -> int:
         "--json",
         action="store_true",
         help="Emit --verify-spill/--orphan-spill results as JSON.",
+    )
+    parser.add_argument(
+        "--jq",
+        metavar="KEY",
+        default="",
+        help="Print just this dotted-path field of the compaction result JSON (e.g. stats.charsBefore); unknown key exits 2.",
     )
     parser.add_argument(
         "--check",

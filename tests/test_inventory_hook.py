@@ -302,6 +302,10 @@ class InventoryHookTests(unittest.TestCase):
                     pick_fn=skip_pick,
                 )
             self.assertEqual(HOOK.LAST_DECISION["note"], "ci-run-42")
+            sidecar = json.loads(
+                (Path(tmp) / ".jev-tools.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(sidecar.get("note"), "ci-run-42")
             # a second run without the env drops the tag
             HOOK.handle(
                 {

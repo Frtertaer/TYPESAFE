@@ -445,6 +445,8 @@ def handle(
     extra = {"jev_status": str(picker.get("status") or "idf")}
     if stale_match:
         extra["stale_sidecar"] = True
+    if note_tag:
+        extra["note"] = note_tag
     if explicit_winner is not None:
         extra["explicit"] = True
     if picker.get("strong"):

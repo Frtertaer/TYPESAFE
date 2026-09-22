@@ -932,6 +932,7 @@ def main(argv: list[str] | None = None) -> int:
                     "removed": total_removed,
                     "ticks": ticks,
                     "elapsed_s": round(time.time() - watch_t0, 2),
+                    "delta_pct": tick.get("delta_pct"),
                 },
             )
 

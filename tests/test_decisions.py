@@ -2141,6 +2141,7 @@ class PruneTest(unittest.TestCase):
             payload = json.loads(verdict.read_text(encoding="utf-8"))
             self.assertIsInstance(payload["elapsed_s"], float)
             self.assertGreaterEqual(payload["elapsed_s"], 0.0)
+            self.assertIn("delta_pct", payload)
 
     def test_watch_verdict_reports_newest_ts(self):
         import os as _os

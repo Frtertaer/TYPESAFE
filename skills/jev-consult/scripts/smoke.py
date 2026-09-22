@@ -1017,6 +1017,236 @@ def step_compact_fake(tmp: Path) -> dict:
                     ok = False
         finally:
             server.server_close()
+    if ok:
+        # option flags under --fake: keep_text pins a matching call,
+        # keep_threshold above every noul keeps all calls, keep_first
+        # pins the leading message, trace pins a file_path match, goal
+        # is echoed into the stats payload
+        opt_t = tmp / "t-opt.json"
+        opt_t.write_text(
+            json.dumps(
+                [
+                    {"role": "user", "content": "first smoke text"},
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "c1",
+                                "name": "Read",
+                                "input": {
+                                    "file_path": "smoke_file.py",
+                                    "extra": "needle-token",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "c1",
+                                "content": "R" * 400,
+                            }
+                        ],
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "c2",
+                                "name": "Bash",
+                                "input": {"command": "smoke_cmd"},
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "c2",
+                                "content": "Q" * 400,
+                            }
+                        ],
+                    },
+                ]
+            ),
+            encoding="utf-8",
+        )
+        base = [
+            str(SCRIPTS / "compact.py"),
+            str(opt_t),
+            "--fake",
+            "--history",
+            "--preserve-recent",
+            "0",
+            "--min-reduction",
+            "0",
+        ]
+        out_a = tmp / "opt-a.json"
+        rc, out = _run(base + ["-o", str(out_a)])
+        ok = rc == 0
+        if ok:
+            # baseline --fake run drops every call: needle-token gone
+            try:
+                compacted = json.loads(out_a.read_text(encoding="utf-8"))
+                ok = "needle-token" not in out_a.read_text(
+                    encoding="utf-8"
+                ) and isinstance(compacted.get("stats"), dict)
+            except (OSError, ValueError, AttributeError):
+                ok = False
+        if ok:
+            # --keep-text pins the call whose input matches the pattern
+            out_b = tmp / "opt-b.json"
+            rc, out = _run(
+                base
+                + ["-o", str(out_b), "--keep-text", "needle-token"]
+            )
+            ok = rc == 0 and "needle-token" in out_b.read_text(
+                encoding="utf-8"
+            )
+        if ok:
+            # --keep-threshold below every fake noul keeps all calls
+            out_c = tmp / "opt-c.json"
+            rc, out = _run(
+                base + ["-o", str(out_c), "--keep-threshold", "0.05"]
+            )
+            try:
+                stats = json.loads(
+                    out_c.read_text(encoding="utf-8")
+                ).get("stats", {})
+                ok = rc == 0 and int(
+                    stats.get("charsAfter") or 0
+                ) >= int(stats.get("charsBefore") or 0)
+            except (OSError, ValueError, TypeError):
+                ok = False
+        if ok:
+            # --trace pins calls whose file_path echoes the trace state
+            trace = tmp / "opt-trace.json"
+            trace.write_text(
+                json.dumps({"current_step": "smoke_file.py"}),
+                encoding="utf-8",
+            )
+            out_d = tmp / "opt-d.json"
+            rc, out = _run(
+                base + ["-o", str(out_d), "--trace", str(trace)]
+            )
+            ok = rc == 0 and "needle-token" in out_d.read_text(
+                encoding="utf-8"
+            )
+        if ok:
+            # --keep-first pins the leading messages: index 0 is always
+            # pinned, so a tool call at index 1 only survives under
+            # --keep-first 2
+            head_t = tmp / "t-opt-head.json"
+            head_t.write_text(
+                json.dumps(
+                    [
+                        {"role": "user", "content": "lead text"},
+                        {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "id": "c0",
+                                    "name": "Bash",
+                                    "input": {"command": "smoke-head"},
+                                }
+                            ],
+                        },
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": "c0",
+                                    "content": "H" * 300,
+                                }
+                            ],
+                        },
+                        {"role": "user", "content": "tail text"},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            base_head = [
+                str(SCRIPTS / "compact.py"),
+                str(head_t),
+                "--fake",
+                "--history",
+                "--preserve-recent",
+                "0",
+                "--min-reduction",
+                "0",
+            ]
+            out_g = tmp / "opt-g.json"
+            rc, out = _run(base_head + ["-o", str(out_g)])
+            if ok := (
+                rc == 0
+                and "smoke-head" not in out_g.read_text(encoding="utf-8")
+            ):
+                out_h = tmp / "opt-h.json"
+                rc, out = _run(
+                    base_head
+                    + ["-o", str(out_h), "--keep-first", "2"]
+                )
+                ok = rc == 0 and "smoke-head" in out_h.read_text(
+                    encoding="utf-8"
+                )
+        if ok:
+            # --goal parses and runs (it shapes the Jev state, not output)
+            out_e = tmp / "opt-e.json"
+            rc, out = _run(
+                base + ["-o", str(out_e), "--goal", "smoke-goal"]
+            )
+            ok = rc == 0 and out_e.is_file()
+        if ok:
+            # --truncate-head-chars bounds the head kept in a dropped
+            # result's emitted text (stub drops result_* nouls)
+            head_server = http.server.HTTPServer(
+                ("127.0.0.1", 0), _stub_handler(drop_results=True)
+            )
+            env3 = dict(env2)
+            spill3 = tmp / "spill-head"
+            env3["JEV_CONSULT_SPILL"] = str(spill3)
+            _stub_policy(
+                tmp,
+                "head-policy.json",
+                head_server.server_address[1],
+                env3,
+            )
+            try:
+                threading.Thread(
+                    target=head_server.handle_request, daemon=True
+                ).start()
+                out_f = tmp / "opt-f.json"
+                rc, out = _run(
+                    [
+                        str(SCRIPTS / "compact.py"),
+                        str(opt_t),
+                        "--history",
+                        "--min-reduction",
+                        "0",
+                        "--preserve-recent",
+                        "0",
+                        "--truncate-head-chars",
+                        "25",
+                        "-o",
+                        str(out_f),
+                    ],
+                    env=env3,
+                )
+                text_f = out_f.read_text(encoding="utf-8") if rc == 0 else ""
+                ok = (
+                    rc == 0
+                    and "full output saved" in text_f
+                    and "R" * 26 not in text_f
+                )
+            finally:
+                head_server.server_close()
     return _step("compact_fake", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

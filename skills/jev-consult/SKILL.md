@@ -134,6 +134,8 @@ Environment: `TYPESAFE_API_KEY` authorizes Jev calls (never print it). `JEV_POLI
 
 The hook enforces a wall-clock budget: `hook_budget_seconds` (policy.json, 12s default) caps each invocation; on timeout it skips the Jev pick, logs `jev_status=budget`, and returns the IDF shortlist without a winner (fail-open). A Jev call that times out is logged as `jev_status=timeout` (distinct from generic `error`), also fail-open.
 
+`jev_status` vocabulary (the value logged to decisions.jsonl and echoed by `--verbose`/`--debug`): `winner` (one pick chosen), `none` (Jev declined to pick), `escalate` (decision wants a human), `dedupe` (fresh sidecar replayed a repeat prompt), `idf` (no Jev pick — shortlist only), `empty` (shortlist was empty), `skip` (no API key), `timeout`, `budget`, `error`, `fill` (written by the peer/catalog/apply fill scripts, not the hook).
+
 If `.jev-tools-miss.json` exists, do not ask the user. Run:
 
 ```text

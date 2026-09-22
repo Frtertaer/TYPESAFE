@@ -2376,6 +2376,55 @@ def step_trace(tmp: Path) -> dict:
             except (OSError, ValueError):
                 ok = False
     if ok:
+        # state --watch emits {ts,state,attempt_count,history,inspected}
+        # ticks; --verdict writes {verdict: ok|empty} per tick
+        stv = tmp / "trace-state-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trace.py"),
+                "--file",
+                str(trace_file),
+                "state",
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--verdict",
+                str(stv),
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"inspected"' in ln]
+        ok = rc == 0 and len(ticks) == 2
+        try:
+            ok = ok and json.loads(stv.read_text(encoding="utf-8")).get(
+                "verdict"
+            ) == "ok"
+        except (OSError, ValueError):
+            ok = False
+        if ok:
+            # an empty/missing trace reports verdict "empty"
+            ev = tmp / "trace-state-verdict-empty.json"
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(tmp / ".jev-trace-none.json"),
+                    "state",
+                    "--watch",
+                    "0.03",
+                    "--max-ticks",
+                    "1",
+                    "--verdict",
+                    str(ev),
+                ]
+            )
+            try:
+                ok = json.loads(ev.read_text(encoding="utf-8")).get(
+                    "verdict"
+                ) == "empty"
+            except (OSError, ValueError):
+                ok = False
+    if ok:
         # init variants: --step seeds current_step, JEV_TRACE_PLAN fills
         # the plan, and neither given exits 2
         t2 = tmp / ".jev-trace-init2.json"

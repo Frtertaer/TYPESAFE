@@ -528,6 +528,58 @@ class WatchFlagTests(unittest.TestCase):
             self.assertEqual(len(lines), 2)
             self.assertTrue(all("findings" in t and "errors" in t for t in lines))
 
+    def test_watch_max_removes_right_argv_pair(self) -> None:
+        import os
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad.json"
+            bad.write_text('{"escalate_if": "x"}', encoding="utf-8")
+            with mock.patch.dict(os.environ, {"JEV_PLINT_WATCH_MAX": "1"}):
+                with redirect_stdout(io.StringIO()):
+                    rc = policy_lint.main(
+                        [str(bad), "--watch", "0.01", "--watch-max", "5"]
+                    )
+            self.assertEqual(rc, 1)
+
+    def test_watch_verdict_writes_final_state(self) -> None:
+        import os
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad.json"
+            bad.write_text('{"escalate_if": "x"}', encoding="utf-8")
+            verdict = Path(tmp) / "v.json"
+            with mock.patch.dict(os.environ, {"JEV_PLINT_WATCH_MAX": "1"}):
+                with redirect_stdout(io.StringIO()):
+                    rc = policy_lint.main(
+                        [str(bad), "--watch", "0.01", "--verdict", str(verdict)]
+                    )
+            self.assertEqual(rc, 1)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "fail")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertGreater(payload["errors"], 0)
+            self.assertIn("findings", payload)
+
+    def test_watch_verdict_pass_on_clean_file(self) -> None:
+        import os
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            with mock.patch.dict(os.environ, {"JEV_PLINT_WATCH_MAX": "1"}):
+                with redirect_stdout(io.StringIO()):
+                    rc = policy_lint.main(
+                        ["--watch", "0.01", "--verdict", str(verdict)]
+                    )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pass")
+
 
 if __name__ == "__main__":
     unittest.main()

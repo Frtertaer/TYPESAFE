@@ -338,6 +338,21 @@ class CliTests(unittest.TestCase):
             self.assertEqual(len(lines), 2)
             self.assertTrue(all("findings" in t and "ts" in t for t in lines))
 
+    def test_watch_verdict_writes_final_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(tmp, [dict(GOOD_CASE)])
+            verdict = Path(tmp) / "v.json"
+            with mock.patch.dict(os.environ, {"JEV_TLINT_WATCH_MAX": "2"}):
+                with redirect_stdout(io.StringIO()):
+                    rc = trigger_lint.main(
+                        [str(path), "--watch", "0.01", "--verdict", str(verdict)]
+                    )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pass")
+            self.assertEqual(payload["ticks"], 2)
+            self.assertEqual(payload["errors"], 0)
+
     def test_watch_rc_reflects_last_lint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             good = write_cases(tmp, [dict(GOOD_CASE)])

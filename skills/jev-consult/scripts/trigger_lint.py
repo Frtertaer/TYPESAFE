@@ -227,6 +227,14 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("bad --watch-max %r (seconds)\n" % argv[idx + 1])
             return 2
         argv = argv[:idx] + argv[idx + 2 :]
+    verdict_path = ""
+    if "--verdict" in argv:
+        idx = argv.index("--verdict")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--verdict needs a PATH value\n")
+            return 2
+        verdict_path = argv[idx + 1]
+        argv = argv[:idx] + argv[idx + 2 :]
     strict = "--strict" in argv
     do_fix = "--fix" in argv
     dry_run = "--dry-run" in argv
@@ -295,6 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         max_ticks = _watch.cap("JEV_TLINT_WATCH_MAX", max_ticks_arg)
         ticks = 0
         dead = _watch.deadline("JEV_TLINT_WATCH_SECS", watch_max_arg)
+        tick: dict = {}
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             rows = lint_cases(path, policy_path=policy_path)
             tick = {
@@ -307,7 +316,20 @@ def main(argv: list[str] | None = None) -> int:
             _watch.emit(tick, out_path, quiet=quiet, bad=tick["errors"] or (strict and tick["findings"]))
             ticks += 1
             _time.sleep(watch_seconds)
-        return 1 if (tick["errors"] or (strict and tick["findings"])) else 0
+        rc = 1 if (tick.get("errors", 0) or (strict and tick.get("findings", 0))) else 0
+        if verdict_path and not _watch.write_verdict(
+            verdict_path,
+            {
+                "verdict": "fail" if rc else "pass",
+                "ticks": ticks,
+                "findings": tick.get("findings", 0),
+                "errors": tick.get("errors", 0),
+                "warnings": tick.get("warnings", 0),
+                "infos": tick.get("infos", 0),
+            },
+        ):
+            return 1
+        return rc
     if do_fix:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))

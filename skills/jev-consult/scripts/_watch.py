@@ -54,3 +54,15 @@ def emit(tick: dict, out_path=None, quiet: bool = False, bad=None) -> None:
                 fh.write(line)
         except OSError:
             pass
+
+
+def write_verdict(path: str, payload: dict) -> bool:
+    """Write a slim verdict JSON to path; False (with stderr note) on failure."""
+    try:
+        Path(path).write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
+    except OSError as exc:
+        sys.stderr.write("--verdict failed: %s\n" % exc)
+        return False
+    return True

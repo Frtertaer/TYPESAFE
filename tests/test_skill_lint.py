@@ -402,6 +402,27 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 0)
 
+    def test_watch_verdict_writes_final_state(self):
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            good = write_skill(tmp, "ok", GOOD.format(name="ok"))
+            verdict = Path(tmp) / "v.json"
+            env = dict(_os.environ, JEV_SLINT_WATCH_MAX="2")
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPT), str(good), "--watch", "0.01",
+                 "--verdict", str(verdict)],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pass")
+            self.assertEqual(payload["ticks"], 2)
+            self.assertEqual(payload["errors"], 0)
+
     def test_watch_appends_ticks_to_out_file(self):
         import os as _os
 

@@ -1099,6 +1099,23 @@ def step_hook(tmp: Path) -> dict:
         )
         env.pop("JEV_HOOK_OFF", None)
         ok = rc == 0 and "{}" in out and "disabled" in out
+    if ok:
+        # JEV_HOOK_SKIP_EVENTS removes the event from the allowed set
+        env["JEV_HOOK_SKIP_EVENTS"] = "UserPromptSubmit"
+        rc, out = _run(
+            [str(SCRIPTS / "inventory_hook.py"), "--verbose"],
+            cwd=tmp,
+            env=env,
+            inp=json.dumps(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "skipped event smoke",
+                    "cwd": str(cwd2),
+                }
+            ),
+        )
+        env.pop("JEV_HOOK_SKIP_EVENTS", None)
+        ok = rc == 0 and "{}" in out
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

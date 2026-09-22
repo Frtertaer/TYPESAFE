@@ -474,6 +474,47 @@ class StrictGateTest(unittest.TestCase):
         self.assertEqual(len(ticks[1]["new_failures"]), 1)
         self.assertIn("did not call Jev", ticks[1]["new_failures"][0])
 
+    def test_watch_fail_fast_breaks_on_first_failing_tick(self) -> None:
+        import io
+        import os as _os
+        from contextlib import redirect_stdout
+        from unittest.mock import patch as _patch
+
+        bad = {"rows": [{"id": "a", "after": {"called_jev": False}}]}
+        buf = io.StringIO()
+        with _patch.object(compare, "run", side_effect=[bad, bad, bad]):
+            with _patch.dict(_os.environ, {"JEV_COMPARE_WATCH_MAX": "9"}):
+                with redirect_stdout(buf):
+                    rc = compare.main(["--watch", "0.01", "--fail-fast"])
+        self.assertEqual(rc, 1)
+        ticks = [
+            json.loads(l)
+            for l in buf.getvalue().splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 1)
+        self.assertEqual(ticks[0]["failures"], 1)
+
+    def test_watch_fail_fast_keeps_running_when_clean(self) -> None:
+        import io
+        import os as _os
+        from contextlib import redirect_stdout
+        from unittest.mock import patch as _patch
+
+        good = {"rows": [{"id": "a", "after": {"called_jev": True}}]}
+        buf = io.StringIO()
+        with _patch.object(compare, "run", side_effect=[good, good, good]):
+            with _patch.dict(_os.environ, {"JEV_COMPARE_WATCH_MAX": "3"}):
+                with redirect_stdout(buf):
+                    rc = compare.main(["--watch", "0.01", "--fail-fast"])
+        self.assertEqual(rc, 0)
+        ticks = [
+            json.loads(l)
+            for l in buf.getvalue().splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 3)
+
     def test_watch_appends_ticks_to_out_file(self) -> None:
         import os as _os
 

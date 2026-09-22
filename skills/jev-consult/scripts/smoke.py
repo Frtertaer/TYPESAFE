@@ -1831,6 +1831,69 @@ def step_trace(tmp: Path) -> dict:
             except (ValueError, AttributeError, IndexError):
                 ok = False
         if ok:
+            # --field prints one field per note; --uniq dedupes by sha/text
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "notes",
+                    "--field",
+                    "text",
+                ]
+            )
+            ok = rc == 0 and "second note" in out
+        if ok:
+            dup_file = tmp / "trace-dup.json"
+            _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(dup_file),
+                    "init",
+                    "--plan",
+                    "p",
+                ]
+            )
+            _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(dup_file),
+                    "record",
+                    "--pick",
+                    "a",
+                    "--note",
+                    "same",
+                ]
+            )
+            _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(dup_file),
+                    "record",
+                    "--pick",
+                    "b",
+                    "--note",
+                    "same",
+                ]
+            )
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(dup_file),
+                    "notes",
+                    "--uniq",
+                    "--json",
+                ]
+            )
+            try:
+                ok = rc == 0 and len(json.loads(out)) == 1
+            except (ValueError, TypeError):
+                ok = False
+        if ok:
             # history --watch emits {picks} ticks; --verdict writes the probe
             verdict = tmp / "trace-verdict.json"
             rc, out = _run(

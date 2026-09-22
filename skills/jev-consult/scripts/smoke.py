@@ -473,6 +473,32 @@ def step_hook(tmp: Path) -> dict:
             inp=payload,
         )
         ok = rc == 0 and '"stale_sidecar": true' in out
+    if ok:
+        # emit shapes: claude-code -> hookSpecificOutput, grok -> {}
+        for harness, want in (("claude-code", '"hookSpecificOutput"'), ("grok", None)):
+            env["JEV_HOOK_HARNESS"] = harness
+            rc, out = _run(
+                [str(SCRIPTS / "inventory_hook.py")],
+                cwd=tmp,
+                env=env,
+                inp=json.dumps(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "emit shape check %s" % harness,
+                        "cwd": str(cwd),
+                    }
+                ),
+            )
+            if rc != 0:
+                ok = False
+                break
+            first = out.strip().splitlines()[0] if out.strip() else ""
+            if want is None:
+                ok = first == "{}"
+            else:
+                ok = want in first
+            if not ok:
+                break
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

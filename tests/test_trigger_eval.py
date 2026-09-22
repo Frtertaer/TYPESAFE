@@ -792,6 +792,33 @@ class TriggerEvalTests(unittest.TestCase):
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertIn(payload["verdict"], ("PASS", "FAIL"))
 
+    def test_verdict_watch_writes_each_tick(self) -> None:
+        # 2 ticks: verdict file must be written at least twice (per tick + final)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "verdict.json"
+            buf = io.StringIO()
+            real_write = Path.write_text
+            calls = []
+
+            def counting_write(self, *a, **kw):
+                calls.append(str(self))
+                return real_write(self, *a, **kw)
+
+            with patch.dict(
+                os.environ,
+                {"JEV_TRIGGER_WATCH_MAX": "2", "TYPESAFE_API_KEY": ""},
+            ):
+                with patch.object(Path, "write_text", counting_write):
+                    with redirect_stdout(buf):
+                        rc = te.main(
+                            ["--watch", "0.01", "--verdict", str(path), "--quiet"]
+                        )
+            self.assertIn(rc, (0, 1))
+            verdict_writes = [c for c in calls if c == str(path)]
+            self.assertGreaterEqual(len(verdict_writes), 2)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertIn(payload["verdict"], ("PASS", "FAIL"))
+
     def test_report_json_writes_object(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "report.json"

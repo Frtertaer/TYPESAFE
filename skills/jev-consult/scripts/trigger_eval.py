@@ -299,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
         "--verdict",
         metavar="PATH",
         default="",
-        help="Write a slim verdict JSON ({verdict, ok, failed_gates, coverage, hits, total, worst_positive, best_negative, margin}) to PATH.",
+        help="Write a slim verdict JSON ({verdict, ok, failed_gates, coverage, hits, total, worst_positive, best_negative, margin}) to PATH (with --watch, refreshed every tick).",
     )
     args = parser.parse_args(argv)
     if args.env:
@@ -496,6 +496,8 @@ def main(argv: list[str] | None = None) -> int:
                 "failed_gates": failed,
             }
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(failed))
+            if not _write_verdict(cur):
+                args.verdict = ""  # warn once, stop retrying
             ticks += 1
             sys.stderr.write(
                 "watch tick=%d ok=%s coverage=%s gates=%s\n"

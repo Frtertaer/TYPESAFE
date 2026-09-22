@@ -120,16 +120,8 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
         "bad_lines": bad,
         "first_ts": min(stamps) if stamps else None,
         "last_ts": max(stamps) if stamps else None,
-        "first_iso": (
-            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(min(stamps)))
-            if stamps
-            else None
-        ),
-        "last_iso": (
-            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(max(stamps)))
-            if stamps
-            else None
-        ),
+        "first_iso": _iso(min(stamps)) if stamps else None,
+        "last_iso": _iso(max(stamps)) if stamps else None,
         "by_status": by_status,
         "by_harness": by_harness,
         "explicit": explicit,
@@ -226,10 +218,17 @@ def format_entry(item: dict) -> str:
     )
 
 
+def _iso(ts: float) -> str | None:
+    try:
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def time_str(ts: object) -> str:
     try:
         return datetime.datetime.fromtimestamp(float(ts)).strftime("%m-%d %H:%M")  # type: ignore[arg-type]
-    except (TypeError, ValueError, OSError):
+    except (TypeError, ValueError, OSError, OverflowError):
         return "?"
 
 
@@ -365,7 +364,7 @@ def prune_entries(path: Path, apply_filters, retries: int = 8) -> dict | None:
     """
     for _ in range(retries):
         snap = path.read_bytes()
-        if not snap.endswith(b"\n"):
+        if snap and not snap.endswith(b"\n"):
             time.sleep(0.05)
             continue
         entries, bad = _parse_jsonl(snap.decode("utf-8", errors="replace"))

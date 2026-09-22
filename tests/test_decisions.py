@@ -164,7 +164,13 @@ class SummarizeTest(unittest.TestCase):
     def test_time_str_bad_values(self):
         self.assertEqual(decisions.time_str(None), "?")
         self.assertEqual(decisions.time_str("nope"), "?")
+        self.assertEqual(decisions.time_str(1e20), "?")
         self.assertRegex(decisions.time_str(1700000000), r"\d{2}-\d{2} \d{2}:\d{2}")
+
+    def test_summarize_huge_ts_iso_none(self):
+        stats = decisions.summarize([{"ts": 1e20, "jev_status": "winner"}])
+        self.assertIsNone(stats["first_iso"])
+        self.assertIsNone(stats["last_iso"])
 
     def test_format_entry_non_dict_winner(self):
         line = decisions.format_entry(
@@ -562,6 +568,15 @@ class CliTest(unittest.TestCase):
             lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
             self.assertEqual(len(lines), 1)
             self.assertEqual(json.loads(lines[0])["harness"], "codex")
+
+    def test_prune_empty_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text("", encoding="utf-8")
+            proc = self.run_cli("--file", str(path), "--prune", "--harness", "codex")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("pruned 0 of 0", proc.stderr)
+            self.assertEqual(path.read_text(encoding="utf-8"), "")
 
     def test_prune_dry_run_keeps_file(self):
         with tempfile.TemporaryDirectory() as tmp:

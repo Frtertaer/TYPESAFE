@@ -1116,6 +1116,23 @@ def step_hook(tmp: Path) -> dict:
         )
         env.pop("JEV_HOOK_SKIP_EVENTS", None)
         ok = rc == 0 and "{}" in out
+    if ok:
+        # JEV_HOOK_EVENTS replaces the allowed set outright
+        env["JEV_HOOK_EVENTS"] = "PreToolUse"
+        rc, out = _run(
+            [str(SCRIPTS / "inventory_hook.py")],
+            cwd=tmp,
+            env=env,
+            inp=json.dumps(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "restricted event smoke",
+                    "cwd": str(cwd2),
+                }
+            ),
+        )
+        env.pop("JEV_HOOK_EVENTS", None)
+        ok = rc == 0 and "{}" in out
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

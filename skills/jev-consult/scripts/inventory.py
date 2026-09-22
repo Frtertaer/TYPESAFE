@@ -1109,7 +1109,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
-    parser.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim verdict JSON (stable|changed, ticks, added, removed) to PATH, refreshed every tick.")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON to PATH: with --watch a {verdict: stable|changed, ticks, added, removed, counts} payload refreshed every tick; otherwise a one-shot {verdict: ok|empty, scanned, shortlisted, counts} payload.")
     parser.add_argument("--id", metavar="NAME", default="", help="Print the single matching item's JSON (matches id or name).")
     parser.add_argument(
         "--explain",
@@ -1319,6 +1319,17 @@ def main(argv: list[str] | None = None) -> int:
         write_sidecar(Path(args.sidecar), harness, args.task, picked)
     watch_seconds = getattr(args, "watch", 0.0) or 0.0
     if watch_seconds <= 0:
+        if getattr(args, "verdict", ""):
+            ok = _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "ok" if items else "empty",
+                    "scanned": len(items),
+                    "shortlisted": len(picked),
+                    "counts": counts,
+                },
+            )
+            return 0 if ok else 1
         return 0
     max_ticks = _watch.cap("JEV_INV_WATCH_MAX", args.max_ticks)
     ticks = 0

@@ -263,6 +263,50 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(ticks[1]["added"], [])
         self.assertEqual(ticks[1]["removed"], ["b", "c"])
 
+    def test_nonwatch_verdict_writes_scan_summary(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--harness", "hermes",
+                        "--hermes-home", str(FIXTURE),
+                        "--verdict", str(verdict),
+                    ]
+                )
+            self.assertEqual(code, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "ok")
+            self.assertGreater(payload["scanned"], 0)
+            self.assertIn("counts", payload)
+            self.assertIn("shortlisted", payload)
+
+    def test_nonwatch_verdict_empty_when_no_items(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            buf = StringIO()
+            with patch.object(inv, "scan", return_value=[]):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness", "hermes",
+                            "--hermes-home", str(FIXTURE),
+                            "--verdict", str(verdict),
+                        ]
+                    )
+            self.assertEqual(code, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "empty")
+            self.assertEqual(payload["scanned"], 0)
+
     def test_watch_verdict_writes_stable_when_unchanged(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

@@ -263,6 +263,48 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(ticks[1]["added"], [])
         self.assertEqual(ticks[1]["removed"], ["b", "c"])
 
+    def test_watch_tick_reports_found_delta(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        results = [
+            [{"id": "a", "kind": "skill", "name": "a"}],
+            [{"id": "a", "kind": "skill", "name": "a"},
+             {"id": "b", "kind": "skill", "name": "b"},
+             {"id": "c", "kind": "skill", "name": "c"}],
+            [{"id": "a", "kind": "skill", "name": "a"}],
+        ]
+
+        def fake_scan(harness, home=None, hermes=None):
+            if results:
+                return results.pop(0)
+            return [{"id": "a", "kind": "skill", "name": "a"}]
+
+        buf = StringIO()
+        with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+            with patch.object(inv, "scan", side_effect=fake_scan):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness",
+                            "hermes",
+                            "--hermes-home",
+                            str(FIXTURE),
+                            "--watch",
+                            "0.01",
+                        ]
+                    )
+        self.assertEqual(code, 0)
+        ticks = [
+            json.loads(l)
+            for l in buf.getvalue().splitlines()
+            if l.startswith('{"ts"')
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertIsNone(ticks[0]["found_delta"])
+        self.assertEqual(ticks[1]["found_delta"], -2)
+
     def test_nonwatch_verdict_writes_scan_summary(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

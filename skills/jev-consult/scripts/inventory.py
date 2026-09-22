@@ -1370,6 +1370,9 @@ def main(argv: list[str] | None = None) -> int:
             "shortlist": [item.get("id") for item in shortlist(fresh, args.task, limit, extra)],
             "added": sorted(cur_ids - prev_ids) if prev_ids is not None else [],
             "removed": sorted(prev_ids - cur_ids) if prev_ids is not None else [],
+            "found_delta": (
+                len(cur_ids) - len(prev_ids) if prev_ids is not None else None
+            ),
         }
         if prev_ids is not None:
             all_added.update(cur_ids - prev_ids)

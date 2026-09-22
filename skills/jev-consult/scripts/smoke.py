@@ -196,6 +196,20 @@ def step_jev_scaffold_lint(tmp: Path) -> dict:
             ]
         )
         ok = rc == 2 and "empty template criteria" in out
+    if ok:
+        # ask --dry resolves the request locally (no API call, no key)
+        env = dict(os.environ)  # skillscan:allow
+        env.pop("TYPESAFE_API_KEY", None)
+        rc, out = _run(
+            [str(SCRIPTS / "jev.py"), "ask", str(req), "--dry"], env=env
+        )
+        if rc == 0:
+            try:
+                ok = "questions" in json.loads(out.strip())
+            except ValueError:
+                ok = False
+        else:
+            ok = False
     return _step("jev_scaffold_lint", ok, out.strip()[:160] or "clean")
 
 

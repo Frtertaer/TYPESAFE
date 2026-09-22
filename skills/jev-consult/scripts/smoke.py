@@ -147,6 +147,41 @@ def step_policy_lint(tmp: Path) -> dict:
             and "fixed P011" in out
             and "smoke_bogus_key" not in bad.read_text(encoding="utf-8")
         )
+    if ok:
+        # --json emits a findings payload on the shipped policy
+        rc, out = _run([str(SCRIPTS / "policy_lint.py"), "--json"])
+        try:
+            ok = rc == 0 and isinstance(json.loads(out).get("findings"), list)
+        except (ValueError, AttributeError):
+            ok = False
+    if ok:
+        # --explain RULE prints one rule's description
+        rc, out = _run(
+            [str(SCRIPTS / "policy_lint.py"), "--explain", "P001"]
+        )
+        ok = rc == 0 and "P001" in out
+    if ok:
+        # --watch emits {findings,errors} ticks; --verdict writes the probe
+        verdict = tmp / "plint-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "policy_lint.py"),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--verdict",
+                str(verdict),
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"findings"' in ln]
+        ok = rc in (0, 1) and len(ticks) == 2
+        try:
+            ok = ok and "verdict" in json.loads(
+                verdict.read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            ok = False
     return _step("policy_lint", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

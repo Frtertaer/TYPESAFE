@@ -703,6 +703,7 @@ def main(argv: list[str] | None = None) -> int:
         verdict_ok = True
         prev_winner: str | None = None
         winners_seen: set = set()
+        winner_changes = 0
         watch_t0 = time.time()
 
         def _write_verdict() -> bool:
@@ -713,6 +714,10 @@ def main(argv: list[str] | None = None) -> int:
                     "ticks": ticks,
                     "winner": tick.get("winner"),
                     "winner_stability": len(winners_seen),
+                    "winner_changes": winner_changes,
+                    "winner_flap_rate": (
+                        round(winner_changes / ticks, 3) if ticks else None
+                    ),
                     "keys": tick.get("keys", []),
                     "keys_count": len(tick.get("keys") or []),
                     "elapsed_s": round(time.time() - watch_t0, 2),
@@ -742,6 +747,8 @@ def main(argv: list[str] | None = None) -> int:
                 prev_winner is not None and tick["winner"] != prev_winner
             )
             prev_winner = tick["winner"]
+            if tick["winner_changed"]:
+                winner_changes += 1
             if tick["winner"]:
                 winners_seen.add(tick["winner"])
             tick["elapsed_s"] = round(time.time() - watch_t0, 2)

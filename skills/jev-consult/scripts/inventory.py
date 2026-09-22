@@ -1230,6 +1230,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the resolved scan roots for the harness (exists/items per dir) as JSON and exit.",
     )
     parser.add_argument(
+        "--item",
+        metavar="NAME",
+        default="",
+        help="Print the single scanned record with this exact name (kind:name or name) as JSON; exits 2 when absent.",
+    )
+    parser.add_argument(
         "--diff",
         metavar="OLD.json",
         default="",
@@ -1321,6 +1327,34 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(json.dumps(report, indent=2) + "\n")
         return 0
     items = scan(harness, home=home, hermes=hermes)
+    if getattr(args, "item", ""):
+        wanted = args.item.strip()
+        lowered = wanted.lower()
+        match = next(
+            (
+                item
+                for item in items
+                if str(item.get("name") or "") == wanted
+                or "%s:%s" % (item.get("kind"), item.get("name")) == wanted
+            ),
+            None,
+        )
+        if match is None:
+            match = next(
+                (
+                    item
+                    for item in items
+                    if str(item.get("name") or "").lower() == lowered
+                    or "%s:%s" % (item.get("kind"), str(item.get("name") or "").lower())
+                    == lowered
+                ),
+                None,
+            )
+        if match is None:
+            sys.stderr.write("no item named %s under harness %s\n" % (wanted, harness))
+            return 2
+        sys.stdout.write(json.dumps(match, indent=2, ensure_ascii=False) + "\n")
+        return 0
     kinds = {part.strip() for part in args.kind.split(",") if part.strip()}
     if kinds:
         items = [item for item in items if item["kind"] in kinds]

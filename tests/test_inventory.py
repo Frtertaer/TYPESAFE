@@ -205,6 +205,83 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(report["plugins"], [])
         self.assertEqual(report["mcp_files"], [])
 
+    def _seed_home(self, tmp: str, *names: str) -> Path:
+        home = Path(tmp)
+        for name in names:
+            skill_dir = home / ".claude" / "skills" / name
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: %s\ndescription: fixture %s\n---\n" % (name, name),
+                encoding="utf-8",
+            )
+        return home
+
+    def test_item_prints_matching_record(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._seed_home(tmp, "alpha", "beta")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "claude-code",
+                        "--home",
+                        str(home),
+                        "--item",
+                        "beta",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        record = json.loads(buf.getvalue())
+        self.assertEqual(record["name"], "beta")
+        self.assertEqual(record["kind"], "skill")
+
+    def test_item_kind_prefixed_and_case_insensitive(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._seed_home(tmp, "Alpha")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "claude-code",
+                        "--home",
+                        str(home),
+                        "--item",
+                        "skill:alpha",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(buf.getvalue())["name"], "Alpha")
+
+    def test_item_missing_exits_2(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._seed_home(tmp, "alpha")
+            buf = StringIO()
+            err = StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "claude-code",
+                        "--home",
+                        str(home),
+                        "--item",
+                        "nope",
+                    ]
+                )
+        self.assertEqual(code, 2)
+        self.assertIn("no item named", err.getvalue())
+
     def test_watch_ticks_emit_jsonl(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

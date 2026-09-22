@@ -2500,6 +2500,67 @@ def step_jev_decide(tmp: Path) -> dict:
             ]
         )
         ok = rc == 2 and out.strip() == '"escalate"'
+    if ok:
+        # --irreversible flag escalates a tight gap even without the
+        # payload field; --out persists the decision payload; a bad
+        # --jq key exits 2
+        tight_flag = tmp / "answers-tight-flag.json"
+        tight_flag.write_text(
+            json.dumps(
+                {
+                    "answers": {
+                        "where": {
+                            "type": "choice",
+                            "choice": "refactor",
+                            "confidence": 0.9,
+                            "probabilities": {
+                                "refactor": 0.53,
+                                "rewrite": 0.47,
+                            },
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "jev.py"),
+                "decide",
+                str(tight_flag),
+                "--irreversible",
+                "--jq",
+                "decision.action",
+            ]
+        )
+        ok = rc == 2 and out.strip() == '"escalate"'
+    if ok:
+        out_file = tmp / "decide-out.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "jev.py"),
+                "decide",
+                str(answers),
+                "--out",
+                str(out_file),
+            ]
+        )
+        try:
+            payload = json.loads(out_file.read_text(encoding="utf-8"))
+            ok = rc == 0 and "decision" in payload
+        except (OSError, ValueError):
+            ok = False
+    if ok:
+        rc, out = _run(
+            [
+                str(SCRIPTS / "jev.py"),
+                "decide",
+                str(answers),
+                "--jq",
+                "nope.nope",
+            ]
+        )
+        ok = rc == 2
     return _step("jev_decide", ok, out.strip()[:120] or "rc=%d" % rc)
 
 
@@ -2611,6 +2672,49 @@ def step_ask_verdict(tmp: Path) -> dict:
                     ok = False
             else:
                 ok = False
+        if ok:
+            # ask --jq digs one response field; --out persists the payload
+            thread = threading.Thread(
+                target=server.handle_request, daemon=True
+            )
+            thread.start()
+            out_file = tmp / "ask-out.json"
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "jev.py"),
+                    "ask",
+                    str(request),
+                    "--jq",
+                    "answers.q.choice",
+                    "--out",
+                    str(out_file),
+                ],
+                env=env,
+            )
+            ok = rc == 0 and out.strip().splitlines()[0] == '"a"'
+            try:
+                ok = ok and "answers" in json.loads(
+                    out_file.read_text(encoding="utf-8")
+                )
+            except (OSError, ValueError):
+                ok = False
+        if ok:
+            # a bad --jq key exits 2 (the stub still serves one more ask)
+            thread = threading.Thread(
+                target=server.handle_request, daemon=True
+            )
+            thread.start()
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "jev.py"),
+                    "ask",
+                    str(request),
+                    "--jq",
+                    "nope.nope",
+                ],
+                env=env,
+            )
+            ok = rc == 2
         if ok:
             # ask fails open when the endpoint is unreachable (port 1 is
             # never listening)

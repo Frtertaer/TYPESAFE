@@ -410,6 +410,16 @@ def step_hook(tmp: Path) -> dict:
             [str(SCRIPTS / "inventory_hook.py")], cwd=tmp, env=env, inp=payload
         )
         ok = rc == 0 and "dedupe=True" in out
+    if ok:
+        # --verbose explains a {} emit on stderr
+        env.pop("JEV_HOOK_DEBUG", None)
+        rc, out = _run(
+            [str(SCRIPTS / "inventory_hook.py"), "--verbose"],
+            cwd=tmp,
+            env=env,
+            inp=json.dumps({"hook_event_name": "PreToolUse", "prompt": "x"}),
+        )
+        ok = rc == 0 and "verbose:" in out
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

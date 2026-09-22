@@ -457,6 +457,22 @@ def step_hook(tmp: Path) -> dict:
             inp=json.dumps({"hook_event_name": "PreToolUse", "prompt": "x"}),
         )
         ok = rc == 0 and "verbose:" in out
+    if ok:
+        # same prompt over an expired sidecar hits the stale_match path;
+        # --json echoes the whole LAST_DECISION record to stderr
+        sidecar = json.loads((cwd / ".jev-tools.json").read_text(encoding="utf-8"))
+        sidecar["written_at"] = 1  # ancient -> stale
+        (cwd / ".jev-tools.json").write_text(
+            json.dumps(sidecar), encoding="utf-8"
+        )
+        env.pop("JEV_HOOK_DEBUG", None)
+        rc, out = _run(
+            [str(SCRIPTS / "inventory_hook.py"), "--json"],
+            cwd=tmp,
+            env=env,
+            inp=payload,
+        )
+        ok = rc == 0 and '"stale_sidecar": true' in out
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

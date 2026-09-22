@@ -212,6 +212,39 @@ class DecideTests(unittest.TestCase):
         )
         self.assertEqual(bad_probs["action"], "proceed")
 
+    def test_decide_malformed_policy_numbers_fall_back(self) -> None:
+        policy = {
+            "confidence_floor": "abc",
+            "tight_gap": float("nan"),
+            "noul_yes": None,
+            "noul_no": "x",
+        }
+        decision = jev.decide(
+            {
+                "q": {
+                    "type": "choice",
+                    "choice": "a",
+                    "confidence": 0.9,
+                    "probabilities": {"a": 0.9, "b": 0.1},
+                },
+                "n": {"type": "noul", "noul": 0.9},
+            },
+            policy,
+        )
+        self.assertEqual(decision["action"], "proceed")
+        low = jev.decide(
+            {
+                "q": {
+                    "type": "choice",
+                    "choice": "a",
+                    "confidence": 0.2,
+                    "probabilities": {"a": 0.9, "b": 0.1},
+                }
+            },
+            policy,
+        )
+        self.assertEqual(low["action"], "escalate")
+
 
 class SecretTests(unittest.TestCase):
     def test_redact(self) -> None:
@@ -605,6 +638,16 @@ class JevInternalsTests(unittest.TestCase):
         warnings = jev.policy_warnings({"noul_yes": 5})  # out-of-range + missing keys
         self.assertTrue(any("P002" in w or "P001" in w for w in warnings))
 
+    def test_read_json_arg_errors_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "nope.json"
+            with self.assertRaises(SystemExit):
+                jev.read_json_arg(str(missing))
+            bad = Path(tmp) / "bad.json"
+            bad.write_text("{{{", encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                jev.read_json_arg(str(bad))
+
     def test_read_json_arg(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "r.json"
@@ -839,6 +882,23 @@ class JevInternalsTests(unittest.TestCase):
         with patch.object(sys, "stderr", io.StringIO()):
             rc = jev.main(["scaffold", "approach"])
         self.assertEqual(rc, jev.ASK_ESCALATE_EXIT)
+
+    def test_scaffold_unwritable_out_exits_2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            blocker = Path(tmp) / "blocker"
+            blocker.write_text("x", encoding="utf-8")
+            err = io.StringIO()
+            with patch.object(sys, "stderr", err):
+                rc = jev.main(
+                    [
+                        "scaffold",
+                        "keep_vs_change",
+                        "--out",
+                        str(blocker / "x.json"),
+                    ]
+                )
+            self.assertEqual(rc, jev.ASK_ESCALATE_EXIT)
+            self.assertIn("cannot write", err.getvalue())
 
     def test_ask_dry_never_posts(self) -> None:
         def _boom(*a, **k):

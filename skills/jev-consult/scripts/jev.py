@@ -333,6 +333,14 @@ def top_two_gap(probabilities: dict[str, Any]) -> float:
     return values[0] - values[1]
 
 
+def _pfloat(value: Any, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if math.isfinite(parsed) else default
+
+
 def decide(
     answers: dict[str, Any],
     policy: dict[str, Any],
@@ -342,34 +350,37 @@ def decide(
     picks: dict[str, Any] = {}
     all_probs: dict[str, Any] = {}
     action = "proceed"
-    conf_floor = float(
+    conf_floor = _pfloat(
         policy_get(
             policy,
             "confidence_floor",
             ("escalate_if", "confidence_below"),
             ("choice", "escalate_if_confidence_below"),
             default=0.55,
-        )
+        ),
+        0.55,
     )
-    gap_floor = float(
+    gap_floor = _pfloat(
         policy_get(
             policy,
             "tight_gap",
             ("escalate_if", "choice_gap_below"),
             ("choice", "escalate_if_top_two_gap_below"),
             default=0.15,
-        )
+        ),
+        0.15,
     )
-    yes_above = float(policy_get(policy, "noul_yes", ("noul", "yes_above"), default=0.7))
-    no_below = float(policy_get(policy, "noul_no", ("noul", "no_below"), default=0.3))
-    score_floor = float(
+    yes_above = _pfloat(policy_get(policy, "noul_yes", ("noul", "yes_above"), default=0.7), 0.7)
+    no_below = _pfloat(policy_get(policy, "noul_no", ("noul", "no_below"), default=0.3), 0.3)
+    score_floor = _pfloat(
         policy_get(
             policy,
             "confidence_floor",
             ("escalate_if", "confidence_below"),
             ("score", "escalate_if_confidence_below"),
             default=0.55,
-        )
+        ),
+        0.55,
     )
     noul_escalate = bool(
         policy_get(policy, ("noul", "escalate_uncertain_if_irreversible"), default=True)
@@ -465,11 +476,14 @@ def apply_trace(state: Any, trace_path: str | None) -> Any:
 
 
 def read_json_arg(file_arg: str) -> Any:
-    if file_arg == "-":
-        raw = sys.stdin.read()
-    else:
-        raw = Path(file_arg).read_text(encoding="utf-8")
-    return json.loads(raw)
+    try:
+        raw = sys.stdin.read() if file_arg == "-" else Path(file_arg).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SystemExit("cannot read %s: %s" % (file_arg, exc))
+    try:
+        return json.loads(raw)
+    except ValueError as exc:
+        raise SystemExit("%s is not JSON: %s" % (file_arg, exc))
 
 
 def emit(payload: dict[str, Any]) -> None:
@@ -710,9 +724,13 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
         sys.stderr.write("%s\n" % exc)
         return ASK_ESCALATE_EXIT
     out = Path(args.out)
-    if out.parent != Path(""):
-        out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    try:
+        if out.parent != Path(""):
+            out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    except OSError as exc:
+        sys.stderr.write("scaffold: cannot write %s: %s\n" % (out, exc))
+        return ASK_ESCALATE_EXIT
     return 0
 
 

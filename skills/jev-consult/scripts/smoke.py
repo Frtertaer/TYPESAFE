@@ -5190,6 +5190,121 @@ def step_peer_fill_status(tmp: Path) -> dict:
     return _step("peer_fill_status", ok, out.strip()[:120] or "rc=%d" % rc)
 
 
+def step_catalog_fill(tmp: Path) -> dict:
+    """catalog_fill end-to-end: a fake `hermes` on PATH answers
+    search/inspect/install, and a localhost stub answers the pick ask."""
+    env = dict(os.environ)  # skillscan:allow
+    home = tmp / "cat-home"
+    hermes = tmp / "cat-hermes"
+    cwd = tmp / "cat-cwd"
+    for p in (home, hermes, cwd):
+        p.mkdir(parents=True, exist_ok=True)
+    # the "install" lands this skill in the hermes catalog (pre-seeded;
+    # the fake installer exits 0 without doing anything)
+    skill_src = hermes / "skills" / "smoke-thing"
+    skill_src.mkdir(parents=True)
+    (skill_src / "SKILL.md").write_text(
+        "---\nname: smoke-thing\ndescription: smoke catalog hit\n---\n",
+        encoding="utf-8",
+    )
+    bin_dir = tmp / "cat-bin"
+    bin_dir.mkdir(parents=True)
+    bat = bin_dir / "hermes.bat"
+    bat.write_text(
+        '@echo off\r\n'
+        'if "%1"=="skills" if "%2"=="search" echo '
+        '[{"id":"smoke-thing","identifier":"acme/smoke-thing","name":"smoke-thing","description":"smoke hit"}]\r\n'
+        'exit /b 0\r\n',
+        encoding="utf-8",
+    )
+    env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+    env["USERPROFILE"] = str(home)
+    env["HOME"] = str(home)
+    env["JEV_CONSULT_LOG"] = str(tmp / "cat-decisions.jsonl")
+    env["TYPESAFE_API_KEY"] = "smoke-stub-key"
+
+    class CatStub(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                request = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, TypeError):
+                request = {}
+            answers: dict = {}
+            for qid, q in (request.get("questions") or {}).items():
+                if q.get("type") == "choice":
+                    pick = next(
+                        (k for k in (q.get("criteria") or {}) if k != "none"),
+                        "none",
+                    )
+                    answers[qid] = {
+                        "type": "choice",
+                        "choice": pick,
+                        "confidence": 0.9,
+                        "probabilities": {pick: 0.9, "none": 0.1},
+                    }
+                else:
+                    answers[qid] = {"type": "noul", "noul": 0.99}
+            reply = json.dumps({"answers": answers}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(reply)))
+            self.end_headers()
+            self.wfile.write(reply)
+
+        def log_message(self, *args) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), CatStub)
+    try:
+        policy = json.loads(
+            (SKILL_DIR / "policy.json").read_text(encoding="utf-8")
+        )
+        policy["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
+            server.server_address[1]
+        )
+        policy_path = tmp / "cat-policy.json"
+        policy_path.write_text(json.dumps(policy), encoding="utf-8")
+        env["JEV_POLICY"] = str(policy_path)
+        thread = threading.Thread(
+            target=server.handle_request, daemon=True
+        )
+        thread.start()
+        rc, out = _run(
+            [
+                str(SCRIPTS / "catalog_fill.py"),
+                "--task",
+                "smoke",
+                "--harness",
+                "codex",
+                "--home",
+                str(home),
+                "--hermes-home",
+                str(hermes),
+                "--cwd",
+                str(cwd),
+            ],
+            cwd=cwd,
+            env=env,
+        )
+        ok = rc == 0 and "installed" in out and "acme/smoke-thing" in out
+        if ok:
+            # the skill is copied into the harness dirs and the sidecar
+            # records the pick
+            copied = (home / ".codex" / "skills" / "smoke-thing" / "SKILL.md").is_file()
+            sidecar = cwd / ".jev-tools.json"
+            try:
+                sidecar_ok = bool(
+                    json.loads(sidecar.read_text(encoding="utf-8"))
+                )
+            except (OSError, ValueError):
+                sidecar_ok = False
+            ok = copied and sidecar_ok
+        return _step("catalog_fill", ok, out.strip()[:120] or "rc=%d" % rc)
+    finally:
+        server.server_close()
+
+
 STEPS = (
     ("policy", "step_policy"),
     ("policy_lint", "step_policy_lint"),
@@ -5210,6 +5325,7 @@ STEPS = (
     ("compact_hook", "step_compact_hook"),
     ("jev_decide", "step_jev_decide"),
     ("peer_fill_status", "step_peer_fill_status"),
+    ("catalog_fill", "step_catalog_fill"),
     ("ask_verdict", "step_ask_verdict"),
 )
 

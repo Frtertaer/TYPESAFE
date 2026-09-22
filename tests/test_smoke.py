@@ -391,6 +391,49 @@ class SmokeTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual([p.name for p in Path(tmp).iterdir()], ["j.xml"])
 
+    def test_junit_watch_writes_final_pass(self) -> None:
+        import xml.etree.ElementTree as ET
+
+        calls = []
+
+        def ok_step(tmp):
+            calls.append(1)
+            return {"name": "policy", "ok": True, "detail": "fake"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "j.xml"
+            ticks = Path(tmp) / "ticks.jsonl"
+            with patch.object(MOD, "step_policy", side_effect=ok_step):
+                import io
+
+                with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                    sys, "stderr", io.StringIO()
+                ):
+                    rc = MOD.main(
+                        [
+                            "--only",
+                            "policy",
+                            "--watch",
+                            "0.01",
+                            "--max-ticks",
+                            "2",
+                            "--quiet",
+                            "--out",
+                            str(ticks),
+                            "--junit",
+                            str(out),
+                        ]
+                    )
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(calls), 2, "expected exactly two watch ticks")
+            root = ET.fromstring(out.read_text(encoding="utf-8"))
+            self.assertEqual(root.tag, "testsuite")
+            self.assertEqual(root.get("tests"), "1")
+            self.assertEqual(root.get("failures"), "0")
+            self.assertEqual(root.find("testcase").get("name"), "policy")
+            lines = [x for x in ticks.read_text(encoding="utf-8").splitlines() if x.strip()]
+            self.assertEqual(len(lines), 2, "watch emitted %d ticks" % len(lines))
+
     def test_junit_escapes_quotes_in_names(self) -> None:
         import xml.etree.ElementTree as ET
 

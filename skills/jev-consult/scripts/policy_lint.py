@@ -87,6 +87,24 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
 )
 
 
+RULES = {
+    "P000": "policy file is not a JSON object",
+    "P001": "missing required key; jev.py reads it and a fallback fires silently without it",
+    "P002": "field has the wrong type or is out of range (probability in [0,1], positive int, non-empty string, boolean)",
+    "P003": "a section that must be an object is not (escalate_if, templates)",
+    "P004": "threshold ordering violated (noul_no < noul_unsure < noul_yes, confidence_floor < strong_pick, soft_max <= hard_max, bands inside bands)",
+    "P005": "duplicate thresholds disagree (escalate_if.confidence_below vs confidence_floor, choice_gap_below vs tight_gap)",
+    "P006": "a kind is listed in both must_ask and never_ask",
+    "P007": "template is malformed (not an object, missing instructions, instructions not a non-empty string)",
+    "P008": "template instructions do not end with '?' or carry a bad type",
+    "P009": "choice criteria malformed (not an object, single non-hatch option, bad option ids, empty meanings, require_hatch with no hatch option, dead criteria on noul/score)",
+    "P010": "unknown escalate_if key; typo guard (auto-fixed by --fix)",
+    "P011": "unknown top-level key or non-https endpoint; typo guard (auto-fixed by --fix)",
+    "P012": "a must_ask kind has no template to send",
+    "P013": "template not listed in must_ask; the trigger layer never auto-asks it",
+}
+
+
 def _num(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
@@ -423,6 +441,19 @@ def main(argv: list[str] | None = None) -> int:
         env_sev = os.environ.get("JEV_PLINT_SEVERITY", "").strip().lower()
         if env_sev in ("error", "warn", "info"):
             severity = env_sev
+    if "--explain" in argv:
+        i = argv.index("--explain")
+        if i + 1 >= len(argv):
+            sys.stderr.write("--explain needs a RULE value\n")
+            return 2
+        rule = argv[i + 1].strip().upper()
+        if rule not in RULES:
+            sys.stderr.write(
+                "unknown rule %r (rules: %s)\n" % (rule, ", ".join(sorted(RULES)))
+            )
+            return 2
+        sys.stdout.write("%s: %s\n" % (rule, RULES[rule]))
+        return 0
     out_path = ""
     if "--out" in argv:
         i = argv.index("--out")

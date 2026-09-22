@@ -52,6 +52,25 @@ def _tokens(text: str) -> set[str]:
     return {t for t in re.findall(r"[a-z]{3,}", text.lower())}
 
 
+RULES = {
+    "J001": "instructions contain a negation; prefer the positive phrasing",
+    "J002": "multiple negations; double negatives cut accuracy",
+    "J003": "asks the model to count or do arithmetic; compute it in code instead",
+    "J004": "depends on a date or duration comparison; precompute it in state",
+    "J005": "depends on a numeric comparison; compare in code or describe bands in criteria",
+    "J006": "looks like a multi-hop question; split into atomic questions",
+    "J007": "instructions are very short; Jev will not infer intent",
+    "J008": "subjective wording with no criteria; define the word in criteria",
+    "J009": "missing criteria (noul with none, or undescribed choice options)",
+    "J010": "compound yes/no question (and/or); ask one thing per noul",
+    "J011": "choice exceeds the option cap; use hierarchical classification",
+    "J012": "two options overlap heavily; merge or sharpen the boundary",
+    "J013": "score scale has too many levels; use 3 to 5",
+    "J014": "true and false criteria are identical",
+    "J015": "choice has fewer than two options",
+}
+
+
 def lint_question(qid: str, q: dict, max_options: int = 255) -> list[dict]:
     text = _text_of(q)
     instructions = str(q.get("instructions") or "")
@@ -299,6 +318,19 @@ def main(argv: list[str] | None = None) -> int:
         if env_sev and env_sev in SEVERITIES:
             severity = env_sev
     out_path = ""
+    if "--explain" in argv:
+        idx = argv.index("--explain")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--explain needs a RULE value\n")
+            return 2
+        rule = argv[idx + 1].strip().upper()
+        if rule not in RULES:
+            sys.stderr.write(
+                "unknown rule %r (rules: %s)\n" % (rule, ", ".join(sorted(RULES)))
+            )
+            return 2
+        sys.stdout.write("%s: %s\n" % (rule, RULES[rule]))
+        return 0
     if "--out" in argv:
         idx = argv.index("--out")
         if idx + 1 >= len(argv):

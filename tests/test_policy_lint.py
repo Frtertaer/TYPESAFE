@@ -673,6 +673,22 @@ class WatchFlagTests(unittest.TestCase):
             rc = policy_lint.main(["a.json", "b.json", "--fix"])
         self.assertEqual(rc, 2)
 
+    def test_explain_prints_rule_description(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = policy_lint.main(["--explain", "P004"])
+        self.assertEqual(rc, 0)
+        self.assertIn("P004:", buf.getvalue())
+        self.assertIn("ordering", buf.getvalue())
+
+    def test_explain_unknown_rule_rc2(self) -> None:
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            rc = policy_lint.main(["--explain", "P999"])
+        self.assertEqual(rc, 2)
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            rc = policy_lint.main(["--explain"])
+        self.assertEqual(rc, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -949,6 +949,22 @@ class ApplyFixesTests(unittest.TestCase):
         self.assertEqual(criteria["jwtlib"], "jwtlib")
         self.assertEqual(criteria["other"], "other")
         self.assertEqual(criteria["mine"], "keep")
+
+    def test_explain_prints_rule_description(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = question_lint.main(["--explain", "J012"])
+        self.assertEqual(rc, 0)
+        self.assertIn("J012:", buf.getvalue())
+        self.assertIn("overlap", buf.getvalue())
+
+    def test_explain_unknown_rule_rc2(self) -> None:
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            rc = question_lint.main(["--explain", "J999"])
+        self.assertEqual(rc, 2)
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            rc = question_lint.main(["--explain"])
+        self.assertEqual(rc, 2)
 
 
 if __name__ == "__main__":

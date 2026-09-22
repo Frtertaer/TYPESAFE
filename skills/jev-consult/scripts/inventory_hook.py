@@ -616,8 +616,21 @@ def main(argv: list[str] | None = None) -> int:
                 verdict_path = argv[idx + 1]
         ticks = 0
         tick: dict = {}
+        verdict_ok = True
+
+        def _write_verdict() -> bool:
+            return _watch.write_verdict(
+                verdict_path,
+                {
+                    "verdict": "pass" if tick.get("winner") else "fail",
+                    "ticks": ticks,
+                    "winner": tick.get("winner"),
+                    "keys": tick.get("keys", []),
+                },
+            )
+
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
-            tick: dict = {"ts": int(time.time())}
+            tick = {"ts": int(time.time())}
             try:
                 if file_path:
                     raw = Path(file_path).read_text(encoding="utf-8")
@@ -633,16 +646,10 @@ def main(argv: list[str] | None = None) -> int:
             )
             _watch.emit(tick, watch_out, quiet=quiet, bad=not tick["winner"])
             ticks += 1
+            if verdict_path and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
             time.sleep(watch_seconds)
-        if verdict_path and not _watch.write_verdict(
-            verdict_path,
-            {
-                "verdict": "pass" if tick.get("winner") else "fail",
-                "ticks": ticks,
-                "winner": tick.get("winner"),
-                "keys": tick.get("keys", []),
-            },
-        ):
+        if verdict_path and verdict_ok and not _write_verdict():
             return 1
         return 0 if tick["winner"] else 1
     if not raw:

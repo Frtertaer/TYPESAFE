@@ -279,6 +279,8 @@ def main(argv: list[str] | None = None) -> int:
         }
 
     def _write_verdict(checks_now: list[dict]) -> bool:
+        if not args.verdict:
+            return True
         try:
             Path(args.verdict).write_text(
                 json.dumps(_verdict_payload(checks_now), indent=2) + "\n",
@@ -298,6 +300,7 @@ def main(argv: list[str] | None = None) -> int:
         count = 0
         last: dict = {}
         last_checks: list[dict] = []
+        verdict_ok = True
         while True:
             cur = collect()
             failed = sum(1 for c in cur if not c["ok"])
@@ -310,12 +313,14 @@ def main(argv: list[str] | None = None) -> int:
             _watch.emit(last, args.out, quiet=args.quiet, bad=not last["ok"])
             last_checks = cur
             count += 1
+            if verdict_ok and not _write_verdict(last_checks):
+                verdict_ok = False  # warn once, stop retrying
             if max_ticks and count >= max_ticks:
                 break
             if dead and _time.time() >= dead:
                 break
             _time.sleep(args.watch)
-        if args.verdict and not _write_verdict(last_checks):
+        if args.verdict and verdict_ok and not _write_verdict(last_checks):
             return 1
         return 0 if last["ok"] else 1
     checks = collect()

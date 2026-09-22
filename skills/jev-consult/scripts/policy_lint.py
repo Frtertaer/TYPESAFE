@@ -541,6 +541,21 @@ def main(argv: list[str] | None = None) -> int:
         ticks = 0
         dead = _watch.deadline("JEV_PLINT_WATCH_SECS", watch_max_arg)
         tick: dict = {}
+        verdict_ok = True
+
+        def _write_verdict(rc_now: int) -> bool:
+            return _watch.write_verdict(
+                verdict_path,
+                {
+                    "verdict": "fail" if rc_now else "pass",
+                    "ticks": ticks,
+                    "findings": tick.get("findings", 0),
+                    "errors": tick.get("errors", 0),
+                    "warnings": tick.get("warnings", 0),
+                    "infos": tick.get("infos", 0),
+                },
+            )
+
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             rows = lint_policy(policy)
             tick = {
@@ -552,23 +567,17 @@ def main(argv: list[str] | None = None) -> int:
             }
             _watch.emit(tick, out_path, quiet=quiet, bad=tick["errors"] or (strict and tick["findings"]))
             ticks += 1
+            if verdict_path and verdict_ok:
+                rc_now = 1 if (tick["errors"] or (strict and tick["findings"])) else 0
+                if not _write_verdict(rc_now):
+                    verdict_ok = False  # warn once, stop retrying
             _time.sleep(watch_seconds)
             try:
                 policy = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 pass
         rc = 1 if (tick.get("errors", 0) or (strict and tick.get("findings", 0))) else 0
-        if verdict_path and not _watch.write_verdict(
-            verdict_path,
-            {
-                "verdict": "fail" if rc else "pass",
-                "ticks": ticks,
-                "findings": tick.get("findings", 0),
-                "errors": tick.get("errors", 0),
-                "warnings": tick.get("warnings", 0),
-                "infos": tick.get("infos", 0),
-            },
-        ):
+        if verdict_path and verdict_ok and not _write_verdict(rc):
             return 1
         return rc
     findings = lint_policy(policy)

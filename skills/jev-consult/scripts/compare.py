@@ -192,6 +192,8 @@ def _write_verdict(path: str, tick: dict[str, Any]) -> None:
         )
     except OSError as exc:
         sys.stderr.write("--verdict failed: %s\n" % exc)
+        return False
+    return True
 
 
 def strict_failures(rows: list[dict[str, Any]], live: bool) -> list[str]:
@@ -256,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--md", action="store_true", help="Print rows as a Markdown table")
     parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH")
     parser.add_argument("--report", metavar="PATH", default="", help="Write a markdown compare report (verdict + per-case table) to PATH; with --json writes the report object instead")
-    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, cases, failures} JSON to PATH (in --watch mode records the final pass)")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, cases, failures} JSON to PATH (in --watch mode refreshed every tick)")
     parser.add_argument("--cases", default=os.environ.get("JEV_COMPARE_CASES", "") or None, help="Path to compare-cases.json")
     parser.add_argument(
         "--only",
@@ -286,6 +288,7 @@ def main(argv: list[str] | None = None) -> int:
         max_ticks = _watch.cap("JEV_COMPARE_WATCH_MAX", args.max_ticks)
         ticks = 0
         dead = _watch.deadline("JEV_COMPARE_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        verdict_ok = True
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             cur = run(
                 live=args.live,
@@ -300,8 +303,10 @@ def main(argv: list[str] | None = None) -> int:
             }
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["failures"]))
             ticks += 1
+            if args.verdict and verdict_ok and not _write_verdict(args.verdict, tick):
+                verdict_ok = False  # warn once, stop retrying
             _time.sleep(args.watch)
-        if args.verdict:
+        if args.verdict and verdict_ok:
             _write_verdict(args.verdict, tick)
         return 0 if tick["failures"] == 0 else 1
     result = run(

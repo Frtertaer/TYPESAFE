@@ -1250,6 +1250,19 @@ def cmd_compact(args: argparse.Namespace) -> int:
         ticks = 0
         dead = _watch.deadline("JEV_COMPACT_WATCH_SECS", getattr(args, "watch_max", 0.0))
         cur: dict[str, Any] = {}
+        verdict_ok = True
+
+        def _write_verdict() -> bool:
+            return _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "fallback" if cur.get("stats", {}).get("fallback") else "ok",
+                    "ticks": ticks,
+                    "reduction": cur.get("stats", {}).get("reduction"),
+                    "fallback": bool(cur.get("stats", {}).get("fallback")),
+                },
+            )
+
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             if args.file != "-":
                 try:
@@ -1269,16 +1282,10 @@ def cmd_compact(args: argparse.Namespace) -> int:
             }
             _watch.emit(tick, getattr(args, "out", "") or None, quiet=args.quiet, bad=tick["fallback"])
             ticks += 1
+            if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
             _time.sleep(args.watch)
-        if getattr(args, "verdict", "") and not _watch.write_verdict(
-            args.verdict,
-            {
-                "verdict": "fallback" if cur.get("stats", {}).get("fallback") else "ok",
-                "ticks": ticks,
-                "reduction": cur.get("stats", {}).get("reduction"),
-                "fallback": bool(cur.get("stats", {}).get("fallback")),
-            },
-        ):
+        if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
             return 1
         return 1 if cur.get("stats", {}).get("fallback") else 0
     result = compact_or_keep(messages, asker, options)

@@ -459,6 +459,19 @@ def main() -> int:
         ticks = 0
         dead = _watch.deadline("JEV_CATALOG_WATCH_SECS", getattr(args, "watch_max", 0.0))
         tick: dict = {}
+        verdict_ok = True
+
+        def _write_verdict() -> bool:
+            return _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "hits" if tick.get("hits") else "none",
+                    "ticks": ticks,
+                    "hits": tick.get("hits", 0),
+                    "cached": bool(tick.get("cached")),
+                },
+            )
+
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             tick = {"ts": int(time.time())}
             try:
@@ -470,16 +483,10 @@ def main() -> int:
                 tick["cached"] = False
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["hits"]))
             ticks += 1
+            if args.verdict and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
             time.sleep(args.watch)
-        if args.verdict and not _watch.write_verdict(
-            args.verdict,
-            {
-                "verdict": "hits" if tick.get("hits") else "none",
-                "ticks": ticks,
-                "hits": tick.get("hits", 0),
-                "cached": bool(tick.get("cached")),
-            },
-        ):
+        if args.verdict and verdict_ok and not _write_verdict():
             return 1
         return 0
     if dest == "auto":

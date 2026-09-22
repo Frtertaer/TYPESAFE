@@ -917,6 +917,20 @@ def main(argv: list[str] | None = None) -> int:
         total_added = 0
         total_removed = 0
         tick: dict = {}
+        verdict_ok = True
+
+        def _write_verdict() -> bool:
+            return _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "removed" if tick.get("removed") else "ok",
+                    "count": tick.get("count", 0),
+                    "added": total_added,
+                    "removed": total_removed,
+                    "ticks": ticks,
+                },
+            )
+
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             cur_keys = {
                 str(e.get("sha") or e.get("ts") or json.dumps(e, sort_keys=True, default=str))
@@ -939,31 +953,16 @@ def main(argv: list[str] | None = None) -> int:
             _watch.emit(tick, getattr(args, "out", "") or None, quiet=args.quiet, bad=bool(tick.get("added") or tick.get("removed")))
             prev_keys = cur_keys
             ticks += 1
+            if args.verdict and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
             time.sleep(args.watch)
             try:
                 fresh, _bad = load_entries(path)
                 entries = _filtered(fresh)
             except Exception:
                 pass
-        if getattr(args, "verdict", ""):
-            try:
-                Path(args.verdict).write_text(
-                    json.dumps(
-                        {
-                            "verdict": "removed" if tick.get("removed") else "ok",
-                            "count": tick.get("count", 0),
-                            "added": total_added,
-                            "removed": total_removed,
-                            "ticks": ticks,
-                        },
-                        indent=2,
-                    )
-                    + "\n",
-                    encoding="utf-8",
-                )
-            except OSError as exc:
-                sys.stderr.write("--verdict failed: %s\n" % exc)
-                return 1
+        if args.verdict and verdict_ok and not _write_verdict():
+            return 1
         return 1 if tick.get("removed") else 0
 
     if args.prune:

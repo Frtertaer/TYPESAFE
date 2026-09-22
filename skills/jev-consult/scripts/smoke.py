@@ -385,6 +385,8 @@ def main(argv: list[str] | None = None) -> int:
         return rows
 
     def _write_verdict(steps_now: list[dict]) -> bool:
+        if not args.verdict:
+            return True
         try:
             Path(args.verdict).write_text(
                 json.dumps(
@@ -410,6 +412,7 @@ def main(argv: list[str] | None = None) -> int:
         ticks = 0
         dead = _watch.deadline("JEV_SMOKE_WATCH_SECS", getattr(args, "watch_max", 0.0))
         last_steps: list[dict] = []
+        verdict_ok = True
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             steps = _run_steps()
             tick = {
@@ -420,8 +423,10 @@ def main(argv: list[str] | None = None) -> int:
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["failed"]))
             last_steps = steps
             ticks += 1
+            if verdict_ok and not _write_verdict(last_steps):
+                verdict_ok = False  # warn once, stop retrying
             _time.sleep(args.watch)
-        if args.verdict and not _write_verdict(last_steps):
+        if args.verdict and verdict_ok and not _write_verdict(last_steps):
             return 1
         return 0 if tick["ok"] else 1
     steps = _run_steps()

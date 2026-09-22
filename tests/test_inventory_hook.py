@@ -493,6 +493,8 @@ class InventoryHookTests(unittest.TestCase):
             self.assertEqual(out["ticks"], 1)
             self.assertEqual(out["winner"], "ascii-art")
             self.assertIsInstance(out["keys"], list)
+            self.assertEqual(out["keys_count"], len(out["keys"]))
+            self.assertIn("elapsed_s", out)
 
     def test_watch_appends_ticks_to_out_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

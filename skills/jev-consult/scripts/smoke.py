@@ -557,6 +557,29 @@ def step_apply_fill(tmp: Path) -> dict:
                 ok = False
         else:
             ok = False
+    if ok:
+        # --json emits {"outcome": ...} objects instead of bare tokens
+        rc, out = _run(
+            [
+                str(SCRIPTS / "apply_fill.py"),
+                "--task",
+                "jwt",
+                "--harness",
+                "claude-code",
+                "--cwd",
+                str(tmp / "cwd"),
+                "--dry-run",
+                "--json",
+            ],
+            env=env,
+        )
+        if rc == 0:
+            try:
+                ok = json.loads(out.strip().splitlines()[0]).get("outcome") == "human"
+            except (ValueError, IndexError, AttributeError):
+                ok = False
+        else:
+            ok = False
     return _step("apply_fill", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

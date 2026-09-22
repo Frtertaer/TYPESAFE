@@ -462,6 +462,21 @@ def cmd_history(args: argparse.Namespace) -> int:
     if history is None:
         return 2
 
+    if getattr(args, "kinds", False):
+        counts: dict[str, int] = {}
+        for entry in history:
+            kind = str(entry.get("kind") or "")
+            counts[kind] = counts.get(kind, 0) + 1
+        rows = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps({"kinds": dict(rows)}, ensure_ascii=False, indent=2) + "\n"
+            )
+        else:
+            for kind, n in rows:
+                sys.stdout.write("%s %d\n" % (kind or "-", n))
+        return 0
+
     if getattr(args, "watch", 0.0) and args.watch > 0:
         import time as _time
 
@@ -1109,6 +1124,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--limit", type=int, help="Show only the last N picks")
     hist_cmd.add_argument("--reverse", action="store_true", help="List picks newest-first")
     hist_cmd.add_argument("--field", default="", help="Print only this field per pick (a.b digs into nested objects)")
+    hist_cmd.add_argument("--kinds", action="store_true", help="Print distinct history kinds with counts, sorted desc (empty kind shown as '-')")
     hist_cmd.add_argument("--since", default=None, help="Only picks with ts >= epoch seconds or ISO8601")
     hist_cmd.add_argument("--grep", default="", help="Only picks whose pick/kind contains SUBSTR (case-insensitive; default JEV_TRACE_HISTORY_GREP)")
     hist_cmd.add_argument("--before", default=None, help="Only picks with ts <= epoch seconds or ISO8601")

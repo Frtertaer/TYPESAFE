@@ -247,6 +247,32 @@ class TraceTests(unittest.TestCase):
             self.assertIn("scaffold", buf.getvalue())
             self.assertNotIn("jwt-auth", buf.getvalue())
 
+    def test_history_kinds_lists_distinct_with_counts(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            data = tr.empty()
+            data = tr.record(data, pick="a", kind="idf")
+            data = tr.record(data, pick="b", kind="idf")
+            data = tr.record(data, pick="c", kind="explicit")
+            data = tr.record(data, pick="d")  # no kind
+            tr.save(data, path)
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = tr.main(["--file", str(path), "history", "--kinds"])
+            self.assertEqual(code, 0)
+            self.assertEqual(buf.getvalue().splitlines(), ["idf 2", "- 1", "explicit 1"])
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = tr.main(["--file", str(path), "history", "--kinds", "--json"])
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                json.loads(buf.getvalue())["kinds"],
+                {"idf": 2, "": 1, "explicit": 1},
+            )
+
     def test_notes_grep_filters_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "trace.json"

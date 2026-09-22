@@ -1950,6 +1950,27 @@ def step_hook(tmp: Path) -> dict:
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 
+def step_install(tmp: Path) -> dict:
+    repo_root = SCRIPTS.parent.parent.parent
+    env = dict(os.environ)  # skillscan:allow
+    home = tmp / "install-home"
+    env["USERPROFILE"] = str(home)
+    env["HOME"] = str(home)
+    rc, out = _run(
+        [
+            str(repo_root / "scripts" / "install.py"),
+            "--dry-run",
+            "--agents",
+            "codex",
+        ],
+        env=env,
+    )
+    # dry-run plans into the redirected home and writes nothing there
+    writes = [p for p in home.rglob("*") if p.is_file()]
+    ok = rc == 0 and "skill ->" in out and not writes
+    return _step("install", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
+
+
 def step_compare(tmp: Path) -> dict:
     rc, out = _run([str(SCRIPTS / "compare.py"), "--strict"])
     ok = rc == 0 and "after_jev" in out
@@ -2379,6 +2400,7 @@ STEPS = (
     ("decisions", "step_decisions"),
     ("trace", "step_trace"),
     ("skill_lint", "step_skill_lint"),
+    ("install", "step_install"),
     ("question_lint", "step_question_lint"),
     ("compare", "step_compare"),
     ("apply_fill", "step_apply_fill"),

@@ -627,6 +627,40 @@ def decisions_log_path() -> Path | None:
     return Path.home() / ".cache" / "jev-consult" / "decisions.jsonl"
 
 
+def _file_lock(fd: int) -> None:
+    """Best-effort exclusive lock so concurrent appends never interleave.
+
+    O_APPEND alone is not atomic on Windows (it is seek-then-write), so a
+    byte-range lock serializes writers; POSIX fcntl.flock does the same."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX)
+    except (OSError, ImportError):
+        pass
+
+
+def _file_unlock(fd: int) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except (OSError, ImportError):
+        pass
+
+
 def append_decision(entry: dict, path: Path | None = None) -> None:
     target = path or decisions_log_path()
     if target is None:
@@ -639,7 +673,11 @@ def append_decision(entry: dict, path: Path | None = None) -> None:
             pass
         fd = os.open(str(target), os.O_APPEND | os.O_WRONLY | os.O_CREAT, 0o600)
         try:
-            os.write(fd, (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8"))
+            _file_lock(fd)
+            try:
+                os.write(fd, (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8"))
+            finally:
+                _file_unlock(fd)
         finally:
             os.close(fd)
     except OSError:

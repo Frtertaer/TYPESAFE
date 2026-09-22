@@ -1871,6 +1871,31 @@ def step_decisions(tmp: Path) -> dict:
         )
         ticks = [ln for ln in out.splitlines() if '"count"' in ln]
         ok = rc == 0 and len(ticks) == 1
+    if ok:
+        # --out inside --watch appends each tick line to the file
+        tick_log = tmp / "decisions-ticks.jsonl"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--out",
+                str(tick_log),
+            ]
+        )
+        try:
+            tick_lines = [
+                ln
+                for ln in tick_log.read_text(encoding="utf-8").splitlines()
+                if '"count"' in ln
+            ]
+            ok = rc == 0 and len(tick_lines) == 2
+        except OSError:
+            ok = False
     return _step("decisions", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

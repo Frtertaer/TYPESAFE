@@ -470,6 +470,23 @@ class InventoryHookTests(unittest.TestCase):
         self.assertEqual(report["dedupe_ttl_seconds"], 0.0)
         self.assertNotIn("api_key", buf.getvalue().lower())
 
+    def test_env_jq_prints_one_value(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_LIMIT": "3"}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--env", "--jq", "limit"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(buf.getvalue()), 3)
+
+    def test_env_jq_bad_key_is_usage_error(self) -> None:
+        buf = io.StringIO()
+        err = io.StringIO()
+        with patch("sys.stdout", buf), patch("sys.stderr", err):
+            rc = HOOK.main(["--env", "--jq", "nope"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(buf.getvalue(), "")
+        self.assertIn("bad --jq key", err.getvalue())
+
     def test_env_report_includes_cwd_sidecar_flags(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / ".jev-tools.json").write_text("{}", encoding="utf-8")

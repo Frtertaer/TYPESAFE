@@ -536,7 +536,22 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write(name + "\n")
         return 0
     if "--env" in argv:
-        text = json.dumps(env_report(), indent=2, sort_keys=True) + "\n"
+        report = env_report()
+        if "--jq" in argv:
+            idx = argv.index("--jq")
+            if idx + 1 < len(argv):
+                key = argv[idx + 1]
+                if key in report:
+                    sys.stdout.write(json.dumps(report[key]) + "\n")
+                    return 0
+                sys.stderr.write(
+                    "bad --jq key %r (env has: %s)\n"
+                    % (key, ", ".join(sorted(report)))
+                )
+                return 2
+            sys.stderr.write("--jq needs a KEY value\n")
+            return 2
+        text = json.dumps(report, indent=2, sort_keys=True) + "\n"
         if "--out" in argv:
             idx = argv.index("--out")
             if idx + 1 < len(argv):

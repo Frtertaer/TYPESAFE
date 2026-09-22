@@ -721,5 +721,46 @@ class WatchSecsEnvTests(unittest.TestCase):
             self.assertLessEqual(len(ticks), 10)
             self.assertGreaterEqual(len(ticks), 1)
 
+    def test_diff_baseline_detects_strict_regression(self) -> None:
+        import copy
+
+        base_rows = [compare.row_offline(c) for c in CASES["cases"]]
+        cur_rows = copy.deepcopy(base_rows)
+        cur_rows[0]["after"]["called_jev"] = False
+        diff = compare.diff_baseline(base_rows, cur_rows, live=False)
+        regs = diff["regressions"]
+        self.assertEqual(len(regs), 1)
+        self.assertEqual(regs[0]["id"], "drift_case")
+        self.assertEqual(regs[0]["why"], "strict_failure")
+        self.assertEqual(diff["unchanged"], len(base_rows) - 1)
+
+    def test_diff_baseline_added_removed_changed(self) -> None:
+        import copy
+
+        base_rows = [compare.row_offline(c) for c in CASES["cases"]]
+        cur_rows = copy.deepcopy(base_rows[1:])
+        new_row = copy.deepcopy(base_rows[0])
+        new_row["id"] = "brand_new"
+        cur_rows.append(new_row)
+        cur_rows[0]["after"]["last_pick"] = "different_pick"
+        diff = compare.diff_baseline(base_rows, cur_rows, live=False)
+        self.assertIn("brand_new", diff["added"])
+        self.assertIn("drift_case", diff["removed"])
+        self.assertIn(cur_rows[0]["id"], diff["changed"])
+
+    def test_diff_baseline_noul_drop_live(self) -> None:
+        import copy
+
+        base_rows = [compare.row_offline(c) for c in CASES["cases"]]
+        cur_rows = copy.deepcopy(base_rows)
+        for row in base_rows:
+            row["after"]["noul"] = 0.95
+        for row in cur_rows:
+            row["after"]["noul"] = 0.95
+        cur_rows[0]["after"]["noul"] = 0.8
+        diff = compare.diff_baseline(base_rows, cur_rows, live=True)
+        self.assertEqual(diff["regressions"][0]["why"], "noul_drop")
+        self.assertAlmostEqual(diff["regressions"][0]["delta"], -0.15)
+
 if __name__ == "__main__":
     unittest.main()

@@ -4885,6 +4885,92 @@ def step_compare(tmp: Path) -> dict:
                     ok = False
         finally:
             server.server_close()
+    if ok:
+        # --baseline writes the rows; --diff reports them unchanged
+        base_file = tmp / "compare-baseline.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compare.py"),
+                "--baseline",
+                str(base_file),
+                "--json",
+            ]
+        )
+        ok = rc == 0 and base_file.is_file()
+    if ok:
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compare.py"),
+                "--diff",
+                str(base_file),
+                "--json",
+            ]
+        )
+        try:
+            diff = json.loads(out).get("diff") or {}
+            ok = (
+                rc == 0
+                and diff.get("unchanged") == 4
+                and not diff.get("regressions")
+                and not diff.get("added")
+                and not diff.get("removed")
+            )
+        except ValueError:
+            ok = False
+    if ok:
+        # a baseline where a case still called Jev makes the current
+        # failing fixture read as a strict_failure regression
+        cases_file = tmp / "smoke-cases.json"
+        cases_file.write_text(
+            json.dumps(
+                {
+                    "cases": [
+                        {
+                            "id": "reg1",
+                            "defect": "smoke",
+                            "score": "on_track",
+                            "prompt": "p",
+                            "after": {"called_jev": False},
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        base_file.write_text(
+            json.dumps(
+                {
+                    "ts": 1,
+                    "rows": [
+                        {
+                            "id": "reg1",
+                            "after": {"called_jev": True},
+                            "before": {"called_jev": True},
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compare.py"),
+                "--cases",
+                str(cases_file),
+                "--diff",
+                str(base_file),
+                "--json",
+                "--strict",
+            ]
+        )
+        # merged stdout+stderr: --strict failures and regression lines
+        # land on stderr, the JSON payload on stdout
+        ok = (
+            rc == 1
+            and '"why": "strict_failure"' in out
+            and '"id": "reg1"' in out
+            and "strict: reg1: regressed vs baseline" in out
+        )
     return _step("compare", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

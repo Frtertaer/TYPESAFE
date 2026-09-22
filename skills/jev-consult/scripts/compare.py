@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -245,6 +246,78 @@ def run(
     }
 
 
+def _row_map(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {str(row.get("id") or "?"): row for row in rows if isinstance(row, dict)}
+
+
+def _failing_ids(rows: list[dict[str, Any]], live: bool) -> set[str]:
+    return {
+        f.split(":", 1)[0]
+        for f in strict_failures(rows, live)
+    }
+
+
+def diff_baseline(
+    baseline_rows: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+    live: bool,
+) -> dict[str, Any]:
+    """Per-case diff vs a saved baseline: strict-gate flips, noul drops,
+    called_jev flips, added/removed cases."""
+    before = _row_map(baseline_rows)
+    after = _row_map(rows)
+    was_failing = _failing_ids(list(before.values()), live)
+    now_failing = _failing_ids(list(after.values()), live)
+    regressions: list[dict[str, Any]] = []
+    improved: list[dict[str, Any]] = []
+    changed: list[str] = []
+    unchanged = 0
+    for cid, row in after.items():
+        old = before.get(cid)
+        if old is None:
+            continue  # added
+        if cid in now_failing and cid not in was_failing:
+            regressions.append({"id": cid, "why": "strict_failure"})
+            continue
+        if cid in was_failing and cid not in now_failing:
+            improved.append({"id": cid, "why": "strict_pass"})
+            continue
+        delta = ""
+        if live:
+            old_noul = (old.get("after") or {}).get("noul")
+            new_noul = (row.get("after") or {}).get("noul")
+            if isinstance(old_noul, (int, float)) and isinstance(new_noul, (int, float)):
+                delta = round(float(new_noul) - float(old_noul), 4)
+                if delta <= -0.1:
+                    regressions.append(
+                        {"id": cid, "why": "noul_drop", "delta": delta}
+                    )
+                    continue
+                if delta >= 0.1:
+                    improved.append(
+                        {"id": cid, "why": "noul_gain", "delta": delta}
+                    )
+                    continue
+        old_after = old.get("after") or {}
+        new_after = row.get("after") or {}
+        if (
+            old_after.get("last_pick") != new_after.get("last_pick")
+            or old_after.get("step") != new_after.get("step")
+            or old.get("defect") != row.get("defect")
+        ):
+            changed.append(cid)
+            continue
+        unchanged += 1
+    return {
+        "regressions": regressions,
+        "improved": improved,
+        "changed": sorted(changed),
+        "added": sorted(set(after) - set(before)),
+        "removed": sorted(set(before) - set(after)),
+        "unchanged": unchanged,
+    }
+
+
 def _atomic_write(path, text):
     tmp = path.with_name(path.name + ".tmp")
     try:
@@ -294,6 +367,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick with failures.")
+    parser.add_argument("--baseline", metavar="PATH", default="", help="Write the current rows to PATH as a baseline file for a later --diff")
+    parser.add_argument("--diff", metavar="PATH", default="", help="Load a --baseline file and add a diff block (regressions/improved/changed/added/removed) to the result payload; regressions also join the --strict failure list")
     args = parser.parse_args(argv)
     only = {s.strip() for s in args.only.split(",") if s.strip()} or None
     if args.watch and args.watch > 0:
@@ -342,6 +417,40 @@ def main(argv: list[str] | None = None) -> int:
         path=Path(args.cases) if args.cases else None,
         only=only,
     )
+    if args.baseline:
+        try:
+            _atomic_write(
+                Path(args.baseline),
+                json.dumps(
+                    {
+                        "ts": int(time.time()),
+                        "live": args.live,
+                        "rows": result["rows"],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+            )
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.baseline, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % args.baseline)
+    if args.diff:
+        try:
+            raw = json.loads(Path(args.diff).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            sys.stderr.write("cannot read baseline %s: %s\n" % (args.diff, exc))
+            return 2
+        base_rows = raw.get("rows") if isinstance(raw, dict) else raw
+        if not isinstance(base_rows, list):
+            sys.stderr.write("baseline %s has no rows list\n" % args.diff)
+            return 2
+        result["diff"] = diff_baseline(base_rows, result["rows"], args.live)
+        for entry in result["diff"]["regressions"]:
+            sys.stderr.write(
+                "regression: %s (%s)\n" % (entry["id"], entry["why"])
+            )
     if args.failing:
         failing_ids = {
             f.split(":", 1)[0]
@@ -422,6 +531,10 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(format_table(result["rows"], live=args.live))
     if args.strict:
         failures = strict_failures(result["rows"], args.live)
+        for entry in (result.get("diff") or {}).get("regressions", []):
+            failures.append(
+                "%s: regressed vs baseline (%s)" % (entry["id"], entry["why"])
+            )
         for failure in failures:
             sys.stderr.write("strict: %s\n" % failure)
         return 1 if failures else 0

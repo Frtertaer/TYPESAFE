@@ -287,6 +287,50 @@ class InventoryHookTests(unittest.TestCase):
                 "jev picked jwt-auth from the shortlist",
             )
 
+    def test_hook_note_env_tags_last_decision(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_NOTE": "ci-run-42"}):
+                HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "Add JWT access tokens in Python",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            self.assertEqual(HOOK.LAST_DECISION["note"], "ci-run-42")
+            # a second run without the env drops the tag
+            HOOK.handle(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "fresh prompt",
+                    "cwd": str(Path(tmp) / "o"),
+                },
+                items=items,
+                harness="claude-code",
+                pick_fn=skip_pick,
+            )
+            self.assertNotIn("note", HOOK.LAST_DECISION)
+
+    def test_hook_note_env_truncates_at_120(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_NOTE": "x" * 200}):
+                HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "jwt tokens",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            self.assertEqual(HOOK.LAST_DECISION["note"], "x" * 120)
+
     def test_question_marks_pick_source(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

@@ -317,6 +317,7 @@ def handle(
     prompt = extract_prompt(payload) or os.environ.get("JEV_HOOK_PROMPT", "").strip()
     if not prompt:
         return {}
+    note_tag = os.environ.get("JEV_HOOK_NOTE", "").strip()[:120] or None
     prompt_cap = hook_max_prompt_chars()
     prompt_truncated = bool(prompt_cap) and len(prompt) > prompt_cap
     if prompt_truncated:
@@ -392,6 +393,8 @@ def handle(
             "sidecar_age_s": sidecar_age_s,
             "shortlist_score_avg": _avg_score(picked, items or picked, prompt),
         }
+        if note_tag:
+            LAST_DECISION["note"] = note_tag
         append_decision(LAST_DECISION)
         if not note:
             return {}
@@ -481,6 +484,8 @@ def handle(
         "stale_sidecar": stale_match,
         "sidecar_age_s": sidecar_age_s,
     }
+    if note_tag:
+        LAST_DECISION["note"] = note_tag
     append_decision(LAST_DECISION)
     if note:
         extra["note_sha"] = hashlib.sha256(note.encode("utf-8")).hexdigest()[:12]

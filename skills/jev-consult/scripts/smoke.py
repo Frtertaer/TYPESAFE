@@ -5712,8 +5712,10 @@ def step_compact_hook(tmp: Path) -> dict:
         # lossless spill: the full 90k result lands on disk while the
         # emitted tool output is abridged
         try:
-            files = list(spill.iterdir())
-            ok = files and files[0].stat().st_size >= 90000
+            files = [
+                f for f in spill.iterdir() if f.name != "index.jsonl"
+            ]
+            ok = files and max(f.stat().st_size for f in files) >= 90000
         except OSError:
             ok = False
     if ok:

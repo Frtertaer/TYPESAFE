@@ -2302,7 +2302,11 @@ class SpillGcTests(unittest.TestCase):
                     oldest = p
             p = C.spill("fresh", spill_dir)
             self.assertIsNotNone(p)
-            files = [f for f in spill_dir.iterdir() if f.is_file()]
+            files = [
+                f
+                for f in spill_dir.iterdir()
+                if f.is_file() and f.name != "index.jsonl"
+            ]
             self.assertLessEqual(len(files), C.SPILL_MAX_FILES)
             self.assertTrue(p.is_file())
             self.assertFalse(oldest.exists())
@@ -2314,8 +2318,48 @@ class SpillGcTests(unittest.TestCase):
             for p in paths:
                 self.assertTrue(p.is_file())
             self.assertEqual(
-                len([f for f in spill_dir.iterdir() if f.is_file()]), 3
+                len(
+                    [
+                        f
+                        for f in spill_dir.iterdir()
+                        if f.is_file() and f.name != "index.jsonl"
+                    ]
+                ),
+                3,
             )
+
+    def test_spill_writes_index_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp)
+            path = C.spill("payload text", spill_dir)
+            self.assertIsNotNone(path)
+            index = spill_dir / "index.jsonl"
+            self.assertTrue(index.is_file())
+            rows = [
+                json.loads(line)
+                for line in index.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["name"], path.name)
+            self.assertEqual(rows[0]["bytes"], path.stat().st_size)
+            self.assertIsInstance(rows[0]["ts"], (int, float))
+
+    def test_list_spill_uses_index_and_skips_index_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp)
+            path = C.spill("payload text", spill_dir)
+            rows = C.list_spill(spill_dir)
+            self.assertEqual([r[0] for r in rows], [path])
+            self.assertEqual(rows[0][1], path.stat().st_size)
+            # a hand-written file with no index row still lists via stat
+            stray = spill_dir / "stray.txt"
+            stray.write_text("stray", encoding="utf-8")
+            rows = C.list_spill(spill_dir)
+            self.assertEqual({r[0].name for r in rows}, {path.name, "stray.txt"})
+            self.assertNotIn("index.jsonl", [r[0].name for r in rows])
+            removed = C.prune_spill(spill_dir, older_than=0)
+            self.assertEqual({p.name for p in removed}, {path.name, "stray.txt"})
+            self.assertTrue((spill_dir / "index.jsonl").is_file())
 
 
 if __name__ == "__main__":

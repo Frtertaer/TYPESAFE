@@ -97,6 +97,38 @@ LIVE_HEAD = 6000
 LIVE_TAIL = 2000
 SPILL_MAX_FILES = 200
 SPILL_MAX_BYTES = 256 * 1024 * 1024
+SPILL_INDEX_NAME = "index.jsonl"
+
+
+def _spill_index_path(target: Path) -> Path:
+    return target / SPILL_INDEX_NAME
+
+
+def _spill_index_append(target: Path, name: str, size: int) -> None:
+    try:
+        with _spill_index_path(target).open("a", encoding="utf-8") as fh:
+            fh.write(
+                json.dumps({"ts": time.time(), "name": name, "bytes": size}) + "\n"
+            )
+    except OSError:
+        pass
+
+
+def _spill_index_rows(target: Path) -> dict[str, dict]:
+    rows: dict[str, dict] = {}
+    try:
+        lines = _spill_index_path(target).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return rows
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        name = row.get("name")
+        if isinstance(name, str):
+            rows[name] = row
+    return rows
 
 
 def spill_dir_default() -> Path | None:
@@ -123,6 +155,7 @@ def spill(text: str, spill_dir: Path | None = None) -> Path | None:
         path = target / (digest + ".txt")
         if path.exists():
             path.touch()
+            _spill_index_append(target, path.name, path.stat().st_size)
         else:
             tmp = target / (digest + ".tmp.%d" % os.getpid())
             try:
@@ -137,6 +170,7 @@ def spill(text: str, spill_dir: Path | None = None) -> Path | None:
                     tmp.unlink()
                 except OSError:
                     pass
+            _spill_index_append(target, path.name, len(text.encode("utf-8")))
         entries: list[tuple[float, int, Path]] = []
         total_size = 0
         for candidate in target.iterdir():
@@ -145,6 +179,8 @@ def spill(text: str, spill_dir: Path | None = None) -> Path | None:
             except OSError:
                 continue
             if not stat.S_ISREG(info.st_mode):
+                continue
+            if candidate.name == SPILL_INDEX_NAME:
                 continue
             entries.append((info.st_mtime, info.st_size, candidate))
             total_size += info.st_size
@@ -1460,6 +1496,7 @@ def list_spill(directory: Path | None = None) -> list[tuple[Path, int, float]]:
     if target is None or not target.is_dir():
         return []
     rows: list[tuple[Path, int, float]] = []
+    indexed = _spill_index_rows(target)
     for candidate in sorted(target.iterdir()):
         try:
             info = candidate.stat()
@@ -1467,7 +1504,15 @@ def list_spill(directory: Path | None = None) -> list[tuple[Path, int, float]]:
             continue
         if not stat.S_ISREG(info.st_mode):
             continue
-        rows.append((candidate, info.st_size, info.st_mtime))
+        if candidate.name == SPILL_INDEX_NAME:
+            continue
+        row = indexed.get(candidate.name)
+        if row is not None and isinstance(row.get("bytes"), int):
+            rows.append(
+                (candidate, int(row["bytes"]), float(row.get("ts") or info.st_mtime))
+            )
+        else:
+            rows.append((candidate, info.st_size, info.st_mtime))
     return rows
 
 
@@ -1486,6 +1531,8 @@ def prune_spill(
         try:
             info = candidate.stat()
         except OSError:
+            continue
+        if candidate.name == SPILL_INDEX_NAME:
             continue
         if not stat.S_ISREG(info.st_mode) or info.st_mtime > cutoff:
             continue

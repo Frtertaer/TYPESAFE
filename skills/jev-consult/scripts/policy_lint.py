@@ -419,6 +419,9 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError) as exc:
             sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (diff_path, exc))
             return 2
+        if not isinstance(policy, dict) or not isinstance(other, dict):
+            sys.stdout.write("ERROR P000 $: --diff needs JSON objects on both sides\n")
+            return 2
         lines = diff_policy(other, policy)
         sys.stdout.write("diff %s -> %s\n" % (diff_path, path))
         for line in lines:

@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -593,6 +594,23 @@ def format_miss_note(script: Path) -> str:
     ) % (peer, catalog, apply_fill)
 
 
+def atomic_write_text(path: Path, text: str) -> None:
+    """Write via temp+replace so a crash or concurrent writer never leaves a torn file."""
+    fd, tmp = tempfile.mkstemp(
+        prefix=path.name + ".", dir=str(path.parent), suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as out:
+            out.write(text)
+        os.replace(tmp, str(path))
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def write_miss(path: Path, harness: str, task: str) -> None:
     task = (task or "")[:500]
     prior = read_sidecar(path)
@@ -604,7 +622,7 @@ def write_miss(path: Path, harness: str, task: str) -> None:
         "empty": True,
         "written_at": int(time.time()),
     }
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
 
 def clear_miss(path: Path) -> None:
@@ -673,7 +691,7 @@ def write_sidecar(
     }
     if extra:
         payload.update(extra)
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
 
 def sidecar_items(payload: dict) -> list[dict]:
@@ -983,7 +1001,7 @@ def write_ask(path: Path, task: str, harness: str, picked: list[dict]) -> None:
         "type": "noul",
         "instructions": "Is the installed shortlist enough for this task, so the coder can skip the marketplace search?",
     }
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:

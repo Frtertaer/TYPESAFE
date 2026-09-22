@@ -25,6 +25,7 @@ from inventory import (  # noqa: E402
     MISS_NAME,
     SIDECAR_NAME,
     append_decision,
+    atomic_write_text,
     clear_miss,
     clear_scan_cache,
     detect_harness,
@@ -122,7 +123,7 @@ def write_peer_ask(path: Path, task: str, dest: str, picked: list[dict]) -> None
             }
         },
     }
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 
 
 def run_jev(ask_path: Path) -> dict | None:

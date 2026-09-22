@@ -25,6 +25,7 @@ from inventory import (  # noqa: E402
     SIDECAR_NAME,
     UNTRUSTED_RULE,
     append_decision,
+    atomic_write_text,
     clear_miss,
     clear_scan_cache,
     detect_harness,
@@ -161,9 +162,7 @@ def write_catalog_cache(query: str, hits: list[dict], path: Path | None = None) 
         del raw[oldest]
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(
-            json.dumps(raw, indent=2) + "\n", encoding="utf-8"
-        )
+        atomic_write_text(target, json.dumps(raw, indent=2) + "\n")
     except OSError:
         pass
 
@@ -283,7 +282,7 @@ def write_catalog_ask(path: Path, task: str, dest: str, hits: list[dict]) -> Non
             }
         },
     }
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 
 
 def item_for_pick(pick: str, hits: list[dict]) -> dict | None:

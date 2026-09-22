@@ -378,6 +378,16 @@ class DiffFlagTests(unittest.TestCase):
         rc = policy_lint.main(["--diff"])
         self.assertEqual(rc, 2)
 
+    def test_diff_non_object_rc2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            other = Path(tmp) / "list.json"
+            other.write_text("[1, 2]", encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = policy_lint.main(["--diff", str(other)])
+        self.assertEqual(rc, 2)
+        self.assertIn("JSON objects", buf.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

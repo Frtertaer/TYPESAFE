@@ -1355,7 +1355,31 @@ def step_doctor(tmp: Path) -> dict:
         } <= agents_seen
     except ValueError:
         ok_json = False
-    return _step("doctor_json", ok_json and rc in (0, 1), "rc=%d json=%s" % (rc, ok_json))
+    ok = ok_json and rc in (0, 1)
+    if ok:
+        # --agents filters the checks to just the named harnesses
+        rc, out = _run(
+            [
+                str(SCRIPTS / "doctor.py"),
+                "--agents",
+                "codex",
+                "--home",
+                str(tmp / "home"),
+                "--hermes-home",
+                str(tmp / "hermes"),
+            ]
+        )
+        try:
+            payload = json.loads(out)
+            agents_seen = {
+                c.get("agent")
+                for c in payload.get("checks", [])
+                if c.get("agent") and c.get("agent") != "*"
+            }
+            ok = rc in (0, 1) and agents_seen == {"codex"}
+        except ValueError:
+            ok = False
+    return _step("doctor_json", ok, "rc=%d" % rc)
 
 
 def step_trigger_lint(tmp: Path) -> dict:

@@ -775,6 +775,17 @@ class TriggerEvalTests(unittest.TestCase):
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(payload["verdict"], "FAIL")
             self.assertIn("coverage", payload["failed_gates"])
+            self.assertEqual(payload["verdict_label"], "FAIL (coverage)")
+
+    def test_verdict_label_pass_when_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "verdict.json"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(["--verdict", str(path), "--quiet"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict_label"], "PASS")
 
     def test_verdict_watch_writes_final_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

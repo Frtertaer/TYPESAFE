@@ -299,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
         "--verdict",
         metavar="PATH",
         default="",
-        help="Write a slim verdict JSON ({verdict, ok, failed_gates, coverage, hits, total, worst_positive, best_negative, margin}) to PATH (with --watch, refreshed every tick).",
+        help="Write a slim verdict JSON ({verdict, verdict_label, ok, failed_gates, coverage, hits, total, worst_positive, best_negative, margin}) to PATH (with --watch, refreshed every tick).",
     )
     args = parser.parse_args(argv)
     if args.env:
@@ -447,6 +447,9 @@ def main(argv: list[str] | None = None) -> int:
                 failed.append("covers")
         payload = {
             "verdict": "PASS" if not failed else "FAIL",
+            "verdict_label": (
+                "PASS" if not failed else "FAIL (%s)" % ", ".join(failed)
+            ),
             "ok": bool(res["ok"]),
             "failed_gates": failed,
             "coverage": res["coverage"],

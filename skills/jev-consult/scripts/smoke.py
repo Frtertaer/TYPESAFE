@@ -461,6 +461,10 @@ def main(argv: list[str] | None = None) -> int:
             _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_SMOKE_WATCH_QUIET", args.quiet), bad=bool(tick["failed"]))
             last_steps = steps
             ticks += 1
+            sys.stderr.write(
+                "watch tick=%d ok=%s failed=%s\n"
+                % (ticks, tick["ok"], ",".join(tick["failed"]) or "-")
+            )
             if verdict_ok and not _write_verdict(
                 last_steps, elapsed_s=round(_time.time() - watch_t0, 2)
             ):

@@ -351,6 +351,23 @@ class SmokeTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(list(Path(tmp).iterdir()), [])
 
+    def test_watch_writes_stderr_tick_summary(self) -> None:
+        env = dict(os.environ, JEV_SMOKE_WATCH_MAX="2")
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "policy",
+             "--watch", "0.05"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        lines = [
+            l for l in proc.stderr.splitlines() if l.startswith("watch tick=")
+        ]
+        self.assertEqual(len(lines), 2)
+        self.assertIn("ok=True", lines[0])
+
     def test_watch_tick_reports_elapsed_s(self) -> None:
         def ok_step(tmp):
             return {"name": "policy", "ok": True, "detail": "fake"}

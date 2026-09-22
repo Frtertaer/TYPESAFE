@@ -1585,6 +1585,45 @@ def step_skill_lint(tmp: Path) -> dict:
             [str(SCRIPTS / "skill_lint.py"), str(skill), "--explain", "S001"]
         )
         ok = rc == 0 and "S001" in out
+    if ok:
+        # --strict/--severity floors stay green on the shipped skill
+        rc, out = _run(
+            [
+                str(SCRIPTS / "skill_lint.py"),
+                str(skill),
+                "--strict",
+                "--severity",
+                "info",
+            ]
+        )
+        ok = rc == 0
+    if ok:
+        # --watch emits {findings,errors} ticks; --verdict writes the probe;
+        # --out appends the payload file
+        verdict = tmp / "slint-verdict.json"
+        out_file = tmp / "slint-out.log"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "skill_lint.py"),
+                str(skill),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--verdict",
+                str(verdict),
+                "--out",
+                str(out_file),
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"findings"' in ln]
+        ok = rc == 0 and len(ticks) == 2 and out_file.is_file()
+        try:
+            ok = ok and json.loads(verdict.read_text(encoding="utf-8")).get(
+                "verdict"
+            ) == "pass"
+        except (OSError, ValueError):
+            ok = False
     return _step("skill_lint", ok, out.strip()[:160] or "rc=%d" % rc)
 
 

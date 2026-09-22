@@ -1846,5 +1846,49 @@ class SidecarSchemaTests(unittest.TestCase):
         self.assertEqual(inv.sidecar_items("junk"), [])
 
 
+class LogPermissionTests(unittest.TestCase):
+    """append_decision creates the log dir 0700 and the file 0600 —
+    the routing log records prompts, so it must not be world-readable."""
+
+    def test_creates_dir_0700_file_0600(self) -> None:
+        import stat
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "sub" / "decisions.jsonl"
+            modes = {}
+            real_open = os.open
+            real_chmod = os.chmod
+
+            def spy_open(path, flags, mode=0o777):
+                modes["file"] = mode
+                return real_open(path, flags, mode)
+
+            def spy_chmod(path, mode):
+                modes["dir"] = mode
+                return real_chmod(path, mode)
+
+            with patch.object(inv.os, "open", spy_open), patch.object(
+                inv.os, "chmod", spy_chmod
+            ):
+                inv.append_decision({"ts": 1, "harness": "h"}, log)
+            self.assertEqual(modes.get("file"), 0o600)
+            self.assertEqual(modes.get("dir"), 0o700)
+            self.assertTrue(log.exists())
+            if os.name == "posix":
+                self.assertEqual(
+                    stat.S_IMODE(log.stat().st_mode) & 0o077, 0
+                )
+
+    def test_append_failure_is_silent(self) -> None:
+        # fail-open: a read-only target must not raise
+        with tempfile.TemporaryDirectory() as tmp:
+            blocked = Path(tmp) / "nope" / "x" / "decisions.jsonl"
+            (Path(tmp) / "nope").mkdir()
+            # a file where the dir should be → mkdir fails
+            (Path(tmp) / "nope" / "x").write_text("file")
+            inv.append_decision({"ts": 1}, blocked)  # must not raise
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

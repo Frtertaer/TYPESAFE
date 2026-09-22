@@ -2581,6 +2581,24 @@ def step_hook(tmp: Path) -> dict:
         # exits 1 when no tick produced a winner
         ticks = [ln for ln in out.splitlines() if '"winner_changed"' in ln]
         ok = rc in (0, 1) and len(ticks) == 2 and 'watch tick=2' in out
+    if ok:
+        # --fail-fast stops the watch on the first winnerless tick
+        rc, out = _run(
+            [
+                str(SCRIPTS / "inventory_hook.py"),
+                "--file",
+                str(event_file),
+                "--watch",
+                "0.05",
+                "--max-ticks",
+                "5",
+                "--fail-fast",
+            ],
+            cwd=tmp,
+            env=env,
+        )
+        ticks = [ln for ln in out.splitlines() if '"winner_changed"' in ln]
+        ok = len(ticks) == 1 and 'watch tick=2' not in out
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

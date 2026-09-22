@@ -380,6 +380,26 @@ def step_compact_fake(tmp: Path) -> dict:
             ]
         )
         ok = rc == 1 and "check: FAIL" in out
+    if ok:
+        # --report writes the stats dict as JSON to PATH
+        report = tmp / "compact-report.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compact.py"),
+                str(transcript),
+                "--history",
+                "--fake",
+                "--min-reduction",
+                "0",
+                "--report",
+                str(report),
+            ]
+        )
+        try:
+            stats = json.loads(report.read_text(encoding="utf-8"))
+            ok = rc == 0 and isinstance(stats, dict) and bool(stats)
+        except (OSError, ValueError):
+            ok = False
     return _step("compact_fake", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

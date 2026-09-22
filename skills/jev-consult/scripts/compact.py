@@ -951,12 +951,14 @@ def decide_call(
     return {**base, "action": "drop_call", "reason": "call_dropped"}
 
 
-def truncated_result_text(text: str, is_error: bool, head_chars: int) -> str:
+def truncated_result_text(
+    text: str, is_error: bool, head_chars: int, spill_enabled: bool = True
+) -> str:
     if len(text) <= head_chars + 120:
         return text
     head = "%s\n" % text[:head_chars] if head_chars > 0 else ""
     extra = " (error)" if is_error else ""
-    saved = spill(text)
+    saved = spill(text) if spill_enabled else None
     if saved is not None:
         extra += "; full output saved: %s" % saved
     return "%s[fast-jev-compaction truncated %s chars of this tool result%s; re-run the tool if needed]" % (
@@ -971,6 +973,7 @@ def apply_decisions(
     decisions: list[dict[str, Any]],
     calls: list[ToolCall],
     head_chars: int,
+    spill_enabled: bool = True,
 ) -> list[dict[str, Any]]:
     by_id = {call.id: call for call in calls}
     actions: dict[str, str] = {}
@@ -999,6 +1002,7 @@ def apply_decisions(
                 tool.get("text") or "",
                 bool(tool.get("isError")),
                 head_chars,
+                spill_enabled,
             )
             if (tool.get("text") or "") == text:
                 return tool
@@ -1022,6 +1026,7 @@ def apply_decisions(
                 result.get("text") or "",
                 bool(result.get("isError")),
                 head_chars,
+                spill_enabled,
             )
             if text == (result.get("text") or ""):
                 return result
@@ -1144,7 +1149,10 @@ def compact(
         )
         for call in calls
     ]
-    kept = apply_decisions(messages, decisions, calls, head_chars)
+    kept = apply_decisions(
+        messages, decisions, calls, head_chars,
+        spill_enabled=not opts.get("no_spill"),
+    )
     return {
         "messages": kept,
         "decisions": decisions,
@@ -1223,6 +1231,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
         "min_reduction": args.min_reduction,
         "keep_text": args.keep_text or os.environ.get("JEV_KEEP_TEXT", ""),
         "trace": load_trace(args.trace),
+        "no_spill": bool(getattr(args, "dry_run", False) or getattr(args, "check", False)),
     }
     asker: Asker
     if args.fake:
@@ -1292,6 +1301,14 @@ def cmd_compact(args: argparse.Namespace) -> int:
         stats["messagesAfter"] = stats.get("messagesBefore")
         stats["charsAfter"] = stats.get("charsBefore")
         stats["dry_run"] = True
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps(
+                    {"dry_run": True, "stats": stats}, indent=2, ensure_ascii=False
+                )
+                + "\n"
+            )
+            return 0
     text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     if args.output:
         Path(args.output).write_text(text, encoding="utf-8")

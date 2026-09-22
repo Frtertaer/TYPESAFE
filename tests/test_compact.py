@@ -1154,6 +1154,81 @@ class CompactCliTests(unittest.TestCase):
         self.assertTrue(out["stats"]["fallback"])
         self.assertEqual(out["stats"]["messagesAfter"], out["stats"]["messagesBefore"])
 
+    def test_apply_decisions_no_spill_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp) / "spill"
+            long_text = "x" * 1000
+            messages = [
+                msg("user", "goal"),
+                msg("assistant", "", [use("u1", "Read", {"file_path": "a.ts"})]),
+                msg("user", "", results=[result("u1", long_text)]),
+                msg("assistant", "ok"),
+            ]
+            calls = C.collect_tool_calls(messages, 0)
+            decisions = [
+                {
+                    "id": calls[0].id,
+                    "tool": "Read",
+                    "keepCall": 0.9,
+                    "keepResult": 0.1,
+                    "action": "drop_result",
+                    "reason": "result_dropped",
+                }
+            ]
+            with patch.dict(os.environ, {"JEV_CONSULT_SPILL": str(spill_dir)}):
+                kept = C.apply_decisions(
+                    messages, decisions, calls, 300, spill_enabled=False
+                )
+                blob = json.dumps(kept)
+                self.assertIn("fast-jev-compaction truncated", blob)
+                self.assertNotIn("full output saved", blob)
+                self.assertFalse(spill_dir.exists())
+                # control: enabled writes the spill file
+                kept2 = C.apply_decisions(
+                    messages, decisions, calls, 300, spill_enabled=True
+                )
+                self.assertIn("full output saved", json.dumps(kept2))
+                self.assertTrue(spill_dir.exists() and any(spill_dir.iterdir()))
+
+    def test_dry_run_json_stats_only_and_no_spill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            spill_dir = Path(tmp) / "spill"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf), patch.dict(
+                os.environ, {"JEV_CONSULT_SPILL": str(spill_dir)}
+            ):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0",
+                     "--dry-run", "--json"]
+                )
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertTrue(out["dry_run"])
+            self.assertIn("stats", out)
+            self.assertNotIn("messages", out)
+            stats = out["stats"]
+            self.assertTrue(stats["dry_run"])
+            self.assertEqual(stats["messagesAfter"], stats["messagesBefore"])
+            # dry-run never writes spill payloads
+            self.assertFalse(spill_dir.exists() and any(spill_dir.iterdir()))
+
+    def test_dry_run_without_json_still_emits_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0",
+                     "--dry-run"]
+                )
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertIn("messages", out)
+            self.assertTrue(out["stats"]["dry_run"])
+
     def test_watch_emits_stats_ticks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

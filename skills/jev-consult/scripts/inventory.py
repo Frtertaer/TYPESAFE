@@ -1225,6 +1225,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
     parser.add_argument(
+        "--roots",
+        action="store_true",
+        help="Print the resolved scan roots for the harness (exists/items per dir) as JSON and exit.",
+    )
+    parser.add_argument(
         "--diff",
         metavar="OLD.json",
         default="",
@@ -1280,6 +1285,41 @@ def main(argv: list[str] | None = None) -> int:
     harness = detect_harness(Path(__file__)) if args.harness == "auto" else args.harness
     home = Path(args.home) if args.home else None
     hermes = Path(args.hermes_home) if args.hermes_home else None
+    if args.roots:
+        roots = roots_for(harness, home=home, hermes=hermes)
+        report = {
+            "harness": harness,
+            "skills": [
+                {
+                    "path": str(path),
+                    "exists": path.is_dir(),
+                    "items": len(iter_skills([path])) if path.is_dir() else 0,
+                }
+                for path in roots["skills"]
+            ],
+            "plugins": [
+                {
+                    "path": str(path),
+                    "exists": path.is_dir(),
+                    "items": (
+                        len(iter_claude_plugins([path]) + iter_plugin_yaml([path]))
+                        if path.is_dir()
+                        else 0
+                    ),
+                }
+                for path in roots["plugins"]
+            ],
+            "mcp_files": [
+                {
+                    "path": str(path),
+                    "exists": path.is_file(),
+                    "items": len(iter_mcp([path])) if path.is_file() else 0,
+                }
+                for path in roots["mcp_files"]
+            ],
+        }
+        sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        return 0
     items = scan(harness, home=home, hermes=hermes)
     kinds = {part.strip() for part in args.kind.split(",") if part.strip()}
     if kinds:

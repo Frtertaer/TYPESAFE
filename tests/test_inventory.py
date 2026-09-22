@@ -161,6 +161,50 @@ class InventoryTests(unittest.TestCase):
         self.assertIn("https://skills.sh", out)
         self.assertIn("smithery", out)
 
+    def test_roots_reports_dirs_and_counts(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            skill_dir = home / ".claude" / "skills" / "alpha"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: alpha\ndescription: fixture\n---\n", encoding="utf-8"
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    ["--harness", "claude-code", "--home", str(home), "--roots"]
+                )
+        self.assertEqual(code, 0)
+        report = json.loads(buf.getvalue())
+        self.assertEqual(report["harness"], "claude-code")
+        self.assertEqual(len(report["skills"]), 1)
+        self.assertTrue(report["skills"][0]["exists"])
+        self.assertEqual(report["skills"][0]["items"], 1)
+        self.assertTrue(str(report["skills"][0]["path"]).endswith(".claude\\skills") or str(report["skills"][0]["path"]).endswith(".claude/skills"))
+        self.assertEqual(len(report["mcp_files"]), 2)
+        self.assertFalse(report["mcp_files"][0]["exists"])
+
+    def test_roots_missing_dirs_report_zero(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    ["--harness", "grok", "--home", str(Path(tmp) / "empty"), "--roots"]
+                )
+        self.assertEqual(code, 0)
+        report = json.loads(buf.getvalue())
+        self.assertEqual(report["harness"], "grok")
+        self.assertFalse(report["skills"][0]["exists"])
+        self.assertEqual(report["skills"][0]["items"], 0)
+        self.assertEqual(report["plugins"], [])
+        self.assertEqual(report["mcp_files"], [])
+
     def test_watch_ticks_emit_jsonl(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

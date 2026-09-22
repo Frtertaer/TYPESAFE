@@ -202,6 +202,23 @@ def step_decisions(tmp: Path) -> dict:
             ok = json.loads(out).get("total") == 2
         except ValueError:
             ok = False
+    if ok:
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--statuses",
+                "--json",
+            ]
+        )
+        if rc == 0:
+            try:
+                ok = json.loads(out).get("counts", {}).get("winner") == 1
+            except (ValueError, AttributeError):
+                ok = False
+        else:
+            ok = False
     return _step("decisions", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

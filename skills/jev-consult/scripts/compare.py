@@ -176,6 +176,24 @@ def format_md(rows: list[dict[str, Any]], live: bool) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _write_verdict(path: str, tick: dict[str, Any]) -> None:
+    """Slim verdict JSON {verdict, cases, failures}; failures is a count or a list."""
+    failures = tick.get("failures")
+    n = len(failures) if isinstance(failures, list) else int(failures or 0)
+    payload = {
+        "verdict": "PASS" if n == 0 else "FAIL",
+        "cases": tick.get("cases"),
+        "failures": failures if isinstance(failures, list) else n,
+    }
+    try:
+        Path(path).write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        sys.stderr.write("--verdict failed: %s\n" % exc)
+
+
 def strict_failures(rows: list[dict[str, Any]], live: bool) -> list[str]:
     """CI gate: the guarded (after) side must have called Jev and, when live,
     scored at least noul_yes on the case's question."""
@@ -238,6 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--md", action="store_true", help="Print rows as a Markdown table")
     parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH")
     parser.add_argument("--report", metavar="PATH", default="", help="Write a markdown compare report (verdict + per-case table) to PATH; with --json writes the report object instead")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, cases, failures} JSON to PATH (in --watch mode records the final pass)")
     parser.add_argument("--cases", default=os.environ.get("JEV_COMPARE_CASES", "") or None, help="Path to compare-cases.json")
     parser.add_argument(
         "--only",
@@ -282,6 +301,8 @@ def main(argv: list[str] | None = None) -> int:
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["failures"]))
             ticks += 1
             _time.sleep(args.watch)
+        if args.verdict:
+            _write_verdict(args.verdict, tick)
         return 0 if tick["failures"] == 0 else 1
     result = run(
         live=args.live,
@@ -300,6 +321,14 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
             return 1
         sys.stderr.write("wrote %s\n" % out_path)
+    if args.verdict:
+        _write_verdict(
+            args.verdict,
+            {
+                "cases": len(result["rows"]),
+                "failures": strict_failures(result["rows"], args.live),
+            },
+        )
     if args.report:
         failures = strict_failures(result["rows"], args.live)
         if args.as_json:

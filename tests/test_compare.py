@@ -294,6 +294,38 @@ class CliTest(unittest.TestCase):
             self.assertIn("- cases: 2", text)
             self.assertIn("| case | defect |", text)
 
+    def test_cli_verdict_writes_slim_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            verdict = Path(tmp) / "verdict.json"
+            proc = self.run_cli("--cases", str(path), "--verdict", str(verdict))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "PASS")
+            self.assertEqual(payload["cases"], 2)
+            self.assertEqual(payload["failures"], [])
+
+    def test_cli_verdict_watch_writes_final_state(self) -> None:
+        import os
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            verdict = Path(tmp) / "verdict.json"
+            env = dict(os.environ, JEV_COMPARE_WATCH_MAX="1")
+            proc = subprocess.run(
+                [
+                    sys.executable, str(COMPARE),
+                    "--cases", str(path),
+                    "--watch", "0.01",
+                    "--verdict", str(verdict),
+                ],
+                capture_output=True, text=True, env=env,
+            )
+            self.assertIn(proc.returncode, (0, 1))
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertIn(payload["verdict"], ("PASS", "FAIL"))
+
     def test_cli_report_json_writes_object(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cases.json"

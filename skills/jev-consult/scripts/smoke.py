@@ -3180,6 +3180,46 @@ def step_peer_fill_status(tmp: Path) -> dict:
             ok = ok and "verdict" in json.loads(verdict.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             ok = False
+    if ok:
+        # --quiet keeps clean ticks off stdout (stderr still logs them)
+        clean_cwd = tmp / "peer-clean-cwd"
+        clean_cwd.mkdir(parents=True, exist_ok=True)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "peer_fill.py"),
+                "--cwd",
+                str(clean_cwd),
+                "--watch",
+                "0.05",
+                "--max-ticks",
+                "2",
+                "--quiet",
+            ]
+        )
+        stdout_ticks = [ln for ln in out.splitlines() if '"miss"' in ln]
+        ok = rc in (0, 1) and not stdout_ticks and "watch tick=2" in out
+    if ok:
+        # --fail-fast stops the watch on the first tick with a pending miss
+        miss_cwd = tmp / "miss-cwd"
+        miss_cwd.mkdir(parents=True, exist_ok=True)
+        (miss_cwd / ".jev-tools-miss.json").write_text(
+            json.dumps({"task": "smoke", "written_at": time.time()}),
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "peer_fill.py"),
+                "--cwd",
+                str(miss_cwd),
+                "--watch",
+                "0.05",
+                "--max-ticks",
+                "5",
+                "--fail-fast",
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"miss"' in ln]
+        ok = len(ticks) == 1 and "watch tick=2" not in out
     return _step("peer_fill_status", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

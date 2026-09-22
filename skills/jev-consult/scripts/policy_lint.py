@@ -11,9 +11,11 @@ not inside a hook at runtime.
 Findings: {"rule", "severity", "path", "message", "fix"},
 severity in ("error", "warn", "info").
 
-    python policy_lint.py [path/to/policy.json] [--strict]
+    python policy_lint.py [path/to/policy.json] [--strict] [--fix] [--dry-run]
 Exit 0 when no errors (warnings are fine), 1 on any error,
-2 when the file cannot be parsed at all.
+2 when the file cannot be parsed at all. --fix rewrites the file in
+place, dropping unknown top-level / escalate_if keys (P011/P010);
+--dry-run reports what --fix would change without writing.
 """
 from __future__ import annotations
 
@@ -352,6 +354,22 @@ def lint_policy(policy) -> list[dict]:
     return findings
 
 
+def fix_policy(policy) -> list[str]:
+    """Drop unknown keys (P011 top-level, P010 escalate_if); returns rule ids applied."""
+    applied: list[str] = []
+    if not isinstance(policy, dict):
+        return applied
+    for key in [k for k in policy if k not in KNOWN_TOP_KEYS]:
+        del policy[key]
+        applied.append("P011")
+    escalate = policy.get("escalate_if")
+    if isinstance(escalate, dict):
+        for key in [k for k in escalate if k not in KNOWN_ESCALATE_KEYS]:
+            del escalate[key]
+            applied.append("P010")
+    return applied
+
+
 def format_finding(finding: dict) -> str:
     return "%s %s %s: %s" % (
         finding["severity"].upper(),
@@ -388,6 +406,8 @@ def main(argv: list[str] | None = None) -> int:
     quiet = "--quiet" in argv
     as_json = "--json" in argv
     fail_fast = "--fail-fast" in argv
+    do_fix = "--fix" in argv
+    dry_run = "--dry-run" in argv
     severity = ""
     if "--severity" in argv:
         i = argv.index("--severity")
@@ -466,9 +486,13 @@ def main(argv: list[str] | None = None) -> int:
     argv = [
         a
         for a in argv
-        if a not in {"--strict", "--show", "--quiet", "--json", "--fail-fast"}
+        if a
+        not in {"--strict", "--show", "--quiet", "--json", "--fail-fast", "--fix", "--dry-run"}
     ]
     if len(argv) > 1:
+        if do_fix:
+            sys.stderr.write("--fix does not support multiple paths\n")
+            return 2
         results = []
         for arg in argv:
             fpath = Path(arg)
@@ -524,6 +548,20 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (path, exc))
         return 2
+    if do_fix:
+        applied = fix_policy(policy)
+        if applied and not dry_run:
+            try:
+                path.write_text(
+                    json.dumps(policy, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (path, exc))
+                return 1
+        verb = "would fix" if dry_run else "fixed"
+        for rule in sorted(set(applied)):
+            sys.stderr.write("%s %s x%d\n" % (verb, rule, applied.count(rule)))
     if diff_path is not None:
         try:
             other = json.loads(Path(diff_path).read_text(encoding="utf-8"))

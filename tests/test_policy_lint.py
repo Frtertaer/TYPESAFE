@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -615,6 +616,55 @@ class WatchFlagTests(unittest.TestCase):
             self.assertEqual(payload["ticks"], 1)
             self.assertIn("errors", payload)
             self.assertIn("warnings", payload)
+
+    def test_fix_drops_unknown_keys(self) -> None:
+        policy = base_policy()
+        policy["typo_key"] = 1
+        policy["escalate_if"]["typo_esc"] = 0.5
+        applied = policy_lint.fix_policy(policy)
+        self.assertEqual(applied, ["P011", "P010"])
+        self.assertNotIn("typo_key", policy)
+        self.assertNotIn("typo_esc", policy["escalate_if"])
+        self.assertEqual(policy_lint.fix_policy({}), [])
+
+    def test_fix_flag_rewrites_file(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "policy.json"
+            policy = base_policy()
+            policy["typo_key"] = 1
+            path.write_text(json.dumps(policy), encoding="utf-8")
+            err = io.StringIO()
+            with patch.object(sys, "stderr", err):
+                with redirect_stdout(io.StringIO()):
+                    rc = policy_lint.main([str(path), "--fix"])
+            self.assertEqual(rc, 0)
+            written = json.loads(path.read_text(encoding="utf-8"))
+            self.assertNotIn("typo_key", written)
+            self.assertIn("fixed P011 x1", err.getvalue())
+
+    def test_fix_dry_run_leaves_file(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "policy.json"
+            policy = base_policy()
+            policy["typo_key"] = 1
+            path.write_text(json.dumps(policy), encoding="utf-8")
+            err = io.StringIO()
+            with patch.object(sys, "stderr", err):
+                with redirect_stdout(io.StringIO()):
+                    rc = policy_lint.main([str(path), "--fix", "--dry-run"])
+            self.assertEqual(rc, 0)
+            written = json.loads(path.read_text(encoding="utf-8"))
+            self.assertIn("typo_key", written)
+            self.assertIn("would fix P011 x1", err.getvalue())
+
+    def test_fix_multi_path_rc2(self) -> None:
+        with patch.object(sys, "stderr", io.StringIO()):
+            rc = policy_lint.main(["a.json", "b.json", "--fix"])
+        self.assertEqual(rc, 2)
 
 
 if __name__ == "__main__":

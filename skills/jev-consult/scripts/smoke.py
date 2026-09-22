@@ -2415,6 +2415,47 @@ def step_question_lint(tmp: Path) -> dict:
                 )
             except (ValueError, AttributeError):
                 ok = False
+    if ok:
+        # --severity error filters the post-fix warns out; --strict exits 1
+        # on them; --out writes the findings payload to a file
+        rc, out = _run(
+            [
+                str(SCRIPTS / "question_lint.py"),
+                str(bad_req),
+                "--json",
+                "--severity",
+                "error",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("findings") == []
+        except ValueError:
+            ok = False
+        if ok:
+            rc, _ = _run(
+                [str(SCRIPTS / "question_lint.py"), str(bad_req), "--strict"]
+            )
+            ok = rc == 1
+        if ok:
+            qout = tmp / "qlint-out.json"
+            rc, _ = _run(
+                [
+                    str(SCRIPTS / "question_lint.py"),
+                    str(bad_req),
+                    "--json",
+                    "--out",
+                    str(qout),
+                ]
+            )
+            try:
+                ok = (
+                    rc == 0
+                    and isinstance(
+                        json.loads(qout.read_text(encoding="utf-8")), dict
+                    )
+                )
+            except (OSError, ValueError):
+                ok = False
     return _step("question_lint", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

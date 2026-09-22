@@ -1,0 +1,17 @@
+{
+  "state": {},
+  "questions": {
+    "approach": {
+      "type": "choice",
+      "instructions": "Which approach should the coder take?",
+      "criteria": {
+        "none": "stop",
+        "scaffold_defaults": "scaffold output minimal fields",
+        "concurrent_decisions": "racing appends atomic",
+        "hook_sigint": "SIGINT mid-run",
+        "junit_more": "more junit edges",
+        "examples_validate": "examples/*.json parse by consumer"
+      }
+    }
+  }
+}

@@ -56,7 +56,8 @@ def tokens(text):
 
 
 def description_of(skill_dir):
-    text = open(os.path.join(skill_dir, "SKILL.md")).read()
+    with open(os.path.join(skill_dir, "SKILL.md")) as fh:
+        text = fh.read()
     m = re.search(r"^description:\s*(.+?)^(?=[a-zA-Z-]+:|---)", text, re.S | re.M)
     return m.group(1) if m else ""
 
@@ -94,7 +95,8 @@ def main():
         if not os.path.exists(case_file):
             print("WARN  %s has no trigger-cases.json — add one" % name)
             continue
-        cases = json.load(open(case_file))["cases"]
+        with open(case_file) as fh:
+            cases = json.load(fh)["cases"]
         pos, neg = [], []
         for c in cases:
             if c.get("lexical") is False:

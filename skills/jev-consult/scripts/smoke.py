@@ -4954,6 +4954,73 @@ def step_trigger_eval(tmp: Path) -> dict:
                 for ln in out.splitlines()
                 if ln.strip()
             )
+    if ok:
+        # --env dumps the resolved config; --jq digs one field of it
+        rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--env"])
+        try:
+            envp = json.loads(out)
+            ok = rc == 0 and "margin" in envp and envp["cases_exists"]
+        except (ValueError, KeyError):
+            ok = False
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trigger_eval.py"),
+                    "--env",
+                    "--jq",
+                    "margin",
+                ]
+            )
+            try:
+                ok = rc == 0 and isinstance(json.loads(out), float)
+            except ValueError:
+                ok = False
+    if ok:
+        # --desc-tokens prints the scored token set; --unmatched adds
+        # per-row missed tokens; --margin overrides the verdict factor;
+        # --skill re-points at another skill dir
+        rc, out = _run(
+            [str(SCRIPTS / "trigger_eval.py"), "--desc-tokens"]
+        )
+        ok = rc == 0 and len(out.strip()) > 0
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trigger_eval.py"),
+                    "--json",
+                    "--unmatched",
+                ]
+            )
+            try:
+                misses = json.loads(out)
+                ok = rc == 0 and isinstance(misses, dict) and any(
+                    isinstance(v, list) and v for v in misses.values()
+                )
+            except (ValueError, AttributeError, TypeError):
+                ok = False
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trigger_eval.py"),
+                    "--margin",
+                    "1.0",
+                    "--json",
+                ]
+            )
+            try:
+                ok = rc in (0, 1) and json.loads(out).get("margin") == 1.0
+            except (ValueError, AttributeError):
+                ok = False
+        if ok:
+            rc, _ = _run(
+                [
+                    str(SCRIPTS / "trigger_eval.py"),
+                    "--skill",
+                    str(SCRIPTS.parent),
+                    "--quiet",
+                ]
+            )
+            ok = rc == 0
     return _step("trigger_eval", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

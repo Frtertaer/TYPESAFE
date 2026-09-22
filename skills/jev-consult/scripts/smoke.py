@@ -1430,6 +1430,26 @@ def step_compact_hook(tmp: Path) -> dict:
             ok = 0 < len(abridged) < 90000
         except (ValueError, AttributeError):
             ok = False
+    if ok:
+        # compact --list-spill reports the spilled payloads (path/size/mtime)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compact.py"),
+                "--list-spill",
+                "--spill-dir",
+                str(spill),
+                "--json",
+            ]
+        )
+        try:
+            payload = json.loads(out)
+            ok = (
+                rc == 0
+                and payload.get("count") == len(files)
+                and all(f.get("size", 0) > 0 for f in payload.get("files", []))
+            )
+        except ValueError:
+            ok = False
     return _step("compact_hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

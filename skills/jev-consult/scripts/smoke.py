@@ -809,6 +809,22 @@ def step_decisions(tmp: Path) -> dict:
         )
         ok = rc == 0 and "skill:alpha" in out and "skill:beta" in out
     if ok:
+        # --missing FIELD keeps only entries lacking the field
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(winner_log),
+                "--missing",
+                "winner",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 1
+        except ValueError:
+            ok = False
+    if ok:
         # --csv emits a header plus one row per entry, no stats
         rc, out = _run(
             [

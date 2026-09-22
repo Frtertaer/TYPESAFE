@@ -2380,6 +2380,66 @@ class SpillGcTests(unittest.TestCase):
             self.assertEqual({p.name for p in removed}, {path.name, "stray.txt"})
             self.assertTrue((spill_dir / "index.jsonl").is_file())
 
+    def test_spill_stats_reports_totals(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp)
+            C.spill("one", spill_dir)
+            C.spill("two two", spill_dir)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = C.main(["--spill-stats", "--spill-dir", str(spill_dir), "--json"])
+            self.assertEqual(rc, 0)
+            stats = json.loads(buf.getvalue())
+            self.assertEqual(stats["count"], 2)
+            self.assertEqual(stats["bytes"], 3 + 7)
+            self.assertIsNotNone(stats["oldest_ts"])
+            self.assertLessEqual(stats["oldest_ts"], stats["newest_ts"])
+            self.assertEqual(stats["dir"], str(spill_dir))
+
+    def test_spill_stats_text_and_empty_dir(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp) / "empty"
+            spill_dir.mkdir()
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = C.main(["--spill-stats", "--spill-dir", str(spill_dir)])
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertIn("count 0", out)
+            self.assertIn("bytes 0", out)
+            self.assertIn("oldest_ts -", out)
+
+    def test_spill_stats_out_writes_file(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp) / "spill"
+            spill_dir.mkdir()
+            C.spill("data", spill_dir)
+            out_f = Path(tmp) / "stats.txt"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = C.main(
+                    [
+                        "--spill-stats",
+                        "--spill-dir",
+                        str(spill_dir),
+                        "--out",
+                        str(out_f),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue(), "")
+            text = out_f.read_text(encoding="utf-8")
+            self.assertIn("count 1", text)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

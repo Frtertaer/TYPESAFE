@@ -1634,7 +1634,7 @@ def main(argv: list[str] | None = None) -> int:
         metavar="SECONDS",
         help="Unlink spill files older than SECONDS in the spill dir (or --spill-dir) and exit.",
     )
-    parser.add_argument("--spill-dir", help="Override spill directory for --prune-spill/--list-spill.")
+    parser.add_argument("--spill-dir", help="Override spill directory for --prune-spill/--list-spill/--spill-stats.")
     parser.add_argument(
         "--out",
         default="",
@@ -1645,6 +1645,11 @@ def main(argv: list[str] | None = None) -> int:
         "--list-spill",
         action="store_true",
         help="List spill files (name, bytes, mtime) and exit.",
+    )
+    parser.add_argument(
+        "--spill-stats",
+        action="store_true",
+        help="Print spill-dir totals ({dir,count,bytes,oldest_ts,newest_ts}) and exit.",
     )
     parser.add_argument(
         "--verify-spill",
@@ -1765,6 +1770,39 @@ def main(argv: list[str] | None = None) -> int:
             for path in orphans:
                 sys.stdout.write("orphan: %s\n" % path)
             sys.stdout.write("%d orphans\n" % len(orphans))
+        return 0
+    if getattr(args, "spill_stats", False):
+        directory = Path(args.spill_dir) if args.spill_dir else None
+        rows = list_spill(directory)
+        stats = {
+            "dir": str(directory or spill_dir_default() or ""),
+            "count": len(rows),
+            "bytes": sum(size for _path, size, _mtime in rows),
+            "oldest_ts": min((mtime for _p, _s, mtime in rows), default=None),
+            "newest_ts": max((mtime for _p, _s, mtime in rows), default=None),
+        }
+        if args.json:
+            text = json.dumps(stats, indent=2) + "\n"
+        else:
+            text = (
+                "dir %s\ncount %d\nbytes %d\noldest_ts %s\nnewest_ts %s\n"
+                % (
+                    stats["dir"],
+                    stats["count"],
+                    stats["bytes"],
+                    int(stats["oldest_ts"]) if stats["oldest_ts"] is not None else "-",
+                    int(stats["newest_ts"]) if stats["newest_ts"] is not None else "-",
+                )
+            )
+        if args.out:
+            try:
+                _atomic_write(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("--out failed: %s\n" % exc)
+                return 1
+            sys.stderr.write("wrote %s\n" % args.out)
+        else:
+            sys.stdout.write(text)
         return 0
     if args.list_spill:
         directory = Path(args.spill_dir) if args.spill_dir else None

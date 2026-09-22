@@ -497,6 +497,10 @@ def main(argv: list[str] | None = None) -> int:
             }
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(failed))
             ticks += 1
+            sys.stderr.write(
+                "watch tick=%d ok=%s coverage=%s gates=%s\n"
+                % (ticks, cur["ok"], cur["coverage"], ",".join(failed) or "-")
+            )
             _time.sleep(args.watch)
             try:
                 cur = evaluate(
@@ -511,6 +515,7 @@ def main(argv: list[str] | None = None) -> int:
             if cur is None:
                 _watch.emit({"ts": int(_time.time()), "ok": None}, args.out)
                 ticks += 1
+                sys.stderr.write("watch tick=%d ok=None\n" % ticks)
                 cur = result
         if cur is not None:
             _write_verdict(cur)

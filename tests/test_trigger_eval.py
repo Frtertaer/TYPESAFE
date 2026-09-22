@@ -372,6 +372,33 @@ class TriggerEvalTests(unittest.TestCase):
                     )
             self.assertEqual(rc, 0)
 
+    def test_watch_writes_per_tick_summary_to_stderr(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(
+                tmp,
+                [
+                    {
+                        "id": "p",
+                        "prompt": "jev consult pick decide between options choose approach wisely",
+                        "should_trigger": True,
+                    },
+                    {
+                        "id": "n",
+                        "prompt": "tell me a bedtime story about dragons",
+                        "should_trigger": False,
+                    },
+                ],
+            )
+            err = io.StringIO()
+            with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
+                with redirect_stdout(io.StringIO()), patch("sys.stderr", err):
+                    te.main(["--cases", str(path), "--watch", "0.01"])
+            line = err.getvalue()
+            self.assertIn("watch tick=1", line)
+            self.assertIn("ok=True", line)
+            self.assertIn("coverage=", line)
+            self.assertIn("gates=", line)
+
     def test_strict_coverage_requires_all_hits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = write_cases(

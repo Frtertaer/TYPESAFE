@@ -320,10 +320,24 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
                 return 1
             sys.stderr.write("wrote %d finding(s) to %s\n" % (len(rows), out_path))
+        rc_now = 1 if any(bad(r) for r in all_rows) else 0
+        if verdict_path:
+            if not _watch.write_verdict(
+                verdict_path,
+                {
+                    "verdict": "fail" if rc_now else "pass",
+                    "ticks": 1,
+                    "findings": len(all_rows),
+                    "errors": sum(1 for r in all_rows if r["severity"] == "error"),
+                    "warnings": sum(1 for r in all_rows if r["severity"] == "warn"),
+                    "infos": sum(1 for r in all_rows if r["severity"] == "info"),
+                },
+            ):
+                return 1
         if not as_json:
-            return 1 if any(bad(r) for r in all_rows) else 0
+            return rc_now
         sys.stdout.write(_json.dumps({"findings": rows}, indent=2) + "\n")
-        return 1 if any(bad(r) for r in all_rows) else 0
+        return rc_now
     n_err = 0
     n_warn = 0
     for path in paths:
@@ -344,6 +358,20 @@ def main(argv: list[str] | None = None) -> int:
             "%d findings (%d errors, %d warns) in %d files\n"
             % (n_err + n_warn, n_err, n_warn, len(paths))
         )
+    if verdict_path:
+        all_f = [f for path in paths for f in lint_skill(path)]
+        if not _watch.write_verdict(
+            verdict_path,
+            {
+                "verdict": "fail" if rc else "pass",
+                "ticks": 1,
+                "findings": len(all_f),
+                "errors": sum(1 for f in all_f if f["severity"] == "error"),
+                "warnings": sum(1 for f in all_f if f["severity"] == "warn"),
+                "infos": sum(1 for f in all_f if f["severity"] == "info"),
+            },
+        ):
+            return 1
     return rc
 
 

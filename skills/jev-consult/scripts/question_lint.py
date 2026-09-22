@@ -488,9 +488,21 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(format_finding(f) + "\n")
         if not quiet:
             sys.stdout.write("lint: %d finding(s)\n" % len(shown))
-    if any(f["severity"] == "error" for f in findings):
-        return 1
-    return 1 if strict and findings else 0
+    rc = 1 if any(f["severity"] == "error" for f in findings) or (strict and findings) else 0
+    if verdict_path:
+        if not _watch.write_verdict(
+            verdict_path,
+            {
+                "verdict": "fail" if rc else "pass",
+                "ticks": 1,
+                "findings": len(findings),
+                "errors": sum(1 for f in findings if f["severity"] == "error"),
+                "warnings": sum(1 for f in findings if f["severity"] == "warn"),
+                "infos": sum(1 for f in findings if f["severity"] == "info"),
+            },
+        ):
+            return 1
+    return rc
 
 
 if __name__ == "__main__":

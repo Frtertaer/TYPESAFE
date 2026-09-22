@@ -353,6 +353,18 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["ticks"], 2)
             self.assertEqual(payload["errors"], 0)
 
+    def test_nonwatch_verdict_writes_single_shot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(tmp, [dict(GOOD_CASE)])
+            verdict = Path(tmp) / "v.json"
+            with redirect_stdout(io.StringIO()):
+                rc = trigger_lint.main([str(path), "--verdict", str(verdict)])
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pass")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertEqual(payload["errors"], 0)
+
     def test_watch_rc_reflects_last_lint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             good = write_cases(tmp, [dict(GOOD_CASE)])

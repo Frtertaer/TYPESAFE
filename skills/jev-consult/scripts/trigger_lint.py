@@ -410,7 +410,21 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(
             "trigger_lint: %d error(s), %d warning(s), %d info\n" % (n_err, n_warn, n_info)
         )
-    return 1 if n_err or (strict and findings) else 0
+    rc = 1 if (n_err or (strict and findings)) else 0
+    if verdict_path:
+        if not _watch.write_verdict(
+            verdict_path,
+            {
+                "verdict": "fail" if rc else "pass",
+                "ticks": 1,
+                "findings": len(findings),
+                "errors": n_err,
+                "warnings": n_warn,
+                "infos": n_info,
+            },
+        ):
+            return 1
+    return rc
 
 
 if __name__ == "__main__":

@@ -803,6 +803,27 @@ class StandaloneCliTests(unittest.TestCase):
             self.assertEqual(payload["ticks"], 2)
             self.assertEqual(payload["errors"], 0)
 
+    def test_nonwatch_verdict_writes_single_shot(self) -> None:
+        request = {"state": {"task": "x"}, "questions": {"q": noul("Pick one.")}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            verdict = Path(tmp) / "v.json"
+            proc = subprocess.run(
+                [
+                    sys.executable, str(self.QLINT_PATH), str(path),
+                    "--verdict", str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pass")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertEqual(payload["errors"], 0)
+
     def test_watch_appends_ticks_to_out_file(self) -> None:
         import os as _os
 

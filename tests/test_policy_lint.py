@@ -580,6 +580,20 @@ class WatchFlagTests(unittest.TestCase):
             payload = json.loads(verdict.read_text(encoding="utf-8"))
             self.assertEqual(payload["verdict"], "pass")
 
+    def test_nonwatch_verdict_writes_single_shot(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            with redirect_stdout(io.StringIO()):
+                rc = policy_lint.main(["--verdict", str(verdict)])
+            self.assertIn(rc, (0, 1))
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertIn(payload["verdict"], ("pass", "fail"))
+            self.assertEqual(payload["ticks"], 1)
+            self.assertIn("errors", payload)
+            self.assertIn("warnings", payload)
+
 
 if __name__ == "__main__":
     unittest.main()

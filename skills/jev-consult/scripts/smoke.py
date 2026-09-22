@@ -272,6 +272,40 @@ def step_trace(tmp: Path) -> dict:
             ok = isinstance(json.loads(out), dict)
         except ValueError:
             ok = False
+    if ok:
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trace.py"),
+                "--file",
+                str(trace_file),
+                "record",
+                "--pick",
+                "smoke-pick",
+                "--note",
+                "smoke note",
+            ]
+        )
+        ok = rc == 0
+    if ok:
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trace.py"),
+                "--file",
+                str(trace_file),
+                "notes",
+                "--json",
+            ]
+        )
+        if rc == 0:
+            try:
+                ok = any(
+                    "smoke note" in str(n.get("text", ""))
+                    for n in json.loads(out)
+                )
+            except (ValueError, AttributeError):
+                ok = False
+        else:
+            ok = False
     return _step("trace", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

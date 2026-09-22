@@ -67,6 +67,25 @@ class LintCasesTests(unittest.TestCase):
         self.assertIn("T006", rules)  # short prompt
         self.assertIn("T007", rules)  # should_trigger not bool
 
+    def test_no_positive_cases_t010(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(
+                tmp, [{"id": "neg-x", "prompt": "hi", "should_trigger": False}]
+            )
+            findings = trigger_lint.lint_cases(path)
+            rules = {f["rule"] for f in findings}
+            self.assertIn("T010", rules)
+
+    def test_must_ask_uncovered_t011(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(
+                tmp,
+                [dict(GOOD_CASE, covers=["not_in_must_ask"])],
+            )
+            findings = trigger_lint.lint_cases(path)
+            rules = {f["rule"] for f in findings}
+            self.assertIn("T011", rules)
+
     def test_unknown_covers_kind_t008(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = write_cases(

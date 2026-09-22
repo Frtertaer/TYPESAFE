@@ -168,6 +168,17 @@ class LintSkillTests(unittest.TestCase):
             self.assertIn("name: myskill", path.read_text(encoding="utf-8"))
             self.assertIn("fixed S008", buf.getvalue())
 
+    def test_long_description_s006(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = GOOD.format(name="s").replace(
+                "description: A test skill.", "description: " + ("x" * 1100)
+            )
+            path = write_skill(root, "s", body)
+            findings = skill_lint.lint_skill(path)
+            rules = {f["rule"] for f in findings}
+            self.assertIn("S006", rules)
+
     def test_name_clean_casing_no_s008(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

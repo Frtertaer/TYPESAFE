@@ -367,6 +367,28 @@ class InventoryHookTests(unittest.TestCase):
             self.assertEqual(len(ticks), 1)
             self.assertIsNone(ticks[0]["winner"])
 
+    def test_watch_writes_stderr_tick_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload.json"
+            payload.write_text(
+                '{"event": "UserPromptSubmit", "prompt": "p"}', encoding="utf-8"
+            )
+            err = io.StringIO()
+            with patch.dict(
+                os.environ, {"JEV_HOOK_WATCH_MAX": "2", "JEV_HOOK_OFF": "1"}
+            ):
+                with patch("sys.stdout", io.StringIO()):
+                    with patch("sys.stderr", err):
+                        rc = HOOK.main(
+                            ["--file", str(payload), "--watch", "0.01"]
+                        )
+            self.assertEqual(rc, 1)
+            lines = [
+                l for l in err.getvalue().splitlines() if l.startswith("watch tick=")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertIn("winner=-", lines[0])
+
     def test_watch_tick_reports_winner_changed(self) -> None:
         calls = []
 

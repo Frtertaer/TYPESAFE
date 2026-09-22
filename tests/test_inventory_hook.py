@@ -319,6 +319,25 @@ class InventoryHookTests(unittest.TestCase):
             )
             self.assertNotIn("note", HOOK.LAST_DECISION)
 
+    def test_hook_note_env_tags_miss_marker(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_NOTE": "nightly"}):
+                HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "zzzqqq unrelated tokens",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            miss = json.loads(
+                (Path(tmp) / ".jev-tools-miss.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(miss.get("note"), "nightly")
+
     def test_hook_note_env_truncates_at_120(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

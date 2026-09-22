@@ -611,7 +611,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
-def write_miss(path: Path, harness: str, task: str) -> None:
+def write_miss(path: Path, harness: str, task: str, extra: dict | None = None) -> None:
     task = (task or "")[:500]
     prior = read_sidecar(path)
     if prior and sidecar_fresh(prior) and str(prior.get("task") or "") == task:
@@ -622,6 +622,8 @@ def write_miss(path: Path, harness: str, task: str) -> None:
         "empty": True,
         "written_at": int(time.time()),
     }
+    if extra:
+        payload.update(extra)
     _atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
 

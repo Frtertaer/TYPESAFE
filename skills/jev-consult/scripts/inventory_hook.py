@@ -503,7 +503,7 @@ def handle(
             if picked or no_miss:
                 clear_miss(miss_path)
             elif tokens(prompt):
-                write_miss(miss_path, harness, prompt)
+                write_miss(miss_path, harness, prompt, {"note": note_tag} if note_tag else None)
                 note = format_miss_note(FILL_SCRIPT)
             else:
                 clear_miss(miss_path)

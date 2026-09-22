@@ -971,6 +971,15 @@ def main(argv: list[str] | None = None) -> int:
             _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_DECISIONS_WATCH_QUIET", args.quiet), bad=bool(tick.get("added") or tick.get("removed")))
             prev_keys = cur_keys
             ticks += 1
+            sys.stderr.write(
+                "watch tick=%d count=%d added=%d removed=%d\n"
+                % (
+                    ticks,
+                    tick["count"],
+                    tick.get("added", 0),
+                    tick.get("removed", 0),
+                )
+            )
             if args.verdict and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
             if getattr(args, "fail_fast", False) and tick.get("removed"):

@@ -2143,6 +2143,26 @@ class PruneTest(unittest.TestCase):
             self.assertGreaterEqual(payload["elapsed_s"], 0.0)
             self.assertIn("delta_pct", payload)
 
+    def test_watch_writes_stderr_tick_summary(self):
+        import io
+        import os as _os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text('{"sha":"a"}\n', encoding="utf-8")
+            err = io.StringIO()
+            with patch.dict(_os.environ, {"JEV_DECISIONS_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", io.StringIO()):
+                    with patch.object(sys, "stderr", err):
+                        rc = decisions.main(
+                            ["--file", str(path), "--watch", "0.001"]
+                        )
+            self.assertEqual(rc, 0)
+            lines = [l for l in err.getvalue().splitlines() if l.startswith("watch tick=")]
+            self.assertEqual(len(lines), 2)
+            self.assertIn("count=1", lines[0])
+
     def test_watch_verdict_reports_newest_ts(self):
         import os as _os
         from unittest.mock import patch

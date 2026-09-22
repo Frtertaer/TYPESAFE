@@ -30,6 +30,11 @@ try:
 except ImportError:
     policy_lint = None
 
+try:
+    import _watch
+except ImportError:
+    _watch = None
+
 
 def policy_warnings(policy: dict[str, Any]) -> list[str]:
     if policy_lint is None:
@@ -520,6 +525,23 @@ def cmd_ask(args: argparse.Namespace) -> int:
             "warnings": warnings,
         }
     )
+    verdict_path = getattr(args, "verdict", "") or ""
+    if verdict_path and _watch is not None:
+        picks = {}
+        for qid, ans in answers.items():
+            if isinstance(ans, dict) and ans.get("choice") is not None:
+                picks[qid] = ans.get("choice")
+        _watch.write_verdict(
+            verdict_path,
+            {
+                "verdict": "proceed"
+                if decision["action"] == "proceed"
+                else "escalate",
+                "action": decision["action"],
+                "picks": picks,
+                "warnings": len(warnings),
+            },
+        )
     if decision["action"] != "proceed":
         return ASK_ESCALATE_EXIT
     return 0
@@ -755,6 +777,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="HTTP timeout seconds (default JEV_TIMEOUT env or 60)",
+    )
+    ask.add_argument(
+        "--verdict",
+        metavar="PATH",
+        default="",
+        help="Write a slim {verdict: proceed|escalate, action, picks, warnings} JSON to PATH after the ask (atomic via .tmp+rename).",
     )
     ask.set_defaults(func=cmd_ask)
     decide_cmd = sub.add_parser("decide", help="Apply policy to an answers object")

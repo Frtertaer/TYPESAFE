@@ -855,6 +855,45 @@ class JevInternalsTests(unittest.TestCase):
             rc = jev.main(["scaffold", "approach"])
         self.assertEqual(rc, jev.ASK_ESCALATE_EXIT)
 
+    def test_ask_verdict_writes_outcome_json(self) -> None:
+        def fake_post(state, questions, policy, model=None, timeout=60, retries=1):
+            return {
+                "model": "m1",
+                "answers": {
+                    "q": {"choice": "a", "confidence": 0.99, "probabilities": {"a": 0.99, "b": 0.01}}
+                },
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "req.json"
+            req.write_text(
+                json.dumps(
+                    {
+                        "state": {"task": "t"},
+                        "questions": {
+                            "q": {
+                                "type": "choice",
+                                "instructions": "pick one",
+                                "criteria": {"a": "x", "b": "y"},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            verdict = Path(tmp) / "v.json"
+            buf = io.StringIO()
+            with patch.object(jev, "post_systemone", side_effect=fake_post), patch.object(
+                sys, "stdout", buf
+            ):
+                rc = jev.main(["ask", str(req), "--verdict", str(verdict)])
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertIn(payload["verdict"], ("proceed", "escalate"))
+            self.assertEqual(payload["verdict"], "proceed" if rc == 0 else "escalate")
+            self.assertEqual(payload["picks"], {"q": "a"})
+            self.assertIn("action", payload)
+            self.assertFalse((Path(tmp) / "v.json.tmp").exists())
+
     def test_ask_dry_never_posts(self) -> None:
         def _boom(*a, **k):
             raise AssertionError("post called")

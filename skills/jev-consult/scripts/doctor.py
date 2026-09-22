@@ -234,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Comma-separated check names to run (e.g. skills,hooks_json); default: all.",
     )
     parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH (with --watch: append each tick line)")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON ({verdict, checks, failed, agents}) to PATH when finished.")
     parser.add_argument(
         "--watch",
         type=float,
@@ -266,6 +267,28 @@ def main(argv: list[str] | None = None) -> int:
             checks = [c for c in checks if c["check"] in only]
         return checks
 
+    def _verdict_payload(checks_now: list[dict]) -> dict:
+        agents: dict[str, bool] = {}
+        for c in checks_now:
+            agents[c["agent"]] = agents.get(c["agent"], True) and c["ok"]
+        return {
+            "verdict": "pass" if all(c["ok"] for c in checks_now) else "fail",
+            "checks": len(checks_now),
+            "failed": sum(1 for c in checks_now if not c["ok"]),
+            "agents": agents,
+        }
+
+    def _write_verdict(checks_now: list[dict]) -> bool:
+        try:
+            Path(args.verdict).write_text(
+                json.dumps(_verdict_payload(checks_now), indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            sys.stderr.write("--verdict failed: %s\n" % exc)
+            return False
+        return True
+
     if args.watch:
         import time as _time
         from datetime import datetime, timezone
@@ -274,6 +297,7 @@ def main(argv: list[str] | None = None) -> int:
         dead = _watch.deadline("JEV_DOCTOR_WATCH_SECS", getattr(args, "watch_max", 0.0))
         count = 0
         last: dict = {}
+        last_checks: list[dict] = []
         while True:
             cur = collect()
             failed = sum(1 for c in cur if not c["ok"])
@@ -284,12 +308,15 @@ def main(argv: list[str] | None = None) -> int:
                 "ok": failed == 0,
             }
             _watch.emit(last, args.out, quiet=args.quiet, bad=not last["ok"])
+            last_checks = cur
             count += 1
             if max_ticks and count >= max_ticks:
                 break
             if dead and _time.time() >= dead:
                 break
             _time.sleep(args.watch)
+        if args.verdict and not _write_verdict(last_checks):
+            return 1
         return 0 if last["ok"] else 1
     checks = collect()
     ok = all(c["ok"] for c in checks)
@@ -308,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
             return 1
         sys.stderr.write("wrote %s\n" % args.out)
+    if args.verdict and not _write_verdict(checks):
+        return 1
     return 0 if ok else 1
 
 

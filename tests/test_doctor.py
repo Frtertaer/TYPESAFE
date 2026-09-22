@@ -301,6 +301,44 @@ class DoctorTests(unittest.TestCase):
             self.assertIn("checks", payload)
             self.assertIsNotNone(check_of(payload, "api_key"))
 
+    def test_verdict_writes_slim_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            rc, out, _ = run_main(
+                [
+                    "--agents", "hermes",
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--verdict", str(verdict),
+                ],
+            )
+            self.assertIn(rc, (0, 1))
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertIn(payload["verdict"], ("pass", "fail"))
+            self.assertEqual(payload["verdict"], "pass" if rc == 0 else "fail")
+            self.assertIn("hermes", payload["agents"])
+            self.assertGreater(payload["checks"], 0)
+            self.assertEqual(payload["failed"], 0 if payload["verdict"] == "pass" else payload["failed"])
+            self.assertGreaterEqual(payload["failed"], 0)
+
+    def test_verdict_watch_writes_final_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            rc, out, _ = run_main(
+                [
+                    "--agents", "hermes",
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--watch", "0.01",
+                    "--verdict", str(verdict),
+                ],
+                env_extra={"JEV_DOCTOR_WATCH_MAX": "1"},
+            )
+            self.assertIn(rc, (0, 1))
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertIn(payload["verdict"], ("pass", "fail"))
+            self.assertIn("agents", payload)
+
     def test_api_key_from_env_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rc, out, _ = run_main(

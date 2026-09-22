@@ -1507,6 +1507,50 @@ class MainLoopTests(unittest.TestCase):
             self.assertIn("jev_status=idf", text)
             self.assertIn("winner=jwt-auth", text)
 
+    def run_main_verbose(self, stdin_text: str, extra_argv=None) -> tuple:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        out_buf, err_buf = io.StringIO(), io.StringIO()
+        argv = ["inventory_hook.py", "--verbose"] + list(extra_argv or [])
+        with patch.object(sys, "argv", argv), patch(
+            "sys.stdin", io.StringIO(stdin_text)
+        ), redirect_stdout(out_buf), redirect_stderr(err_buf):
+            rc = HOOK.main()
+        self.assertEqual(rc, 0)
+        return out_buf.getvalue(), err_buf.getvalue()
+
+    def test_verbose_explains_hook_off(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_OFF": "1"}):
+            out, err = self.run_main_verbose('{"prompt": "x", "event": "UserPromptSubmit"}')
+        self.assertEqual(out.strip(), "{}")
+        self.assertIn("JEV_HOOK_OFF", err)
+
+    def test_verbose_explains_disallowed_event(self) -> None:
+        out, err = self.run_main_verbose('{"prompt": "x", "event": "PostToolUse"}')
+        self.assertEqual(out.strip(), "{}")
+        self.assertIn("not in allowed set", err)
+
+    def test_verbose_explains_missing_prompt(self) -> None:
+        out, err = self.run_main_verbose('{"event": "UserPromptSubmit"}')
+        self.assertEqual(out.strip(), "{}")
+        self.assertIn("no prompt", err)
+
+    def test_verbose_reports_jev_status_when_no_context(self) -> None:
+        decision = {"jev_status": "none"}
+        with patch.object(HOOK, "handle", lambda _p: {}), patch.object(
+            HOOK, "LAST_DECISION", decision
+        ):
+            out, err = self.run_main_verbose('{"prompt": "x"}')
+        self.assertEqual(out.strip(), "{}")
+        self.assertIn("jev_status=none", err)
+
+    def test_verbose_silent_when_context_emitted(self) -> None:
+        with patch.object(HOOK, "handle", lambda _p: {"context": "note"}):
+            out, err = self.run_main_verbose('{"prompt": "x"}')
+        self.assertIn("context", out)
+        self.assertEqual(err, "")
+
     def test_debug_file_bad_path_fails_open(self) -> None:
         decision = {"jev_status": "idf"}
         with patch.object(HOOK, "LAST_DECISION", decision), patch.object(

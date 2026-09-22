@@ -459,6 +459,28 @@ def handle(
     return {}
 
 
+def _silence_reason(payload: dict) -> str:
+    """Why handle() emitted no context — mirrors its early returns in order."""
+    if os.environ.get("JEV_HOOK_OFF", "").strip() in {"1", "true", "yes"}:
+        return "hook disabled (JEV_HOOK_OFF)"
+    event = event_name(payload) if isinstance(payload, dict) else None
+    if event and event not in allowed_events():
+        return "skipped: event %r not in allowed set" % event
+    max_age = hook_max_age()
+    if isinstance(payload, dict) and max_age > 0:
+        ts = payload_ts(payload)
+        if ts is not None and time.time() - ts > max_age:
+            return "skipped: payload older than JEV_HOOK_MAX_AGE"
+    prompt = (extract_prompt(payload) if isinstance(payload, dict) else "") or os.environ.get(
+        "JEV_HOOK_PROMPT", ""
+    ).strip()
+    if not prompt:
+        return "skipped: no prompt in payload"
+    if isinstance(LAST_DECISION, dict):
+        return "no context emitted (jev_status=%s)" % LAST_DECISION.get("jev_status")
+    return "no context emitted"
+
+
 def _debug_enabled(argv: list[str]) -> bool:
     import os
 
@@ -712,6 +734,8 @@ def main(argv: list[str] | None = None) -> int:
                     fh.write(line + "\n")
             except OSError:
                 pass
+    if "--verbose" in argv and not out:
+        sys.stderr.write("verbose: %s\n" % _silence_reason(payload))
     return 0
 
 

@@ -777,6 +777,22 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertIn("coverage", payload["failed_gates"])
             self.assertEqual(payload["verdict_label"], "FAIL (coverage)")
 
+    def test_env_jq_prints_one_field(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--env", "--jq", "margin"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(buf.getvalue()), 1.15)
+
+    def test_env_jq_bad_key_rc2(self) -> None:
+        buf = io.StringIO()
+        err = io.StringIO()
+        with redirect_stdout(buf):
+            with patch("sys.stderr", err):
+                rc = te.main(["--env", "--jq", "nope"])
+        self.assertEqual(rc, 2)
+        self.assertIn("margin", err.getvalue())
+
     def test_verdict_label_pass_when_clean(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "verdict.json"

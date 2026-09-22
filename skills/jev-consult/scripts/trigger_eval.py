@@ -267,6 +267,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the resolved config (paths, margin, scorer) as JSON and exit.",
     )
     parser.add_argument(
+        "--jq",
+        metavar="KEY",
+        default="",
+        help="With --env: print only that field's value as JSON (rc 2 on bad key).",
+    )
+    parser.add_argument(
         "--watch",
         metavar="S",
         type=float,
@@ -318,6 +324,15 @@ def main(argv: list[str] | None = None) -> int:
             "margin_default": scorer_margin,
             "desc_override": bool(args.desc),
         }
+        if args.jq:
+            if args.jq in report:
+                sys.stdout.write(json.dumps(report[args.jq]) + "\n")
+                return 0
+            sys.stderr.write(
+                "bad --jq key %r (env has: %s)\n"
+                % (args.jq, ", ".join(sorted(report)))
+            )
+            return 2
         sys.stdout.write(json.dumps(report, indent=2) + "\n")
         return 0
     if args.desc_tokens:

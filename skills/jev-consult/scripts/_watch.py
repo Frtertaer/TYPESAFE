@@ -48,8 +48,11 @@ def deadline(env_name: str, override=None) -> float:
 def emit(tick: dict, out_path=None, quiet: bool = False, bad=None) -> None:
     """Print one JSONL tick (and append to out_path, fail-open).
 
+    A ``ts`` epoch field is injected when the caller did not set one.
     quiet suppresses stdout for clean ticks: with quiet=True a tick reaches
     stdout only when `bad` is truthy; --out always gets every tick."""
+    if "ts" not in tick:
+        tick = dict(tick, ts=int(time.time()))
     line = json.dumps(tick) + "\n"
     if not (quiet and not bad):
         sys.stdout.write(line)

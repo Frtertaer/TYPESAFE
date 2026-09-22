@@ -117,8 +117,31 @@ class EmitTests(unittest.TestCase):
                 watch.emit({"a": 2}, str(out))
             lines = out.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(lines), 2)
-            self.assertEqual(json.loads(lines[0]), {"a": 1})
-            self.assertEqual(json.loads(lines[1]), {"a": 2})
+            for line, a in zip(lines, (1, 2)):
+                payload = json.loads(line)
+                self.assertEqual(payload["a"], a)
+                self.assertIsInstance(payload["ts"], int)
+
+    def test_injects_ts_when_absent(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            watch.emit({"ok": True})
+        payload = json.loads(buf.getvalue())
+        self.assertTrue(payload["ok"])
+        self.assertIsInstance(payload["ts"], int)
+
+    def test_preserves_caller_ts(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            watch.emit({"ts": 42, "ok": True})
+        self.assertEqual(json.loads(buf.getvalue()), {"ts": 42, "ok": True})
+
+    def test_does_not_mutate_caller_dict(self) -> None:
+        tick = {"ok": True}
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            watch.emit(tick)
+        self.assertNotIn("ts", tick)
 
     def test_bad_out_path_is_fail_open(self) -> None:
         buf = io.StringIO()

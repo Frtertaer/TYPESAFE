@@ -1548,5 +1548,55 @@ class WatchJqTests(unittest.TestCase):
         self.assertTrue(all("ts" not in d for d in dicts))
         self.assertTrue(all("skill" in d for d in dicts))
 
+class WatchFailFastTests(unittest.TestCase):
+    def test_watch_fail_fast_breaks_on_first_delta_tick(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+        from unittest.mock import patch
+
+        results = [
+            [{"id": "a", "kind": "skill", "name": "a"}],  # initial payload scan
+            [{"id": "a", "kind": "skill", "name": "a"}],  # tick 1: baseline
+            [{"id": "b", "kind": "skill", "name": "b"}],  # tick 2: delta -> break
+            [{"id": "b", "kind": "skill", "name": "b"}],
+            [{"id": "b", "kind": "skill", "name": "b"}],
+            [{"id": "b", "kind": "skill", "name": "b"}],
+        ]
+
+        def fake_scan(harness, home=None, hermes=None):
+            if results:
+                return results.pop(0)
+            return []
+
+        buf = StringIO()
+        err = StringIO()
+        with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "5"}):
+            with patch.object(inv, "scan", side_effect=fake_scan):
+                with redirect_stdout(buf), redirect_stderr(err):
+                    code = inv.main(
+                        [
+                            "--harness",
+                            "hermes",
+                            "--hermes-home",
+                            str(FIXTURE),
+                            "--watch",
+                            "0.01",
+                            "--fail-fast",
+                        ]
+                    )
+        self.assertEqual(code, 0)
+        ticks = [
+            json.loads(l)
+            for l in buf.getvalue().splitlines()
+            if l.startswith('{"ts"')
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertEqual(ticks[1]["added"], ["b"])
+        self.assertEqual(ticks[1]["removed"], ["a"])
+        stderr_lines = [
+            l for l in err.getvalue().splitlines() if l.startswith("watch tick=")
+        ]
+        self.assertEqual(len(stderr_lines), 2)
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

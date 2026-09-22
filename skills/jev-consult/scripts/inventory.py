@@ -1110,6 +1110,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that reports added or removed items")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON to PATH: with --watch a {verdict: stable|changed, ticks, added, removed, counts} payload refreshed every tick; otherwise a one-shot {verdict: ok|empty, scanned, shortlisted, counts} payload.")
     parser.add_argument("--id", metavar="NAME", default="", help="Print the single matching item's JSON (matches id or name).")
     parser.add_argument(
@@ -1415,6 +1416,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         if verdict_ok and not _write_verdict(ticks):
             verdict_ok = False  # warn once, stop retrying
+        if getattr(args, "fail_fast", False) and (tick["added"] or tick["removed"]):
+            break
     if args.verdict and verdict_ok and not _write_verdict(ticks):
         return 1
     return 0

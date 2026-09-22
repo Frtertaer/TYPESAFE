@@ -1357,10 +1357,10 @@ def main(argv: list[str] | None = None) -> int:
                 "mcp": sum(1 for i in fresh if i["kind"] == KIND_MCP),
             },
             "shortlist": [item.get("id") for item in shortlist(fresh, args.task, limit, extra)],
+            "added": sorted(cur_ids - prev_ids) if prev_ids is not None else [],
+            "removed": sorted(prev_ids - cur_ids) if prev_ids is not None else [],
         }
         if prev_ids is not None:
-            tick["added"] = sorted(cur_ids - prev_ids)
-            tick["removed"] = sorted(prev_ids - cur_ids)
             all_added.update(cur_ids - prev_ids)
             all_removed.update(prev_ids - cur_ids)
         prev_ids = cur_ids

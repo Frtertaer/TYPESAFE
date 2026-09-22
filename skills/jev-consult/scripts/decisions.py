@@ -669,7 +669,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
-    parser.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict, count, added, removed, ticks} JSON to PATH when the loop ends.")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict, count, added, removed, ticks} JSON to PATH, refreshed every tick.")
     args = parser.parse_args(argv)
     file_arg = args.file or os.environ.get("JEV_DECISIONS", "").strip()
     path = Path(file_arg) if file_arg else inventory.decisions_log_path()

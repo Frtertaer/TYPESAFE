@@ -257,8 +257,9 @@ class InventoryTests(unittest.TestCase):
             if l.startswith('{"ts"')
         ]
         self.assertEqual(len(ticks), 2)
-        self.assertNotIn("added", ticks[0])
-        self.assertNotIn("removed", ticks[0])
+        # schema-stable ticks: added/removed keys always present
+        self.assertEqual(ticks[0]["added"], [])
+        self.assertEqual(ticks[0]["removed"], [])
         self.assertEqual(ticks[1]["added"], [])
         self.assertEqual(ticks[1]["removed"], ["b", "c"])
 

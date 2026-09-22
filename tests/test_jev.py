@@ -928,7 +928,7 @@ class JevInternalsTests(unittest.TestCase):
                             "q": {
                                 "type": "choice",
                                 "instructions": "How many files are there?",
-                                "criteria": {"a": "one", "b": "two"},
+                                "criteria": {"a": "one", "b": "two", "none": "none of these"},
                             }
                         }
                     }

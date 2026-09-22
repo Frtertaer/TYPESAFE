@@ -68,6 +68,7 @@ RULES = {
     "J013": "score scale has too many levels; use 3 to 5",
     "J014": "true and false criteria are identical",
     "J015": "choice has fewer than two options",
+    "J016": "choice has no 'none'/'other' escape; a forced pick returns a wrong answer",
     "J020": "state exceeds the 32k-token limit; trim or chunk it first",
     "J021": "state is over 8k tokens; irrelevant state distracts and drops accuracy",
 }
@@ -181,6 +182,13 @@ def lint_question(qid: str, q: dict, max_options: int = 255) -> list[dict]:
                 "error",
                 "%d options exceeds the %d-option limit" % (len(options), max_options),
                 "Use hierarchical classification.",
+            )
+        if len(options) >= 2 and "none" not in options and "other" not in options:
+            add(
+                "J016",
+                "warn",
+                "choice has no 'none'/'other' escape option",
+                "Without an abstain option Jev must pick something — a forced pick returns a confident wrong answer. Add a `none` criterion.",
             )
         undescribed = [k for k, v in options.items() if not v]
         if len(undescribed) > len(options) / 2:

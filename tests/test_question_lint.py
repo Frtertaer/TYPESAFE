@@ -1020,5 +1020,27 @@ class WatchSecsEnvTests(unittest.TestCase):
             self.assertLessEqual(len(ticks), 10)
             self.assertGreaterEqual(len(ticks), 1)
 
+    def test_choice_without_none_warns_j016(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which of these should the coder use?",
+                "criteria": {"a": "option a", "b": "option b"},
+            },
+        )
+        self.assertIn(("J016", "warn"), rules(findings))
+
+    def test_choice_with_none_is_clean_j016(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which of these should the coder use?",
+                "criteria": {"a": "option a", "none": "none of these"},
+            },
+        )
+        self.assertNotIn(("J016", "warn"), rules(findings))
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

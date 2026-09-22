@@ -1854,6 +1854,23 @@ def step_decisions(tmp: Path) -> dict:
             if ln.strip().isdigit()
         ]
         ok = rc == 0 and len(lines) == 2 and len(set(lines)) == 1
+    if ok:
+        # --watch-max bounds a slow watch by elapsed seconds
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--watch",
+                "0.2",
+                "--watch-max",
+                "0.05",
+                "--max-ticks",
+                "20",
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"count"' in ln]
+        ok = rc == 0 and len(ticks) == 1
     return _step("decisions", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

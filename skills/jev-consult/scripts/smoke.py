@@ -341,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, steps, failed} JSON to PATH when finished (in --watch mode, the final pass state).")
     args = parser.parse_args(argv)
     names = {name for name, _ in STEPS}
     if args.list:
@@ -383,12 +384,32 @@ def main(argv: list[str] | None = None) -> int:
                     break
         return rows
 
+    def _write_verdict(steps_now: list[dict]) -> bool:
+        try:
+            Path(args.verdict).write_text(
+                json.dumps(
+                    {
+                        "verdict": "PASS" if all(s["ok"] for s in steps_now) else "FAIL",
+                        "steps": len(steps_now),
+                        "failed": [s["name"] for s in steps_now if not s["ok"]],
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            sys.stderr.write("--verdict failed: %s\n" % exc)
+            return False
+        return True
+
     if args.watch and args.watch > 0:
         import time as _time
 
         max_ticks = _watch.cap("JEV_SMOKE_WATCH_MAX", args.max_ticks)
         ticks = 0
         dead = _watch.deadline("JEV_SMOKE_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        last_steps: list[dict] = []
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             steps = _run_steps()
             tick = {
@@ -397,8 +418,11 @@ def main(argv: list[str] | None = None) -> int:
                 "failed": [s["name"] for s in steps if not s["ok"]],
             }
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["failed"]))
+            last_steps = steps
             ticks += 1
             _time.sleep(args.watch)
+        if args.verdict and not _write_verdict(last_steps):
+            return 1
         return 0 if tick["ok"] else 1
     steps = _run_steps()
     ok = all(s["ok"] for s in steps)
@@ -411,6 +435,8 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
             return 1
         sys.stderr.write("wrote %s\n" % args.out)
+    if args.verdict and not _write_verdict(steps):
+        return 1
     if args.report:
         lines = [
             "# smoke report",

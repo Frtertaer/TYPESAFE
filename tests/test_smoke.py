@@ -126,6 +126,39 @@ class SmokeTests(unittest.TestCase):
             self.assertIn("- steps: 1", text)
             self.assertIn("| policy | yes |", text)
 
+    def test_verdict_writes_slim_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            proc = subprocess.run(
+                [sys.executable, str(SMOKE), "--only", "policy",
+                 "--verdict", str(verdict)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "PASS")
+            self.assertEqual(payload["steps"], 1)
+            self.assertEqual(payload["failed"], [])
+
+    def test_verdict_watch_writes_final_state(self) -> None:
+        import os
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            env = dict(os.environ, JEV_SMOKE_WATCH_MAX="1")
+            proc = subprocess.run(
+                [sys.executable, str(SMOKE), "--only", "policy",
+                 "--watch", "0.01", "--verdict", str(verdict)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "PASS")
+
     def test_only_doctor_json_uses_emitted_name(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(SMOKE), "--only", "doctor_json"],

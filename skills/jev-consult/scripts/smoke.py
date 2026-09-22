@@ -1368,6 +1368,47 @@ def step_trace(tmp: Path) -> dict:
         else:
             ok = False
     if ok:
+        # notes --prune N rewrites the trace keeping only the last N notes
+        _run(
+            [
+                str(SCRIPTS / "trace.py"),
+                "--file",
+                str(trace_file),
+                "record",
+                "--pick",
+                "smoke-pick-2",
+                "--note",
+                "second note",
+            ]
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trace.py"),
+                "--file",
+                str(trace_file),
+                "notes",
+                "--prune",
+                "1",
+            ]
+        )
+        if rc == 0:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "notes",
+                    "--json",
+                ]
+            )
+            try:
+                notes = json.loads(out)
+                ok = rc == 0 and len(notes) == 1 and "second" in str(notes[0].get("text", ""))
+            except (ValueError, IndexError):
+                ok = False
+        else:
+            ok = False
+    if ok:
         rc, out = _run(
             [
                 str(SCRIPTS / "trace.py"),

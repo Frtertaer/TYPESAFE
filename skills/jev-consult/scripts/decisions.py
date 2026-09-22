@@ -982,7 +982,11 @@ def main(argv: list[str] | None = None) -> int:
                     tick["delta_pct"] = None
             total_added += int(tick.get("added", 0))
             total_removed += int(tick.get("removed", 0))
-            _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_DECISIONS_WATCH_QUIET", args.quiet), bad=bool(tick.get("added") or tick.get("removed")))
+            if args.jq:
+                for field in [f.strip() for f in args.jq.split(",") if f.strip()]:
+                    sys.stdout.write(json.dumps(_dig(tick, field)) + "\n")
+            else:
+                _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_DECISIONS_WATCH_QUIET", args.quiet), bad=bool(tick.get("added") or tick.get("removed")))
             prev_keys = cur_keys
             ticks += 1
             sys.stderr.write(

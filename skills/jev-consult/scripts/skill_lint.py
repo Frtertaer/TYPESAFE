@@ -6,21 +6,40 @@ Exit 0 clean/warn, 1 on any error, 2 on bad args.
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 _FM_KEY = re.compile(r"^(name|description):\s*(.*)$")
 
 
-def raw_frontmatter(text: str) -> dict[str, str]:
-    """Minimal frontmatter read: single-line name/description scalars only."""
+_FM_END = re.compile(r"\n---[ \t]*(\r?\n|$)")
+
+
+def _fm_end(text: str, start: int) -> int:
+    """Index of the newline before the closing '---' marker, or -1.
+
+    The closer must be a bare '---' line (trailing blanks tolerated), so
+    '\n---foo' inside the block is not mistaken for the end.
+    """
+    match = _FM_END.search(text, start)
+    return match.start() if match else -1
+
+
+def raw_frontmatter(text: str) -> dict[str, str] | None:
+    """Minimal frontmatter read: single-line name/description scalars only.
+
+    Returns None when there is no --- ... --- block at all, else a dict
+    (possibly empty) of the recognized keys.
+    """
     if not text.lstrip().startswith("---"):
-        return {}
+        return None
     start = text.index("---") + 3
-    end = text.find("\n---", start)
+    end = _fm_end(text, start)
     if end < 0:
-        return {}
+        return None
     meta: dict[str, str] = {}
     for line in text[start:end].splitlines():
         match = _FM_KEY.match(line)
@@ -44,7 +63,7 @@ def lint_skill(path: Path) -> list[dict]:
     except OSError as exc:
         return [{"rule": "S001", "severity": "error", "message": "unreadable: %s" % exc}]
     meta = raw_frontmatter(text)
-    if not meta:
+    if meta is None:
         findings.append(
             {"rule": "S002", "severity": "error", "message": "no frontmatter block"}
         )
@@ -88,7 +107,8 @@ def lint_skill(path: Path) -> list[dict]:
         try:
             import json as _json
 
-            policy_keys = set(_json.loads(policy_file.read_text(encoding="utf-8")))
+            parsed = _json.loads(policy_file.read_text(encoding="utf-8"))
+            policy_keys = set(parsed) if isinstance(parsed, dict) else None
         except (OSError, _json.JSONDecodeError):
             policy_keys = None
         if policy_keys is not None:
@@ -106,16 +126,40 @@ def lint_skill(path: Path) -> list[dict]:
     return findings
 
 
+def _fm_bounds(text: str) -> tuple[int, int] | None:
+    if not text.lstrip().startswith("---"):
+        return None
+    start = text.index("---") + 3
+    end = _fm_end(text, start)
+    if end < 0:
+        return None
+    return start, end
+
+
+def _write(path: Path, text: str) -> None:
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as out:
+            out.write(text)
+        os.replace(tmp, str(path))
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def fix_name(path: Path) -> bool:
     """Rewrite the frontmatter name to the parent directory name. Returns True if changed."""
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
-    start = text.index("---") + 3 if text.lstrip().startswith("---") else -1
-    end = text.find("\n---", start) if start >= 0 else -1
-    if end < 0:
+    bounds = _fm_bounds(text)
+    if bounds is None:
         return False
+    start, end = bounds
     block = text[start:end]
     new_block, n = re.subn(
         r"^(name|description):\s*(.*)$",
@@ -127,7 +171,7 @@ def fix_name(path: Path) -> bool:
     )
     if n == 0:
         return False
-    path.write_text(text[:start] + new_block + text[end:], encoding="utf-8")
+    _write(path, text[:start] + new_block + text[end:])
     return True
 
 
@@ -137,10 +181,10 @@ def fix_case(path: Path) -> bool:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
-    start = text.index("---") + 3 if text.lstrip().startswith("---") else -1
-    end = text.find("\n---", start) if start >= 0 else -1
-    if end < 0:
+    bounds = _fm_bounds(text)
+    if bounds is None:
         return False
+    start, end = bounds
     block = text[start:end]
 
     def normalize(m: "re.Match[str]") -> str:
@@ -152,7 +196,7 @@ def fix_case(path: Path) -> bool:
     new_block, n = re.subn(r"^(name|description):\s*(.*)$", normalize, block, flags=re.M)
     if n == 0 or new_block == block:
         return False
-    path.write_text(text[:start] + new_block + text[end:], encoding="utf-8")
+    _write(path, text[:start] + new_block + text[end:])
     return True
 
 

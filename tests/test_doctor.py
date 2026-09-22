@@ -675,5 +675,61 @@ class WatchSecsEnvTests(unittest.TestCase):
             self.assertLessEqual(len(ticks), 10)
             self.assertGreaterEqual(len(ticks), 1)
 
+class EnvDumpTests(unittest.TestCase):
+    def test_env_lists_prefixed_vars_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, data, text = run_main(
+                ["--env"],
+                env_extra={"JEV_FOO_XYZ": "bar", "PATH_LIKE": "nope"},
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 0)
+            self.assertIn("JEV_FOO_XYZ", data["env"])
+            self.assertEqual(data["env"]["JEV_FOO_XYZ"], "bar")
+            self.assertNotIn("PATH_LIKE", data["env"])
+            self.assertEqual(data["count"], len(data["env"]))
+
+    def test_env_masks_secret_names_and_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, data, _ = run_main(
+                ["--env"],
+                env_extra={
+                    "TYPESAFE_API_KEY": "apikey_" + "a" * 30 + "_" + "b" * 30,
+                    "JEV_INNOCENT": "apikey_" + "a" * 30 + "_" + "b" * 30,
+                },
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 0)
+            self.assertEqual(data["env"]["TYPESAFE_API_KEY"], "<set>")
+            self.assertEqual(data["env"]["JEV_INNOCENT"], "<set>")
+            self.assertNotIn("apikey_", json.dumps(data))
+
+    def test_env_empty_secret_name_not_masked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, data, _ = run_main(
+                ["--env"],
+                env_extra={"TYPESAFE_API_KEY": ""},
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 0)
+            self.assertEqual(data["env"]["TYPESAFE_API_KEY"], "")
+
+    def test_env_jq_digs_into_env_map(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(
+                ["--env", "--jq", "env.JEV_FOO_Q"],
+                env_extra={"JEV_FOO_Q": "qq"},
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(text), "qq")
+
+    def test_env_jq_unknown_key_rc2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, _ = run_main(
+                ["--env", "--jq", "nope.deep"], cwd=tmp
+            )
+            self.assertEqual(rc, 2)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

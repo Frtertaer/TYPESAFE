@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -260,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first failing tick.")
     parser.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the {ok,checks} payload (e.g. ok); unknown key exits 2")
+    parser.add_argument("--env", action="store_true", help="Print the resolved JEV_*/TYPESAFE_* env vars as JSON and exit (secret-looking names/values masked to <set>)")
     parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown report (verdict line + per-check table with hints) to PATH")
     args = parser.parse_args(argv)
     agents = [a.strip() for a in args.agents.split(",") if a.strip()]
@@ -270,6 +272,42 @@ def main(argv: list[str] | None = None) -> int:
     home = Path(args.home) if args.home else user_home()
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home(home)
     only = {n.strip() for n in args.only.split(",") if n.strip()}
+
+    if getattr(args, "env", False):
+        secretish = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|AUTH|CREDENTIAL)", re.IGNORECASE)
+        blob = re.compile(
+            r"apikey_[A-Za-z0-9]{20,}_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_-]{20,}"
+        )
+        env: dict[str, str] = {}
+        for name in sorted(os.environ):
+            if not (name.startswith("JEV_") or name.startswith("TYPESAFE_")):
+                continue
+            value = os.environ[name]
+            env[name] = (
+                "<set>"
+                if (value and (secretish.search(name) or blob.search(value)))
+                else value
+            )
+        payload = {"env": env, "count": len(env)}
+        if getattr(args, "jq", ""):
+            node: object = payload
+            found = True
+            for part in args.jq.split("."):
+                if isinstance(node, dict) and part in node:
+                    node = node[part]
+                else:
+                    found = False
+                    break
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (payload has: %s)\n"
+                    % (args.jq, ", ".join(sorted(payload)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+            return 0
+        sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        return 0
 
     def collect() -> list[dict]:
         checks: list[dict] = check_common(home, hermes)

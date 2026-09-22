@@ -2888,6 +2888,25 @@ def step_install(tmp: Path) -> dict:
             and out.strip().startswith("TYPESAFE_API_KEY:")
             and "apikey_" not in out
         )
+    if ok:
+        # --uninstall --dry-run plans removals into the redirected home and
+        # writes nothing there either
+        rc, out = _run(
+            [
+                str(repo_root / "scripts" / "install.py"),
+                "--dry-run",
+                "--uninstall",
+                "--agents",
+                "codex",
+            ],
+            env=env,
+        )
+        writes = [p for p in home.rglob("*") if p.is_file()]
+        ok = (
+            rc == 0
+            and ("remove" in out or "missing" in out)
+            and not writes
+        )
     return _step("install", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

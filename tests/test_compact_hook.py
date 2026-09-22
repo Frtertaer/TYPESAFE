@@ -88,6 +88,34 @@ class HookTests(unittest.TestCase):
         )
         self.assertEqual(out, {})
 
+    def test_camelcase_event_and_iserror_variants(self):
+        fat = "y" * 40000
+        out = HOOK.handle({"hookEventName": "post_tool_use", "toolResult": fat})
+        self.assertIn("updatedToolOutput", out["hookSpecificOutput"])
+        out = HOOK.handle(
+            {"hook_event_name": "PostToolUse", "toolResult": fat, "isError": True}
+        )
+        self.assertEqual(out, {})
+
+    def test_nested_content_dict_gets_output_for_prompt_key(self):
+        # text found via content->text nesting; replace_payload adds
+        # output_for_prompt since no flat output key exists.
+        fat = "z" * 40000
+        original = {"content": {"text": fat}}
+        out = HOOK.handle({"hook_event_name": "PostToolUse", "toolResult": original})
+        replaced = out["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertIsInstance(replaced, dict)
+        self.assertIn("output_for_prompt", replaced)
+        self.assertLess(len(replaced["output_for_prompt"]), len(fat))
+        self.assertEqual(replaced["content"], {"text": fat})
+
+    def test_dict_result_without_known_key_noop(self):
+        # a dict whose text can't be extracted at all abridges to nothing.
+        out = HOOK.handle(
+            {"hook_event_name": "PostToolUse", "toolResult": {"weird": "x" * 40000}}
+        )
+        self.assertEqual(out, {})
+
 
 class InstallHookTests(unittest.TestCase):
     def test_claude_hook_idempotent(self):

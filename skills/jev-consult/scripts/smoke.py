@@ -1264,6 +1264,36 @@ def step_decisions(tmp: Path) -> dict:
         )
         ok = rc == 0 and out.strip() == "none"
     if ok:
+        # --jq with an unknown dotted key is graceful: null per row, rc 0
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--jq",
+                "nope.nope",
+            ]
+        )
+        ok = (
+            rc == 0
+            and [ln.strip() for ln in out.splitlines()] == ["null", "null"]
+        )
+    if ok:
+        # --jq digs a flat field present on every row
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--jq",
+                "harness",
+            ]
+        )
+        ok = (
+            rc == 0
+            and [ln.strip() for ln in out.splitlines()] == ["smoke", "smoke"]
+        )
+    if ok:
         # numeric-field threshold filters keep only the high row
         num_log = tmp / "decisions-num.jsonl"
         num_log.write_text(

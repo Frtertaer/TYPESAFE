@@ -66,7 +66,10 @@ def skill_root() -> Path:
 
 
 def load_policy(path: str | None = None) -> dict[str, Any]:
-    policy_path = Path(path) if path else skill_root() / "policy.json"
+    env_path = os.environ.get("JEV_POLICY", "")
+    policy_path = (
+        Path(path) if path else Path(env_path) if env_path else skill_root() / "policy.json"
+    )
     with policy_path.open(encoding="utf-8") as handle:
         data = json.load(handle)
     if not isinstance(data, dict):

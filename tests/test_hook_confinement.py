@@ -329,6 +329,128 @@ class HugePromptTests(unittest.TestCase):
             self.assertEqual(data["task"], "x" * 500)
 
 
+class StubJevE2ETests(unittest.TestCase):
+    """Subprocess E2E: hook → real urllib POST → local HTTP stub → Jev pick
+    lands in the sidecar. Exercises the wire path, auth header, response
+    validation, and the pick→sidecar leg — not just the miss path."""
+
+    def _stub_server(self):
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        picked_id: dict = {}
+
+        class H(BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802 - stdlib handler name
+                body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                req = json.loads(body.decode("utf-8"))
+                criteria = req["questions"]["load_tools"]["criteria"]
+                picked_id["id"] = next(k for k in criteria if k != "none")
+                probs = {k: 0.0 for k in criteria}
+                probs[picked_id["id"]] = 0.9
+                probs["none"] = 0.1
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(
+                    json.dumps(
+                        {
+                            "model": "stub",
+                            "answers": {
+                                "load_tools": {
+                                    "type": "choice",
+                                    "choice": picked_id["id"],
+                                    "confidence": 0.95,
+                                    "probabilities": probs,
+                                },
+                                "need_skill": {"type": "noul", "noul": 0.9},
+                            },
+                            "usage": {"input_tokens": 1, "output_tokens": 1},
+                        }
+                    ).encode("utf-8")
+                )
+
+            def log_message(self, *_a):  # silence
+                pass
+
+        srv = HTTPServer(("127.0.0.1", 0), H)
+        import threading
+
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv, picked_id
+
+    def test_hook_pick_roundtrip_against_stub_jev(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cwd = root / "work"
+            cwd.mkdir()
+            home = root / "home"
+            skill = home / ".claude" / "skills" / "zqxjwt-helper"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: zqxjwt-helper\n"
+                "description: Handles zqxjwt token plumbing tasks.\n---\n",
+                encoding="utf-8",
+            )
+            policy_src = json.loads(
+                (SCRIPTS.parent / "policy.json").read_text(encoding="utf-8")
+            )
+            srv, picked = self._stub_server()
+            try:
+                policy_src["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
+                    srv.server_address[1]
+                )
+                policy = root / "policy.json"
+                policy.write_text(json.dumps(policy_src), encoding="utf-8")
+                log = cwd / "decisions.jsonl"
+                env = dict(os.environ)
+                env.update(
+                    {
+                        "TYPESAFE_API_KEY": "stub-test-key-not-real",
+                        "JEV_POLICY": str(policy),
+                        "JEV_CONSULT_LOG": str(log),
+                        "JEV_HOOK_CWD": str(cwd),
+                        "JEV_HOOK_HARNESS": "claude-code",
+                        "JEV_HOOK_TIMEOUT": "5",
+                        "HOME": str(home),
+                        "USERPROFILE": str(home),
+                    }
+                )
+                payload = {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "please wire up the zqxjwt token flow",
+                    "cwd": str(cwd),
+                }
+                proc = subprocess.run(
+                    [sys.executable, str(HOOK)],
+                    input=json.dumps(payload).encode("utf-8"),
+                    capture_output=True,
+                    env=env,
+                    cwd=str(cwd),
+                    timeout=30,
+                )
+            finally:
+                srv.shutdown()
+                srv.server_close()
+            self.assertEqual(proc.returncode, 0, proc.stderr[:400])
+            self.assertIn("id", picked, "stub Jev never got the POST")
+            sidecar = cwd / ".jev-tools.json"
+            self.assertTrue(sidecar.exists(), "no sidecar written")
+            data = json.loads(sidecar.read_text(encoding="utf-8"))
+            self.assertEqual(
+                data.get("jev_pick", {}).get("name"), "zqxjwt-helper"
+            )
+            out = json.loads(proc.stdout.decode("utf-8", "replace"))
+            self.assertNotEqual(out, {})
+            rows = [
+                json.loads(line)
+                for line in log.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertTrue(
+                any(r.get("jev_status") == "winner" for r in rows), rows
+            )
+
+
 class ConcurrentHookTests(unittest.TestCase):
     def test_racing_hooks_leave_parseable_sidecars(self) -> None:
         """Two+ hooks writing the same cwd must not interleave bytes —

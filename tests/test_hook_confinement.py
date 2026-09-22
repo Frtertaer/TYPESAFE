@@ -634,5 +634,27 @@ class HookRuleInvariantTests(unittest.TestCase):
             self.assertIn("never", src.lower(), name)
 
 
+class AgentDocRuleParityTests(unittest.TestCase):
+    """CLAUDE.md / AGENTS.md / .hermes.md must state identical rule lines."""
+
+    DOCS = ("CLAUDE.md", "AGENTS.md", ".hermes.md")
+    RULE_MARK = "Hook never auto-installs"
+
+    def _rule_lines(self, name: str) -> list[str]:
+        path = ROOT / name
+        self.assertTrue(path.is_file(), "%s missing" % name)
+        return [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if self.RULE_MARK in line
+        ]
+
+    def test_agent_docs_share_identical_rule_lines(self) -> None:
+        reference = self._rule_lines(self.DOCS[0])
+        self.assertTrue(reference, "%s carries no rule line" % self.DOCS[0])
+        for name in self.DOCS[1:]:
+            self.assertEqual(reference, self._rule_lines(name), name)
+
+
 if __name__ == "__main__":
     unittest.main()

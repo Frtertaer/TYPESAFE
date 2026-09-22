@@ -167,8 +167,11 @@ class InventoryTests(unittest.TestCase):
         from unittest.mock import patch
 
         buf = StringIO()
+        err = StringIO()
+        from contextlib import redirect_stderr
+
         with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
-            with redirect_stdout(buf):
+            with redirect_stdout(buf), redirect_stderr(err):
                 code = inv.main(
                     [
                         "--harness",
@@ -183,6 +186,13 @@ class InventoryTests(unittest.TestCase):
         lines = buf.getvalue().splitlines()
         ticks = [json.loads(l) for l in lines[1:] if l.startswith('{"ts"')]
         self.assertEqual(len(ticks), 2)
+        stderr_lines = [
+            l for l in err.getvalue().splitlines() if l.startswith("watch tick=")
+        ]
+        self.assertEqual(len(stderr_lines), 2)
+        self.assertIn("shortlist=", stderr_lines[0])
+        self.assertIn("added=0", stderr_lines[0])
+        self.assertIn("removed=0", stderr_lines[0])
         self.assertIn("counts", ticks[0])
         self.assertGreater(ticks[0]["counts"]["skill"], 0)
         self.assertIn("shortlist", ticks[0])

@@ -118,6 +118,12 @@ class ApplyFillTests(unittest.TestCase):
                 for l in proc.stdout.splitlines()
                 if l.startswith("{")
             ]
+            stderr_lines = [
+                l for l in proc.stderr.splitlines() if l.startswith("watch tick=")
+            ]
+            self.assertEqual(len(stderr_lines), 2)
+            self.assertIn("miss=True", stderr_lines[0])
+            self.assertIn("ask=False", stderr_lines[0])
             self.assertEqual(len(ticks), 2)
             self.assertTrue(all(t["miss"] is True for t in ticks))
             self.assertTrue(all(t["ask"] is False for t in ticks))

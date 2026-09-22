@@ -428,7 +428,7 @@ class CatalogFillTests(unittest.TestCase):
                 ],
             ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "2"}), patch(
                 "sys.stdout", buf
-            ):
+            ), patch("sys.stderr", io.StringIO()) as err:
                 rc = FILL.main()
             self.assertEqual(rc, 0)
             ticks = [
@@ -438,6 +438,12 @@ class CatalogFillTests(unittest.TestCase):
             ]
             self.assertEqual(len(ticks), 2)
             self.assertTrue(all(t["hits"] == 1 and t["cached"] for t in ticks))
+            stderr_lines = [
+                l for l in err.getvalue().splitlines() if l.startswith("watch tick=")
+            ]
+            self.assertEqual(len(stderr_lines), 2)
+            self.assertIn("hits=1", stderr_lines[0])
+            self.assertIn("cached=True", stderr_lines[0])
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
 
     def test_watch_tick_reports_cache_age(self) -> None:

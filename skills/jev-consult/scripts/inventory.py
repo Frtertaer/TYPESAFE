@@ -1402,6 +1402,15 @@ def main(argv: list[str] | None = None) -> int:
         last_tick = tick
         _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_INV_WATCH_QUIET", args.quiet), bad=ticks == 0 or bool(tick.get("added") or tick.get("removed")))
         ticks += 1
+        sys.stderr.write(
+            "watch tick=%d shortlist=%d added=%d removed=%d\n"
+            % (
+                ticks,
+                len(tick["shortlist"]),
+                len(tick["added"]),
+                len(tick["removed"]),
+            )
+        )
         if verdict_ok and not _write_verdict(ticks):
             verdict_ok = False  # warn once, stop retrying
     if args.verdict and verdict_ok and not _write_verdict(ticks):

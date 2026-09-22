@@ -471,6 +471,12 @@ class PeerFillInternalsTests(unittest.TestCase):
             self.assertTrue(all(t["miss"] for t in ticks))
             self.assertTrue(all(t["miss_task"] == "jwt flow" for t in ticks))
             self.assertFalse(any(t["ask"] for t in ticks))
+            stderr_lines = [
+                l for l in proc.stderr.splitlines() if l.startswith("watch tick=")
+            ]
+            self.assertEqual(len(stderr_lines), 2)
+            self.assertIn("miss=True", stderr_lines[0])
+            self.assertIn("ask=False", stderr_lines[0])
 
     def test_watch_fail_fast_breaks_on_miss(self) -> None:
         import subprocess

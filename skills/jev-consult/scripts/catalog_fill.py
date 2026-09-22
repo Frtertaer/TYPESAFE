@@ -542,6 +542,10 @@ def main() -> int:
             tick["elapsed_s"] = round(time.time() - watch_t0, 2)
             _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_CATALOG_WATCH_QUIET", args.quiet), bad=bool(tick["hits"]))
             ticks += 1
+            sys.stderr.write(
+                "watch tick=%d hits=%d cached=%s\n"
+                % (ticks, tick["hits"], tick["cached"])
+            )
             if args.verdict and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
             if args.fail_fast and tick["hits"]:

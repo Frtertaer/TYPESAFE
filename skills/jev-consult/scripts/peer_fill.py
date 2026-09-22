@@ -403,6 +403,10 @@ def main() -> int:
                         "elapsed_s": round(time.time() - watch_t0, 2)}
             _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_PEER_WATCH_QUIET", args.quiet), bad=bool(tick.get("miss") or tick.get("ask")))
             ticks += 1
+            sys.stderr.write(
+                "watch tick=%d miss=%s ask=%s\n"
+                % (ticks, tick.get("miss"), tick.get("ask"))
+            )
             if args.verdict and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
             if args.fail_fast and (tick.get("miss") or tick.get("ask")):

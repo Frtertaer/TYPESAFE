@@ -686,6 +686,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Per-harness report of miss entries (no winner) never followed by a fill for the same prompt",
     )
     parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="With --fill-gaps: exit 1 when any harness has open misses",
+    )
+    parser.add_argument(
         "--prune",
         action="store_true",
         help="Rewrite the log keeping only entries matching the time/status filters",
@@ -1026,6 +1031,18 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(json.dumps({"fill_gaps": rows}, indent=2) + "\n")
         else:
             sys.stdout.write(format_fill_gaps(rows) + "\n")
+        open_total = sum(row["open"] for row in rows)
+        if getattr(args, "strict", False) and open_total:
+            sys.stderr.write(
+                "strict: %d open miss%s across %d harness%s\n"
+                % (
+                    open_total,
+                    "es" if open_total != 1 else "",
+                    len(rows),
+                    "es" if len(rows) != 1 else "",
+                )
+            )
+            return 1
         return 0
     if getattr(args, "watch", 0) > 0:
         max_ticks = _watch.cap("JEV_DECISIONS_WATCH_MAX", args.max_ticks)

@@ -2866,6 +2866,27 @@ class FillGapsTest(unittest.TestCase):
         ]
         self.assertEqual(decisions.fill_gaps(entries), [])
 
+    def test_fill_gaps_strict_fails_on_open_misses(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._log(tmp)
+            proc = run_cli("--file", str(path), "--fill-gaps", "--strict")
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("strict:", proc.stderr)
+            self.assertIn("2 open", proc.stderr)
+
+    def test_fill_gaps_strict_passes_when_all_filled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "harness": "h", "jev_status": "none", "prompt_head": "p"},
+                    {"ts": 2, "harness": "h", "jev_status": "fill", "prompt_head": "p"},
+                ],
+            )
+            proc = run_cli("--file", str(path), "--fill-gaps", "--strict")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

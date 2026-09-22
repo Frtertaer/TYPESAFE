@@ -2389,6 +2389,18 @@ def step_install(tmp: Path) -> dict:
     # dry-run plans into the redirected home and writes nothing there
     writes = [p for p in home.rglob("*") if p.is_file()]
     ok = rc == 0 and "skill ->" in out and not writes
+    if ok:
+        # --check-key reports set/missing and never echoes a value
+        env.pop("TYPESAFE_API_KEY", None)
+        rc, out = _run(
+            [str(repo_root / "scripts" / "install.py"), "--check-key"],
+            env=env,
+        )
+        ok = (
+            rc == 0
+            and out.strip().startswith("TYPESAFE_API_KEY:")
+            and "apikey_" not in out
+        )
     return _step("install", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

@@ -363,6 +363,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, steps, failed} JSON to PATH when finished (in --watch mode, the final pass state).")
     parser.add_argument("--junit", metavar="PATH", default="", help="Write a JUnit XML <testsuite> for the step results to PATH (in --watch mode, the final pass).")
+    parser.add_argument(
+        "--repeat",
+        metavar="N",
+        type=int,
+        default=0,
+        help="Run each step N times; a step fails when any attempt does (default 1; JEV_SMOKE_REPEAT presets).",
+    )
     args = parser.parse_args(argv)
     names = {name for name, _ in STEPS}
     if args.list:
@@ -372,6 +379,14 @@ def main(argv: list[str] | None = None) -> int:
             for name in sorted(names):
                 sys.stdout.write(name + "\n")
         return 0
+    repeat = args.repeat
+    if repeat <= 0:
+        try:
+            repeat = int(os.environ.get("JEV_SMOKE_REPEAT", "") or "1")
+        except ValueError:
+            repeat = 1
+    if repeat < 1:
+        repeat = 1
     wanted = {s.strip() for s in args.only.split(",") if s.strip()}
     unknown = wanted - names
     if unknown:
@@ -397,10 +412,19 @@ def main(argv: list[str] | None = None) -> int:
                 if wanted and name not in wanted:
                     continue
                 fn = globals()[fn_name]
-                try:
-                    rows.append(fn(tmp))
-                except Exception as exc:  # a crash is a failed step, not a crash
-                    rows.append(_step(getattr(fn, "__name__", "step"), False, "raised %r" % exc))
+                for attempt in range(repeat):
+                    try:
+                        row = fn(tmp)
+                    except Exception as exc:  # a crash is a failed step, not a crash
+                        row = _step(getattr(fn, "__name__", "step"), False, "raised %r" % exc)
+                    if not row["ok"] and repeat > 1:
+                        row = dict(row)
+                        row["detail"] = "attempt %d/%d: %s" % (
+                            attempt + 1, repeat, row["detail"]
+                        )
+                    if not row["ok"]:
+                        break
+                rows.append(row)
                 if args.fail_fast and not rows[-1]["ok"]:
                     break
         return rows

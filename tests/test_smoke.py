@@ -84,6 +84,29 @@ class SmokeTests(unittest.TestCase):
         out = json.loads(proc.stdout)
         self.assertEqual({s["name"] for s in out["steps"]}, {"policy"})
 
+    def test_repeat_runs_step_multiple_times(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "policy", "--repeat", "2"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertEqual([s["name"] for s in out["steps"]], ["policy"])
+        self.assertTrue(all(s["ok"] for s in out["steps"]))
+
+    def test_repeat_env_presets_attempts(self) -> None:
+        env = dict(os.environ, JEV_SMOKE_REPEAT="2")
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "policy"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
     def test_only_unknown_step_rc2(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(SMOKE), "--only", "bogus"],

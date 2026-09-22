@@ -1285,6 +1285,10 @@ def cmd_compact(args: argparse.Namespace) -> int:
             }
             _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_COMPACT_WATCH_QUIET", args.quiet), bad=tick["fallback"])
             ticks += 1
+            sys.stderr.write(
+                "watch tick=%d reduction=%s fallback=%s\n"
+                % (ticks, tick["reduction"], tick["fallback"])
+            )
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
             if getattr(args, "fail_fast", False) and tick["fallback"]:

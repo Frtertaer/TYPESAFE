@@ -1248,6 +1248,23 @@ class CompactCliTests(unittest.TestCase):
         self.assertTrue(all("charsBefore" in t and "reduction" in t for t in ticks))
         self.assertTrue(all(t["fallback"] is False for t in ticks))
 
+    def test_watch_writes_stderr_tick_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            err = io.StringIO()
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", io.StringIO()):
+                    with patch.object(sys, "stderr", err):
+                        rc = C.main(
+                            [str(f), "--history", "--fake", "--min-reduction", "0",
+                             "--watch", "0.01"]
+                        )
+        self.assertEqual(rc, 0)
+        lines = [l for l in err.getvalue().splitlines() if l.startswith("watch tick=")]
+        self.assertEqual(len(lines), 2)
+        self.assertIn("fallback=False", lines[0])
+
     def test_watch_rc_1_on_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

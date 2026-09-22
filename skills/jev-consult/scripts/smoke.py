@@ -1223,6 +1223,34 @@ def step_hook(tmp: Path) -> dict:
             ),
         )
         ok = rc == 0 and out.strip().splitlines()[0] == "{}"
+    if ok:
+        # $name in the prompt is an explicit pick — no Jev call needed
+        skill_dir = tmp / "hermes" / "skills" / "explicit-skill"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: explicit-skill\n---\n", encoding="utf-8"
+        )
+        env["HERMES_HOME"] = str(tmp / "hermes")
+        cwd3 = tmp / "cwd3"
+        cwd3.mkdir(exist_ok=True)
+        rc, out = _run(
+            [str(SCRIPTS / "inventory_hook.py"), "--json"],
+            cwd=tmp,
+            env=env,
+            inp=json.dumps(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "please apply $explicit-skill to this task",
+                    "cwd": str(cwd3),
+                }
+            ),
+        )
+        env.pop("HERMES_HOME", None)
+        ok = (
+            rc == 0
+            and '"explicit": true' in out
+            and '"jev_status": "winner"' in out
+        )
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

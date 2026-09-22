@@ -3936,6 +3936,102 @@ def step_hook(tmp: Path) -> dict:
             if ln.strip().startswith("[")
         ]
         ok = len(lines) == 2 and '"winner_changed"' not in out
+    if ok:
+        # end-to-end pick path: an installed skill is shortlisted for
+        # the prompt, a localhost stub answers the Jev ask, and the
+        # hook emits the pick note + writes the sidecar.
+        pick_home = tmp / "pick-home"
+        pick_cwd = tmp / "pick-cwd"
+        pick_cwd.mkdir(parents=True, exist_ok=True)
+        sk = pick_home / ".codex" / "skills" / "smoke-thing"
+        sk.mkdir(parents=True)
+        (sk / "SKILL.md").write_text(
+            "---\nname: smoke-thing\ndescription: picked skill\n---\n",
+            encoding="utf-8",
+        )
+        env3 = dict(env)  # skillscan:allow
+        env3["USERPROFILE"] = str(pick_home)
+        env3["HOME"] = str(pick_home)
+        env3["TYPESAFE_API_KEY"] = "smoke-stub-key"
+        env3["JEV_HOOK_HARNESS"] = "codex"
+
+        class HookStub(http.server.BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                    request = json.loads(self.rfile.read(length) or b"{}")
+                except (ValueError, TypeError):
+                    request = {}
+                answers: dict = {}
+                for qid, q in (request.get("questions") or {}).items():
+                    if q.get("type") == "choice":
+                        pick = next(
+                            (
+                                k
+                                for k in (q.get("criteria") or {})
+                                if k != "none"
+                            ),
+                            "none",
+                        )
+                        answers[qid] = {
+                            "type": "choice",
+                            "choice": pick,
+                            "confidence": 0.9,
+                            "probabilities": {pick: 0.9, "none": 0.1},
+                        }
+                    else:
+                        answers[qid] = {"type": "noul", "noul": 0.99}
+                reply = json.dumps({"answers": answers}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(reply)))
+                self.end_headers()
+                self.wfile.write(reply)
+
+            def log_message(self, *args) -> None:
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), HookStub)
+        try:
+            policy = json.loads(
+                (SKILL_DIR / "policy.json").read_text(encoding="utf-8")
+            )
+            policy["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
+                server.server_address[1]
+            )
+            policy_path = tmp / "hook-policy.json"
+            policy_path.write_text(json.dumps(policy), encoding="utf-8")
+            env3["JEV_POLICY"] = str(policy_path)
+            threading.Thread(
+                target=server.handle_request, daemon=True
+            ).start()
+            pick_payload = json.dumps(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "smoke",
+                    "cwd": str(pick_cwd),
+                }
+            )
+            rc, out = _run(
+                [str(SCRIPTS / "inventory_hook.py")],
+                cwd=pick_cwd,
+                env=env3,
+                inp=pick_payload,
+            )
+            ok = False
+            if rc == 0:
+                try:
+                    emitted = json.loads(out.strip().splitlines()[0])
+                    context = (
+                        emitted.get("hookSpecificOutput") or {}
+                    ).get("additionalContext") or ""
+                    ok = "smoke-thing" in context
+                except (ValueError, IndexError):
+                    ok = False
+            if ok:
+                ok = (pick_cwd / ".jev-tools.json").is_file()
+        finally:
+            server.server_close()
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

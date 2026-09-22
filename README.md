@@ -39,7 +39,7 @@ Windows: `install.cmd`. Unix: `sh install.sh`. То же самое, что ко
 | `vendor/fast-jev-compaction` | MIT-снимок upstream; рантайм — `compact.py`, не плагин Claude |
 | `vendor/awesome-jev` | Снимок каталога (inspect-only) |
 | `vendor/typesafeai-cli` | MIT Python CLI; наш клиент остаётся `jev.py` |
-| `vendor/awesome-llm-apps-skill-evals` | Apache-2.0 снимок evals-инструментов (inspect-only); рантайм — `scripts/skill_scanner.py` |
+| `vendor/awesome-llm-apps-skill-evals` | Apache-2.0 снимок evals-инструментов (inspect-only); рантайм — `skills/jev-consult/scripts/skill_scanner.py` |
 | `vendor/jev-skill-suggester` | MIT-снимок upstream (inspect-only); перенесены защиты в `jev.py`/`inventory.py`, их CLI не запускаем |
 | `vendor/jevcal` | MIT-снимок upstream (inspect-only); правила линта перенесены в `question_lint.py` |
 | `vendor/skill-router` | MIT-снимок upstream (inspect-only); перенесены `strong_pick` и журнал решений |

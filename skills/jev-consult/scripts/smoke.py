@@ -762,7 +762,7 @@ def step_decisions(tmp: Path) -> dict:
         winner_log.write_text(
             '\n'.join(
                 [
-                    json.dumps({"ts": 1, "jev_status": "winner", "winner": {"kind": "skill", "name": "alpha"}, "explicit": True}),
+                    json.dumps({"ts": 1, "jev_status": "winner", "winner": {"kind": "skill", "name": "alpha"}, "explicit": True, "question": "explicit"}),
                     json.dumps({"ts": 2, "jev_status": "winner", "winner": {"kind": "skill", "name": "beta"}}),
                     json.dumps({"ts": 3, "jev_status": "none"}),
                 ]
@@ -879,6 +879,58 @@ def step_decisions(tmp: Path) -> dict:
             ]
         )
         ok = rc == 0 and "winner" in out and "none" in out
+    if ok:
+        # --count prints only the matching entry count
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--count",
+            ]
+        )
+        ok = rc == 0 and out.strip() == "2"
+    if ok:
+        # --question KIND filters by the routing question kind
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(winner_log),
+                "--question",
+                "explicit",
+                "--json",
+            ]
+        )
+        # only the explicit-pick row carries question="explicit"
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 1
+        except ValueError:
+            ok = False
+    if ok:
+        # --uniq dedupes --jq values
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--jq",
+                "harness",
+                "--uniq",
+            ]
+        )
+        ok = rc == 0 and out.strip() == "smoke"
+    if ok:
+        # --fields lists field names with counts
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--fields",
+            ]
+        )
+        ok = rc == 0 and "jev_status" in out and "harness" in out
     if ok:
         # --csv emits a header plus one row per entry, no stats
         rc, out = _run(

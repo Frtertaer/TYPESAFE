@@ -514,6 +514,21 @@ def step_decisions(tmp: Path) -> dict:
         except ValueError:
             ok = False
     if ok:
+        # --nth 1 prints the first matching entry as JSON
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--nth",
+                "1",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("jev_status") == "winner"
+        except ValueError:
+            ok = False
+    if ok:
         # --csv emits a header plus one row per entry, no stats
         rc, out = _run(
             [

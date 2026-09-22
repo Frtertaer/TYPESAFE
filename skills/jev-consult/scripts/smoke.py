@@ -2332,7 +2332,46 @@ def step_trigger_lint(tmp: Path) -> dict:
     if not cases.is_file():
         return _step("trigger_lint", False, "fixture missing: %s" % cases)
     rc, out = _run([str(SCRIPTS / "trigger_lint.py"), str(cases)])
-    return _step("trigger_lint", rc == 0, out.strip()[:120] or "rc=%d" % rc)
+    ok = rc == 0
+    if ok:
+        # --json emits a findings payload; the shipped fixture is clean
+        rc, out = _run(
+            [str(SCRIPTS / "trigger_lint.py"), str(cases), "--json"]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("findings") == []
+        except (ValueError, AttributeError):
+            ok = False
+    if ok:
+        # --explain RULE prints one rule's description
+        rc, out = _run(
+            [str(SCRIPTS / "trigger_lint.py"), "--explain", "T001"]
+        )
+        ok = rc == 0 and "T001" in out
+    if ok:
+        # --watch emits {findings,errors} ticks; --verdict writes the probe
+        verdict = tmp / "tlint-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trigger_lint.py"),
+                str(cases),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--verdict",
+                str(verdict),
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"findings"' in ln]
+        ok = rc == 0 and len(ticks) == 2
+        try:
+            ok = ok and json.loads(verdict.read_text(encoding="utf-8")).get(
+                "verdict"
+            ) == "pass"
+        except (OSError, ValueError):
+            ok = False
+    return _step("trigger_lint", ok, out.strip()[:120] or "rc=%d" % rc)
 
 
 def step_trigger_eval(tmp: Path) -> dict:

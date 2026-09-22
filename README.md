@@ -82,6 +82,8 @@ python skills/jev-consult/scripts/jev.py ping
 python scripts/install.py --uninstall
 ```
 
+Опции: `--agents hermes,codex` ставит только в часть харнессов; `--dry-run` показывает план без записи; `--check-key` печатает `TYPESAFE_API_KEY: set|missing` (значение — никогда).
+
 ## Новая сессия
 
 Jev — не демон. Он не стартует сам. Новая сессия подхватит режим, если:

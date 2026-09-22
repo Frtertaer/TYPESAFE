@@ -1448,6 +1448,40 @@ class TriggerEvalTests(unittest.TestCase):
                 rc = te.main(["--cases", str(Path(tmp) / "nope.json")])
         self.assertEqual(rc, 2)
 
+    def test_watch_leaves_no_tmp_litter(self) -> None:
+        # --verdict/--out writes are atomic (.tmp + os.replace): after a
+        # watch run only the declared outputs may exist
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            v = Path(tmp) / "v.json"
+            o = Path(tmp) / "o.log"
+            env = dict(os.environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--watch",
+                    "0.01",
+                    "--max-ticks",
+                    "2",
+                    "--verdict",
+                    str(v),
+                    "--out",
+                    str(o),
+                    "--quiet",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=tmp,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+            created = {p.name for p in Path(tmp).rglob("*") if p.is_file()}
+            self.assertEqual(created, {"v.json", "o.log"})
+
 
 class WatchSecsEnvTests(unittest.TestCase):
     def test_watch_secs_env_bounds_loop(self) -> None:

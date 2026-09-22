@@ -416,6 +416,57 @@ class InventoryHookTests(unittest.TestCase):
             self.assertFalse(ticks[0]["winner_changed"])
             self.assertTrue(ticks[1]["winner_changed"])
 
+    def test_watch_verdict_reports_winner_stability(self) -> None:
+        winners = iter(["a-tool", "b-tool"])
+
+        def fake_handle(payload):
+            HOOK.LAST_DECISION = {"winner": {"name": next(winners)}}
+            return {"note": "x"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload.json"
+            payload.write_text('{"event": "UserPromptSubmit", "prompt": "p"}',
+                               encoding="utf-8")
+            verdict = Path(tmp) / "verdict.json"
+            with patch.dict(os.environ, {"JEV_HOOK_WATCH_MAX": "2"}):
+                with patch.object(HOOK, "handle", side_effect=fake_handle):
+                    with patch("sys.stdout", io.StringIO()):
+                        rc = HOOK.main(
+                            [
+                                "--file", str(payload),
+                                "--watch", "0.01",
+                                "--verdict", str(verdict),
+                            ]
+                        )
+            self.assertEqual(rc, 0)
+            out = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(out["winner_stability"], 2)
+            self.assertEqual(out["winner"], "b-tool")
+
+    def test_watch_verdict_winner_stability_one_when_stable(self) -> None:
+        def fake_handle(payload):
+            HOOK.LAST_DECISION = {"winner": {"name": "same"}}
+            return {"note": "x"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload.json"
+            payload.write_text('{"event": "UserPromptSubmit", "prompt": "p"}',
+                               encoding="utf-8")
+            verdict = Path(tmp) / "verdict.json"
+            with patch.dict(os.environ, {"JEV_HOOK_WATCH_MAX": "2"}):
+                with patch.object(HOOK, "handle", side_effect=fake_handle):
+                    with patch("sys.stdout", io.StringIO()):
+                        rc = HOOK.main(
+                            [
+                                "--file", str(payload),
+                                "--watch", "0.01",
+                                "--verdict", str(verdict),
+                            ]
+                        )
+            self.assertEqual(rc, 0)
+            out = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(out["winner_stability"], 1)
+
     def test_watch_tick_winner_changed_false_when_stable(self) -> None:
         def fake_handle(payload):
             HOOK.LAST_DECISION = {"winner": {"name": "same"}}

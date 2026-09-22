@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -2357,7 +2358,7 @@ class SpillGcTests(unittest.TestCase):
             rows = C.list_spill(spill_dir)
             self.assertEqual({r[0].name for r in rows}, {path.name, "stray.txt"})
             self.assertNotIn("index.jsonl", [r[0].name for r in rows])
-            removed = C.prune_spill(spill_dir, older_than=0)
+            removed = C.prune_spill(spill_dir, older_than=0, now=time.time() + 60)
             self.assertEqual({p.name for p in removed}, {path.name, "stray.txt"})
             self.assertTrue((spill_dir / "index.jsonl").is_file())
 

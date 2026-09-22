@@ -453,6 +453,18 @@ def step_decisions(tmp: Path) -> dict:
         except (ValueError, AttributeError):
             ok = False
     if ok:
+        # --tail 1 lists only the last entry (a "none" row)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--tail",
+                "1",
+            ]
+        )
+        ok = rc == 0 and "none" in out.splitlines()[-1] and "winner" not in out.splitlines()[-1]
+    if ok:
         rc, out = _run(
             [
                 str(SCRIPTS / "decisions.py"),

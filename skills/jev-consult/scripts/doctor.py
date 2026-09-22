@@ -245,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first failing tick.")
     parser.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the {ok,checks} payload (e.g. ok); unknown key exits 2")
+    parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown report (verdict line + per-check table with hints) to PATH")
     args = parser.parse_args(argv)
     agents = [a.strip() for a in args.agents.split(",") if a.strip()]
     bad = [a for a in agents if a not in ALLOWED]
@@ -364,6 +365,31 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
         return 0
+    if getattr(args, "report", ""):
+        rep = [
+            "# doctor report",
+            "",
+            "verdict: %s" % ("pass" if ok else "fail"),
+            "",
+            "| check | agent | ok | hint |",
+            "| --- | --- | --- | --- |",
+        ]
+        for c in shown:
+            rep.append(
+                "| %s | %s | %s | %s |"
+                % (
+                    c.get("check") or "",
+                    c.get("agent") or "",
+                    "yes" if c.get("ok") else "NO",
+                    c.get("hint") or "",
+                )
+            )
+        try:
+            Path(args.report).write_text("\n".join(rep) + "\n", encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % args.report)
     text = json.dumps(payload, indent=2) + "\n"
     sys.stdout.write(text)
     if args.out:

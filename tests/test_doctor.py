@@ -103,6 +103,24 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("bad --jq key", buf.getvalue())
 
+    def test_report_writes_markdown_check_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "doctor.md"
+            rc, _, _ = run_main(
+                [
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--report", str(report),
+                ],
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 1)
+            text = report.read_text(encoding="utf-8")
+            self.assertIn("# doctor report", text)
+            self.assertIn("verdict: fail", text)
+            self.assertIn("| api_key |", text)
+            self.assertIn("| NO |", text)
+
     def test_full_install_ok(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"

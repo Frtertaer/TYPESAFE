@@ -1816,6 +1816,51 @@ def step_question_lint(tmp: Path) -> dict:
             ) == "pass"
         except (OSError, ValueError):
             ok = False
+    if ok:
+        # --quiet keeps passing ticks off stdout (stderr still logs them)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "question_lint.py"),
+                str(req),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--quiet",
+            ]
+        )
+        stdout_ticks = [ln for ln in out.splitlines() if '"findings"' in ln]
+        ok = rc == 0 and not stdout_ticks and "watch tick=2" in out
+    if ok:
+        # --fail-fast stops the watch on the first erroring tick
+        bad_req = tmp / "req-bad.json"
+        bad_req.write_text(
+            json.dumps(
+                {
+                    "questions": {
+                        "q": {
+                            "type": "noul",
+                            "instructions": "Go?",
+                            "criteria": {"true": "x", "false": "x"},
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "question_lint.py"),
+                str(bad_req),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "5",
+                "--fail-fast",
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"findings"' in ln]
+        ok = len(ticks) == 1 and "watch tick=2" not in out
     return _step("question_lint", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

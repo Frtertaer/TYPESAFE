@@ -4502,6 +4502,30 @@ def step_compact_hook(tmp: Path) -> dict:
             ]
         )
         ok = rc == 0 and not stale.is_file()
+    if ok:
+        # fail-open stdin variants: empty, invalid JSON, non-dict, a small
+        # result under the live-fat threshold, and a truncated event all
+        # emit {} rc 0
+        variants = [
+            "",
+            "not json {",
+            "[1, 2]",
+            json.dumps({"hook_event_name": "PostToolUse", "tool_result": "tiny"}),
+            json.dumps(
+                {
+                    "hook_event_name": "PostToolUse",
+                    "toolResultTruncated": True,
+                    "tool_result": "x" * 90000,
+                }
+            ),
+        ]
+        for variant in variants:
+            rc, out = _run(
+                [str(SCRIPTS / "compact_hook.py")], cwd=tmp, env=env, inp=variant
+            )
+            if rc != 0 or out.strip() != "{}":
+                ok = False
+                break
     return _step("compact_hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

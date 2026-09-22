@@ -384,22 +384,25 @@ def fill_gaps(entries: list[dict], now: float | None = None) -> list[dict]:
     for row in rows:
         oldest = row["oldest_open_ts"]
         row["age_s"] = round(now - oldest, 1) if oldest is not None else None
+        row["fill_rate"] = round(row["filled"] / row["misses"], 3) if row["misses"] else None
     return sorted(rows, key=lambda g: (-g["open"], g["harness"]))
 
 
 def format_fill_gaps(rows: list[dict]) -> str:
     if not rows:
         return "no miss entries"
-    lines = ["harness        misses  filled  open   age_s      examples"]
+    lines = ["harness        misses  filled  open   rate    age_s      examples"]
     for row in rows:
         age = row.get("age_s")
+        rate = row.get("fill_rate")
         lines.append(
-            "%-14s %-7d %-7d %-6d %-10s %s"
+            "%-14s %-7d %-7d %-6d %-7s %-10s %s"
             % (
                 row["harness"],
                 row["misses"],
                 row["filled"],
                 row["open"],
+                "-" if rate is None else "%.3f" % rate,
                 "-" if age is None else "%.1f" % age,
                 "; ".join(row["examples"]),
             )

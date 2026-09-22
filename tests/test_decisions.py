@@ -2896,6 +2896,28 @@ class FillGapsTest(unittest.TestCase):
         self.assertIsNone(row["oldest_open_ts"])
         self.assertIsNone(row["age_s"])
 
+    def test_fill_gaps_rate_field_and_column(self) -> None:
+        entries = [
+            {"ts": 10, "harness": "h", "jev_status": "none", "prompt_head": "a"},
+            {"ts": 20, "harness": "h", "jev_status": "fill", "prompt_head": "a"},
+            {"ts": 30, "harness": "h", "jev_status": "none", "prompt_head": "b"},
+            {"ts": 40, "harness": "h", "jev_status": "none", "prompt_head": "c"},
+            {"ts": 50, "harness": "h", "jev_status": "fill", "prompt_head": "c"},
+            {"ts": 60, "harness": "h", "jev_status": "none", "prompt_head": "d"},
+        ]
+        row = decisions.fill_gaps(entries, now=100.0)[0]
+        self.assertEqual(row["misses"], 4)
+        self.assertEqual(row["filled"], 2)
+        self.assertEqual(row["fill_rate"], 0.5)
+
+    def test_fill_gaps_table_shows_rate_column(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._log(tmp)
+            proc = run_cli("--file", str(path), "--fill-gaps")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("rate", proc.stdout.splitlines()[0])
+            self.assertRegex(proc.stdout, r"hermes\s+2\s+1\s+1\s+0\.5")
+
     def test_fill_gaps_table_shows_age_column(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = self._log(tmp)

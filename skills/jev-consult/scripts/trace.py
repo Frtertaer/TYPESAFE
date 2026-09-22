@@ -623,6 +623,7 @@ def cmd_state(args: argparse.Namespace) -> int:
         dead = _watch.deadline("JEV_TRACE_WATCH_SECS", getattr(args, "watch_max", 0.0))
         state: dict = {}
         verdict_ok = True
+        prev_attempt: int | None = None
 
         def _write_verdict() -> bool:
             nonempty = any(k != "attempt_count" for k in state)
@@ -639,11 +640,17 @@ def cmd_state(args: argparse.Namespace) -> int:
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             data = load(path)
             state = {key: value for key, value in data.items() if _present(value)}
+            cur_attempt = int(data.get("attempt_count") or 0)
             _watch.emit(
                 {
                     "ts": int(_time.time()),
                     "state": state,
-                    "attempt_count": int(data.get("attempt_count") or 0),
+                    "attempt_count": cur_attempt,
+                    "attempt_count_delta": (
+                        cur_attempt - prev_attempt
+                        if prev_attempt is not None
+                        else None
+                    ),
                     "history": len(data.get("history") or []),
                     "inspected": len(data.get("inspected") or []),
                 },
@@ -651,6 +658,7 @@ def cmd_state(args: argparse.Namespace) -> int:
                 quiet=getattr(args, "quiet", False),
                 bad=bool(state),
             )
+            prev_attempt = cur_attempt
             ticks += 1
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying

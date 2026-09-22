@@ -3933,6 +3933,65 @@ def step_trigger_lint(tmp: Path) -> dict:
                 )
             except (OSError, ValueError, KeyError, IndexError):
                 ok = False
+    if ok:
+        # --severity error drops warn/info findings; --explain RULE prints
+        # one rule's description; --out writes the payload file;
+        # --watch-max bounds a slow watch before --max-ticks fires
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trigger_lint.py"),
+                str(fix_cases),
+                "--json",
+                "--severity",
+                "error",
+            ]
+        )
+        try:
+            sev_payload = json.loads(out)
+            ok = rc in (0, 1) and isinstance(
+                sev_payload.get("findings", sev_payload), list
+            )
+        except (ValueError, AttributeError):
+            ok = False
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trigger_lint.py"),
+                    str(fix_cases),
+                    "--explain",
+                    "T005",
+                ]
+            )
+            ok = rc == 0 and "T005" in out
+        if ok:
+            tout = tmp / "tlint-out.json"
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trigger_lint.py"),
+                    str(fix_cases),
+                    "--json",
+                    "--out",
+                    str(tout),
+                ]
+            )
+            ok = rc in (0, 1) and tout.is_file()
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trigger_lint.py"),
+                    str(cases),
+                    "--watch",
+                    "0.2",
+                    "--watch-max",
+                    "0.05",
+                    "--max-ticks",
+                    "20",
+                ]
+            )
+            ticks = [
+                ln for ln in out.splitlines() if '"findings"' in ln
+            ]
+            ok = len(ticks) == 1
     return _step("trigger_lint", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

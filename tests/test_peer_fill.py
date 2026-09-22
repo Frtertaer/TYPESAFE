@@ -472,6 +472,38 @@ class PeerFillInternalsTests(unittest.TestCase):
             self.assertTrue(all(t["miss_task"] == "jwt flow" for t in ticks))
             self.assertFalse(any(t["ask"] for t in ticks))
 
+    def test_watch_fail_fast_breaks_on_miss(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / INV.MISS_NAME).write_text(
+                json.dumps({"task": "jwt flow", "written_at": int(time.time())}),
+                encoding="utf-8",
+            )
+            env = dict(__import__("os").environ)
+            env["JEV_PEER_WATCH_MAX"] = "5"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--cwd",
+                    str(cwd),
+                    "--watch",
+                    "0.01",
+                    "--fail-fast",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+            ticks = [
+                json.loads(l) for l in proc.stdout.splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 1)
+            self.assertTrue(ticks[0]["miss"])
+
     def test_watch_verdict_writes_fill_state(self) -> None:
         import subprocess
 

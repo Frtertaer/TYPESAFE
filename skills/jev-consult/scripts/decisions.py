@@ -918,6 +918,7 @@ def main(argv: list[str] | None = None) -> int:
         total_removed = 0
         tick: dict = {}
         verdict_ok = True
+        watch_t0 = time.time()
 
         def _write_verdict() -> bool:
             return _watch.write_verdict(
@@ -946,7 +947,12 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 default=None,
             )
-            tick = {"ts": int(time.time()), "count": len(entries), "newest_ts": newest_ts}
+            tick = {
+                "ts": int(time.time()),
+                "count": len(entries),
+                "newest_ts": newest_ts,
+                "elapsed_s": round(time.time() - watch_t0, 2),
+            }
             if prev_keys is not None:
                 tick["added"] = len(cur_keys - prev_keys)
                 tick["removed"] = len(prev_keys - cur_keys)

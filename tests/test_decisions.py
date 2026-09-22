@@ -2150,6 +2150,32 @@ class PruneTest(unittest.TestCase):
             payload = json.loads(verdict.read_text(encoding="utf-8"))
             self.assertEqual(payload["newest_ts"], 300)
 
+    def test_watch_tick_reports_elapsed_s(self):
+        import os as _os
+        from unittest.mock import patch
+
+        def fake_load(p):
+            return ([{"sha": "a", "ts": 100}], 0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text('{"sha":"a","ts":100}\n', encoding="utf-8")
+            out = Path(tmp) / "ticks.jsonl"
+            with patch.dict(_os.environ, {"JEV_DECISIONS_WATCH_MAX": "2"}):
+                with patch.object(decisions, "load_entries", side_effect=fake_load):
+                    import io
+
+                    with patch.object(sys, "stdout", io.StringIO()):
+                        rc = decisions.main(
+                            ["--file", str(path), "--watch", "0.02",
+                             "--out", str(out)]
+                        )
+            self.assertEqual(rc, 0)
+            lines = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all(isinstance(t["elapsed_s"], float) for t in lines))
+            self.assertGreaterEqual(lines[1]["elapsed_s"], lines[0]["elapsed_s"])
+
     def test_nonwatch_verdict_ok_with_entries(self):
         import io
         from unittest.mock import patch

@@ -5443,6 +5443,115 @@ def step_peer_fill_status(tmp: Path) -> dict:
                 )
             except (OSError, ValueError):
                 ok = False
+    if ok:
+        # end-to-end peer fill: a skill installed under one harness is
+        # shortlisted for another, a localhost stub answers the pick
+        # ask, and the skill is copied into the dest harness dirs.
+        peer_home = tmp / "peer-home"
+        peer_cwd = tmp / "peer-cwd"
+        peer_cwd.mkdir(parents=True, exist_ok=True)
+        src_dir = peer_home / ".claude" / "skills" / "smoke-thing"
+        src_dir.mkdir(parents=True)
+        (src_dir / "SKILL.md").write_text(
+            "---\nname: smoke-thing\ndescription: peer skill\n---\n",
+            encoding="utf-8",
+        )
+        env2 = dict(os.environ)  # skillscan:allow
+        env2["TYPESAFE_API_KEY"] = "smoke-stub-key"
+        env2["JEV_CONSULT_LOG"] = str(tmp / "peer-decisions.jsonl")
+
+        class PeerStub(http.server.BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                    request = json.loads(self.rfile.read(length) or b"{}")
+                except (ValueError, TypeError):
+                    request = {}
+                answers: dict = {}
+                for qid, q in (request.get("questions") or {}).items():
+                    if q.get("type") == "choice":
+                        pick = next(
+                            (
+                                k
+                                for k in (q.get("criteria") or {})
+                                if k != "none"
+                            ),
+                            "none",
+                        )
+                        answers[qid] = {
+                            "type": "choice",
+                            "choice": pick,
+                            "confidence": 0.9,
+                            "probabilities": {pick: 0.9, "none": 0.1},
+                        }
+                    else:
+                        answers[qid] = {"type": "noul", "noul": 0.99}
+                reply = json.dumps({"answers": answers}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(reply)))
+                self.end_headers()
+                self.wfile.write(reply)
+
+            def log_message(self, *args) -> None:
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), PeerStub)
+        try:
+            policy = json.loads(
+                (SKILL_DIR / "policy.json").read_text(encoding="utf-8")
+            )
+            policy["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
+                server.server_address[1]
+            )
+            policy_path = tmp / "peer-policy.json"
+            policy_path.write_text(json.dumps(policy), encoding="utf-8")
+            env2["JEV_POLICY"] = str(policy_path)
+            threading.Thread(
+                target=server.handle_request, daemon=True
+            ).start()
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--task",
+                    "smoke",
+                    "--harness",
+                    "codex",
+                    "--home",
+                    str(peer_home),
+                    "--cwd",
+                    str(peer_cwd),
+                    "--ask-file",
+                    str(tmp / "peer-ask.json"),
+                ],
+                cwd=peer_cwd,
+                env=env2,
+            )
+            ok = (
+                rc == 0
+                and "copied" in out
+                and (
+                    peer_home
+                    / ".codex"
+                    / "skills"
+                    / "smoke-thing"
+                    / "SKILL.md"
+                ).is_file()
+            )
+            if ok:
+                # the sidecar records the pick for the dest harness
+                try:
+                    ok = bool(
+                        json.loads(
+                            (peer_cwd / ".jev-tools.json").read_text(
+                                encoding="utf-8"
+                            )
+                        )
+                    )
+                except (OSError, ValueError):
+                    ok = False
+        finally:
+            server.server_close()
     return _step("peer_fill_status", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

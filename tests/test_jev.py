@@ -742,6 +742,21 @@ class JevInternalsTests(unittest.TestCase):
             rc = jev.main(["ping", "--timeout", "3"])
         self.assertEqual(calls, [3])
 
+    def test_ping_jq_prints_one_field(self) -> None:
+        fake = {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
+        buf = io.StringIO()
+        with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+            sys, "stdout", buf
+        ):
+            rc = jev.main(["ping", "--jq", "model"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(buf.getvalue()), "m1")
+        with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+            sys, "stdout", io.StringIO()
+        ), patch.object(sys, "stderr", io.StringIO()):
+            rc = jev.main(["ping", "--jq", "nope"])
+        self.assertEqual(rc, 2)
+
     def test_ping_json_emits_object(self) -> None:
         def fake_post(state, questions, policy, model=None, timeout=60, retries=1):
             return {"model": "m9", "answers": {"ok": {"type": "noul", "noul": 0.9}}}

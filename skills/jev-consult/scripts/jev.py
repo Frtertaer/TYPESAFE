@@ -660,29 +660,28 @@ def cmd_ping(args: argparse.Namespace) -> int:
         timeout=args.timeout or env_timeout() or 60,
     )
     answer = (result.get("answers") or {}).get("ok") or {}
+    slim = {
+        "ok": True,
+        "model": result.get("model"),
+        "noul": answer.get("noul"),
+        "ms": int((time.time() - started) * 1000),
+    }
     verdict_path = getattr(args, "verdict", "") or ""
     if verdict_path and _watch is not None:
-        _watch.write_verdict(
-            verdict_path,
-            {
-                "ok": True,
-                "model": result.get("model"),
-                "noul": answer.get("noul"),
-                "ms": int((time.time() - started) * 1000),
-            },
-        )
-    if getattr(args, "json", False):
-        sys.stdout.write(
-            json.dumps(
-                {
-                    "ok": True,
-                    "model": result.get("model"),
-                    "noul": answer.get("noul"),
-                    "ms": int((time.time() - started) * 1000),
-                }
+        _watch.write_verdict(verdict_path, slim)
+    jq_key = getattr(args, "jq", "") or ""
+    if jq_key:
+        value, found = jq_lookup(slim, jq_key)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (jq_key, ", ".join(sorted(slim)))
             )
-            + "\n"
-        )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+        return 0
+    if getattr(args, "json", False):
+        sys.stdout.write(json.dumps(slim) + "\n")
         return 0
     sys.stdout.write(
         "ok model=%s noul=%s\n" % (result.get("model"), answer.get("noul"))
@@ -894,6 +893,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         default="",
         help="Write a slim {ok, model, noul, ms} JSON to PATH (atomic via .tmp+rename).",
+    )
+    ping.add_argument(
+        "--jq",
+        metavar="KEY",
+        default="",
+        help="Print just one field of the slim payload (ok|model|noul|ms); unknown key exits 2.",
     )
     ping.set_defaults(func=cmd_ping)
     scaffold = sub.add_parser(

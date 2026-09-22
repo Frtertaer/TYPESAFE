@@ -113,6 +113,19 @@ class LintQuestionTests(unittest.TestCase):
         )
         self.assertIn(("J014", "error"), rules(findings))
 
+    def test_j014_does_not_fire_without_true_false_keys(self) -> None:
+        # criteria lacking both true/false keys used to compare "" == ""
+        for criteria in ({}, {"boundary": "edge cases only"}, {"true": "yes", "false": "no"}):
+            findings = question_lint.lint_question(
+                "q",
+                noul("Is the shortlist enough for this task to proceed safely?", criteria),
+            )
+            self.assertNotIn(
+                "J014",
+                [f["rule"] for f in findings],
+                "J014 false-positive for criteria=%r" % (criteria,),
+            )
+
     def test_fat_state_is_error_j020(self) -> None:
         findings = question_lint.lint_request(
             {"state": "a " * 40000, "questions": {"q": noul("Is this fine?")}}

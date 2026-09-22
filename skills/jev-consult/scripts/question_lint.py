@@ -14,8 +14,10 @@ question and does not fire.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -134,9 +136,12 @@ def lint_question(qid: str, q: dict, max_options: int = 255) -> list[dict]:
                 "noul has no criteria",
                 "Describe what a yes and a no mean, especially near the boundary.",
             )
-        elif isinstance(criteria, dict) and str(
-            criteria.get("true", "")
-        ).strip().lower() == str(criteria.get("false", "")).strip().lower():
+        elif (
+            isinstance(criteria, dict)
+            and str(criteria.get("true", "")).strip()
+            and str(criteria.get("true", "")).strip().lower()
+            == str(criteria.get("false", "")).strip().lower()
+        ):
             add(
                 "J014",
                 "error",
@@ -303,9 +308,21 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if do_fix:
         applied = apply_fixes(request)
-        Path(argv[0]).write_text(json.dumps(request, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        for rule in applied:
-            sys.stderr.write("fixed %s\n" % rule)
+        if applied:
+            text = json.dumps(request, indent=2, ensure_ascii=False) + "\n"
+            fd, tmp = tempfile.mkstemp(prefix=Path(argv[0]).name + ".", dir=str(Path(argv[0]).resolve().parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as out:
+                    out.write(text)
+                os.replace(tmp, argv[0])
+            except OSError:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+            for rule in applied:
+                sys.stderr.write("fixed %s\n" % rule)
     findings = lint_request(request)
     shown = [f for f in findings if not severity or f["severity"] == severity]
     if as_json:

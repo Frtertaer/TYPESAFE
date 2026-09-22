@@ -1061,6 +1061,78 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(len(ticks), 2)
             self.assertTrue(all(t["notes"] == 2 for t in ticks))
 
+    def test_notes_watch_verdict_writes_notes_count(self) -> None:
+        import io
+        import os as _os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps({"notes": [{"ts": 1, "text": "a"}, {"ts": 2, "text": "b"}]}),
+                encoding="utf-8",
+            )
+            verdict = Path(tmp) / "v.json"
+            buf = io.StringIO()
+            with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = tr.main(
+                        ["--file", str(path), "notes", "--watch", "0.01", "--verdict", str(verdict)]
+                    )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "notes")
+            self.assertEqual(payload["ticks"], 2)
+            self.assertEqual(payload["notes"], 2)
+
+    def test_history_watch_verdict_writes_pick_count(self) -> None:
+        import io
+        import os as _os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps({"history": [{"ts": 1, "kind": "skill", "pick": "a"}]}),
+                encoding="utf-8",
+            )
+            verdict = Path(tmp) / "v.json"
+            buf = io.StringIO()
+            with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "1"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = tr.main(
+                        ["--file", str(path), "history", "--watch", "0.01", "--verdict", str(verdict)]
+                    )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "picks")
+            self.assertEqual(payload["picks"], 1)
+
+    def test_stats_watch_verdict_writes_state(self) -> None:
+        import io
+        import os as _os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps({"attempt_count": 2, "history": [{"ts": 1, "pick": "a"}]}),
+                encoding="utf-8",
+            )
+            verdict = Path(tmp) / "v.json"
+            buf = io.StringIO()
+            with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = tr.main(
+                        ["--file", str(path), "stats", "--watch", "0.01", "--verdict", str(verdict)]
+                    )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "exists")
+            self.assertEqual(payload["ticks"], 2)
+            self.assertEqual(payload["attempt_count"], 2)
+            self.assertEqual(payload["history"], 1)
+
     def test_history_watch_emits_pick_ticks(self) -> None:
         import io
         import os as _os

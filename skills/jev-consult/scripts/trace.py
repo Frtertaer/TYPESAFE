@@ -324,6 +324,20 @@ def cmd_history(args: argparse.Namespace) -> int:
         max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX", getattr(args, "max_ticks", 0))
         ticks = 0
         dead = _watch.deadline("JEV_TRACE_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        tick: dict = {}
+        verdict_ok = True
+
+        def _write_verdict() -> bool:
+            picks = tick.get("picks")
+            return _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "picks" if picks else "empty",
+                    "ticks": ticks,
+                    "picks": picks,
+                },
+            )
+
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             fresh = load(path).get("history")
             fresh = (
@@ -335,7 +349,11 @@ def cmd_history(args: argparse.Namespace) -> int:
             tick = {"ts": int(_time.time()), "picks": len(filtered) if filtered is not None else None}
             _watch.emit(tick, getattr(args, "out", "") or None, quiet=getattr(args, "quiet", False), bad=bool(tick["picks"]))
             ticks += 1
+            if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
             _time.sleep(args.watch)
+        if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
+            return 1
         return 0
     field = getattr(args, "field", "") or ""
     if field:
@@ -461,6 +479,20 @@ def cmd_notes(args: argparse.Namespace) -> int:
         max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX", getattr(args, "max_ticks", 0))
         ticks = 0
         dead = _watch.deadline("JEV_TRACE_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        tick: dict = {}
+        verdict_ok = True
+
+        def _write_verdict() -> bool:
+            notes_count = tick.get("notes")
+            return _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "notes" if notes_count else "empty",
+                    "ticks": ticks,
+                    "notes": notes_count,
+                },
+            )
+
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             fresh = load(path).get("notes")
             fresh = fresh if isinstance(fresh, list) else []
@@ -468,7 +500,11 @@ def cmd_notes(args: argparse.Namespace) -> int:
             tick = {"ts": int(_time.time()), "notes": len(filtered) if filtered is not None else None}
             _watch.emit(tick, getattr(args, "out", "") or None, quiet=getattr(args, "quiet", False), bad=bool(tick["notes"]))
             ticks += 1
+            if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
             _time.sleep(args.watch)
+        if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
+            return 1
         return 0
     field = getattr(args, "field", "") or ""
     if field:
@@ -514,6 +550,21 @@ def cmd_stats(args: argparse.Namespace) -> int:
         max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX", getattr(args, "max_ticks", 0))
         ticks = 0
         dead = _watch.deadline("JEV_TRACE_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        tick: dict = {}
+        verdict_ok = True
+
+        def _write_verdict() -> bool:
+            return _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "exists" if tick.get("exists") else "missing",
+                    "ticks": ticks,
+                    "attempt_count": tick.get("attempt_count", 0),
+                    "history": tick.get("history", 0),
+                    "inspected": tick.get("inspected", 0),
+                },
+            )
+
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             cur = load(path)
             tick = {
@@ -525,7 +576,11 @@ def cmd_stats(args: argparse.Namespace) -> int:
             }
             _watch.emit(tick, getattr(args, "out", "") or None, quiet=getattr(args, "quiet", False), bad=not tick["exists"])
             ticks += 1
+            if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
             _time.sleep(args.watch)
+        if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
+            return 1
         return 0 if tick["exists"] else 1
     # stats/notes/history watch loops emit ticks through _watch.emit below
     data = load(path)
@@ -689,6 +744,7 @@ def build_parser() -> argparse.ArgumentParser:
     stats_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
     stats_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     stats_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    stats_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: exists|missing, ticks, attempt_count, history, inspected} JSON to PATH, refreshed every tick")
     stats_cmd.set_defaults(func=cmd_stats)
     notes_cmd = sub.add_parser("notes", help="List recorded notes (iso + text)")
     notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")
@@ -706,6 +762,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
     notes_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     notes_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    notes_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: notes|empty, ticks, notes} JSON to PATH, refreshed every tick")
     notes_cmd.set_defaults(func=cmd_notes)
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")
@@ -720,6 +777,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     hist_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     hist_cmd.add_argument("--out", default="", help="With --watch: append each tick line to PATH (fail-open)")
+    hist_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: picks|empty, ticks, picks} JSON to PATH, refreshed every tick")
     hist_cmd.set_defaults(func=cmd_history)
     return parser
 

@@ -237,6 +237,20 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertEqual(len(out["uncovered"]), 2)
 
+    def test_json_aux_payloads_carry_margin(self) -> None:
+        for argv in (
+            ["--coverage", "--json"],
+            ["--covers", "--json"],
+            ["--dist", "--json"],
+            ["--uncovered", "--json"],
+        ):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                te.main(argv)
+            out = json.loads(buf.getvalue())
+            self.assertIn("margin", out, argv)
+            self.assertIsInstance(out["margin"], float)
+
     def test_min_coverage_gates_hit_rate(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

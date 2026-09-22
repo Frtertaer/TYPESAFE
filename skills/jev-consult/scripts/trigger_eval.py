@@ -764,6 +764,7 @@ def main(argv: list[str] | None = None) -> int:
                 "covers": {t: counts[t] for t in sorted(counts)},
                 "uncovered": uncovered,
                 "ok": result["ok"] and _covers_ok(),
+                "margin": result["margin"],
             }
             if args.min_covers:
                 payload["min_covers"] = args.min_covers
@@ -801,6 +802,7 @@ def main(argv: list[str] | None = None) -> int:
                         },
                         "unscored": unscored,
                         "ok": result["ok"],
+                        "margin": result["margin"],
                     }
                 )
                 + "\n"
@@ -815,7 +817,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result["ok"] else 1
     if args.uncovered:
         if args.json:
-            sys.stdout.write(json.dumps({"uncovered": _uncovered()}) + "\n")
+            sys.stdout.write(
+                json.dumps(
+                    {"uncovered": _uncovered(), "margin": result["margin"]}
+                )
+                + "\n"
+            )
         else:
             for cid in _uncovered():
                 sys.stdout.write("%s\n" % cid)
@@ -836,6 +843,7 @@ def main(argv: list[str] | None = None) -> int:
                         "coverage": result["coverage"],
                         "uncovered": _uncovered(),
                         "ok": result["ok"] and _coverage_ok(),
+                        "margin": result["margin"],
                     }
                 )
                 + "\n"

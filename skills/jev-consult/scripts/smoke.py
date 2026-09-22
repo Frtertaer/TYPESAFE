@@ -3885,6 +3885,55 @@ def step_compare(tmp: Path) -> dict:
             ]
         )
         ok = rc == 1 and "watch tick=2" not in out
+    if ok:
+        # --failing prints only strict-gate failures; --jq digs one field
+        mix_cases = tmp / "compare-mix.json"
+        mix_cases.write_text(
+            json.dumps(
+                {
+                    "cases": [
+                        {
+                            "id": "ok1",
+                            "defect": "x",
+                            "prompt": "p",
+                            "after": {
+                                "called_jev": True,
+                                "last_pick": "a",
+                                "step": "s",
+                            },
+                        },
+                        {
+                            "id": "bad1",
+                            "defect": "x",
+                            "prompt": "p",
+                            "after": {"called_jev": False},
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compare.py"),
+                "--cases",
+                str(mix_cases),
+                "--failing",
+            ]
+        )
+        ok = rc == 0 and "bad1" in out and "ok1" not in out
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "compare.py"),
+                    "--cases",
+                    str(mix_cases),
+                    "--json",
+                    "--jq",
+                    "live",
+                ]
+            )
+            ok = rc == 0 and out.strip() == "false"
     return _step("compare", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

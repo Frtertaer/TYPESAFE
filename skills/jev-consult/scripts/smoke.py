@@ -2388,6 +2388,53 @@ def step_peer_fill_status(tmp: Path) -> dict:
             ok = isinstance(json.loads(out), dict)
         except ValueError:
             ok = False
+    if ok:
+        # --status --jq digs one field; a bad key exits 2
+        rc, out = _run(
+            [
+                str(SCRIPTS / "peer_fill.py"),
+                "--status",
+                "--cwd",
+                str(tmp / "cwd"),
+                "--jq",
+                "miss",
+            ]
+        )
+        ok = rc == 0 and out.strip() in ("true", "false")
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--status",
+                    "--cwd",
+                    str(tmp / "cwd"),
+                    "--jq",
+                    "nope.nope",
+                ]
+            )
+            ok = rc == 2
+    if ok:
+        # --watch ticks the fill state; --verdict writes the slim probe
+        verdict = tmp / "peer-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "peer_fill.py"),
+                "--cwd",
+                str(tmp / "cwd"),
+                "--watch",
+                "0.05",
+                "--max-ticks",
+                "2",
+                "--verdict",
+                str(verdict),
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"miss"' in ln]
+        ok = rc in (0, 1) and len(ticks) == 2
+        try:
+            ok = ok and "verdict" in json.loads(verdict.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            ok = False
     return _step("peer_fill_status", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

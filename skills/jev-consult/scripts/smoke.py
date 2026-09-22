@@ -115,7 +115,38 @@ def step_policy(tmp: Path) -> dict:
 
 def step_policy_lint(tmp: Path) -> dict:
     rc, out = _run([str(SCRIPTS / "policy_lint.py")])
-    return _step("policy_lint", rc == 0, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
+    ok = rc == 0
+    if ok:
+        # --fix --dry-run reports without writing; --fix drops the key
+        bad = tmp / "policy-bad.json"
+        policy = json.loads(
+            (SCRIPTS.parent / "policy.json").read_text(encoding="utf-8")
+        )
+        policy["smoke_bogus_key"] = 1
+        bad.write_text(json.dumps(policy), encoding="utf-8")
+        rc, out = _run(
+            [
+                str(SCRIPTS / "policy_lint.py"),
+                str(bad),
+                "--fix",
+                "--dry-run",
+            ]
+        )
+        ok = (
+            rc == 0
+            and "would fix P011" in out
+            and '"smoke_bogus_key"' in bad.read_text(encoding="utf-8")
+        )
+    if ok:
+        rc, out = _run(
+            [str(SCRIPTS / "policy_lint.py"), str(bad), "--fix"]
+        )
+        ok = (
+            rc == 0
+            and "fixed P011" in out
+            and "smoke_bogus_key" not in bad.read_text(encoding="utf-8")
+        )
+    return _step("policy_lint", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 
 def step_jev_scaffold_lint(tmp: Path) -> dict:

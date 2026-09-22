@@ -1645,6 +1645,44 @@ def step_question_lint(tmp: Path) -> dict:
     )
     rc, out = _run([str(SCRIPTS / "question_lint.py"), str(req)])
     ok = rc == 0 and "lint:" in out
+    if ok:
+        # --json emits a findings array; the good request is clean
+        rc, out = _run(
+            [str(SCRIPTS / "question_lint.py"), str(req), "--json"]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("findings") == []
+        except (ValueError, AttributeError):
+            ok = False
+    if ok:
+        # --explain RULE prints one rule's description
+        rc, out = _run(
+            [str(SCRIPTS / "question_lint.py"), "--explain", "J001"]
+        )
+        ok = rc == 0 and "J001" in out
+    if ok:
+        # --watch emits {findings,errors} ticks; --verdict writes the probe
+        verdict = tmp / "qlint-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "question_lint.py"),
+                str(req),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--verdict",
+                str(verdict),
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"findings"' in ln]
+        ok = rc == 0 and len(ticks) == 2
+        try:
+            ok = ok and json.loads(verdict.read_text(encoding="utf-8")).get(
+                "verdict"
+            ) == "pass"
+        except (OSError, ValueError):
+            ok = False
     return _step("question_lint", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

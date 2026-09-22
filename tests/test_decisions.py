@@ -1984,6 +1984,24 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(len(ticks), 2)
             self.assertTrue(all(t["count"] == 2 for t in ticks))
 
+    def test_report_writes_markdown_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "ok", "winner": {"name": "w1"}},
+                    {"ts": 2, "jev_status": "ok", "winner": {"name": "w2"}},
+                ],
+            )
+            report = Path(tmp) / "report.md"
+            proc = self.run_cli("--file", str(path), "--report", str(report))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = report.read_text(encoding="utf-8")
+            self.assertIn("# decisions report", text)
+            self.assertIn("| ok | 2 |", text)
+            self.assertIn("w1", text)
+
     def test_watch_jq_prints_only_the_named_tick_field(self):
         import os as _os
         import subprocess as _sp

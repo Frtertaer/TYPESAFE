@@ -606,6 +606,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Rewrite the log dropping unparseable lines (keeps all well-formed entries)",
     )
     parser.add_argument("--json", action="store_true", help="Machine-readable stats")
+    parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown stats report (totals, status/harness/winners tables) to PATH")
     parser.add_argument(
         "--csv",
         action="store_true",
@@ -1318,6 +1319,42 @@ def main(argv: list[str] | None = None) -> int:
     stats["until"] = until
     if getattr(args, "_prune_dry_run", None):
         stats["prune_dry_run"] = args._prune_dry_run
+    if getattr(args, "report", ""):
+        rep = [
+            "# decisions report",
+            "",
+            "- entries: %(total)d (filtered: %(filtered)d, bad lines: %(bad_lines)d)" % stats,
+            "- window: %s -> %s" % (stats.get("first_iso") or "-", stats.get("last_iso") or "-"),
+            "- explicit: %d  strong_pick: %d" % (stats["explicit"], stats["strong_pick"]),
+            "",
+            "## by status",
+            "",
+            "| status | count |",
+            "| --- | --- |",
+        ]
+        rep += ["| %s | %d |" % (k, v) for k, v in sorted(stats["by_status"].items())]
+        rep += ["", "## by harness", "", "| harness | count |", "| --- | --- |"]
+        rep += ["| %s | %d |" % (k, v) for k, v in sorted(stats["by_harness"].items())]
+        if stats["top_winners"]:
+            rep += ["", "## top winners", "", "| winner | count |", "| --- | --- |"]
+            rep += ["| %s | %d |" % (k, v) for k, v in stats["top_winners"].items()]
+        need = stats["need_skill"]
+        lat = stats["latency_ms"]
+        rep += [
+            "",
+            "## latency / need",
+            "",
+            "- need_skill: n=%d mean=%s p50=%s p90=%s"
+            % (need["n"], need["mean"], need["p50"], need["p90"]),
+            "- latency_ms: n=%d mean=%s p50=%s p90=%s max=%s"
+            % (lat["n"], lat["mean"], lat["p50"], lat["p90"], lat["max"]),
+        ]
+        try:
+            Path(args.report).write_text("\n".join(rep) + "\n", encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % args.report)
     if args.json:
         sys.stdout.write(json.dumps(stats, indent=2) + "\n")
     else:

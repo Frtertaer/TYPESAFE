@@ -309,7 +309,7 @@ def iter_claude_plugins(plugin_dirs: list[Path]) -> list[dict]:
         if not isinstance(plugins, dict):
             continue
         for key in plugins:
-            name = str(key).split("@", 1)[0]
+            name = str(key).rsplit("@", 1)[0] or str(key)
             items.append(
                 {
                     "kind": KIND_PLUGIN,
@@ -418,8 +418,10 @@ def mcp_names_from_json(text: str) -> list[str]:
 
 def mcp_names_from_toml(text: str) -> list[str]:
     found: list[str] = []
-    for match in re.finditer(r"^\[mcp_servers\.([^\]\.]+)\]", text, re.MULTILINE):
-        name = match.group(1).strip()
+    for match in re.finditer(
+        r'^\[mcp_servers\.(?:"([^"]+)"|([^\]\."]+))\]', text, re.MULTILINE
+    ):
+        name = (match.group(1) or match.group(2) or "").strip()
         if name and name not in found:
             found.append(name)
     return found

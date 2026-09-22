@@ -1289,6 +1289,10 @@ class InventoryInternalsTests(unittest.TestCase):
         text = "[mcp_servers.github]\nurl = 1\n[mcp_servers.slack]\nx = 2\n[mcp_servers.github]\n"
         self.assertEqual(INV.mcp_names_from_toml(text), ["github", "slack"])
 
+    def test_mcp_names_from_toml_quoted(self) -> None:
+        text = '[mcp_servers."my.name"]\nurl = 1\n[mcp_servers.plain]\nx = 2\n'
+        self.assertEqual(INV.mcp_names_from_toml(text), ["my.name", "plain"])
+
     def test_iter_mcp_suffixes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
@@ -1308,6 +1312,18 @@ class InventoryInternalsTests(unittest.TestCase):
             manifest.write_text('{"plugins": {"nice@1.0": {}, "other@2": {}}}', encoding="utf-8")
             items = INV.iter_claude_plugins([root])
             self.assertEqual({i["name"] for i in items}, {"nice", "other"})
+
+    def test_iter_claude_plugins_scoped_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "installed_plugins.json"
+            manifest.write_text(
+                '{"plugins": {"@scope/tool@1.0": {}, "plain": {}}}', encoding="utf-8"
+            )
+            items = INV.iter_claude_plugins([Path(tmp)])
+            names = {i["name"] for i in items}
+            self.assertNotIn("", names)
+            self.assertIn("@scope/tool", names)
+            self.assertIn("plain", names)
 
     def test_iter_plugin_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

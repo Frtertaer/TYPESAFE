@@ -1710,5 +1710,29 @@ class WatchSecsEnvTests(unittest.TestCase):
             self.assertLessEqual(len(ticks), 10)
             self.assertGreaterEqual(len(ticks), 1)
 
+class AtomicWriteTests(unittest.TestCase):
+    def test_save_leaves_no_tmp_and_roundtrips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.save({"plan": "p", "attempt_count": 3}, path)
+            self.assertEqual(
+                [f.name for f in Path(tmp).iterdir()], ["trace.json"]
+            )
+            data = tr.load(path)
+            self.assertEqual(data["plan"], "p")
+            self.assertEqual(data["attempt_count"], 3)
+
+    def test_save_replace_failure_leaves_no_tmp(self) -> None:
+        from unittest.mock import patch as _patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with _patch.object(tr.os, "replace", side_effect=OSError("boom")):
+                with self.assertRaises(OSError):
+                    tr.save({"plan": "p"}, path)
+            self.assertFalse(path.exists())
+            self.assertFalse((Path(tmp) / "trace.json.tmp").exists())
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

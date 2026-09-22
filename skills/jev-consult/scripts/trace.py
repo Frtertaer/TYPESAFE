@@ -72,9 +72,22 @@ def load(path: Path | None = None) -> dict[str, Any]:
     return data
 
 
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def save(data: dict[str, Any], path: Path | None = None) -> Path:
     path = path or default_path()
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     return path
 
 
@@ -201,9 +214,9 @@ def cmd_show(args: argparse.Namespace) -> int:
     out_path = getattr(args, "out", "") or ""
     if out_path:
         try:
-            Path(out_path).write_text(
+            _atomic_write(
+                Path(out_path),
                 json.dumps({"path": str(path), "exists": exists, "age_seconds": age_seconds, "trace": data}, indent=2, ensure_ascii=False) + "\n",
-                encoding="utf-8",
             )
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
@@ -464,7 +477,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     out_path = getattr(args, "out", "") or ""
     if out_path:
         try:
-            Path(out_path).write_text(out_text, encoding="utf-8")
+            _atomic_write(Path(out_path), out_text)
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
             return 1
@@ -619,7 +632,7 @@ def cmd_notes(args: argparse.Namespace) -> int:
     out_path = getattr(args, "out", "") or ""
     if out_path:
         try:
-            Path(out_path).write_text(out_text, encoding="utf-8")
+            _atomic_write(Path(out_path), out_text)
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
             return 1
@@ -711,8 +724,9 @@ def cmd_stats(args: argparse.Namespace) -> int:
         return rc
     if getattr(args, "out", ""):
         try:
-            Path(args.out).write_text(
-                json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+            _atomic_write(
+                Path(args.out),
+                json.dumps(out, indent=2, ensure_ascii=False) + "\n",
             )
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
@@ -802,9 +816,14 @@ def cmd_state(args: argparse.Namespace) -> int:
     ):
         return 1
     if args.out:
-        Path(args.out).write_text(
-            json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
+        try:
+            _atomic_write(
+                Path(args.out),
+                json.dumps(state, indent=2, ensure_ascii=False) + "\n",
+            )
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+            return 1
     else:
         emit(state)
     return 0

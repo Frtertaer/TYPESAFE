@@ -308,6 +308,27 @@ class UnicodeTaskTests(unittest.TestCase):
             self.assertTrue(rows)
 
 
+class HugePromptTests(unittest.TestCase):
+    """A far-over-cap prompt still completes: the stored task is truncated,
+    the run stays fail-open rc 0."""
+
+    def test_100k_prompt_truncates_task_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            log = cwd / "decisions.jsonl"
+            payload = {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "x" * 100_000,
+                "cwd": str(cwd),
+            }
+            proc = run_hook(cwd, log, payload)
+            self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+            miss = cwd / ".jev-tools-miss.json"
+            self.assertTrue(miss.exists())
+            data = json.loads(miss.read_text(encoding="utf-8"))
+            self.assertEqual(data["task"], "x" * 500)
+
+
 class ConcurrentHookTests(unittest.TestCase):
     def test_racing_hooks_leave_parseable_sidecars(self) -> None:
         """Two+ hooks writing the same cwd must not interleave bytes —

@@ -282,6 +282,87 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("no item named", err.getvalue())
 
+    def _seed_hermes(self, tmp: str, *names: str) -> Path:
+        home = Path(tmp) / ".hermes"
+        for name in names:
+            skill_dir = home / "skills" / name
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: %s\ndescription: fixture %s\n---\n" % (name, name),
+                encoding="utf-8",
+            )
+        return home
+
+    def test_dupes_reports_cross_harness_name(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._seed_home(tmp, "shared", "solo")
+            hermes = self._seed_hermes(tmp, "shared", "other")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--dupes",
+                        "--home",
+                        str(home),
+                        "--hermes-home",
+                        str(hermes),
+                    ]
+                )
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["dupes"][0]["name"], "shared")
+        self.assertEqual(payload["dupes"][0]["count"], 2)
+        self.assertIn("claude-code", payload["dupes"][0]["harnesses"])
+        self.assertIn("hermes", payload["dupes"][0]["harnesses"])
+
+    def test_dupes_empty_when_names_unique(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._seed_home(tmp, "alpha", "beta")
+            hermes = self._seed_hermes(tmp, "gamma")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--dupes",
+                        "--home",
+                        str(home),
+                        "--hermes-home",
+                        str(hermes),
+                    ]
+                )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(buf.getvalue())["count"], 0)
+
+    def test_dupes_scoped_to_explicit_harness(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._seed_home(tmp, "shared")
+            hermes = self._seed_hermes(tmp, "shared")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--dupes",
+                        "--harness",
+                        "claude-code",
+                        "--home",
+                        str(home),
+                        "--hermes-home",
+                        str(hermes),
+                    ]
+                )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(buf.getvalue())["count"], 0)
+
     def test_watch_ticks_emit_jsonl(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

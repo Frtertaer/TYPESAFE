@@ -1236,6 +1236,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the single scanned record with this exact name (kind:name or name) as JSON; exits 2 when absent.",
     )
     parser.add_argument(
+        "--dupes",
+        action="store_true",
+        help="List names that appear more than once: across harnesses when --harness is auto, or within the selected harness (different kinds) when it is set.",
+    )
+    parser.add_argument(
         "--diff",
         metavar="OLD.json",
         default="",
@@ -1354,6 +1359,41 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("no item named %s under harness %s\n" % (wanted, harness))
             return 2
         sys.stdout.write(json.dumps(match, indent=2, ensure_ascii=False) + "\n")
+        return 0
+    if args.dupes:
+        rows = []
+        for h in HARNESSES if args.harness == "auto" else (harness,):
+            for it in scan(h, home=home, hermes=hermes):
+                rows.append({"harness": h, **it})
+        by_name = {}
+        for it in rows:
+            key = str(it.get("name") or "").lower()
+            if key:
+                by_name.setdefault(key, []).append(it)
+        dupes = []
+        for group in by_name.values():
+            harness_set = sorted({g["harness"] for g in group})
+            if len(group) < 2 or (args.harness == "auto" and len(harness_set) < 2):
+                continue
+            dupes.append(
+                {
+                    "name": group[0]["name"],
+                    "count": len(group),
+                    "harnesses": harness_set,
+                    "kinds": sorted({str(g.get("kind") or "") for g in group}),
+                }
+            )
+        dupes.sort(key=lambda d: (-d["count"], d["name"].lower()))
+        text = json.dumps({"count": len(dupes), "dupes": dupes}, indent=2) + "\n"
+        if args.out:
+            try:
+                _atomic_write_text(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+                return 1
+            sys.stderr.write("wrote %s\n" % args.out)
+        else:
+            sys.stdout.write(text)
         return 0
     kinds = {part.strip() for part in args.kind.split(",") if part.strip()}
     if kinds:

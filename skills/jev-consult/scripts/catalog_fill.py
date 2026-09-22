@@ -144,6 +144,20 @@ def read_catalog_cache(
     return [item for item in hits if isinstance(item, dict)]
 
 
+def catalog_cache_age(query: str, path: Path | None = None) -> float | None:
+    """Seconds since the cached hits entry for query was written; None if absent."""
+    target = path or catalog_cache_path()
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    entry = raw.get(query) if isinstance(raw, dict) else None
+    written = entry.get("written_at") if isinstance(entry, dict) else None
+    if not isinstance(written, (int, float)) or isinstance(written, bool):
+        return None
+    return time.time() - float(written)
+
+
 def write_catalog_cache(query: str, hits: list[dict], path: Path | None = None) -> None:
     target = path or catalog_cache_path()
     try:
@@ -426,7 +440,7 @@ def main() -> int:
         metavar="S",
         type=float,
         default=0.0,
-        help="Re-run the catalog search for --task every S seconds, printing {ts,hits,cached} ticks (read-only; JEV_CATALOG_WATCH_MAX caps ticks).",
+        help="Re-run the catalog search for --task every S seconds, printing {ts,hits,cached,cache_age_s} ticks (read-only; JEV_CATALOG_WATCH_MAX caps ticks).",
     )
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
@@ -478,9 +492,12 @@ def main() -> int:
                 hits = search_hits(task) or []
                 tick["hits"] = len(hits)
                 tick["cached"] = read_catalog_cache(task) is not None
+                age = catalog_cache_age(task)
+                tick["cache_age_s"] = round(age, 1) if age is not None else None
             except Exception:
                 tick["hits"] = 0
                 tick["cached"] = False
+                tick["cache_age_s"] = None
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["hits"]))
             ticks += 1
             if args.verdict and verdict_ok and not _write_verdict():

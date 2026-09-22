@@ -405,6 +405,89 @@ class CatalogFillTests(unittest.TestCase):
             self.assertTrue(all(t["hits"] == 1 and t["cached"] for t in ticks))
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
 
+    def test_watch_tick_reports_cache_age(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            buf = io.StringIO()
+            with patch.object(
+                FILL, "search_hits", return_value=[{"name": "jwt"}]
+            ), patch.object(
+                FILL, "read_catalog_cache", return_value=[{"name": "jwt"}]
+            ), patch.object(
+                FILL, "catalog_cache_age", return_value=12.34
+            ), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task", "jwt",
+                    "--cwd", str(base),
+                    "--watch", "0.01",
+                ],
+            ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "1"}), patch(
+                "sys.stdout", buf
+            ):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            ticks = [json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")]
+            self.assertEqual(ticks[0]["cache_age_s"], 12.3)
+
+    def test_watch_tick_cache_age_none_when_no_cache(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            buf = io.StringIO()
+            with patch.object(
+                FILL, "search_hits", return_value=[]
+            ), patch.object(
+                FILL, "read_catalog_cache", return_value=None
+            ), patch.object(
+                FILL, "catalog_cache_age", return_value=None
+            ), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task", "jwt",
+                    "--cwd", str(base),
+                    "--watch", "0.01",
+                ],
+            ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "1"}), patch(
+                "sys.stdout", buf
+            ):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            ticks = [json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")]
+            self.assertIsNone(ticks[0]["cache_age_s"])
+
+    def test_catalog_cache_age_reads_written_at(self) -> None:
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cache.json"
+            FILL.write_catalog_cache("jwt", [{"name": "x"}], path=path)
+            age = FILL.catalog_cache_age("jwt", path=path)
+            self.assertIsNotNone(age)
+            self.assertGreaterEqual(age, 0)
+            self.assertIsNone(FILL.catalog_cache_age("other", path=path))
+
+    def test_catalog_cache_age_stale_entry_still_reports(self) -> None:
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cache.json"
+            path.write_text(
+                json.dumps({"jwt": {"written_at": int(time.time()) - 9999, "hits": []}}),
+                encoding="utf-8",
+            )
+            age = FILL.catalog_cache_age("jwt", path=path)
+            self.assertIsNotNone(age)
+            self.assertGreaterEqual(age, 9999)
+            self.assertIsNone(FILL.catalog_cache_age("jwt", path=Path(tmp) / "missing.json"))
+
     def test_watch_verdict_writes_final_state(self) -> None:
         import io
 

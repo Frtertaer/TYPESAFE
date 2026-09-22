@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -687,6 +688,28 @@ def step_trace(tmp: Path) -> dict:
             except (ValueError, AttributeError):
                 ok = False
         else:
+            ok = False
+    if ok:
+        # prune removes a trace file whose mtime is older than the TTL
+        os.utime(trace_file, (time.time() - 4000,) * 2)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trace.py"),
+                "--file",
+                str(trace_file),
+                "prune",
+                "--older-than",
+                "60",
+            ]
+        )
+        try:
+            payload = json.loads(out)
+            ok = (
+                rc == 0
+                and payload.get("removed") is True
+                and not trace_file.exists()
+            )
+        except ValueError:
             ok = False
     return _step("trace", ok, "rc=%d" % rc if ok else out.strip()[:160])
 

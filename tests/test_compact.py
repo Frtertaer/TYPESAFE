@@ -90,6 +90,16 @@ class CompactTests(unittest.TestCase):
         pinned = {c.tool_use_id: c.pinned for c in calls}
         self.assertEqual(pinned, {"tool-1": True, "tool-2": False})
 
+    def test_negative_preserve_windows_clamp_to_zero(self):
+        # A negative --preserve-recent/--keep-first must not silently
+        # disable the pin window (index >= total - (-N) is never true).
+        self.assertFalse(C.is_pinned(5, 10, preserve_recent=-3))
+        self.assertFalse(C.is_pinned(5, 10, preserve_recent=0))
+        self.assertTrue(C.is_pinned(9, 10, preserve_recent=1))
+        self.assertTrue(C.is_pinned(0, 10, preserve_recent=-3))  # index 0 always pinned
+        self.assertFalse(C.is_pinned(5, 10, preserve_recent=0, keep_first=-2))
+        self.assertTrue(C.is_pinned(1, 10, preserve_recent=0, keep_first=2))
+
     def test_collect_pairs_and_renumbers(self):
         messages = [
             msg("user", "Fix the failing test. Never edit src/generated."),

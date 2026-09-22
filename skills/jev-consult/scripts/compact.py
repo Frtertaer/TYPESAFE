@@ -179,6 +179,9 @@ def abridge_live(
 def is_pinned(
     index: int, total: int, preserve_recent: int, keep_first: int = 0
 ) -> bool:
+    # Negative values would silently disable the pin window; clamp to zero.
+    preserve_recent = max(0, preserve_recent)
+    keep_first = max(0, keep_first)
     return index == 0 or index < keep_first or index >= total - preserve_recent
 
 
@@ -500,10 +503,13 @@ def parse_transcript(raw: str) -> list[Any]:
         payload = json.loads(text)
     except json.JSONDecodeError:
         rows: list[Any] = []
-        for line in text.splitlines():
+        for lineno, line in enumerate(text.splitlines(), 1):
             line = line.strip()
             if line:
-                rows.append(json.loads(line))
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    raise SystemExit("bad JSONL transcript line %d" % lineno) from None
         payload = rows
     return extract_messages(payload)
 
@@ -1196,16 +1202,22 @@ def jev_asker(state: dict[str, Any], questions: dict[str, Any]) -> dict[str, Any
 def load_trace(path: str | None) -> dict[str, Any] | None:
     if not path:
         return None
-    raw = Path(path).read_text(encoding="utf-8")
-    data = json.loads(raw)
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
     return data if isinstance(data, dict) else None
 
 
 def cmd_compact(args: argparse.Namespace) -> int:
-    if args.file == "-":
-        raw = sys.stdin.read()
-    else:
-        raw = Path(args.file).read_text(encoding="utf-8")
+    try:
+        if args.file == "-":
+            raw = sys.stdin.read()
+        else:
+            raw = Path(args.file).read_text(encoding="utf-8")
+    except OSError as exc:
+        sys.stderr.write("transcript read failed: %s\n" % exc)
+        return 1
     messages = parse_transcript(raw)
     options = {
         "goal": args.goal,

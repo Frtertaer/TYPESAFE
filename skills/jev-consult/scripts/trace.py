@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -65,9 +66,26 @@ def load(path: Path | None = None) -> dict[str, Any]:
     return data
 
 
+def _write_atomic(path: Path, text: str) -> None:
+    """Write via temp+replace so a crash mid-write never leaves a torn trace."""
+    fd, tmp = tempfile.mkstemp(
+        prefix=path.name + ".", dir=str(path.parent), suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as out:
+            out.write(text)
+        os.replace(tmp, str(path))
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def save(data: dict[str, Any], path: Path | None = None) -> Path:
     path = path or default_path()
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _write_atomic(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     return path
 
 
@@ -245,7 +263,8 @@ def cmd_prune(args: argparse.Namespace) -> int:
         emit({"path": str(path), "removed": False, "reason": "missing"})
         return 0
     try:
-        age = time.time() - path.stat().st_mtime
+        path_mtime = path.stat().st_mtime
+        age = time.time() - path_mtime
     except OSError as exc:
         emit({"path": str(path), "removed": False, "reason": "stat failed: %s" % exc})
         return 0
@@ -253,6 +272,11 @@ def cmd_prune(args: argparse.Namespace) -> int:
         emit({"path": str(path), "removed": False, "reason": "fresh", "age_seconds": round(age, 3)})
         return 0
     try:
+        # Re-check right before unlink: a save landing between stat() and
+        # unlink() must not lose the fresh trace.
+        if path.stat().st_mtime != path_mtime:
+            emit({"path": str(path), "removed": False, "reason": "changed"})
+            return 0
         path.unlink()
     except OSError as exc:
         emit({"path": str(path), "removed": False, "reason": "unlink failed: %s" % exc})
@@ -333,8 +357,8 @@ def cmd_state(args: argparse.Namespace) -> int:
     data = load(path)
     state = {key: value for key, value in data.items() if _present(value)}
     if args.out:
-        Path(args.out).write_text(
-            json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        _write_atomic(
+            Path(args.out), json.dumps(state, indent=2, ensure_ascii=False) + "\n"
         )
     else:
         emit(state)

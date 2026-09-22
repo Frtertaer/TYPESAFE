@@ -366,6 +366,15 @@ def cmd_history(args: argparse.Namespace) -> int:
         if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
             return 1
         return 0
+    if getattr(args, "verdict", "") and not _watch.write_verdict(
+        args.verdict,
+        {
+            "verdict": "picks" if history else "empty",
+            "ticks": 1,
+            "picks": len(history),
+        },
+    ):
+        return 1
     field = getattr(args, "field", "") or ""
     if field:
         values = [_dig(entry, field) for entry in history]
@@ -576,6 +585,15 @@ def cmd_notes(args: argparse.Namespace) -> int:
         if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
             return 1
         return 0
+    if getattr(args, "verdict", "") and not _watch.write_verdict(
+        args.verdict,
+        {
+            "verdict": "notes" if notes else "empty",
+            "ticks": 1,
+            "notes": len(notes),
+        },
+    ):
+        return 1
     field = getattr(args, "field", "") or ""
     if field:
         values = [_dig(n, field) for n in notes if isinstance(n, dict)]
@@ -677,6 +695,17 @@ def cmd_stats(args: argparse.Namespace) -> int:
             out["age_seconds"] = int(time.time() - path.stat().st_mtime)
         except OSError:
             pass
+    if getattr(args, "verdict", "") and not _watch.write_verdict(
+        args.verdict,
+        {
+            "verdict": "exists" if out["exists"] else "missing",
+            "ticks": 1,
+            "attempt_count": out["attempt_count"],
+            "history": out["history"],
+            "inspected": out["inspected"],
+        },
+    ):
+        return 1
     rc = emit_jq(out, getattr(args, "jq", ""))
     if rc is not None:
         return rc
@@ -762,6 +791,16 @@ def cmd_state(args: argparse.Namespace) -> int:
         return 0 if any(k != "attempt_count" for k in state) else 1
     data = load(path)
     state = {key: value for key, value in data.items() if _present(value)}
+    if getattr(args, "verdict", "") and not _watch.write_verdict(
+        args.verdict,
+        {
+            "verdict": "ok" if any(k != "attempt_count" for k in state) else "empty",
+            "ticks": 1,
+            "attempt_count": int(state.get("attempt_count") or 0),
+            "state": state,
+        },
+    ):
+        return 1
     if args.out:
         Path(args.out).write_text(
             json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"

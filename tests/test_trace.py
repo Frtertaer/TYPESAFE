@@ -1599,5 +1599,85 @@ class WatchQuietEnvTests(unittest.TestCase):
             self.assertEqual(buf.getvalue(), "")
             self.assertIn("watch tick=1", err.getvalue())
 
+class VerdictOneshotTests(unittest.TestCase):
+    def _trace(self, tmp: str) -> Path:
+        path = Path(tmp) / "trace.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "plan": "P",
+                    "attempt_count": 2,
+                    "history": [{"ts": 1, "pick": "a"}],
+                    "inspected": [{"name": "x"}],
+                    "notes": [{"ts": 1, "text": "n"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def _run(self, path: Path, cmd: str, verdict: Path):
+        import io
+
+        with patch.object(sys, "stdout", io.StringIO()):
+            rc = tr.main(["--file", str(path), cmd, "--verdict", str(verdict)])
+        return rc, json.loads(verdict.read_text(encoding="utf-8"))
+
+    def test_state_verdict_ok_when_state_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, payload = self._run(
+                self._trace(tmp), "state", Path(tmp) / "v.json"
+            )
+        self.assertEqual(rc, 0)
+        self.assertEqual(payload["verdict"], "ok")
+        self.assertEqual(payload["ticks"], 1)
+        self.assertEqual(payload["attempt_count"], 2)
+        self.assertEqual(payload["state"]["plan"], "P")
+
+    def test_state_verdict_empty_without_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "nope.json"
+            rc, payload = self._run(missing, "state", Path(tmp) / "v.json")
+        self.assertEqual(rc, 0)
+        self.assertEqual(payload["verdict"], "empty")
+        self.assertEqual(payload["attempt_count"], 0)
+
+    def test_stats_verdict_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, payload = self._run(
+                self._trace(tmp), "stats", Path(tmp) / "v.json"
+            )
+        self.assertEqual(rc, 0)
+        self.assertEqual(payload["verdict"], "exists")
+        self.assertEqual(payload["history"], 1)
+        self.assertEqual(payload["inspected"], 1)
+
+    def test_stats_verdict_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, payload = self._run(
+                Path(tmp) / "nope.json", "stats", Path(tmp) / "v.json"
+            )
+        self.assertEqual(rc, 0)
+        self.assertEqual(payload["verdict"], "missing")
+        self.assertEqual(payload["ticks"], 1)
+
+    def test_notes_verdict_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, payload = self._run(
+                self._trace(tmp), "notes", Path(tmp) / "v.json"
+            )
+        self.assertEqual(rc, 0)
+        self.assertEqual(payload["verdict"], "notes")
+        self.assertEqual(payload["notes"], 1)
+
+    def test_history_verdict_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, payload = self._run(
+                self._trace(tmp), "history", Path(tmp) / "v.json"
+            )
+        self.assertEqual(rc, 0)
+        self.assertEqual(payload["verdict"], "picks")
+        self.assertEqual(payload["picks"], 1)
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

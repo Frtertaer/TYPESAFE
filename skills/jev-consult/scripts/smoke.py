@@ -1928,6 +1928,44 @@ def step_hook(tmp: Path) -> dict:
             except (ValueError, IndexError):
                 ok = False
     if ok:
+        # --debug echoes LAST_DECISION to stderr; --out persists the payload;
+        # --verdict writes the slim {verdict,...} probe
+        out_path = tmp / "hook-emit.json"
+        verdict_path = tmp / "hook-verdict.json"
+        cwd5 = tmp / "cwd5"
+        cwd5.mkdir(exist_ok=True)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "inventory_hook.py"),
+                "--debug",
+                "--out",
+                str(out_path),
+                "--verdict",
+                str(verdict_path),
+            ],
+            cwd=tmp,
+            env=env,
+            inp=json.dumps(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "debug out verdict smoke",
+                    "cwd": str(cwd5),
+                }
+            ),
+        )
+        ok = (
+            rc == 0
+            and "jev_status=" in out
+            and out_path.is_file()
+            and verdict_path.is_file()
+        )
+        try:
+            emitted = json.loads(out_path.read_text(encoding="utf-8"))
+            verdict = json.loads(verdict_path.read_text(encoding="utf-8"))
+            ok = ok and isinstance(emitted, dict) and "verdict" in verdict
+        except (OSError, ValueError):
+            ok = False
+    if ok:
         # --watch S --max-ticks N emits N tick lines and stops
         event_file = tmp / "hook-event.json"
         event_file.write_text(payload, encoding="utf-8")

@@ -326,6 +326,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Also write the results JSON to PATH.",
     )
     parser.add_argument(
+        "--report",
+        metavar="PATH",
+        default="",
+        help="Write a markdown step report (verdict + per-step table) to PATH.",
+    )
+    parser.add_argument(
         "--watch",
         metavar="S",
         type=float,
@@ -405,6 +411,29 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
             return 1
         sys.stderr.write("wrote %s\n" % args.out)
+    if args.report:
+        lines = [
+            "# smoke report",
+            "",
+            "verdict: **%s**" % ("PASS" if ok else "FAIL"),
+            "",
+            "- steps: %d" % len(steps),
+            "- failed: %d" % sum(1 for s in steps if not s["ok"]),
+            "",
+            "| step | ok | detail |",
+            "| --- | --- | --- |",
+        ]
+        for s in steps:
+            detail = str(s.get("detail") or "").replace("|", "\\|").replace("\n", " ")
+            lines.append(
+                "| %s | %s | %s |" % (s["name"], "yes" if s["ok"] else "NO", detail)
+            )
+        try:
+            Path(args.report).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % args.report)
     return 0 if ok else 1
 
 

@@ -784,6 +784,22 @@ class PolicyKeyUsageTests(unittest.TestCase):
         ]
         self.assertEqual([], unused, "policy keys never read: %s" % unused)
 
+    def test_escalate_if_subkeys_are_referenced(self) -> None:
+        # escalate_if is a structured-threshold section: every sub-key must
+        # be wired into a policy_get lookup, not just linted as known.
+        # (templates/catalogs/hallucination carry content, not thresholds.)
+        src = ""
+        for p in SCRIPTS.glob("*.py"):
+            src += p.read_text(encoding="utf-8")
+        section = base_policy().get("escalate_if")
+        self.assertIsInstance(section, dict)
+        unused = [
+            k
+            for k in section
+            if '"%s"' % k not in src and "'%s'" % k not in src
+        ]
+        self.assertEqual([], unused, "escalate_if sub-keys never read: %s" % unused)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -395,6 +395,9 @@ def decide(
     noul_escalate = bool(
         policy_get(policy, ("noul", "escalate_uncertain_if_irreversible"), default=True)
     )
+    escalate_irrev = bool(
+        policy_get(policy, ("escalate_if", "irreversible"), default=True)
+    )
 
     for qid, answer in answers.items():
         if not isinstance(answer, dict):
@@ -419,7 +422,7 @@ def decide(
                     "%s: top-two gap %.3f; using max probability (%s)"
                     % (qid, gap, picked)
                 )
-                if irreversible:
+                if irreversible and escalate_irrev:
                     action = "escalate"
             else:
                 notes.append("%s: %s (max probability)" % (qid, picked))
@@ -435,7 +438,7 @@ def decide(
                     "%s: uncertain noul=%.3f (0.5 means equally yes/no, not medium)"
                     % (qid, probability)
                 )
-                if irreversible and noul_escalate:
+                if irreversible and noul_escalate and escalate_irrev:
                     action = "escalate"
         elif qtype == "score":
             picks[qid] = answer.get("score")

@@ -154,6 +154,44 @@ class DecideTests(unittest.TestCase):
         bad = jev.decide(answers, self.policy, irreversible=True)
         self.assertEqual(bad["action"], "escalate")
 
+    def test_escalate_if_irreversible_false_disables_choice_escalate(self) -> None:
+        policy = dict(self.policy)
+        policy["escalate_if"] = dict(self.policy.get("escalate_if") or {})
+        policy["escalate_if"]["irreversible"] = False
+        answers = {
+            "where": {
+                "type": "choice",
+                "choice": "refactor",
+                "confidence": 0.7,
+                "probabilities": {"refactor": 0.51, "rewrite": 0.49},
+            }
+        }
+        decision = jev.decide(answers, policy, irreversible=True)
+        self.assertEqual(decision["action"], "proceed")
+
+    def test_escalate_if_irreversible_false_disables_noul_escalate(self) -> None:
+        policy = dict(self.policy)
+        policy["escalate_if"] = dict(self.policy.get("escalate_if") or {})
+        policy["escalate_if"]["irreversible"] = False
+        answers = {"touch": {"type": "noul", "noul": 0.5}}
+        decision = jev.decide(answers, policy, irreversible=True)
+        self.assertEqual(decision["action"], "proceed")
+
+    def test_escalate_if_irreversible_true_keeps_escalate(self) -> None:
+        policy = dict(self.policy)
+        policy["escalate_if"] = dict(self.policy.get("escalate_if") or {})
+        policy["escalate_if"]["irreversible"] = True
+        answers = {
+            "where": {
+                "type": "choice",
+                "choice": "refactor",
+                "confidence": 0.7,
+                "probabilities": {"refactor": 0.51, "rewrite": 0.49},
+            }
+        }
+        decision = jev.decide(answers, policy, irreversible=True)
+        self.assertEqual(decision["action"], "escalate")
+
     def test_v3_tight_gap_used_not_nested_015(self) -> None:
         answers = {
             "where": {

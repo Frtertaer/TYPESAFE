@@ -1147,6 +1147,24 @@ class CompactCliTests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("bad --jq key", err.getvalue())
 
+    def test_explain_prints_decision_lines_to_stderr(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            err = io.StringIO()
+            with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", err
+            ):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0", "--explain"]
+                )
+            self.assertEqual(rc, 0)
+            lines = [l for l in err.getvalue().splitlines() if l.startswith("explain:")]
+            self.assertEqual(len(lines), 1)
+            self.assertIn("action=", lines[0])
+            self.assertIn("reason=", lines[0])
+            self.assertIn("keepCall=", lines[0])
+
     def test_output_file_and_stdin(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out_f = Path(tmp) / "out.json"

@@ -1403,6 +1403,22 @@ def cmd_compact(args: argparse.Namespace) -> int:
                 pct,
             )
         )
+    if getattr(args, "explain", False):
+        decisions = result.get("decisions") if isinstance(result, dict) else None
+        for d in decisions or []:
+            if not isinstance(d, dict):
+                continue
+            sys.stderr.write(
+                "explain: %s %s action=%s reason=%s keepCall=%s keepResult=%s\n"
+                % (
+                    d.get("id"),
+                    d.get("tool"),
+                    d.get("action"),
+                    d.get("reason"),
+                    d.get("keepCall"),
+                    d.get("keepResult"),
+                )
+            )
     return 0
 
 
@@ -1558,6 +1574,11 @@ def main(argv: list[str] | None = None) -> int:
         "--check",
         action="store_true",
         help="Dry check: exit 1 when the transcript would compact below the --min-reduction gate; prints only a check line.",
+    )
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="Print one stderr line per tool-call decision (id tool action reason scores).",
     )
     parser.add_argument(
         "--stats",

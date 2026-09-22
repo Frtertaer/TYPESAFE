@@ -54,6 +54,10 @@ MIN_REDUCTION = 0.25
 MAX_CALLS_PER_BATCH = 16
 PATH_KEYS = ("file_path", "path", "filename", "target")
 TOKEN_PIECES = re.compile(r"[A-Za-z]+|\d+|[^ \t\n\r\f\vA-Za-z\d]")
+# spill references are emitted as "full output saved: PATH …]" (abridged
+# marker) or "; full output saved: PATH; re-run ...]" (metadata trailer) —
+# capture the path up to whitespace, ';', ']', or the ellipsis char.
+SPILL_REF = re.compile(r"full output saved: ([^\s;\]\u2026]+)")
 DUMP = {"separators": (",", ":"), "ensure_ascii": False}
 
 
@@ -1634,7 +1638,7 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as exc:
             sys.stderr.write("--verify-spill failed: %s\n" % exc)
             return 2
-        refs = re.findall(r"full output saved: (\S+?)\]", text)
+        refs = SPILL_REF.findall(text)
         missing = [ref for ref in refs if not Path(ref).is_file()]
         if args.json:
             sys.stdout.write(
@@ -1661,7 +1665,7 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as exc:
             sys.stderr.write("--orphan-spill failed: %s\n" % exc)
             return 2
-        referenced = set(re.findall(r"full output saved: (\S+?)\]", text))
+        referenced = set(SPILL_REF.findall(text))
         directory = Path(args.spill_dir) if args.spill_dir else None
         orphans = [
             path for path, _size, _mtime in list_spill(directory)

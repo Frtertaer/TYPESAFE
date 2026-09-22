@@ -2580,6 +2580,58 @@ def step_compact_hook(tmp: Path) -> dict:
             )
         except ValueError:
             ok = False
+    if ok:
+        # --verify-spill resolves the emitted "full output saved: P …]"
+        # marker against the spill dir; --orphan-spill lists files no
+        # emitted doc references
+        doc = tmp / "emitted.txt"
+        doc.write_text(
+            "head\n[… 9000 chars omitted; full output saved: %s …]\ntail\n"
+            % files[0],
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compact.py"),
+                "--verify-spill",
+                str(doc),
+                "--spill-dir",
+                str(spill),
+            ]
+        )
+        ok = rc == 0 and "0 missing" in out
+        if ok:
+            orphan = spill / "orphan.txt"
+            orphan.write_text("unreferenced", encoding="utf-8")
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "compact.py"),
+                    "--orphan-spill",
+                    str(doc),
+                    "--spill-dir",
+                    str(spill),
+                ]
+            )
+            ok = rc == 0 and "orphan.txt" in out
+            try:
+                orphan.unlink()
+            except OSError:
+                pass
+    if ok:
+        # --prune-spill unlinks spill files older than the TTL
+        stale = spill / "stale.txt"
+        stale.write_text("old payload", encoding="utf-8")
+        os.utime(stale, (time.time() - 4000,) * 2)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compact.py"),
+                "--prune-spill",
+                "60",
+                "--spill-dir",
+                str(spill),
+            ]
+        )
+        ok = rc == 0 and not stale.is_file()
     return _step("compact_hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

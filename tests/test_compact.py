@@ -1821,6 +1821,24 @@ class ListSpillTests(unittest.TestCase):
                 rc = C.main(["--verify-spill", str(Path(tmp) / "nope.txt")])
             self.assertEqual(rc, 2)
 
+    def test_cli_verify_spill_matches_emitted_marker(self) -> None:
+        # abridge_live emits "full output saved: PATH …]" — the ref ends
+        # at the space-ellipsis, not at ']' glued to the path
+        with tempfile.TemporaryDirectory() as tmp:
+            existing = Path(tmp) / "spillfile.txt"
+            existing.write_text("x", encoding="utf-8")
+            doc = Path(tmp) / "out.txt"
+            doc.write_text(
+                "head\n[… 9000 chars omitted; full output saved: %s …]\ntail\n"
+                % existing,
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--verify-spill", str(doc)])
+            self.assertEqual(rc, 0)
+            self.assertIn("1 refs, 0 missing", buf.getvalue())
+
     def test_cli_orphan_spill_lists_unreferenced(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "spill"

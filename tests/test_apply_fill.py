@@ -122,6 +122,64 @@ class ApplyFillTests(unittest.TestCase):
             self.assertTrue(all(t["miss"] is True for t in ticks))
             self.assertTrue(all(t["ask"] is False for t in ticks))
 
+    def test_watch_verdict_writes_state_json(self) -> None:
+        import subprocess
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / ".jev-tools-miss.json").write_text(
+                json.dumps({"task": "jwt", "harness": "hermes", "written_at": time.time()}),
+                encoding="utf-8",
+            )
+            verdict = cwd / "v.json"
+            env = dict(os.environ, JEV_APPLY_WATCH_MAX="2")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--watch", "0.01",
+                    "--cwd", str(cwd),
+                    "--verdict", str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pending")
+            self.assertEqual(payload["ticks"], 2)
+            self.assertTrue(payload["miss"])
+            self.assertFalse(payload["ask"])
+
+    def test_watch_verdict_clean_when_no_files(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            verdict = cwd / "v.json"
+            env = dict(os.environ, JEV_APPLY_WATCH_MAX="1")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--watch", "0.01",
+                    "--cwd", str(cwd),
+                    "--verdict", str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "clean")
+            self.assertFalse(payload["miss"])
+            self.assertFalse(payload["ask"])
+
     def test_watch_appends_ticks_to_out_file(self) -> None:
         import subprocess
 

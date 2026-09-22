@@ -372,6 +372,12 @@ def main() -> int:
         default="",
         help="With --watch, append each tick line to PATH (fail-open).",
     )
+    parser.add_argument(
+        "--verdict",
+        default="",
+        metavar="PATH",
+        help="With --watch: write a slim {verdict: pending|clean, ticks, miss, ask} JSON to PATH, refreshed every tick.",
+    )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     if args.watch and args.watch > 0:
@@ -380,6 +386,21 @@ def main() -> int:
         dead = _watch.deadline("JEV_APPLY_WATCH_SECS", getattr(args, "watch_max", 0.0))
         ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
         miss_path = cwd / MISS_NAME
+        tick: dict = {}
+        verdict_ok = True
+
+        def _write_verdict() -> bool:
+            pending = bool(tick.get("miss") or tick.get("ask"))
+            return _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "pending" if pending else "clean",
+                    "ticks": ticks,
+                    "miss": bool(tick.get("miss")),
+                    "ask": bool(tick.get("ask")),
+                },
+            )
+
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             miss = read_miss(miss_path)
             tick = {
@@ -389,7 +410,11 @@ def main() -> int:
             }
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["miss"] or tick["ask"]))
             ticks += 1
+            if args.verdict and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
             time.sleep(args.watch)
+        if args.verdict and verdict_ok and not _write_verdict():
+            return 1
         return 0
     task = args.task
     dest = args.harness

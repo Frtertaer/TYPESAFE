@@ -630,6 +630,51 @@ def step_compact_fake(tmp: Path) -> dict:
         stdout_ticks = [ln for ln in out.splitlines() if '"fallback"' in ln]
         ok = rc == 0 and not stdout_ticks and "watch tick=2" in out
     if ok:
+        # --verdict writes a slim {verdict, ticks, reduction, fallback}
+        # probe — one-shot after a plain run, refreshed per watch tick
+        cverdict = tmp / "compact-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compact.py"),
+                str(transcript),
+                "--history",
+                "--fake",
+                "--min-reduction",
+                "0",
+                "--verdict",
+                str(cverdict),
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(
+                cverdict.read_text(encoding="utf-8")
+            ).get("verdict") == "ok"
+        except (OSError, ValueError):
+            ok = False
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "compact.py"),
+                    str(transcript),
+                    "--history",
+                    "--fake",
+                    "--min-reduction",
+                    "0",
+                    "--watch",
+                    "0.05",
+                    "--max-ticks",
+                    "2",
+                    "--verdict",
+                    str(cverdict),
+                ]
+            )
+            try:
+                ok = rc == 0 and json.loads(
+                    cverdict.read_text(encoding="utf-8")
+                ).get("verdict") == "ok"
+            except (OSError, ValueError):
+                ok = False
+    if ok:
         # --stats prints a one-line summary; --stats-json the stats dict
         # (both on stderr, after the result JSON)
         rc, out = _run(

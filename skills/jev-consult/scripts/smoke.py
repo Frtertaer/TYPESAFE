@@ -761,6 +761,28 @@ def step_trace(tmp: Path) -> dict:
         else:
             ok = False
     if ok:
+        # export dumps the whole trace bundle (state + history + notes)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trace.py"),
+                "--file",
+                str(trace_file),
+                "export",
+            ]
+        )
+        if rc == 0:
+            try:
+                bundle = json.loads(out)
+                ok = (
+                    "notes" in bundle
+                    and "file" in bundle
+                    and bundle.get("plan") == "smoke"
+                )
+            except ValueError:
+                ok = False
+        else:
+            ok = False
+    if ok:
         # prune removes a trace file whose mtime is older than the TTL
         os.utime(trace_file, (time.time() - 4000,) * 2)
         rc, out = _run(

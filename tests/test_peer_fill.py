@@ -977,5 +977,36 @@ class WatchJqTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(proc.stdout.splitlines(), ["false", "false"])
 
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import subprocess
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(
+                __import__("os").environ,
+                JEV_PEER_WATCH_MAX="0",
+                JEV_PEER_WATCH_SECS="0.05",
+            )
+            start = _time.time()
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--cwd", tmp,
+                    "--watch", "0.02",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertLess(_time.time() - start, 10.0)
+            ticks = [
+                l for l in proc.stdout.splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
 if __name__ == "__main__":
     unittest.main()

@@ -2221,5 +2221,35 @@ class DryRunTests(unittest.TestCase):
             self.assertEqual(len(out["messages"]), len(messages))
 
 
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import time as _time
+
+        transcript = [
+            {"role": "user", "content": "read the file"},
+            {"role": "assistant", "content": "done"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(transcript), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {"JEV_COMPACT_WATCH_MAX": "0", "JEV_COMPACT_WATCH_SECS": "0.05"},
+            ):
+                with patch.object(sys, "stdout", buf):
+                    start = _time.time()
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0",
+                         "--watch", "0.02"]
+                    )
+            self.assertEqual(rc, 0)
+            self.assertLess(_time.time() - start, 2.0)
+            ticks = [
+                l for l in buf.getvalue().splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

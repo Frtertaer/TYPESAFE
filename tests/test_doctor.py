@@ -649,5 +649,31 @@ class WatchJqTests(unittest.TestCase):
             self.assertTrue(all(l.lstrip("-").isdigit() for l in lines))
             self.assertTrue(all(int(l) > 0 for l in lines))
 
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            start = _time.time()
+            rc, _, text = run_main(
+                [
+                    "--agents", "claude-code",
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--watch", "0.02",
+                ],
+                env_extra={
+                    "JEV_DOCTOR_WATCH_MAX": "0",
+                    "JEV_DOCTOR_WATCH_SECS": "0.05",
+                },
+                cwd=tmp,
+            )
+            self.assertLess(_time.time() - start, 2.0)
+            ticks = [
+                l for l in text.splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

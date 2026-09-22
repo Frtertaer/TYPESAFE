@@ -987,5 +987,38 @@ class WatchJqTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(buf.getvalue().splitlines(), ["0", "0"])
 
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import os as _os
+        import time as _time
+
+        request = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Is it not true?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            env = dict(
+                _os.environ,
+                JEV_QLINT_WATCH_MAX="0",
+                JEV_QLINT_WATCH_SECS="0.05",
+            )
+            start = _time.time()
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPTS / "question_lint.py"), str(path), "--watch", "0.02"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+                timeout=30,
+            )
+            self.assertLess(_time.time() - start, 10.0)
+            ticks = [
+                l for l in proc.stdout.splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

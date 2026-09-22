@@ -997,5 +997,32 @@ class WatchJqTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(proc.stdout.splitlines(), ["0", "0"])
 
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import io
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hits = [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                sys, "argv",
+                ["catalog_fill.py", "--task", "jwt", "--cwd", str(base),
+                 "--watch", "0.02"],
+            ), patch.dict(
+                os.environ,
+                {"JEV_CATALOG_WATCH_MAX": "0", "JEV_CATALOG_WATCH_SECS": "0.05"},
+            ), patch("sys.stdout", buf), patch("sys.stderr", io.StringIO()):
+                start = _time.time()
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertLess(_time.time() - start, 2.0)
+            ticks = [
+                l for l in buf.getvalue().splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
 if __name__ == "__main__":
     unittest.main()

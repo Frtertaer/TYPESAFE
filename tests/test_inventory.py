@@ -1655,5 +1655,35 @@ class UnicodeRoundTripTests(unittest.TestCase):
 
 
 
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import time as _time
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+        from unittest.mock import patch
+
+        buf = StringIO()
+        err = StringIO()
+        with patch.dict(
+            os.environ,
+            {"JEV_INV_WATCH_MAX": "0", "JEV_INV_WATCH_SECS": "0.05"},
+        ):
+            start = _time.time()
+            with redirect_stdout(buf), redirect_stderr(err):
+                code = inv.main(
+                    [
+                        "--harness", "hermes",
+                        "--hermes-home", str(FIXTURE),
+                        "--watch", "0.02",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        self.assertLess(_time.time() - start, 2.0)
+        ticks = [
+            l for l in buf.getvalue().splitlines() if l.startswith('{"ts"')
+        ]
+        self.assertLessEqual(len(ticks), 10)
+        self.assertGreaterEqual(len(ticks), 1)
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

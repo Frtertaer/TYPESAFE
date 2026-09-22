@@ -652,5 +652,37 @@ class StrictGateTest(unittest.TestCase):
             self.assertTrue(all("cases" in t and "failures" in t for t in lines))
 
 
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import os as _os
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            env = dict(
+                _os.environ,
+                JEV_COMPARE_WATCH_MAX="0",
+                JEV_COMPARE_WATCH_SECS="0.05",
+            )
+            start = _time.time()
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "skills" / "jev-consult" / "scripts" / "compare.py"),
+                    "--watch", "0.02", "--cases", str(path),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertLess(_time.time() - start, 10.0)
+            ticks = [
+                l for l in proc.stdout.splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
 if __name__ == "__main__":
     unittest.main()

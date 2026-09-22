@@ -1449,5 +1449,25 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(rc, 2)
 
 
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import time as _time
+
+        buf = io.StringIO()
+        with patch.dict(
+            os.environ,
+            {"JEV_TRIGGER_WATCH_MAX": "0", "JEV_TRIGGER_WATCH_SECS": "0.05"},
+        ):
+            start = _time.time()
+            with redirect_stdout(buf):
+                rc = te.main(["--watch", "0.02"])
+        self.assertEqual(rc, 0)
+        self.assertLess(_time.time() - start, 2.0)
+        ticks = [
+            l for l in buf.getvalue().splitlines() if l.startswith("{")
+        ]
+        self.assertLessEqual(len(ticks), 10)
+        self.assertGreaterEqual(len(ticks), 1)
+
 if __name__ == "__main__":
     unittest.main()

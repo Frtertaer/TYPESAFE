@@ -1679,5 +1679,36 @@ class VerdictOneshotTests(unittest.TestCase):
         self.assertEqual(payload["verdict"], "picks")
         self.assertEqual(payload["picks"], 1)
 
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import io
+        import os as _os
+        import time as _time
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.json"
+            path.write_text(
+                json.dumps({"plan": "P", "attempt_count": 1}),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.dict(
+                _os.environ,
+                {"JEV_TRACE_WATCH_MAX": "0", "JEV_TRACE_WATCH_SECS": "0.05"},
+            ):
+                start = _time.time()
+                with patch.object(sys, "stdout", buf):
+                    rc = tr.main(
+                        ["--file", str(path), "state", "--watch", "0.02"]
+                    )
+            self.assertEqual(rc, 0)
+            self.assertLess(_time.time() - start, 2.0)
+            ticks = [
+                l for l in buf.getvalue().splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

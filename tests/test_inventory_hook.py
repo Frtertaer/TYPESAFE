@@ -3003,5 +3003,40 @@ class WatchJqTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertEqual(buf.getvalue().splitlines(), ["null", "null"])
 
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {"event": "UserPromptSubmit", "prompt": "jwt", "cwd": str(cwd)}
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {
+                    "JEV_HOOK_WATCH_MAX": "0",
+                    "JEV_HOOK_WATCH_SECS": "0.05",
+                    "JEV_HOOK_OFF": "1",
+                },
+            ):
+                start = _time.time()
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(
+                        ["--file", str(payload), "--watch", "0.02"]
+                    )
+            self.assertEqual(rc, 1)
+            self.assertLess(_time.time() - start, 2.0)
+            ticks = [
+                l for l in buf.getvalue().splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

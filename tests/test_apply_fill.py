@@ -217,6 +217,8 @@ class ApplyFillInternalsTests(unittest.TestCase):
         self.assertEqual(FILL.bare_name("https://evil.example/x"), "")
         self.assertEqual(FILL.bare_name("a/b"), "")
         self.assertEqual(FILL.bare_name("a\\b"), "")
+        self.assertEqual(FILL.bare_name("--enable"), "")
+        self.assertEqual(FILL.bare_name("-x"), "")
 
     def test_parse_kind_pick(self) -> None:
         self.assertIsNone(FILL.parse_kind_pick(""))

@@ -68,7 +68,7 @@ def run_hermes(argv: list[str], timeout: int = 120) -> tuple[int, str]:
 
 def bare_name(value: str) -> str:
     text = (value or "").strip()
-    if not text or "://" in text or "/" in text or "\\" in text:
+    if not text or text.startswith("-") or "://" in text or "/" in text or "\\" in text:
         return ""
     return text
 

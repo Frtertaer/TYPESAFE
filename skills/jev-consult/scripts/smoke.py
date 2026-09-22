@@ -959,6 +959,81 @@ def step_decisions(tmp: Path) -> dict:
                 counts_ok = False
         ok = counts_ok
     if ok:
+        # --top N caps count-list rows
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(kind_log),
+                "--harnesses",
+                "--top",
+                "1",
+            ]
+        )
+        ok = rc == 0 and out.strip() == "hermes 2"
+    if ok:
+        # boolean-flag filters keep only entries with the flag true
+        flag_log = tmp / "decisions-flags.jsonl"
+        flag_log.write_text(
+            '\n'.join(
+                [
+                    json.dumps({"ts": 1, "jev_status": "winner", "dedupe": True, "stale_sidecar": True, "strong_pick": True, "over_budget": True, "prompt_head": "hello-jev", "prompt_sha": "abc123"}),
+                    json.dumps({"ts": 2, "jev_status": "none"}),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        flag_ok = True
+        for flag in ("--dedupe-only", "--stale", "--strong", "--over-budget"):
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "decisions.py"),
+                    "--file",
+                    str(flag_log),
+                    flag,
+                    "--json",
+                ]
+            )
+            try:
+                if not (rc == 0 and json.loads(out).get("total") == 1):
+                    flag_ok = False
+            except ValueError:
+                flag_ok = False
+        ok = flag_ok
+    if ok:
+        # --prompt substring-matches prompt_head/prompt_tail
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(flag_log),
+                "--prompt",
+                "HELLO",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 1
+        except ValueError:
+            ok = False
+    if ok:
+        # --sha PREFIX matches prompt_sha prefix
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(flag_log),
+                "--sha",
+                "abc",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 1
+        except ValueError:
+            ok = False
+    if ok:
         # --csv emits a header plus one row per entry, no stats
         rc, out = _run(
             [

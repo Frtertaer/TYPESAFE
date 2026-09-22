@@ -4572,6 +4572,41 @@ def step_jev_decide(tmp: Path) -> dict:
             ]
         )
         ok = rc == 2
+    if ok:
+        # file '-' reads answers from stdin; an escalating --verdict
+        # writes the escalate probe even though the exit code is 2
+        rc, out = _run(
+            [
+                str(SCRIPTS / "jev.py"),
+                "decide",
+                "-",
+                "--jq",
+                "decision.action",
+            ],
+            inp=answers.read_text(encoding="utf-8"),
+        )
+        ok = rc == 0 and out.strip() == '"proceed"'
+        if ok:
+            esc_v = tmp / "decide-escalate-verdict.json"
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "jev.py"),
+                    "decide",
+                    str(tight),
+                    "--verdict",
+                    str(esc_v),
+                ]
+            )
+            try:
+                ok = (
+                    rc == 2
+                    and json.loads(esc_v.read_text(encoding="utf-8")).get(
+                        "verdict"
+                    )
+                    == "escalate"
+                )
+            except (OSError, ValueError):
+                ok = False
     return _step("jev_decide", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

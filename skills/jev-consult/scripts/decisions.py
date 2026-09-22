@@ -403,6 +403,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--since", default=os.environ.get("JEV_DECISIONS_SINCE", ""), help="Only entries with ts >= epoch seconds or ISO8601")
     parser.add_argument("--until", default=os.environ.get("JEV_DECISIONS_UNTIL", ""), help="Only entries with ts <= epoch seconds or ISO8601")
+    parser.add_argument(
+        "--since-last",
+        dest="since_last",
+        metavar="STATUS",
+        nargs="?",
+        const="ok",
+        default="",
+        help="Only entries logged after the newest entry whose jev_status is STATUS (default: ok).",
+    )
     parser.add_argument("--harness", default=os.environ.get("JEV_DECISIONS_HARNESS", ""), help="Only entries for this harness")
     parser.add_argument("--status", default=os.environ.get("JEV_DECISIONS_STATUS", ""), help="Only entries with this jev_status")
     parser.add_argument("--outcome", default=os.environ.get("JEV_DECISIONS_OUTCOME", ""), help="Only entries with this outcome (e.g. human, blocked)")
@@ -723,6 +732,26 @@ def main(argv: list[str] | None = None) -> int:
             items = filter_since(items, since)
         if until is not None:
             items = filter_until(items, until)
+        if getattr(args, "since_last", ""):
+            bound = None
+            for item in items:
+                ts = item.get("ts")
+                if (
+                    str(item.get("jev_status") or "") == args.since_last
+                    and isinstance(ts, (int, float))
+                    and not isinstance(ts, bool)
+                ):
+                    bound = ts if bound is None else max(bound, ts)
+            if bound is None:
+                items = []
+            else:
+                items = [
+                    item
+                    for item in items
+                    if isinstance(item.get("ts"), (int, float))
+                    and not isinstance(item.get("ts"), bool)
+                    and float(item["ts"]) > bound
+                ]
         if args.harness:
             items = filter_harness(items, args.harness)
         if args.status:

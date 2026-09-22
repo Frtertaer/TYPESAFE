@@ -1890,5 +1890,34 @@ class LogPermissionTests(unittest.TestCase):
             inv.append_decision({"ts": 1}, blocked)  # must not raise
 
 
+class ScanPerfTests(unittest.TestCase):
+    """Regression tripwire: scanning a large install tree must not blow up.
+    Generous bound — catches O(n^2) reads, not micro-optimizations."""
+
+    def test_scan_and_shortlist_400_skills(self) -> None:
+        import time as time_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            skills_dir = Path(tmp) / ".claude" / "skills"
+            for i in range(400):
+                d = skills_dir / ("skill-%03d" % i)
+                d.mkdir(parents=True)
+                (d / "SKILL.md").write_text(
+                    "---\nname: skill-%03d\ndescription: skill %d does tok%d things\n---\n"
+                    % (i, i, i % 50),
+                    encoding="utf-8",
+                )
+            t0 = time_mod.perf_counter()
+            items = inv.scan("claude-code", home=Path(tmp))
+            scan_s = time_mod.perf_counter() - t0
+            self.assertEqual(len(items), 400)
+            self.assertLess(scan_s, 15.0, "scan too slow: %.1fs" % scan_s)
+            t0 = time_mod.perf_counter()
+            picked = inv.shortlist(items, "007", 6, [])
+            short_s = time_mod.perf_counter() - t0
+            self.assertEqual([i["name"] for i in picked], ["skill-007"])
+            self.assertLess(short_s, 15.0, "shortlist too slow: %.1fs" % short_s)
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

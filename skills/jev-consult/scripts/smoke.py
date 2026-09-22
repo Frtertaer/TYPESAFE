@@ -464,6 +464,48 @@ def step_compact_fake(tmp: Path) -> dict:
         )
         # exits 1 when the last tick fell back (already-compact transcript)
         ok = rc in (0, 1) and out.count("watch tick=") == 2
+    if ok:
+        # --stats prints a one-line summary; --stats-json the stats dict
+        # (both on stderr, after the result JSON)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compact.py"),
+                str(transcript),
+                "--history",
+                "--fake",
+                "--min-reduction",
+                "0",
+                "--stats",
+            ]
+        )
+        ok = rc == 0 and "stats:" in out
+    if ok:
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compact.py"),
+                str(transcript),
+                "--history",
+                "--fake",
+                "--min-reduction",
+                "0",
+                "--stats-json",
+            ]
+        )
+        ok = rc == 0 and '"charsBefore"' in out
+    if ok:
+        # --explain logs one decision line per tool call on stderr
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compact.py"),
+                str(transcript),
+                "--history",
+                "--fake",
+                "--min-reduction",
+                "0",
+                "--explain",
+            ]
+        )
+        ok = rc == 0
     return _step("compact_fake", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

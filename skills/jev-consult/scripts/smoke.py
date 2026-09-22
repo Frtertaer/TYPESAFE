@@ -3200,6 +3200,64 @@ def step_trigger_lint(tmp: Path) -> dict:
         )
         ticks = [ln for ln in out.splitlines() if '"findings"' in ln]
         ok = len(ticks) == 1 and "watch tick=2" not in out
+    if ok:
+        # --fix --dry-run reports T005/T007 fixes without writing;
+        # --fix renames the bad id and dedupes covers
+        fix_cases = tmp / "cases-fix.json"
+        fix_cases.write_text(
+            json.dumps(
+                {
+                    "skill": "x",
+                    "cases": [
+                        {
+                            "id": "Bad ID!",
+                            "prompt": "prompt text here",
+                            "should_trigger": True,
+                        },
+                        {
+                            "id": "neg-ok",
+                            "prompt": "prompt text here",
+                            "should_trigger": False,
+                            "covers": ["a", "a", 1],
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trigger_lint.py"),
+                str(fix_cases),
+                "--fix",
+                "--dry-run",
+            ]
+        )
+        try:
+            ok = (
+                rc in (0, 1)
+                and "would fix T005" in out
+                and json.loads(fix_cases.read_text(encoding="utf-8"))["cases"][0][
+                    "id"
+                ]
+                == "Bad ID!"
+            )
+        except (OSError, ValueError, KeyError, IndexError):
+            ok = False
+        if ok:
+            rc, out = _run(
+                [str(SCRIPTS / "trigger_lint.py"), str(fix_cases), "--fix"]
+            )
+            try:
+                fixed = json.loads(fix_cases.read_text(encoding="utf-8"))
+                ok = (
+                    rc in (0, 1)
+                    and "fixed T005" in out
+                    and fixed["cases"][0]["id"] == "pos-bad-id"
+                    and fixed["cases"][1]["covers"] == ["a"]
+                )
+            except (OSError, ValueError, KeyError, IndexError):
+                ok = False
     return _step("trigger_lint", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -475,6 +476,47 @@ def cmd_history(args: argparse.Namespace) -> int:
         else:
             for kind, n in rows:
                 sys.stdout.write("%s %d\n" % (kind or "-", n))
+        return 0
+
+    if getattr(args, "rate", False):
+        stamps = [
+            float(h["ts"])
+            for h in history
+            if isinstance(h.get("ts"), (int, float)) and not isinstance(h.get("ts"), bool)
+        ]
+        per_day: dict[str, int] = {}
+        for stamp in stamps:
+            day = datetime.fromtimestamp(stamp, tz=timezone.utc).strftime("%Y-%m-%d")
+            per_day[day] = per_day.get(day, 0) + 1
+        span_s = (max(stamps) - min(stamps)) if len(stamps) >= 2 else 0.0
+        days = max(1, int(span_s // 86400) + 1) if stamps else 0
+        data_out = {
+            "count": len(history),
+            "stamped": len(stamps),
+            "first_ts": min(stamps) if stamps else None,
+            "last_ts": max(stamps) if stamps else None,
+            "span_s": round(span_s, 3),
+            "days": days,
+            "picks_per_day": round(len(stamps) / days, 3) if days else 0.0,
+            "per_day": dict(sorted(per_day.items())),
+        }
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps({"rate": data_out}, ensure_ascii=False, indent=2) + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "count %d\nstamped %d\nspan_s %s\ndays %d\npicks_per_day %s\n"
+                % (
+                    data_out["count"],
+                    data_out["stamped"],
+                    data_out["span_s"],
+                    data_out["days"],
+                    data_out["picks_per_day"],
+                )
+            )
+            for day, n in sorted(per_day.items()):
+                sys.stdout.write("%s %d\n" % (day, n))
         return 0
 
     if getattr(args, "watch", 0.0) and args.watch > 0:
@@ -1125,6 +1167,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--reverse", action="store_true", help="List picks newest-first")
     hist_cmd.add_argument("--field", default="", help="Print only this field per pick (a.b digs into nested objects)")
     hist_cmd.add_argument("--kinds", action="store_true", help="Print distinct history kinds with counts, sorted desc (empty kind shown as '-')")
+    hist_cmd.add_argument("--rate", action="store_true", help="Print pick-rate stats over the filtered history: per-day UTC buckets plus picks_per_day")
     hist_cmd.add_argument("--since", default=None, help="Only picks with ts >= epoch seconds or ISO8601")
     hist_cmd.add_argument("--grep", default="", help="Only picks whose pick/kind contains SUBSTR (case-insensitive; default JEV_TRACE_HISTORY_GREP)")
     hist_cmd.add_argument("--before", default=None, help="Only picks with ts <= epoch seconds or ISO8601")

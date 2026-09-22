@@ -273,6 +273,108 @@ class TraceTests(unittest.TestCase):
                 {"idf": 2, "": 1, "explicit": 1},
             )
 
+    def _write_history(self, path, stamps):
+        data = tr.empty()
+        for i, ts in enumerate(stamps):
+            data["history"].append(
+                {
+                    "pick": "p%d" % i,
+                    "ts": ts,
+                    "kind": "idf" if i % 2 == 0 else "explicit",
+                }
+            )
+        tr.save(data, path)
+
+    def test_history_rate_json_buckets_and_rate(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        import datetime as _dt
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            day0 = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc).timestamp()
+            day1 = day0 + 86400
+            self._write_history(path, [day0, day0 + 3600, day1])
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = tr.main(
+                    ["--file", str(path), "history", "--rate", "--json"]
+                )
+            self.assertEqual(code, 0)
+            rate = json.loads(buf.getvalue())["rate"]
+            self.assertEqual(rate["count"], 3)
+            self.assertEqual(rate["stamped"], 3)
+            self.assertEqual(rate["first_ts"], day0)
+            self.assertEqual(rate["last_ts"], day1)
+            self.assertEqual(rate["days"], 2)
+            self.assertEqual(rate["picks_per_day"], 1.5)
+            self.assertEqual(
+                rate["per_day"], {"2026-01-01": 2, "2026-01-02": 1}
+            )
+
+    def test_history_rate_text_rows(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            self._write_history(path, [1000.0, 2000.0])
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = tr.main(["--file", str(path), "history", "--rate"])
+            self.assertEqual(code, 0)
+            lines = buf.getvalue().splitlines()
+            self.assertIn("count 2", lines)
+            self.assertIn("days 1", lines)
+            self.assertIn("picks_per_day 2.0", lines)
+            self.assertTrue(any(l.startswith("1970-01-01 2") for l in lines))
+
+    def test_history_rate_empty_history(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.save(tr.empty(), path)
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = tr.main(
+                    ["--file", str(path), "history", "--rate", "--json"]
+                )
+            self.assertEqual(code, 0)
+            rate = json.loads(buf.getvalue())["rate"]
+            self.assertEqual(rate["count"], 0)
+            self.assertEqual(rate["stamped"], 0)
+            self.assertIsNone(rate["first_ts"])
+            self.assertEqual(rate["days"], 0)
+            self.assertEqual(rate["picks_per_day"], 0.0)
+            self.assertEqual(rate["per_day"], {})
+
+    def test_history_rate_honors_since_window(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            self._write_history(path, [100.0, 200.0, 300.0])
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = tr.main(
+                    [
+                        "--file",
+                        str(path),
+                        "history",
+                        "--rate",
+                        "--json",
+                        "--since",
+                        "150",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            rate = json.loads(buf.getvalue())["rate"]
+            self.assertEqual(rate["count"], 2)
+            self.assertEqual(rate["first_ts"], 200.0)
+
     def test_notes_grep_filters_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "trace.json"

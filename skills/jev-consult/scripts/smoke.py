@@ -1208,6 +1208,21 @@ def step_hook(tmp: Path) -> dict:
         )
         env.pop("JEV_HOOK_MAX_AGE", None)
         ok = rc == 0 and "{}" in out
+    if ok:
+        # an empty prompt emits {} (nothing to consult on)
+        rc, out = _run(
+            [str(SCRIPTS / "inventory_hook.py")],
+            cwd=tmp,
+            env=env,
+            inp=json.dumps(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "",
+                    "cwd": str(cwd2),
+                }
+            ),
+        )
+        ok = rc == 0 and out.strip().splitlines()[0] == "{}"
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

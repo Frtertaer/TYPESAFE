@@ -1598,5 +1598,62 @@ class WatchFailFastTests(unittest.TestCase):
         ]
         self.assertEqual(len(stderr_lines), 2)
 
+# -*- coding: utf-8 -*-
+
+
+class UnicodeRoundTripTests(unittest.TestCase):
+    U_PROMPT = "dobav JWT tokens: привет, こんにちは, مرحبا"
+    U_WINNER = "ß-auth ☃"
+
+    def test_append_decision_utf8_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            entry = {
+                "sha": "c0ffee",
+                "ts": 1,
+                "jev_status": "ok",
+                "prompt": self.U_PROMPT,
+                "winner": self.U_WINNER,
+            }
+            inv.append_decision(entry, path)
+            raw = path.read_bytes()
+            self.assertIn("привет".encode("utf-8"), raw)
+            line = json.loads(raw.decode("utf-8"))
+            self.assertEqual(line["winner"], self.U_WINNER)
+            spec = importlib.util.spec_from_file_location(
+                "jev_decisions", ROOT / "skills" / "jev-consult" / "scripts" / "decisions.py"
+            )
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            entries, _ = mod.load_entries(path)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["prompt"], self.U_PROMPT)
+
+    def test_write_sidecar_utf8_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            picked = [
+                {
+                    "id": "x1",
+                    "kind": "skill",
+                    "name": "ё-search",
+                    "description": "Unicode  description ☃",
+                    "path": "skills/ё-search",
+                }
+            ]
+            inv.write_sidecar(path, "hermes", "найди مرحبا", picked)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["task"], "найди مرحبا")
+            self.assertEqual(payload["items"][0]["name"], "ё-search")
+            self.assertEqual(
+                payload["names"], [{"kind": "skill", "name": "ё-search"}]
+            )
+
+    def test_append_decision_bad_dir_fails_open(self) -> None:
+        path = Path("N:\no\such\dir") / "d.jsonl"
+        inv.append_decision({"sha": "x"}, path)
+
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

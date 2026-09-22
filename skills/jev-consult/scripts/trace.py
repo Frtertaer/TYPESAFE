@@ -566,6 +566,21 @@ def cmd_state(args: argparse.Namespace) -> int:
         max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX", getattr(args, "max_ticks", 0))
         ticks = 0
         dead = _watch.deadline("JEV_TRACE_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        state: dict = {}
+        verdict_ok = True
+
+        def _write_verdict() -> bool:
+            nonempty = any(k != "attempt_count" for k in state)
+            return _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "ok" if nonempty else "empty",
+                    "ticks": ticks,
+                    "attempt_count": int(state.get("attempt_count") or 0),
+                    "state": state,
+                },
+            )
+
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             data = load(path)
             state = {key: value for key, value in data.items() if _present(value)}
@@ -582,7 +597,11 @@ def cmd_state(args: argparse.Namespace) -> int:
                 bad=bool(state),
             )
             ticks += 1
+            if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
             _time.sleep(args.watch)
+        if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
+            return 1
         return 0 if any(k != "attempt_count" for k in state) else 1
     data = load(path)
     state = {key: value for key, value in data.items() if _present(value)}
@@ -662,6 +681,7 @@ def build_parser() -> argparse.ArgumentParser:
     state_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
     state_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     state_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    state_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: ok|empty, ticks, attempt_count, state} JSON to PATH, refreshed every tick")
     state_cmd.set_defaults(func=cmd_state)
     stats_cmd = sub.add_parser("stats", help="Summary: counts, last pick, file age")
     stats_cmd.add_argument("--out", default="", help="Write the stats JSON to PATH instead of stdout")

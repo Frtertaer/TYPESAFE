@@ -991,6 +991,50 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(ticks[0]["history"], 1)
             self.assertEqual(ticks[0]["inspected"], 1)
 
+    def test_state_watch_verdict_writes_final_state(self) -> None:
+        import io
+        import os as _os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps({"plan": "P", "attempt_count": 2, "history": [{"ts": 1, "pick": "a"}]}),
+                encoding="utf-8",
+            )
+            verdict = Path(tmp) / "v.json"
+            with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", io.StringIO()):
+                    rc = tr.main(
+                        ["--file", str(path), "state", "--watch", "0.01",
+                         "--verdict", str(verdict)]
+                    )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "ok")
+            self.assertEqual(payload["ticks"], 2)
+            self.assertEqual(payload["attempt_count"], 2)
+            self.assertEqual(payload["state"]["plan"], "P")
+
+    def test_state_watch_verdict_empty(self) -> None:
+        import io
+        import os as _os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(json.dumps({"attempt_count": 3}), encoding="utf-8")
+            verdict = Path(tmp) / "v.json"
+            with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "1"}):
+                with patch.object(sys, "stdout", io.StringIO()):
+                    rc = tr.main(
+                        ["--file", str(path), "state", "--watch", "0.01",
+                         "--verdict", str(verdict)]
+                    )
+            self.assertEqual(rc, 1)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "empty")
+
     def test_notes_watch_emits_count_ticks(self) -> None:
         import io
         import os as _os

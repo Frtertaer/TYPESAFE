@@ -77,6 +77,18 @@ class DocFlagsTests(unittest.TestCase):
         )
         self.assertIsInstance(policy, dict)
 
+    def test_readme_lists_every_user_facing_script(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        missing = []
+        for script in sorted(SCRIPTS.glob("*.py")):
+            name = script.stem
+            # _watch is internal plumbing shared by the watch loops
+            if name.startswith("_"):
+                continue
+            if "scripts/%s.py" % name not in readme:
+                missing.append(name)
+        self.assertEqual(missing, [], "scripts absent from README table")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

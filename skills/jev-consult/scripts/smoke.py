@@ -1757,6 +1757,56 @@ def step_trace(tmp: Path) -> dict:
                 ) == "picks"
             except (OSError, ValueError):
                 ok = False
+        if ok:
+            # stats --watch emits {exists,attempt_count} ticks + verdict probe
+            verdict = tmp / "trace-stats-verdict.json"
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "stats",
+                    "--watch",
+                    "0.03",
+                    "--max-ticks",
+                    "2",
+                    "--verdict",
+                    str(verdict),
+                ]
+            )
+            ticks = [ln for ln in out.splitlines() if '"exists"' in ln]
+            ok = rc == 0 and len(ticks) == 2
+            try:
+                ok = ok and json.loads(verdict.read_text(encoding="utf-8")).get(
+                    "verdict"
+                ) == "exists"
+            except (OSError, ValueError):
+                ok = False
+        if ok:
+            # notes --watch emits {notes} ticks + verdict probe
+            verdict = tmp / "trace-notes-verdict.json"
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "notes",
+                    "--watch",
+                    "0.03",
+                    "--max-ticks",
+                    "2",
+                    "--verdict",
+                    str(verdict),
+                ]
+            )
+            ticks = [ln for ln in out.splitlines() if '"notes"' in ln]
+            ok = rc == 0 and len(ticks) == 2
+            try:
+                ok = ok and json.loads(verdict.read_text(encoding="utf-8")).get(
+                    "verdict"
+                ) == "notes"
+            except (OSError, ValueError):
+                ok = False
     if ok:
         # prune removes a trace file whose mtime is older than the TTL
         os.utime(trace_file, (time.time() - 4000,) * 2)

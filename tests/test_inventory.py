@@ -1782,5 +1782,49 @@ class AtomicWriteTests(unittest.TestCase):
             self.assertFalse((Path(tmp) / ".jev-tools.json.tmp").exists())
 
 
+class SidecarSchemaTests(unittest.TestCase):
+    PICKED = [
+        {
+            "id": "skill:jwt",
+            "kind": "skill",
+            "name": "jwt",
+            "description": "JWT helpers",
+            "path": "skills/jwt",
+        },
+        {"id": "mcp:pg", "kind": "mcp", "name": "pg", "description": "", "path": ""},
+    ]
+
+    def test_sidecar_schema_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            inv.write_sidecar(path, "claude-code", "task", self.PICKED)
+            data = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(set(data), {"harness", "task", "written_at", "names", "items"})
+        self.assertEqual(data["harness"], "claude-code")
+        self.assertIsInstance(data["written_at"], int)
+        self.assertEqual(len(data["names"]), 2)
+        for row in data["names"]:
+            self.assertEqual(set(row), {"kind", "name"})
+        items = {i["name"]: i for i in data["items"]}
+        self.assertEqual(items["jwt"]["id"], "skill:jwt")
+        self.assertEqual(items["jwt"]["description"], "JWT helpers")
+        self.assertNotIn("description", items["pg"])  # empty desc dropped
+        self.assertNotIn("path", items["pg"])
+
+    def test_sidecar_items_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            inv.write_sidecar(path, "grok", "t", self.PICKED)
+            items = inv.sidecar_items(json.loads(path.read_text(encoding="utf-8")))
+            self.assertEqual([i["name"] for i in items], ["jwt", "pg"])
+
+    def test_sidecar_items_from_legacy_names_only(self) -> None:
+        payload = {"names": [{"kind": "skill", "name": "x"}]}
+        items = inv.sidecar_items(payload)
+        self.assertEqual(items, [{"kind": "skill", "name": "x"}])
+        self.assertEqual(inv.sidecar_items({}), [])
+        self.assertEqual(inv.sidecar_items("junk"), [])
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

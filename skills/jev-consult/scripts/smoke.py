@@ -984,6 +984,18 @@ def step_ask_verdict(tmp: Path) -> dict:
                     ok = False
             else:
                 ok = False
+        if ok:
+            # ask fails open when the endpoint is unreachable (port 1 is
+            # never listening)
+            bad_policy = tmp / "policy-down.json"
+            policy["endpoint"] = "http://127.0.0.1:1/v1/systemone"
+            bad_policy.write_text(json.dumps(policy), encoding="utf-8")
+            env["JEV_POLICY"] = str(bad_policy)
+            rc, out = _run(
+                [str(SCRIPTS / "jev.py"), "ask", str(request)],
+                env=env,
+            )
+            ok = rc != 0 and "network error" in out
         return _step("ask_verdict", ok, out.strip()[:120] or "rc=%d" % rc)
     finally:
         server.server_close()

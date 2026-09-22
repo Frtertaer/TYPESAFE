@@ -334,14 +334,22 @@ class StubJevE2ETests(unittest.TestCase):
     lands in the sidecar. Exercises the wire path, auth header, response
     validation, and the pick→sidecar leg — not just the miss path."""
 
-    def _stub_server(self):
+    def _stub_server(self, fail_first: int = 0):
         from http.server import BaseHTTPRequestHandler, HTTPServer
 
         picked_id: dict = {}
+        state = {"calls": 0, "fail_first": fail_first}
 
         class H(BaseHTTPRequestHandler):
             def do_POST(self):  # noqa: N802 - stdlib handler name
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                state["calls"] += 1
+                if state["calls"] <= state["fail_first"]:
+                    self.send_response(429)
+                    self.send_header("Content-Length", "2")
+                    self.end_headers()
+                    self.wfile.write(b"{}")
+                    return
                 req = json.loads(body.decode("utf-8"))
                 criteria = req["questions"]["load_tools"]["criteria"]
                 picked_id["id"] = next(k for k in criteria if k != "none")
@@ -376,9 +384,11 @@ class StubJevE2ETests(unittest.TestCase):
         import threading
 
         threading.Thread(target=srv.serve_forever, daemon=True).start()
-        return srv, picked_id
+        return srv, picked_id, state
 
-    def test_hook_pick_roundtrip_against_stub_jev(self) -> None:
+    def _run_against_stub(self, fail_first: int = 0, extra_env: dict | None = None):
+        """Run the hook subprocess against the stub; return (proc, picked,
+        state, sidecar dict, log rows)."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             cwd = root / "work"
@@ -394,7 +404,7 @@ class StubJevE2ETests(unittest.TestCase):
             policy_src = json.loads(
                 (SCRIPTS.parent / "policy.json").read_text(encoding="utf-8")
             )
-            srv, picked = self._stub_server()
+            srv, picked, state = self._stub_server(fail_first=fail_first)
             try:
                 policy_src["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
                     srv.server_address[1]
@@ -415,6 +425,8 @@ class StubJevE2ETests(unittest.TestCase):
                         "USERPROFILE": str(home),
                     }
                 )
+                if extra_env:
+                    env.update(extra_env)
                 payload = {
                     "hook_event_name": "UserPromptSubmit",
                     "prompt": "please wire up the zqxjwt token flow",
@@ -426,29 +438,56 @@ class StubJevE2ETests(unittest.TestCase):
                     capture_output=True,
                     env=env,
                     cwd=str(cwd),
-                    timeout=30,
+                    timeout=40,
                 )
             finally:
                 srv.shutdown()
                 srv.server_close()
-            self.assertEqual(proc.returncode, 0, proc.stderr[:400])
-            self.assertIn("id", picked, "stub Jev never got the POST")
             sidecar = cwd / ".jev-tools.json"
-            self.assertTrue(sidecar.exists(), "no sidecar written")
-            data = json.loads(sidecar.read_text(encoding="utf-8"))
-            self.assertEqual(
-                data.get("jev_pick", {}).get("name"), "zqxjwt-helper"
+            data = (
+                json.loads(sidecar.read_text(encoding="utf-8"))
+                if sidecar.exists()
+                else {}
             )
-            out = json.loads(proc.stdout.decode("utf-8", "replace"))
-            self.assertNotEqual(out, {})
-            rows = [
-                json.loads(line)
-                for line in log.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-            self.assertTrue(
-                any(r.get("jev_status") == "winner" for r in rows), rows
+            rows = (
+                [
+                    json.loads(line)
+                    for line in log.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+                if log.exists()
+                else []
             )
+            return proc, picked, state, data, rows
+
+    def test_hook_pick_roundtrip_against_stub_jev(self) -> None:
+        proc, picked, _state, data, rows = self._run_against_stub()
+        self.assertEqual(proc.returncode, 0, proc.stderr[:400])
+        self.assertIn("id", picked, "stub Jev never got the POST")
+        self.assertEqual(data.get("jev_pick", {}).get("name"), "zqxjwt-helper")
+        out = json.loads(proc.stdout.decode("utf-8", "replace"))
+        self.assertNotEqual(out, {})
+        self.assertTrue(
+            any(r.get("jev_status") == "winner" for r in rows), rows
+        )
+
+    def test_hook_retries_once_after_429(self) -> None:
+        proc, picked, state, data, _rows = self._run_against_stub(
+            fail_first=1, extra_env={"JEV_HOOK_RETRIES": "1"}
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[:400])
+        self.assertEqual(state["calls"], 2, "no retry happened")
+        self.assertIn("id", picked)
+        self.assertEqual(data.get("jev_pick", {}).get("name"), "zqxjwt-helper")
+
+    def test_hook_survives_stub_5xx_fail_open(self) -> None:
+        # all-429 stub (fail_first beyond retries) -> miss path, rc 0
+        proc, picked, state, data, _rows = self._run_against_stub(
+            fail_first=99, extra_env={"JEV_HOOK_RETRIES": "0"}
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[:400])
+        self.assertNotIn("id", picked)
+        self.assertEqual(data.get("jev_pick"), None)
 
 
 class ConcurrentHookTests(unittest.TestCase):

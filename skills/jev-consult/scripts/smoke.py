@@ -644,6 +644,31 @@ def step_decisions(tmp: Path) -> dict:
         except ValueError:
             ok = False
     if ok:
+        # --min-need filters on the numeric need field
+        need_log = tmp / "decisions-need.jsonl"
+        need_log.write_text(
+            '\n'.join(
+                json.dumps({"ts": 1, "jev_status": "winner", "need": n})
+                for n in (0.2, 0.9)
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(need_log),
+                "--min-need",
+                "0.5",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 1
+        except ValueError:
+            ok = False
+    if ok:
         # --csv emits a header plus one row per entry, no stats
         rc, out = _run(
             [

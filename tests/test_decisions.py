@@ -2664,5 +2664,36 @@ class PruneTest(unittest.TestCase):
             proc = self.run_cli("--file", str(path), "--missing", "winner", "--count")
             self.assertEqual(proc.stdout.strip(), "2")
 
+class WatchDeadlineEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import os as _os
+        import time
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text('{"sha":"a","ts":1,"jev_status":"ok"}' + chr(10), encoding="utf-8")
+            import io
+
+            buf = io.StringIO()
+            with patch.dict(
+                _os.environ,
+                {"JEV_DECISIONS_WATCH_MAX": "0", "JEV_DECISIONS_WATCH_SECS": "0.05"},
+            ):
+                start = time.time()
+                with patch.object(sys, "stdout", buf), patch.object(
+                    sys, "stderr", io.StringIO()
+                ):
+                    rc = decisions.main(
+                        ["--file", str(path), "--watch", "0.02"]
+                    )
+            self.assertEqual(rc, 0)
+            self.assertLess(time.time() - start, 2.0)
+            ticks = [
+                l for l in buf.getvalue().splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
 if __name__ == "__main__":
     unittest.main()

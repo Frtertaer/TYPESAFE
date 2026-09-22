@@ -735,5 +735,28 @@ class WatchQuietEnvTests(unittest.TestCase):
             ]
             self.assertEqual(len(stderr_lines), 2)
 
+class WatchDeadlineEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import os
+        import time
+        from unittest import mock
+
+        buf = io.StringIO()
+        err = io.StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {"JEV_PLINT_WATCH_MAX": "0", "JEV_PLINT_WATCH_SECS": "0.05"},
+        ):
+            start = time.time()
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = policy_lint.main(["--watch", "0.02"])
+        self.assertEqual(rc, 0)
+        self.assertLess(time.time() - start, 2.0)
+        ticks = [
+            json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+        ]
+        self.assertLessEqual(len(ticks), 10)
+        self.assertGreaterEqual(len(ticks), 1)
+
 if __name__ == "__main__":
     unittest.main()

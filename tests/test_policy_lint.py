@@ -91,6 +91,12 @@ class PolicyLintTests(unittest.TestCase):
         self.assertIn("P011", rule_ids(findings))
         self.assertTrue(errors(findings))
 
+    def test_endpoint_scheme_case_insensitive(self) -> None:
+        policy = base_policy()
+        policy["endpoint"] = "HTTPS://api.typesafe.ai/v1/systemone"
+        findings = policy_lint.lint_policy(policy)
+        self.assertNotIn("P011", rule_ids(findings))
+
     def test_noul_band_ordering(self) -> None:
         policy = base_policy()
         policy["noul_no"] = 0.9

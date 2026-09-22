@@ -189,7 +189,7 @@ def lint_policy(policy) -> list[dict]:
         add("P002", "error", "require_hatch", "require_hatch must be a boolean", "use true or false")
 
     endpoint = policy.get("endpoint")
-    if isinstance(endpoint, str) and endpoint and not endpoint.startswith("https://"):
+    if isinstance(endpoint, str) and endpoint and not endpoint.lower().startswith("https://"):
         add(
             "P011",
             "error",

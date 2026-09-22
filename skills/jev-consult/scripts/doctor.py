@@ -318,6 +318,9 @@ def main(argv: list[str] | None = None) -> int:
             _watch.emit(last, args.out, quiet=_watch.quiet("JEV_DOCTOR_WATCH_QUIET", args.quiet), bad=not last["ok"])
             last_checks = cur
             count += 1
+            sys.stderr.write(
+                "watch tick=%d ok=%s failed=%d\n" % (count, last["ok"], failed)
+            )
             if verdict_ok and not _write_verdict(
                 last_checks, count, elapsed_s=round(_time.time() - watch_t0, 2)
             ):

@@ -4831,6 +4831,45 @@ def step_ask_verdict(tmp: Path) -> dict:
             )
             ok = rc == 2
         if ok:
+            # ask reads the request from stdin when the file is '-';
+            # ping --jq digs one slim-payload field and --verdict writes it
+            thread = threading.Thread(
+                target=server.handle_request, daemon=True
+            )
+            thread.start()
+            rc, out = _run(
+                [str(SCRIPTS / "jev.py"), "ask", "-", "--jq", "decision.action"],
+                env=env,
+                inp=request.read_text(encoding="utf-8"),
+            )
+            ok = rc == 0 and out.strip() == '"proceed"'
+        if ok:
+            thread = threading.Thread(
+                target=server.handle_request, daemon=True
+            )
+            thread.start()
+            ping_v = tmp / "ping-verdict.json"
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "jev.py"),
+                    "ping",
+                    "--jq",
+                    "model",
+                    "--verdict",
+                    str(ping_v),
+                ],
+                env=env,
+            )
+            try:
+                ok = (
+                    rc == 0
+                    and out.strip().startswith('"')
+                    and json.loads(ping_v.read_text(encoding="utf-8")).get("ok")
+                    is True
+                )
+            except (OSError, ValueError):
+                ok = False
+        if ok:
             # ask fails open when the endpoint is unreachable (port 1 is
             # never listening)
             bad_policy = tmp / "policy-down.json"

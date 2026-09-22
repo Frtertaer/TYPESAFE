@@ -376,7 +376,7 @@ def main() -> int:
         "--verdict",
         default="",
         metavar="PATH",
-        help="With --watch: write a slim {verdict: pending|clean, ticks, miss, ask} JSON to PATH, refreshed every tick.",
+        help="Write a slim {verdict: pending|clean, ticks, miss, ask} JSON to PATH — refreshed every tick with --watch; without it, a one-shot {ticks: 1} payload.",
     )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
@@ -423,6 +423,20 @@ def main() -> int:
         task = task or str(miss.get("task") or "")
         if dest == "auto":
             dest = str(miss.get("harness") or "auto")
+    ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+    if args.verdict:
+        miss_now = bool(read_miss(cwd / MISS_NAME))
+        ask_now = ask_path.is_file()
+        if not _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "pending" if (miss_now or ask_now) else "clean",
+                "ticks": 1,
+                "miss": miss_now,
+                "ask": ask_now,
+            },
+        ):
+            return 1
     if not task.strip():
         if args.json:
             sys.stdout.write(json.dumps({"outcome": "no_task"}) + "\n")
@@ -431,7 +445,6 @@ def main() -> int:
         return 0
     if dest == "auto":
         dest = detect_harness(Path(__file__))
-    ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
     try:
         return fill(
             task,

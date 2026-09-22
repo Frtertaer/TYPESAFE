@@ -332,7 +332,7 @@ def main() -> int:
         "--verdict",
         default="",
         metavar="PATH",
-        help="With --watch: write a slim {verdict: pending|clean, ticks, miss, miss_task, ask} JSON to PATH, refreshed every tick.",
+        help="Write a slim {verdict: pending|clean, ticks, miss, miss_task, ask} JSON to PATH — refreshed every tick with --watch; without it, a one-shot {ticks: 1} payload.",
     )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
@@ -444,12 +444,31 @@ def main() -> int:
         except Exception:
             pass
         return 0
+    ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+    if args.verdict:
+        try:
+            miss_now = read_miss(cwd / MISS_NAME)
+            miss_task = str(miss_now.get("task") or "") if miss_now else ""
+            miss_flag = bool(miss_now)
+            ask_now = ask_path.is_file()
+        except Exception:
+            miss_flag, miss_task, ask_now = None, "", None
+        if not _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "pending" if (miss_flag or ask_now) else "clean",
+                "ticks": 1,
+                "miss": miss_flag,
+                "miss_task": miss_task,
+                "ask": ask_now,
+            },
+        ):
+            return 1
     if not task.strip():
         sys.stdout.write(
             json.dumps({"outcome": "no_task"}) + "\n" if args.json else "no_task\n"
         )
         return 0
-    ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
     try:
         return fill(
             task,

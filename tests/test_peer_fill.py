@@ -535,6 +535,58 @@ class PeerFillInternalsTests(unittest.TestCase):
             self.assertEqual(payload["verdict"], "clean")
             self.assertFalse(payload["miss"])
 
+    def test_nonwatch_verdict_pending_with_miss(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / INV.MISS_NAME).write_text(
+                json.dumps({"task": "jwt flow", "written_at": int(time.time())}),
+                encoding="utf-8",
+            )
+            verdict = cwd / "v.json"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--cwd",
+                    str(cwd),
+                    "--verdict",
+                    str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pending")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertTrue(payload["miss"])
+            self.assertEqual(payload["miss_task"], "jwt flow")
+
+    def test_nonwatch_verdict_clean(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            verdict = cwd / "v.json"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--cwd",
+                    str(cwd),
+                    "--verdict",
+                    str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "clean")
+            self.assertEqual(payload["ticks"], 1)
+
     def test_watch_appends_ticks_to_out_file(self) -> None:
         import subprocess
 

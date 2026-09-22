@@ -225,6 +225,29 @@ def step_inventory(tmp: Path) -> dict:
         else:
             ok = False
     if ok:
+        # --verdict PATH writes the slim one-shot probe JSON
+        verdict = tmp / "inv-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "inventory.py"),
+                "--harness",
+                "codex",
+                "--home",
+                str(home),
+                "--hermes-home",
+                str(hermes),
+                "--task",
+                "smoke",
+                "--verdict",
+                str(verdict),
+            ]
+        )
+        try:
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            ok = rc == 0 and payload.get("verdict") == "ok"
+        except (OSError, ValueError):
+            ok = False
+    if ok:
         sidecar = tmp / "sc.json"
         rc, out = _run(
             [

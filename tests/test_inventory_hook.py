@@ -3525,5 +3525,55 @@ class WrongTypedFieldTests(unittest.TestCase):
             leaked = [x.name for x in Path(tmp).iterdir()]
             self.assertEqual(leaked, [], "handle wrote into cwd: %s" % leaked)
 
+    def test_simulate_emits_payload_without_stdin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.getcwd()
+            os.chdir(tmp)
+            try:
+                buf = io.StringIO()
+                with patch.dict(os.environ, {"JEV_HOOK_OFF": "1"}):
+                    with patch("sys.stdout", buf):
+                        rc = HOOK.main(["--simulate", "add jwt tokens"])
+            finally:
+                os.chdir(old)
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), {})
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_simulate_uses_text_as_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.getcwd()
+            os.chdir(tmp)
+            seen = {}
+            def spy(payload, **_kw):
+                seen.update(payload)
+                return {}
+            try:
+                buf = io.StringIO()
+                with patch.object(HOOK, "handle", spy):
+                    with patch("sys.stdout", buf):
+                        rc = HOOK.main(["--simulate", "my task text"])
+            finally:
+                os.chdir(old)
+            self.assertEqual(rc, 0)
+            self.assertEqual(seen["prompt"], "my task text")
+            self.assertEqual(seen["hook_event_name"], "UserPromptSubmit")
+            self.assertEqual(seen["cwd"], str(Path(tmp)))
+            self.assertEqual(json.loads(buf.getvalue()), {})
+
+    def test_simulate_missing_text_runs_empty_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.getcwd()
+            os.chdir(tmp)
+            try:
+                buf = io.StringIO()
+                with patch.dict(os.environ, {"JEV_HOOK_OFF": "1"}):
+                    with patch("sys.stdout", buf):
+                        rc = HOOK.main(["--simulate"])
+            finally:
+                os.chdir(old)
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), {})
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -299,6 +299,7 @@ def handle(
     items: list[dict] | None = None,
     harness: str | None = None,
     pick_fn=None,
+    no_writes: bool = False,
 ) -> dict:
     global LAST_DECISION
     LAST_DECISION = None
@@ -491,13 +492,13 @@ def handle(
     append_decision(LAST_DECISION)
     if note:
         extra["note_sha"] = hashlib.sha256(note.encode("utf-8")).hexdigest()[:12]
-    no_sidecar = _env_on("JEV_HOOK_NOSIDECAR")
+    no_sidecar = no_writes or _env_on("JEV_HOOK_NOSIDECAR")
     if cwd is not None and not no_sidecar:
         try:
             write_sidecar(cwd / SIDECAR_NAME, harness, prompt, picked, extra)
         except OSError:
             pass
-        no_miss = _env_on("JEV_HOOK_NOMISS")
+        no_miss = no_writes or _env_on("JEV_HOOK_NOMISS")
         miss_path = cwd / MISS_NAME
         try:
             if picked or no_miss:
@@ -623,7 +624,7 @@ def env_report() -> dict:
     return report
 
 
-USAGE = 'Usage: python inventory_hook.py [--env|--events|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet]\n       [--verdict PATH]]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n  --events   print allowed hook event names and exit\n  --dry-run  resolve the pick without writing sidecar/miss files\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --version  print the pack policy version and exit\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --verdict P  write a slim {verdict, ticks, winner, winner_stability, keys} JSON\n'
+USAGE = 'Usage: python inventory_hook.py [--env|--events|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet]\n       [--verdict PATH]]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n  --events   print allowed hook event names and exit\n  --dry-run  resolve the pick without writing sidecar/miss files\n  --simulate TEXT  run the hook on a synthetic UserPromptSubmit event with TEXT as the prompt and the process cwd (implies --dry-run; no stdin)\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --version  print the pack policy version and exit\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --verdict P  write a slim {verdict, ticks, winner, winner_stability, keys} JSON\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -633,10 +634,23 @@ def main(argv: list[str] | None = None) -> int:
     if "-h" in argv or "--help" in argv:
         sys.stdout.write(USAGE)
         return 0
+    no_writes = False
     if "--dry-run" in argv:
-        os.environ["JEV_HOOK_NOSIDECAR"] = "1"
-        os.environ["JEV_HOOK_NOMISS"] = "1"
+        no_writes = True
         argv = [a for a in argv if a != "--dry-run"]
+    simulated_raw = ""
+    if "--simulate" in argv:
+        idx = argv.index("--simulate")
+        task = argv[idx + 1] if idx + 1 < len(argv) else ""
+        del argv[idx : idx + 2]
+        no_writes = True
+        simulated_raw = json.dumps(
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": task,
+                "cwd": str(Path.cwd()),
+            }
+        )
     if "--events" in argv:
         names = sorted(allowed_events())
         if "--jsonl" in argv:
@@ -772,7 +786,13 @@ def main(argv: list[str] | None = None) -> int:
                 if payload_cap and len(raw.encode("utf-8", "ignore")) > payload_cap:
                     raw = ""
                 payload = json.loads(raw) if raw.strip() else {}
-                out = handle(payload) if isinstance(payload, dict) else {}
+                out = (
+                    handle(payload, no_writes=True)
+                    if (isinstance(payload, dict) and no_writes)
+                    else handle(payload)
+                    if isinstance(payload, dict)
+                    else {}
+                )
             except Exception:
                 out = {}
             tick["keys"] = sorted(out.keys()) if isinstance(out, dict) else []
@@ -803,7 +823,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0 if tick["winner"] else 1
     if not raw:
-        raw = _read_stdin()
+        raw = simulated_raw or _read_stdin()
     payload_cap = hook_max_payload_bytes()
     if payload_cap and len(raw.encode("utf-8", "ignore")) > payload_cap:
         sys.stdout.write("{}\n")
@@ -820,7 +840,9 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("{}\n")
         return 0
     try:
-        out = handle(payload)
+        out = (
+            handle(payload, no_writes=True) if no_writes else handle(payload)
+        )
     except Exception:
         out = {}
     if "--verdict" in argv:

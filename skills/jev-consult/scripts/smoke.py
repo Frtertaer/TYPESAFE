@@ -4286,6 +4286,90 @@ def step_compare(tmp: Path) -> dict:
                 ]
             )
             ok = rc == 0 and out.strip() == "false"
+    if ok:
+        # --live scores each side through the stub Jev endpoint —
+        # every noul answers 0.99, so both sides show live nouls
+        env2 = dict(os.environ)  # skillscan:allow
+        env2["TYPESAFE_API_KEY"] = "smoke-stub-key"
+
+        class CmpStub(http.server.BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                    request = json.loads(self.rfile.read(length) or b"{}")
+                except (ValueError, TypeError):
+                    request = {}
+                answers: dict = {}
+                for qid, q in (request.get("questions") or {}).items():
+                    if q.get("type") == "choice":
+                        pick = next(
+                            (
+                                k
+                                for k in (q.get("criteria") or {})
+                                if k != "none"
+                            ),
+                            "none",
+                        )
+                        answers[qid] = {
+                            "type": "choice",
+                            "choice": pick,
+                            "confidence": 0.9,
+                            "probabilities": {pick: 0.9, "none": 0.1},
+                        }
+                    else:
+                        answers[qid] = {"type": "noul", "noul": 0.99}
+                reply = json.dumps({"answers": answers}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(reply)))
+                self.end_headers()
+                self.wfile.write(reply)
+
+            def log_message(self, *args) -> None:
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), CmpStub)
+        try:
+            policy = json.loads(
+                (SKILL_DIR / "policy.json").read_text(encoding="utf-8")
+            )
+            policy["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
+                server.server_address[1]
+            )
+            policy_path = tmp / "cmp-policy.json"
+            policy_path.write_text(json.dumps(policy), encoding="utf-8")
+            env2["JEV_POLICY"] = str(policy_path)
+            # one case scores two sides — serve both POSTs
+            for _ in range(2):
+                threading.Thread(
+                    target=server.handle_request, daemon=True
+                ).start()
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "compare.py"),
+                    "--cases",
+                    str(SKILL_DIR / "examples" / "compare-cases.json"),
+                    "--only",
+                    "off_track",
+                    "--live",
+                    "--json",
+                    "--strict",
+                ],
+                env=env2,
+            )
+            ok = rc == 0 and '"noul": 0.99' in out
+            if ok:
+                # the stub reports proceed on every side
+                try:
+                    payload = json.loads(out)
+                    row = (payload.get("rows") or [{}])[0]
+                    ok = row.get("live") is not False and "noul" in (
+                        row.get("after") or {}
+                    )
+                except (ValueError, IndexError):
+                    ok = False
+        finally:
+            server.server_close()
     return _step("compare", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

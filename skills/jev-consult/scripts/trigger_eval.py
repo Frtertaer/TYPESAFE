@@ -307,6 +307,11 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="Write a slim verdict JSON ({verdict, verdict_label, ok, failed_gates, coverage, hits, total, worst_positive, best_negative, margin}) to PATH (with --watch, refreshed every tick).",
     )
+    parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="With --watch: stop after the first tick that fails any gate (rc still reflects the last tick).",
+    )
     args = parser.parse_args(argv)
     if args.env:
         scorer_margin = None
@@ -563,6 +568,8 @@ def main(argv: list[str] | None = None) -> int:
                 "watch tick=%d ok=%s coverage=%s gates=%s\n"
                 % (ticks, cur["ok"], cur["coverage"], ",".join(failed) or "-")
             )
+            if args.fail_fast and failed:
+                break
             _time.sleep(args.watch)
             try:
                 cur = evaluate(

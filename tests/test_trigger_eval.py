@@ -1187,6 +1187,81 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertIn("elapsed_s", ticks[0])
         self.assertGreaterEqual(ticks[0]["elapsed_s"], 0)
 
+    def test_watch_fail_fast_breaks_on_first_failure(self) -> None:
+        def res(ok):
+            return {
+                "ok": ok,
+                "coverage": 1.0,
+                "hits": 1,
+                "cases": [
+                    {
+                        "id": "x",
+                        "covers": [],
+                        "ok": ok,
+                        "should_trigger": True,
+                        "score": 1.0,
+                        "lexical": True,
+                    }
+                ],
+                "worst_positive": 1.0 if ok else 0.0,
+                "best_negative": 0.0,
+                "margin": 1.15,
+                "n_positives": 1,
+                "n_negatives": 0,
+            }
+
+        buf = io.StringIO()
+        with patch.object(
+            te, "evaluate", side_effect=[res(False)] + [res(True)] * 5
+        ):
+            with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "5"}):
+                with redirect_stdout(buf):
+                    rc = te.main(["--watch", "0.001", "--fail-fast"])
+        ticks = [
+            json.loads(l)
+            for l in buf.getvalue().splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 1)
+        self.assertEqual(ticks[0]["verdict"], "FAIL")
+        self.assertEqual(rc, 1)
+
+    def test_watch_fail_fast_keeps_running_when_clean(self) -> None:
+        def res():
+            return {
+                "ok": True,
+                "coverage": 1.0,
+                "hits": 1,
+                "cases": [
+                    {
+                        "id": "x",
+                        "covers": [],
+                        "ok": True,
+                        "should_trigger": True,
+                        "score": 1.0,
+                        "lexical": True,
+                    }
+                ],
+                "worst_positive": 1.0,
+                "best_negative": 0.0,
+                "margin": 1.15,
+                "n_positives": 1,
+                "n_negatives": 0,
+            }
+
+        buf = io.StringIO()
+        with patch.object(te, "evaluate", side_effect=[res()] * 4):
+            with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "3"}):
+                with redirect_stdout(buf):
+                    rc = te.main(["--watch", "0.001", "--fail-fast"])
+        ticks = [
+            json.loads(l)
+            for l in buf.getvalue().splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 3)
+        self.assertEqual(rc, 0)
+
     def test_watch_rc_reflects_last_verdict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cases = write_cases(

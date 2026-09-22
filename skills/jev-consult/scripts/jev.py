@@ -394,6 +394,10 @@ def decide(
         qtype = answer.get("type")
         if qtype == "choice":
             picked = answer.get("choice")
+            if not isinstance(picked, str) or not picked:
+                notes.append("%s: malformed choice" % qid)
+                action = "escalate"
+                continue
             picks[qid] = picked
             try:
                 confidence = float(answer.get("confidence"))
@@ -404,8 +408,16 @@ def decide(
             probabilities = answer.get("probabilities") or {}
             if not isinstance(probabilities, dict):
                 probabilities = {}
-            all_probs[qid] = probabilities
-            gap = top_two_gap(probabilities)
+            clean_probs: dict[str, float] = {}
+            for key, value in probabilities.items():
+                try:
+                    prob = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(prob):
+                    clean_probs[key] = prob
+            all_probs[qid] = clean_probs
+            gap = top_two_gap(clean_probs)
             if confidence < conf_floor:
                 notes.append("%s: low confidence %.3f" % (qid, confidence))
                 action = "escalate"
@@ -440,7 +452,15 @@ def decide(
                 if irreversible and noul_escalate:
                     action = "escalate"
         elif qtype == "score":
-            picks[qid] = answer.get("score")
+            try:
+                score_value = float(answer.get("score"))
+            except (TypeError, ValueError):
+                score_value = math.nan
+            if not math.isfinite(score_value):
+                notes.append("%s: malformed score" % qid)
+                action = "escalate"
+                continue
+            picks[qid] = score_value
             try:
                 confidence = float(answer.get("confidence"))
             except (TypeError, ValueError):
@@ -451,7 +471,7 @@ def decide(
                 notes.append("%s: low score confidence %.3f" % (qid, confidence))
                 action = "escalate"
             else:
-                notes.append("%s: score=%s" % (qid, answer.get("score")))
+                notes.append("%s: score=%s" % (qid, score_value))
         else:
             notes.append("%s: unknown answer type %s" % (qid, qtype))
             action = "escalate"

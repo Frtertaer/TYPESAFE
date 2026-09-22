@@ -245,6 +245,52 @@ class DecideTests(unittest.TestCase):
         )
         self.assertEqual(low["action"], "escalate")
 
+    def test_decide_malformed_score_escalates(self) -> None:
+        for raw in ("abc", float("nan"), float("inf"), None):
+            decision = jev.decide(
+                {"s": {"type": "score", "score": raw, "confidence": 0.9}},
+                self.policy,
+            )
+            self.assertEqual(decision["action"], "escalate", "score=%r" % raw)
+            self.assertNotIn("s", decision["picks"])
+        good = jev.decide(
+            {"s": {"type": "score", "score": "0.8", "confidence": 0.9}},
+            self.policy,
+        )
+        self.assertEqual(good["action"], "proceed")
+        self.assertEqual(good["picks"]["s"], 0.8)
+
+    def test_decide_malformed_choice_and_probs(self) -> None:
+        for raw in (None, float("nan"), 7, ""):
+            decision = jev.decide(
+                {
+                    "q": {
+                        "type": "choice",
+                        "choice": raw,
+                        "confidence": 0.9,
+                        "probabilities": {"a": 0.9, "b": 0.1},
+                    }
+                },
+                self.policy,
+            )
+            self.assertEqual(decision["action"], "escalate", "choice=%r" % raw)
+            self.assertNotIn("q", decision["picks"])
+        clean = jev.decide(
+            {
+                "q": {
+                    "type": "choice",
+                    "choice": "a",
+                    "confidence": 0.9,
+                    "probabilities": {"a": 0.9, "b": "x", "c": float("nan")},
+                }
+            },
+            self.policy,
+        )
+        self.assertEqual(clean["probabilities"]["q"], {"a": 0.9})
+        self.assertEqual(
+            json.loads(json.dumps(clean, allow_nan=False))["action"], "proceed"
+        )
+
 
 class SecretTests(unittest.TestCase):
     def test_redact(self) -> None:

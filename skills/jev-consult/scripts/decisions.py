@@ -937,7 +937,15 @@ def main(argv: list[str] | None = None) -> int:
                 for e in entries
                 if isinstance(e, dict)
             }
-            tick = {"ts": int(time.time()), "count": len(entries)}
+            newest_ts = max(
+                (
+                    e["ts"]
+                    for e in entries
+                    if isinstance(e, dict) and isinstance(e.get("ts"), (int, float))
+                ),
+                default=None,
+            )
+            tick = {"ts": int(time.time()), "count": len(entries), "newest_ts": newest_ts}
             if prev_keys is not None:
                 tick["added"] = len(cur_keys - prev_keys)
                 tick["removed"] = len(prev_keys - cur_keys)

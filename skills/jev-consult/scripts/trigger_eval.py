@@ -536,6 +536,13 @@ def main(argv: list[str] | None = None) -> int:
                     else None
                 ),
                 "coverage": cur["coverage"],
+                "coverage_delta": (
+                    round(cur["coverage"] - prev_tick["coverage"], 4)
+                    if prev_scores
+                    and isinstance(cur.get("coverage"), (int, float))
+                    and isinstance(prev_tick.get("coverage"), (int, float))
+                    else None
+                ),
                 "hits": cur.get("hits"),
                 "n_positives": cur.get("n_positives"),
                 "n_negatives": cur.get("n_negatives"),

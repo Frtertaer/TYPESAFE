@@ -1104,10 +1104,10 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(ticks[0]["margin"], 1.15)
 
     def test_watch_tick_reports_score_deltas(self) -> None:
-        def res(worst, best):
+        def res(worst, best, cov=1.0):
             return {
                 "ok": True,
-                "coverage": 1.0,
+                "coverage": cov,
                 "hits": 1,
                 "cases": [
                     {
@@ -1128,7 +1128,9 @@ class TriggerEvalTests(unittest.TestCase):
 
         buf = io.StringIO()
         with patch.object(
-            te, "evaluate", side_effect=[res(1.0, 0.1), res(0.8, 0.2), res(0.8, 0.2)]
+            te,
+            "evaluate",
+            side_effect=[res(1.0, 0.1, 1.0), res(0.8, 0.2, 0.5), res(0.8, 0.2, 0.5)],
         ):
             with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "2"}):
                 with redirect_stdout(buf):
@@ -1141,8 +1143,10 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(len(ticks), 2)
         self.assertIsNone(ticks[0]["worst_positive_delta"])
         self.assertIsNone(ticks[0]["best_negative_delta"])
+        self.assertIsNone(ticks[0]["coverage_delta"])
         self.assertEqual(ticks[1]["worst_positive_delta"], -0.2)
         self.assertEqual(ticks[1]["best_negative_delta"], 0.1)
+        self.assertEqual(ticks[1]["coverage_delta"], -0.5)
 
     def test_watch_tick_reports_case_counts(self) -> None:
         def res():

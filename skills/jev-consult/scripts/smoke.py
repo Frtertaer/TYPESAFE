@@ -839,6 +839,47 @@ def step_decisions(tmp: Path) -> dict:
         )
         ok = rc == 0 and out.strip() == "alpha"
     if ok:
+        # --since/--until bound entries by ts window
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(winner_log),
+                "--since",
+                "2",
+                "--until",
+                "2",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 1
+        except ValueError:
+            ok = False
+    if ok:
+        # --daily buckets counts by UTC day
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--daily",
+            ]
+        )
+        ok = rc == 0 and "2023-11-14" in out
+    if ok:
+        # --group-by FIELD counts entries per field value
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--group-by",
+                "jev_status",
+            ]
+        )
+        ok = rc == 0 and "winner" in out and "none" in out
+    if ok:
         # --csv emits a header plus one row per entry, no stats
         rc, out = _run(
             [

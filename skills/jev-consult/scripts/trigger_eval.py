@@ -536,6 +536,9 @@ def main(argv: list[str] | None = None) -> int:
                     else None
                 ),
                 "coverage": cur["coverage"],
+                "hits": cur.get("hits"),
+                "n_positives": cur.get("n_positives"),
+                "n_negatives": cur.get("n_negatives"),
                 "min_coverage": args.min_coverage,
                 "coverage_ok": coverage_ok,
                 "failed_gates": failed,

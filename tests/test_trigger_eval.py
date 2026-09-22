@@ -1144,6 +1144,43 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(ticks[1]["worst_positive_delta"], -0.2)
         self.assertEqual(ticks[1]["best_negative_delta"], 0.1)
 
+    def test_watch_tick_reports_case_counts(self) -> None:
+        def res():
+            return {
+                "ok": True,
+                "coverage": 1.0,
+                "hits": 3,
+                "cases": [
+                    {
+                        "id": "x",
+                        "covers": [],
+                        "ok": True,
+                        "should_trigger": True,
+                        "score": 1.0,
+                        "lexical": True,
+                    }
+                ],
+                "worst_positive": 1.0,
+                "best_negative": 0.0,
+                "margin": 1.15,
+                "n_positives": 2,
+                "n_negatives": 1,
+            }
+
+        buf = io.StringIO()
+        with patch.object(te, "evaluate", side_effect=[res(), res()]):
+            with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
+                with redirect_stdout(buf):
+                    te.main(["--watch", "0.01"])
+        ticks = [
+            json.loads(l)
+            for l in buf.getvalue().splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(ticks[0]["hits"], 3)
+        self.assertEqual(ticks[0]["n_positives"], 2)
+        self.assertEqual(ticks[0]["n_negatives"], 1)
+
     def test_watch_rc_reflects_last_verdict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cases = write_cases(

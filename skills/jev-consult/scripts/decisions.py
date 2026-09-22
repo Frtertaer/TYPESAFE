@@ -7,6 +7,7 @@ status mix, explicit/strong-pick rates, need_skill mean, latency percentiles.
 import argparse
 import csv
 import datetime
+import io
 import json
 import os
 import sys
@@ -366,6 +367,19 @@ def prune_entries(path: Path, entries: list[dict]) -> None:
     except OSError:
         try:
             os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _atomic_write(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
         except OSError:
             pass
         raise
@@ -1284,17 +1298,22 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if args.csv:
                 header, rows = _rows()
-                with out_path.open("w", encoding="utf-8", newline="") as fh:
-                    writer = csv.writer(fh, lineterminator="\n")
-                    writer.writerow(header)
-                    writer.writerows(rows)
+                buf = io.StringIO()
+                writer = csv.writer(buf, lineterminator="\n")
+                writer.writerow(header)
+                writer.writerows(rows)
+                _atomic_write(out_path, buf.getvalue())
             elif args.md:
                 header, rows = _rows()
-                out_path.write_text(_md_text(header, rows), encoding="utf-8")
+                _atomic_write(out_path, _md_text(header, rows))
             else:
-                with out_path.open("w", encoding="utf-8") as fh:
-                    for item in emit_entries:
-                        fh.write(json.dumps(item, sort_keys=True) + "\n")
+                _atomic_write(
+                    out_path,
+                    "".join(
+                        json.dumps(item, sort_keys=True) + "\n"
+                        for item in emit_entries
+                    ),
+                )
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
             return 1
@@ -1350,7 +1369,7 @@ def main(argv: list[str] | None = None) -> int:
             % (lat["n"], lat["mean"], lat["p50"], lat["p90"], lat["max"]),
         ]
         try:
-            Path(args.report).write_text("\n".join(rep) + "\n", encoding="utf-8")
+            _atomic_write(Path(args.report), "\n".join(rep) + "\n")
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
             return 1

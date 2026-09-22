@@ -1399,7 +1399,7 @@ def main(argv: list[str] | None = None) -> int:
             if getattr(args, "out", ""):
                 out_path = Path(args.out)
                 try:
-                    out_path.write_text(text, encoding="utf-8")
+                    _atomic_write_text(out_path, text)
                 except OSError as exc:
                     sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
                     return 1

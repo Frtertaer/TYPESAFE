@@ -470,12 +470,25 @@ def emit(payload: dict[str, Any]) -> None:
     sys.stdout.write("\n")
 
 
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def write_out(path: str, payload: dict[str, Any]) -> bool:
     """Write the payload JSON to PATH; warn + False on error."""
     try:
-        Path(path).write_text(
+        _atomic_write(
+            Path(path),
             json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
         )
     except OSError as exc:
         sys.stderr.write("cannot write %s: %s\n" % (path, exc))
@@ -833,7 +846,7 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
     out = Path(args.out)
     if out.parent != Path(""):
         out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _atomic_write(out, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     return 0
 
 

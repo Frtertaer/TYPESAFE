@@ -134,7 +134,7 @@ def fix_name(path: Path) -> bool:
     )
     if n == 0:
         return False
-    path.write_text(text[:start] + new_block + text[end:], encoding="utf-8")
+    _atomic_write(path, text[:start] + new_block + text[end:])
     return True
 
 
@@ -159,7 +159,7 @@ def fix_case(path: Path) -> bool:
     new_block, n = re.subn(r"^(name|description):\s*(.*)$", normalize, block, flags=re.M)
     if n == 0 or new_block == block:
         return False
-    path.write_text(text[:start] + new_block + text[end:], encoding="utf-8")
+    _atomic_write(path, text[:start] + new_block + text[end:])
     return True
 
 
@@ -173,6 +173,19 @@ RULES = {
     "S007": "cited policy.json key does not exist in the sibling policy.json",
     "S008": "name is not lowercase-hyphenated",
 }
+
+
+def _atomic_write(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -358,10 +371,8 @@ def main(argv: list[str] | None = None) -> int:
 
         if out_path:
             try:
-                Path(out_path).write_text(
-                    _json.dumps({"findings": rows}, indent=2) + "\n",
-                    encoding="utf-8",
-                )
+                _atomic_write(Path(out_path), 
+                    _json.dumps({"findings": rows}, indent=2) + "\n")
             except OSError as exc:
                 sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
                 return 1

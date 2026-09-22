@@ -133,6 +133,19 @@ def jq_lookup(obj, path: str):
     return cur, True
 
 
+def _atomic_write(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Score jev-consult trigger cases lexically (per-case rows)."
@@ -677,8 +690,9 @@ def main(argv: list[str] | None = None) -> int:
                 "cases": result["cases"],
             }
             try:
-                Path(args.report).write_text(
-                    json.dumps(report, indent=2) + "\n", encoding="utf-8"
+                _atomic_write(
+                    Path(args.report),
+                    json.dumps(report, indent=2) + "\n",
                 )
             except OSError as exc:
                 sys.stderr.write("--report failed: %s\n" % exc)
@@ -739,7 +753,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         try:
-            Path(args.report).write_text("\n".join(lines) + "\n", encoding="utf-8")
+            _atomic_write(Path(args.report), "\n".join(lines) + "\n")
         except OSError as exc:
             sys.stderr.write("--report failed: %s\n" % exc)
             return 1
@@ -764,8 +778,9 @@ def main(argv: list[str] | None = None) -> int:
         out_payload = dict(result)
         out_payload["cases"] = _rows()
         try:
-            Path(args.out).write_text(
-                json.dumps(out_payload, indent=2) + "\n", encoding="utf-8"
+            _atomic_write(
+                Path(args.out),
+                json.dumps(out_payload, indent=2) + "\n",
             )
         except OSError as exc:
             sys.stderr.write("--out failed: %s\n" % exc)

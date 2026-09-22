@@ -222,6 +222,19 @@ def check_common(home: Path, hermes: Path) -> list[dict]:
     return out
 
 
+def _atomic_write(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Check a jev-consult install. Read-only.")
     parser.add_argument("--agents", default=",".join(ALLOWED))
@@ -385,7 +398,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         try:
-            Path(args.report).write_text("\n".join(rep) + "\n", encoding="utf-8")
+            _atomic_write(Path(args.report), "\n".join(rep) + "\n")
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
             return 1
@@ -394,7 +407,7 @@ def main(argv: list[str] | None = None) -> int:
     sys.stdout.write(text)
     if args.out:
         try:
-            Path(args.out).write_text(text, encoding="utf-8")
+            _atomic_write(Path(args.out), text)
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
             return 1

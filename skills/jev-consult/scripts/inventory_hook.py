@@ -21,6 +21,7 @@ if str(_SCRIPTS) not in sys.path:
 
 import _watch  # noqa: E402
 from inventory import (  # noqa: E402
+    _atomic_write_text,
     hook_limit,
     MISS_NAME,
     SIDECAR_NAME,
@@ -585,7 +586,7 @@ def main(argv: list[str] | None = None) -> int:
             idx = argv.index("--out")
             if idx + 1 < len(argv):
                 try:
-                    Path(argv[idx + 1]).write_text(text, encoding="utf-8")
+                    _atomic_write_text(Path(argv[idx + 1]), text)
                 except OSError:
                     pass  # fail-open: still print to stdout
         sys.stdout.write(text)
@@ -736,7 +737,7 @@ def main(argv: list[str] | None = None) -> int:
         idx = argv.index("--out")
         if idx + 1 < len(argv):
             try:
-                Path(argv[idx + 1]).write_text(json.dumps(out) + "\n", encoding="utf-8")
+                _atomic_write_text(Path(argv[idx + 1]), json.dumps(out) + "\n")
             except OSError:
                 pass
     if "--jq" in argv:

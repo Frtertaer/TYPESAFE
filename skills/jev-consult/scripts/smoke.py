@@ -530,7 +530,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(text)
     if args.out:
         try:
-            Path(args.out).write_text(text, encoding="utf-8")
+            _atomic_write(Path(args.out), text)
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
             return 1
@@ -555,7 +555,7 @@ def main(argv: list[str] | None = None) -> int:
                 "| %s | %s | %s |" % (s["name"], "yes" if s["ok"] else "NO", detail)
             )
         try:
-            Path(args.report).write_text("\n".join(lines) + "\n", encoding="utf-8")
+            _atomic_write(Path(args.report), "\n".join(lines) + "\n")
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
             return 1

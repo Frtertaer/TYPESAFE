@@ -294,6 +294,19 @@ def apply_fixes(request: dict) -> list[str]:
     return applied
 
 
+def _atomic_write(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def main(argv: list[str] | None = None) -> int:
     """Standalone CLI: python question_lint.py request.json [--json] [--fix]"""
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -437,7 +450,7 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write("  %d error(s) of %d finding(s)\n" % (res["errors"], res["total"]))
         if out_path:
             try:
-                Path(out_path).write_text(
+                _atomic_write(Path(out_path), 
                     json.dumps(results, indent=2) + "\n", encoding="utf-8"
                 )
             except OSError as exc:
@@ -517,16 +530,16 @@ def main(argv: list[str] | None = None) -> int:
         return rc
     if do_fix:
         applied = apply_fixes(request)
-        Path(argv[0]).write_text(json.dumps(request, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        _atomic_write(Path(argv[0]), json.dumps(request, indent=2, ensure_ascii=False) + "\n")
         for rule in applied:
             sys.stderr.write("fixed %s\n" % rule)
     findings = lint_request(request)
     shown = [f for f in findings if not severity or f["severity"] == severity]
     if out_path:
         try:
-            Path(out_path).write_text(
+            _atomic_write(
+                Path(out_path),
                 json.dumps({"findings": shown}, indent=2, ensure_ascii=False) + "\n",
-                encoding="utf-8",
             )
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))

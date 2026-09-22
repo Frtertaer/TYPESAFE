@@ -122,7 +122,7 @@ def spill(text: str, spill_dir: Path | None = None) -> Path | None:
         else:
             tmp = target / (digest + ".tmp.%d" % os.getpid())
             try:
-                tmp.write_text(text, encoding="utf-8")
+                _atomic_write(tmp, text)
                 try:
                     os.chmod(tmp, 0o600)
                 except OSError:
@@ -1367,16 +1367,16 @@ def cmd_compact(args: argparse.Namespace) -> int:
         return 0
     text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     if args.output:
-        Path(args.output).write_text(text, encoding="utf-8")
+        _atomic_write(Path(args.output), text)
     else:
         sys.stdout.write(text)
     report_path = getattr(args, "report", "") or ""
     if report_path:
         stats = result.get("stats") if isinstance(result, dict) else {}
         try:
-            Path(report_path).write_text(
+            _atomic_write(
+                Path(report_path),
                 json.dumps(stats or {}, indent=2, ensure_ascii=False) + "\n",
-                encoding="utf-8",
             )
         except OSError as exc:
             sys.stderr.write("cannot write report %s: %s\n" % (report_path, exc))
@@ -1463,6 +1463,19 @@ def prune_spill(
             continue
         removed.append(candidate)
     return removed
+
+
+def _atomic_write(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1691,7 +1704,7 @@ def main(argv: list[str] | None = None) -> int:
             ) + "%d spill files\n" % len(rows)
         if args.out:
             try:
-                Path(args.out).write_text(text, encoding="utf-8")
+                _atomic_write(Path(args.out), text)
             except OSError as exc:
                 sys.stderr.write("--out failed: %s\n" % exc)
                 return 1
@@ -1713,7 +1726,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.out:
             try:
-                Path(args.out).write_text(text, encoding="utf-8")
+                _atomic_write(Path(args.out), text)
             except OSError as exc:
                 sys.stderr.write("--out failed: %s\n" % exc)
                 return 1

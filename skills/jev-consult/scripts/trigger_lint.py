@@ -171,6 +171,19 @@ RULES = {
 }
 
 
+def _atomic_write(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     as_json = "--json" in argv
@@ -322,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
         if out_path:
             try:
-                Path(out_path).write_text(
+                _atomic_write(Path(out_path), 
                     json.dumps(results, indent=2) + "\n", encoding="utf-8"
                 )
             except OSError as exc:
@@ -393,9 +406,8 @@ def main(argv: list[str] | None = None) -> int:
         applied = fix_cases(data) if isinstance(data, dict) else []
         if applied and not dry_run:
             try:
-                path.write_text(
-                    json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-                    encoding="utf-8",
+                _atomic_write(
+                    path, json.dumps(data, indent=2, ensure_ascii=False) + "\n"
                 )
             except OSError as exc:
                 sys.stderr.write("cannot write %s: %s\n" % (path, exc))
@@ -415,7 +427,7 @@ def main(argv: list[str] | None = None) -> int:
     n_info = sum(1 for f in findings if f["severity"] == "info")
     if out_path:
         try:
-            Path(out_path).write_text(
+            _atomic_write(Path(out_path), 
                 json.dumps(
                     {
                         "path": str(path),
@@ -426,9 +438,7 @@ def main(argv: list[str] | None = None) -> int:
                     },
                     indent=2,
                 )
-                + "\n",
-                encoding="utf-8",
-            )
+                + "\n")
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
             return 1

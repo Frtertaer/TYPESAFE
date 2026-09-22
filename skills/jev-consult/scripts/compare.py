@@ -245,6 +245,19 @@ def run(
     }
 
 
+def _atomic_write(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Compare unguarded vs Jev-guarded traces on sticky prompts."
@@ -338,9 +351,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.out:
         out_path = Path(args.out)
         try:
-            out_path.write_text(
+            _atomic_write(
+                out_path,
                 json.dumps(result, indent=2, ensure_ascii=False) + "\n",
-                encoding="utf-8",
             )
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
@@ -377,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
                 + format_md(result["rows"], live=args.live)
             )
         try:
-            Path(args.report).write_text(text, encoding="utf-8")
+            _atomic_write(Path(args.report), text)
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
             return 1

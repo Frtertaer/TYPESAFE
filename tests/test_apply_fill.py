@@ -629,5 +629,61 @@ class ApplyFillE2ETests(unittest.TestCase):
             self.assertEqual(entry["harness"], "codex")
 
 
+
+    def test_status_reports_fill_state(self) -> None:
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(["--status", "--cwd", tmp], cwd=tmp, home=tmp)
+            report = json.loads(out)
+            self.assertFalse(report["miss"])
+            self.assertFalse(report["ask"])
+            self.assertIsNone(report["miss_age_s"])
+            (Path(tmp) / INV.MISS_NAME).write_text(
+                json.dumps({"task": "jwt", "harness": "codex", "written_at": time.time()}),
+                encoding="utf-8",
+            )
+            out = self._run(["--status", "--cwd", tmp], cwd=tmp, home=tmp)
+            report = json.loads(out)
+            self.assertTrue(report["miss"])
+            self.assertEqual(report["task"], "jwt")
+            self.assertIsNotNone(report["miss_age_s"])
+
+    def test_status_jq_prints_one_field(self) -> None:
+        import subprocess
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / INV.MISS_NAME).write_text(
+                json.dumps({"task": "jwt", "harness": "codex", "written_at": time.time()}),
+                encoding="utf-8",
+            )
+            env = dict(os.environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env["JEV_CONSULT_LOG"] = "0"
+            env["USERPROFILE"] = tmp
+            env["HOME"] = tmp
+            proc = subprocess.run(
+                [sys.executable, str(self.SCRIPT), "--status", "--cwd", tmp, "--jq", "task"],
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout), "jwt")
+            proc = subprocess.run(
+                [sys.executable, str(self.SCRIPT), "--status", "--cwd", tmp, "--jq", "nope"],
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("bad --jq key", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

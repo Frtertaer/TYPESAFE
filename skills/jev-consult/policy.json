@@ -20,6 +20,7 @@
   "hook_jev_timeout_seconds": 8,
   "hook_jev_retries": 0,
   "hook_max_prompt_chars": 20000,
+  "hook_payload_max_bytes": 1048576,
   "must_ask": [
     "approach",
     "keep_vs_change",

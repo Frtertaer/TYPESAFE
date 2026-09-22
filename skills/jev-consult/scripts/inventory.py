@@ -877,6 +877,24 @@ DEFAULT_HOOK_JEV_RETRIES = 0
 
 HOOK_MAX_PROMPT_KEY = "hook_max_prompt_chars"
 DEFAULT_HOOK_MAX_PROMPT_CHARS = 20000
+HOOK_MAX_PAYLOAD_KEY = "hook_payload_max_bytes"
+DEFAULT_HOOK_MAX_PAYLOAD_BYTES = 1048576
+
+
+def hook_max_payload_bytes() -> int:
+    """Cap on hook stdin/--file payload bytes (0 = unlimited).
+    Env JEV_HOOK_MAX_PAYLOAD > policy hook_payload_max_bytes > default.
+    Over-cap payloads are ignored (the hook emits {} and stays fail-open)."""
+    try:
+        env = int(os.environ.get("JEV_HOOK_MAX_PAYLOAD", "") or -1)
+        if env >= 0:
+            return env
+    except ValueError:
+        pass
+    try:
+        return max(0, int(_policy_dict().get(HOOK_MAX_PAYLOAD_KEY, DEFAULT_HOOK_MAX_PAYLOAD_BYTES)))
+    except (TypeError, ValueError):
+        return DEFAULT_HOOK_MAX_PAYLOAD_BYTES
 
 
 def hook_max_prompt_chars() -> int:

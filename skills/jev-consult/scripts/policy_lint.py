@@ -71,6 +71,7 @@ NONNEG_NUM_FIELDS = (
     "hook_jev_retries",
     "hook_jev_timeout_seconds",
     "hook_max_prompt_chars",
+    "hook_payload_max_bytes",
     "sidecar_ttl_seconds",
 )
 NONEMPTY_STR_FIELDS = ("model", "endpoint", "default", "role", "coder_role")
@@ -85,6 +86,7 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "hook_jev_retries",
     "hook_jev_timeout_seconds",
     "hook_max_prompt_chars",
+    "hook_payload_max_bytes",
     "stop_words",
 )
 

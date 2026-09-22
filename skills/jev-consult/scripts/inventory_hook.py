@@ -34,6 +34,7 @@ from inventory import (  # noqa: E402
     format_winner_note,
     hook_budget_seconds,
     hook_dedupe_ttl_seconds,
+    hook_max_payload_bytes,
     hook_max_prompt_chars,
     hook_note_limit,
     hook_jev_retries,
@@ -531,6 +532,7 @@ def env_report() -> dict:
         "budget_seconds": hook_budget_seconds(),
         "max_age_seconds": hook_max_age(),
         "max_prompt_chars": hook_max_prompt_chars(),
+        "max_payload_bytes": hook_max_payload_bytes(),
         "dedupe_ttl_seconds": hook_dedupe_ttl_seconds(),
     }
     for name in onoff:
@@ -676,6 +678,9 @@ def main(argv: list[str] | None = None) -> int:
                     raw = Path(file_path).read_text(encoding="utf-8")
                 else:
                     raw = sys.stdin.read()
+                payload_cap = hook_max_payload_bytes()
+                if payload_cap and len(raw.encode("utf-8", "ignore")) > payload_cap:
+                    raw = ""
                 payload = json.loads(raw) if raw.strip() else {}
                 out = handle(payload) if isinstance(payload, dict) else {}
             except Exception:
@@ -705,6 +710,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if tick["winner"] else 1
     if not raw:
         raw = sys.stdin.read()
+    payload_cap = hook_max_payload_bytes()
+    if payload_cap and len(raw.encode("utf-8", "ignore")) > payload_cap:
+        sys.stdout.write("{}\n")
+        return 0
     if not raw.strip():
         sys.stdout.write("{}\n")
         return 0

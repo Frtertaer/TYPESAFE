@@ -3093,5 +3093,53 @@ class MaxPromptCharsTests(unittest.TestCase):
         self.assertEqual(report["max_prompt_chars"], 77)
 
 
+class MaxPayloadBytesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+
+    def _run_stdin(self, raw: str, env: dict) -> tuple:
+        import io
+
+        buf = io.StringIO()
+        with patch.dict(os.environ, env):
+            with patch.object(sys, "stdin", io.StringIO(raw)):
+                with patch.object(sys, "stdout", buf):
+                    rc = HOOK.main([])
+        return rc, buf.getvalue()
+
+    def test_over_cap_emits_empty_object(self) -> None:
+        raw = json.dumps({"prompt": "x" * 500, "cwd": "c:/"})
+        rc, out = self._run_stdin(raw, {"JEV_HOOK_MAX_PAYLOAD": "64"})
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "{}")
+
+    def test_under_cap_processed(self) -> None:
+        raw = json.dumps({"prompt": "hi", "cwd": "c:/nope"})
+        rc, out = self._run_stdin(raw, {"JEV_HOOK_MAX_PAYLOAD": "4096"})
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.strip())  # {} or a winner payload, either way reads
+
+    def test_cap_zero_unlimited(self) -> None:
+        raw = json.dumps({"prompt": "x" * 5000, "cwd": "c:/"})
+        rc, out = self._run_stdin(raw, {"JEV_HOOK_MAX_PAYLOAD": "0"})
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.strip())
+
+    def test_helper_env_and_default(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_MAX_PAYLOAD": "123"}):
+            self.assertEqual(INV.hook_max_payload_bytes(), 123)
+        with patch.dict(os.environ, {"JEV_HOOK_MAX_PAYLOAD": "bogus"}):
+            self.assertEqual(INV.hook_max_payload_bytes(), 1048576)
+        os.environ.pop("JEV_HOOK_MAX_PAYLOAD", None)
+        self.assertEqual(INV.hook_max_payload_bytes(), 1048576)
+
+    def test_env_report_exposes_cap(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_MAX_PAYLOAD": "77"}):
+            report = HOOK.env_report()
+        self.assertEqual(report["max_payload_bytes"], 77)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

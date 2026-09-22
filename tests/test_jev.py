@@ -894,6 +894,34 @@ class JevInternalsTests(unittest.TestCase):
             self.assertIn("action", payload)
             self.assertFalse((Path(tmp) / "v.json.tmp").exists())
 
+    def test_decide_verdict_writes_action_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "a.json"
+            payload.write_text(
+                json.dumps(
+                    {
+                        "answers": {
+                            "q": {
+                                "choice": "a",
+                                "confidence": 0.99,
+                                "probabilities": {"a": 0.99, "b": 0.01},
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            verdict = Path(tmp) / "v.json"
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = jev.main(
+                    ["decide", str(payload), "--verdict", str(verdict)]
+                )
+            out = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertIn(out["verdict"], ("proceed", "escalate"))
+            self.assertEqual(out["verdict"], "proceed" if rc == 0 else "escalate")
+            self.assertIn("action", out)
+
     def test_ask_dry_never_posts(self) -> None:
         def _boom(*a, **k):
             raise AssertionError("post called")

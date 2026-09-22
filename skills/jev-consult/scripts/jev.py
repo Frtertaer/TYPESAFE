@@ -558,6 +558,17 @@ def cmd_decide(args: argparse.Namespace) -> int:
     irreversible = bool(payload.get("irreversible", args.irreversible))
     decision = decide(answers, policy, irreversible=irreversible)
     emit({"decision": decision, "warnings": policy_warnings(policy)})
+    verdict_path = getattr(args, "verdict", "") or ""
+    if verdict_path and _watch is not None:
+        _watch.write_verdict(
+            verdict_path,
+            {
+                "verdict": "proceed"
+                if decision["action"] == "proceed"
+                else "escalate",
+                "action": decision["action"],
+            },
+        )
     if decision["action"] != "proceed":
         return ASK_ESCALATE_EXIT
     return 0
@@ -786,6 +797,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ask.set_defaults(func=cmd_ask)
     decide_cmd = sub.add_parser("decide", help="Apply policy to an answers object")
+    decide_cmd.add_argument(
+        "--verdict",
+        metavar="PATH",
+        default="",
+        help="Write a slim {verdict: proceed|escalate, action} JSON to PATH (atomic via .tmp+rename).",
+    )
     decide_cmd.add_argument("file", help="JSON file or - for stdin")
     decide_cmd.add_argument(
         "--irreversible",

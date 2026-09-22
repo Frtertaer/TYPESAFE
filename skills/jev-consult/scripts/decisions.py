@@ -925,6 +925,7 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "verdict": "removed" if tick.get("removed") else "ok",
                     "count": tick.get("count", 0),
+                    "newest_ts": tick.get("newest_ts"),
                     "added": total_added,
                     "removed": total_removed,
                     "ticks": ticks,

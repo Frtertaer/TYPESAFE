@@ -2121,6 +2121,35 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(lines[0]["newest_ts"], 100)
             self.assertEqual(lines[1]["newest_ts"], 200)
 
+    def test_watch_verdict_reports_newest_ts(self):
+        import os as _os
+        from unittest.mock import patch
+
+        results = [
+            ([{"sha": "a", "ts": 100}], 0),
+            ([{"sha": "a", "ts": 100}, {"sha": "b", "ts": 300}], 0),
+        ]
+
+        def fake_load(p):
+            return results.pop(0) if results else ([{"sha": "b", "ts": 300}], 0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text('{"sha":"a","ts":100}\n', encoding="utf-8")
+            verdict = Path(tmp) / "v.json"
+            with patch.dict(_os.environ, {"JEV_DECISIONS_WATCH_MAX": "2"}):
+                with patch.object(decisions, "load_entries", side_effect=fake_load):
+                    import io
+
+                    with patch.object(sys, "stdout", io.StringIO()):
+                        rc = decisions.main(
+                            ["--file", str(path), "--watch", "0.001",
+                             "--verdict", str(verdict)]
+                        )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["newest_ts"], 300)
+
     def test_nonwatch_verdict_ok_with_entries(self):
         import io
         from unittest.mock import patch

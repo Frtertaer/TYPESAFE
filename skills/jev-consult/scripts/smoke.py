@@ -300,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--fail-fast",
         action="store_true",
-        help="Stop after the first failing step.",
+        help="Stop after the first failing step (in --watch mode, stops on the first failing tick).",
     )
     parser.add_argument(
         "--list",
@@ -416,6 +416,8 @@ def main(argv: list[str] | None = None) -> int:
             ticks += 1
             if verdict_ok and not _write_verdict(last_steps):
                 verdict_ok = False  # warn once, stop retrying
+            if args.fail_fast and tick["failed"]:
+                break
             _time.sleep(args.watch)
         if args.verdict and verdict_ok and not _write_verdict(last_steps):
             return 1

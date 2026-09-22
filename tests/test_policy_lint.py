@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 from pathlib import Path
 
@@ -474,8 +474,9 @@ class WatchFlagTests(unittest.TestCase):
         from unittest import mock
 
         buf = io.StringIO()
+        err = io.StringIO()
         with mock.patch.dict(os.environ, {"JEV_PLINT_WATCH_MAX": "2"}):
-            with redirect_stdout(buf):
+            with redirect_stdout(buf), redirect_stderr(err):
                 rc = policy_lint.main(["--watch", "0.01"])
         self.assertEqual(rc, 0)
         ticks = [
@@ -484,6 +485,12 @@ class WatchFlagTests(unittest.TestCase):
         self.assertEqual(len(ticks), 2)
         self.assertTrue(all("errors" in t for t in ticks))
         self.assertTrue(all("warnings" in t and "infos" in t for t in ticks))
+        stderr_lines = [
+            l for l in err.getvalue().splitlines() if l.startswith("watch tick=")
+        ]
+        self.assertEqual(len(stderr_lines), 2)
+        self.assertIn("findings=", stderr_lines[0])
+        self.assertIn("errors=", stderr_lines[0])
 
     def test_watch_bad_value_rc2(self) -> None:
         with redirect_stdout(io.StringIO()):

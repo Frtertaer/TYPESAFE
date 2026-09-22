@@ -310,7 +310,8 @@ class CliTests(unittest.TestCase):
             path = write_cases(tmp, [dict(GOOD_CASE)])
             with mock.patch.dict(os.environ, {"JEV_TLINT_WATCH_MAX": "2"}):
                 buf = io.StringIO()
-                with redirect_stdout(buf):
+                err = io.StringIO()
+                with redirect_stdout(buf), redirect_stderr(err):
                     rc = trigger_lint.main([str(path), "--watch", "0.01"])
         self.assertEqual(rc, 0)
         ticks = [
@@ -319,6 +320,12 @@ class CliTests(unittest.TestCase):
         self.assertEqual(len(ticks), 2)
         self.assertTrue(all("errors" in t for t in ticks))
         self.assertTrue(all("warnings" in t and "infos" in t for t in ticks))
+        stderr_lines = [
+            l for l in err.getvalue().splitlines() if l.startswith("watch tick=")
+        ]
+        self.assertEqual(len(stderr_lines), 2)
+        self.assertIn("findings=", stderr_lines[0])
+        self.assertIn("errors=", stderr_lines[0])
 
     def test_watch_appends_ticks_to_out_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

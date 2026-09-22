@@ -333,6 +333,10 @@ def main(argv: list[str] | None = None) -> int:
             }
             _watch.emit(tick, out_path, quiet=_watch.quiet("JEV_TLINT_WATCH_QUIET", quiet), bad=tick["errors"] or (strict and tick["findings"]))
             ticks += 1
+            sys.stderr.write(
+                "watch tick=%d findings=%d errors=%d\n"
+                % (ticks, tick["findings"], tick["errors"])
+            )
             if verdict_path and verdict_ok:
                 rc_now = 1 if (tick["errors"] or (strict and tick["findings"])) else 0
                 if not _write_verdict(rc_now):

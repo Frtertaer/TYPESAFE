@@ -746,6 +746,12 @@ class StandaloneCliTests(unittest.TestCase):
         self.assertEqual(len(ticks), 2)
         self.assertTrue(all("errors" in t for t in ticks))
         self.assertTrue(all("warnings" in t and "infos" in t for t in ticks))
+        stderr_lines = [
+            l for l in proc.stderr.splitlines() if l.startswith("watch tick=")
+        ]
+        self.assertEqual(len(stderr_lines), 2)
+        self.assertIn("findings=", stderr_lines[0])
+        self.assertIn("errors=", stderr_lines[0])
 
     def test_watch_fail_fast_breaks_on_error_tick(self) -> None:
         import os as _os

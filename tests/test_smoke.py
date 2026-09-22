@@ -328,6 +328,25 @@ class SmokeTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(list(Path(tmp).iterdir()), [])
 
+    def test_watch_tick_reports_elapsed_s(self) -> None:
+        def ok_step(tmp):
+            return {"name": "policy", "ok": True, "detail": "fake"}
+
+        with patch.dict(os.environ, {"JEV_SMOKE_WATCH_MAX": "2"}):
+            with patch.object(MOD, "step_policy", side_effect=ok_step):
+                import io
+
+                buf = io.StringIO()
+                with patch.object(sys, "stdout", buf):
+                    rc = MOD.main(["--watch", "0.001", "--only", "policy"])
+        self.assertEqual(rc, 0)
+        ticks = [
+            json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertTrue(all(isinstance(t["elapsed_s"], float) for t in ticks))
+        self.assertGreaterEqual(ticks[1]["elapsed_s"], ticks[0]["elapsed_s"])
+
     def test_watch_fail_fast_breaks_on_first_failing_tick(self) -> None:
         def boom(tmp):
             raise RuntimeError("explode")

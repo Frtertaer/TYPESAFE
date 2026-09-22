@@ -425,12 +425,14 @@ def main(argv: list[str] | None = None) -> int:
         dead = _watch.deadline("JEV_SMOKE_WATCH_SECS", getattr(args, "watch_max", 0.0))
         last_steps: list[dict] = []
         verdict_ok = True
+        watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             steps = _run_steps()
             tick = {
                 "ts": int(_time.time()),
                 "ok": all(s["ok"] for s in steps),
                 "failed": [s["name"] for s in steps if not s["ok"]],
+                "elapsed_s": round(_time.time() - watch_t0, 2),
             }
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["failed"]))
             last_steps = steps

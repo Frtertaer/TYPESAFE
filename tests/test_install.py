@@ -314,6 +314,34 @@ class InstallCoverageTests(unittest.TestCase):
             self.assertIn("- other", config.read_text(encoding="utf-8"))
             self.assertIn("not enabled", install.disable_hermes_plugin(config, "jev-compact", False))
 
+    def test_hermes_plugin_scoped_to_enabled_block(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "config.yaml"
+            config.write_text(
+                "catalog:\n  - jev-compact\nplugins:\n  enabled:\n    - other\n",
+                encoding="utf-8",
+            )
+            self.assertIn("enable", install.enable_hermes_plugin(config, "jev-compact", False))
+            text = config.read_text(encoding="utf-8")
+            self.assertIn("- jev-compact", text)
+            self.assertIn("- other", text)
+            config.write_text(
+                "plugins:\n  enabled:\n    - jev-compact\n  - jev-compact\nother_key: []\n",
+                encoding="utf-8",
+            )
+            self.assertIn("disabled", install.disable_hermes_plugin(config, "jev-compact", False))
+            text = config.read_text(encoding="utf-8")
+            self.assertNotIn("    - jev-compact", text)  # enabled entry removed
+            self.assertIn("  - jev-compact", text)  # out-of-block entry survives
+
+    def test_env_file_has_key_export_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            path.write_text("export TYPESAFE_API_KEY=abc123\n", encoding="utf-8")
+            self.assertTrue(install.env_file_has_key(path))
+            path.write_text("OTHER=1\n", encoding="utf-8")
+            self.assertFalse(install.env_file_has_key(path))
+
     def test_strip_codex_event_branches(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "hooks.json"

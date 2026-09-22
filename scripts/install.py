@@ -67,6 +67,8 @@ def env_file_has_key(path: Path) -> bool:
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
+        if stripped.lower().startswith("export "):
+            stripped = stripped[7:].strip()
         key, _, value = stripped.partition("=")
         if key.strip() == "TYPESAFE_API_KEY" and value.strip().strip("\"'"):
             return True
@@ -159,13 +161,21 @@ def parse_agents(raw: str | None) -> list[str]:
     return names
 
 
+def _remove_path(dest: Path) -> None:
+    """Remove a file/symlink/dir at dest; rmtree refuses symlinks."""
+    if dest.is_symlink() or not dest.is_dir():
+        dest.unlink()
+    else:
+        shutil.rmtree(dest)
+
+
 def copy_skill(src: Path, dest_parent: Path, dry_run: bool) -> Path:
     dest = dest_parent / "jev-consult"
     if dry_run:
         return dest
     dest_parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists():
-        shutil.rmtree(dest)
+    if dest.exists() or dest.is_symlink():
+        _remove_path(dest)
     shutil.copytree(src, dest)
     (dest / ".jev-consult-source").write_text(str(src.resolve()) + "\n", encoding="utf-8")
     return dest
@@ -371,7 +381,10 @@ def strip_claude_event(settings: Path, event: str, marker: str, dry_run: bool) -
     kept = [entry for entry in entries if not _entry_is_ours(entry, marker)]
     if len(kept) == len(entries):
         return "no marker " + str(settings)
-    hooks[event] = kept
+    if kept:
+        hooks[event] = kept
+    else:
+        hooks.pop(event, None)
     settings.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return "stripped hook %s %s" % (event, settings)
 
@@ -411,24 +424,42 @@ def copy_hermes_plugin(src: Path, dest: Path, dry_run: bool) -> str:
     if dry_run:
         return "plugin -> " + str(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists():
-        shutil.rmtree(dest)
+    if dest.exists() or dest.is_symlink():
+        _remove_path(dest)
     shutil.copytree(src, dest)
     return "plugin -> " + str(dest)
+
+
+_ENABLED_RE = re.compile(r"(?m)^plugins:\n  enabled:\n")
+
+
+def _enabled_span(text: str) -> tuple[int, int] | None:
+    """(start, end) offsets of the plugins.enabled list items, or None."""
+    match = _ENABLED_RE.search(text)
+    if match is None:
+        return None
+    start = pos = match.end()
+    for line in text[start:].splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped and len(line) - len(line.lstrip(" ")) <= 2:
+            break
+        pos += len(line)
+    return (start, pos)
 
 
 def enable_hermes_plugin(config: Path, name: str, dry_run: bool) -> str:
     if not config.is_file():
         return "missing " + str(config)
     text = config.read_text(encoding="utf-8")
-    if re.search(r"(?m)^\s*-\s+%s\s*$" % re.escape(name), text):
-        return "already enabled " + name
-    needle = "plugins:\n  enabled:\n"
-    if needle not in text:
+    span = _enabled_span(text)
+    if span is None:
         return "no plugins.enabled " + str(config)
+    block = text[span[0]:span[1]]
+    if re.search(r"(?m)^\s*-\s+%s\s*$" % re.escape(name), block):
+        return "already enabled " + name
     if dry_run:
         return "enable " + name
-    config.write_text(text.replace(needle, needle + "    - %s\n" % name, 1), encoding="utf-8")
+    config.write_text(text[:span[0]] + "    - %s\n" % name + text[span[0]:], encoding="utf-8")
     return "enabled " + name
 
 
@@ -437,12 +468,16 @@ def disable_hermes_plugin(config: Path, name: str, dry_run: bool) -> str:
         return "missing " + str(config)
     if dry_run:
         return "disable " + name
-    pattern = re.compile(r"(?m)^\s*-\s+%s\s*\n" % re.escape(name))
     text = config.read_text(encoding="utf-8")
-    new = pattern.sub("", text, count=1)
-    if new == text:
+    span = _enabled_span(text)
+    if span is None:
+        return "no plugins.enabled " + str(config)
+    block = text[span[0]:span[1]]
+    pattern = re.compile(r"(?m)^\s*-\s+%s\s*\n" % re.escape(name))
+    new_block = pattern.sub("", block, count=1)
+    if new_block == block:
         return "not enabled " + name
-    config.write_text(new, encoding="utf-8")
+    config.write_text(text[:span[0]] + new_block + text[span[1]:], encoding="utf-8")
     return "disabled " + name
 
 
@@ -522,8 +557,8 @@ def uninstall_live_hooks(agents: list[str], dry_run: bool) -> None:
     if "hermes" in agents:
         dest = hermes / "plugins" / PLUGIN_NAME
         sys.stdout.write("hermes remove %s\n" % dest)
-        if not dry_run and dest.exists():
-            shutil.rmtree(dest)
+        if not dry_run and (dest.exists() or dest.is_symlink()):
+            _remove_path(dest)
         sys.stdout.write("hermes %s\n" % disable_hermes_plugin(hermes / "config.yaml", PLUGIN_NAME, dry_run))
     if "codex" in agents:
         sys.stdout.write(
@@ -565,8 +600,8 @@ def uninstall(agents: list[str], dry_run: bool) -> int:
         for parent in spec["skills"]:
             dest = parent / "jev-consult"
             sys.stdout.write("%s remove %s\n" % (name, dest))
-            if not dry_run and dest.exists():
-                shutil.rmtree(dest)
+            if not dry_run and (dest.exists() or dest.is_symlink()):
+                _remove_path(dest)
         for instruction in spec["instructions"]:
             sys.stdout.write("%s %s\n" % (name, strip_snippet(instruction, dry_run)))
     uninstall_live_hooks(agents, dry_run)

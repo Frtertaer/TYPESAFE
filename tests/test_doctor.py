@@ -338,6 +338,24 @@ class DoctorTests(unittest.TestCase):
             payload = json.loads(verdict.read_text(encoding="utf-8"))
             self.assertIn(payload["verdict"], ("pass", "fail"))
             self.assertIn("agents", payload)
+            self.assertEqual(payload["ticks"], 1)
+
+    def test_verdict_watch_ticks_counts_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            rc, out, _ = run_main(
+                [
+                    "--agents", "hermes",
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--watch", "0.01",
+                    "--verdict", str(verdict),
+                ],
+                env_extra={"JEV_DOCTOR_WATCH_MAX": "2"},
+            )
+            self.assertIn(rc, (0, 1))
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["ticks"], 2)
 
     def test_api_key_from_env_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -234,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Comma-separated check names to run (e.g. skills,hooks_json); default: all.",
     )
     parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH (with --watch: append each tick line)")
-    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON ({verdict, checks, failed, agents}) to PATH when finished.")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON ({verdict, ticks, checks, failed, agents}) to PATH when finished (with --watch, refreshed every tick; ticks counts passes).")
     parser.add_argument(
         "--watch",
         type=float,
@@ -267,21 +267,24 @@ def main(argv: list[str] | None = None) -> int:
             checks = [c for c in checks if c["check"] in only]
         return checks
 
-    def _verdict_payload(checks_now: list[dict]) -> dict:
+    def _verdict_payload(checks_now: list[dict], ticks: int = 1) -> dict:
         agents: dict[str, bool] = {}
         for c in checks_now:
             agents[c["agent"]] = agents.get(c["agent"], True) and c["ok"]
         return {
             "verdict": "pass" if all(c["ok"] for c in checks_now) else "fail",
+            "ticks": ticks,
             "checks": len(checks_now),
             "failed": sum(1 for c in checks_now if not c["ok"]),
             "agents": agents,
         }
 
-    def _write_verdict(checks_now: list[dict]) -> bool:
+    def _write_verdict(checks_now: list[dict], ticks: int = 1) -> bool:
         if not args.verdict:
             return True
-        return _watch.write_verdict(args.verdict, _verdict_payload(checks_now))
+        return _watch.write_verdict(
+            args.verdict, _verdict_payload(checks_now, ticks)
+        )
 
     if args.watch:
         import time as _time
@@ -305,14 +308,14 @@ def main(argv: list[str] | None = None) -> int:
             _watch.emit(last, args.out, quiet=args.quiet, bad=not last["ok"])
             last_checks = cur
             count += 1
-            if verdict_ok and not _write_verdict(last_checks):
+            if verdict_ok and not _write_verdict(last_checks, count):
                 verdict_ok = False  # warn once, stop retrying
             if max_ticks and count >= max_ticks:
                 break
             if dead and _time.time() >= dead:
                 break
             _time.sleep(args.watch)
-        if args.verdict and verdict_ok and not _write_verdict(last_checks):
+        if args.verdict and verdict_ok and not _write_verdict(last_checks, count):
             return 1
         return 0 if last["ok"] else 1
     checks = collect()

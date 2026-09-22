@@ -3035,6 +3035,62 @@ class EvidenceTest(unittest.TestCase):
             self.assertIn("cannot write", proc.stderr)
 
 
+class GapTest(unittest.TestCase):
+    def _log(self, tmp: str) -> Path:
+        path = Path(tmp) / "decisions.jsonl"
+        write_log(
+            path,
+            [
+                {"ts": 1000, "harness": "hermes", "jev_status": "ok"},
+                {"ts": 1010, "harness": "hermes", "jev_status": "ok"},
+                {"ts": 5000, "harness": "hermes", "jev_status": "none"},
+                {"ts": 5010, "harness": "hermes", "jev_status": "ok"},
+                {"ts": 9000, "harness": "hermes", "jev_status": "ok"},
+            ],
+        )
+        return path
+
+    def test_gap_lists_quiet_periods(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli("--file", str(self._log(tmp)), "--gap", "1000")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("seconds", proc.stdout)
+            self.assertIn("3990", proc.stdout)
+            self.assertIn("1970-01-01 01:23:20Z", proc.stdout)
+
+    def test_gap_json_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli(
+                "--file", str(self._log(tmp)), "--gap", "1000", "--json"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            gaps = json.loads(proc.stdout)["gaps"]
+            self.assertEqual(len(gaps), 2)
+            self.assertEqual(gaps[0], {"from_ts": 1010.0, "to_ts": 5000.0, "seconds": 3990.0})
+            self.assertEqual(gaps[1]["seconds"], 3990.0)
+
+    def test_gap_under_threshold_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli("--file", str(self._log(tmp)), "--gap", "10000")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("no quiet periods", proc.stdout)
+
+    def test_gap_ignores_entries_without_ts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"harness": "hermes", "jev_status": "ok"},
+                    {"ts": 100, "harness": "hermes", "jev_status": "ok"},
+                    {"ts": 200, "harness": "hermes", "jev_status": "ok"},
+                ],
+            )
+            proc = run_cli("--file", str(path), "--gap", "150")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("no quiet periods", proc.stdout)
+
+
 class ReasonFilterTest(unittest.TestCase):
     def _log(self, tmp: str) -> Path:
         path = Path(tmp) / "decisions.jsonl"

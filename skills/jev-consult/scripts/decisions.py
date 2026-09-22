@@ -480,6 +480,44 @@ def format_evidence(data: dict) -> str:
     return "\n".join(lines)
 
 
+def quiet_gaps(entries: list[dict], min_seconds: float) -> list[dict]:
+    """Quiet periods: consecutive timestamps (sorted) more than min_seconds apart."""
+    stamps = sorted(
+        ts for ts in (_entry_ts(item) for item in entries) if ts is not None
+    )
+    gaps = []
+    for prev, cur in zip(stamps, stamps[1:]):
+        delta = cur - prev
+        if delta > min_seconds:
+            gaps.append({"from_ts": prev, "to_ts": cur, "seconds": delta})
+    return gaps
+
+
+def _iso_full(ts: float | None) -> str | None:
+    if ts is None:
+        return None
+    return (
+        datetime.datetime.fromtimestamp(float(ts), tz=datetime.timezone.utc)
+        .strftime("%Y-%m-%d %H:%M:%SZ")
+    )
+
+
+def format_gaps(gaps: list[dict]) -> str:
+    if not gaps:
+        return "no quiet periods"
+    lines = ["seconds     from                 to"]
+    for gap in gaps:
+        lines.append(
+            "%-11d %-20s %s"
+            % (
+                int(gap["seconds"]),
+                _iso_full(gap["from_ts"]) or "?",
+                _iso_full(gap["to_ts"]) or "?",
+            )
+        )
+    return "\n".join(lines)
+
+
 def _ts_arg(raw: str) -> float | None:
     """Parse an epoch-seconds or ISO8601 timestamp argument. Empty -> None."""
     text = (raw or "").strip()
@@ -733,6 +771,13 @@ def main(argv: list[str] | None = None) -> int:
         "--evidence",
         action="store_true",
         help="Print a routing-evidence block (statuses/winners/open misses) for PRs; --json emits it as JSON",
+    )
+    parser.add_argument(
+        "--gap",
+        metavar="S",
+        type=float,
+        default=None,
+        help="List quiet periods: consecutive entries more than S seconds apart (--json emits {gaps: [...]})",
     )
     parser.add_argument(
         "--count",
@@ -1157,6 +1202,13 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("wrote evidence to %s\n" % out_path)
             return 0
         sys.stdout.write(rendered)
+        return 0
+    if getattr(args, "gap", None) is not None:
+        gaps = quiet_gaps(entries, float(args.gap))
+        if args.json:
+            sys.stdout.write(json.dumps({"gaps": gaps}, indent=2) + "\n")
+        else:
+            sys.stdout.write(format_gaps(gaps) + "\n")
         return 0
     if getattr(args, "fill_gaps", False):
         rows = fill_gaps(entries)

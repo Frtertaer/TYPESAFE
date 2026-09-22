@@ -75,6 +75,21 @@ def _env_on(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _read_stdin() -> str:
+    """stdin as text, decoded utf-8-sig: strips a UTF-8 BOM and avoids
+    mojibake when the console codepage isn't utf-8 (Windows cp1252)."""
+    stream = getattr(sys.stdin, "buffer", None)
+    if stream is not None:
+        try:
+            return stream.read().decode("utf-8-sig", "replace")
+        except (OSError, ValueError):
+            pass
+    try:
+        return sys.stdin.read().lstrip("﻿")
+    except (OSError, UnicodeError):
+        return ""
+
+
 def _avg_score(items: list[dict], pool: list[dict], text: str) -> float | None:
     """Mean IDF score of `items` under the prompt query; None when no query."""
     query = tokens(text)
@@ -627,6 +642,7 @@ def main(argv: list[str] | None = None) -> int:
             file_path = argv[idx + 1]
             try:
                 raw = Path(file_path).read_text(encoding="utf-8")
+                raw = raw.lstrip("﻿")
             except OSError:
                 sys.stdout.write("{}\n")
                 return 0
@@ -703,7 +719,8 @@ def main(argv: list[str] | None = None) -> int:
                 if file_path:
                     raw = Path(file_path).read_text(encoding="utf-8")
                 else:
-                    raw = sys.stdin.read()
+                    raw = _read_stdin()
+                raw = raw.lstrip("﻿")
                 payload_cap = hook_max_payload_bytes()
                 if payload_cap and len(raw.encode("utf-8", "ignore")) > payload_cap:
                     raw = ""
@@ -735,7 +752,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0 if tick["winner"] else 1
     if not raw:
-        raw = sys.stdin.read()
+        raw = _read_stdin()
     payload_cap = hook_max_payload_bytes()
     if payload_cap and len(raw.encode("utf-8", "ignore")) > payload_cap:
         sys.stdout.write("{}\n")

@@ -190,6 +190,76 @@ class EncodingConfinementTests(unittest.TestCase):
                     json.loads(sidecar.read_text(encoding="utf-8"))
 
 
+class BomPayloadTests(unittest.TestCase):
+    """Windows tools hand hooks UTF-8-BOM-prefixed JSON (stdin or --file).
+    The hook must still parse it — a BOM'd payload is input, not garbage."""
+
+    BOM = bytes([0xEF, 0xBB, 0xBF])
+
+    def _env(self, cwd: Path) -> dict:
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env.update(
+            {
+                "JEV_HOOK_CWD": str(cwd),
+                "JEV_CONSULT_LOG": "0",
+                "JEV_HOOK_TIMEOUT": "0.01",
+                "PYTHONIOENCODING": "cp1252",
+            }
+        )
+        return env
+
+    def test_bom_stdin_still_processes_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            body = json.dumps(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "jwt",
+                    "cwd": str(cwd),
+                }
+            ).encode("utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(HOOK)],
+                input=self.BOM + body,
+                capture_output=True,
+                env=self._env(cwd),
+                cwd=str(cwd),
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+            out = json.loads(proc.stdout.decode("utf-8", "replace"))
+            # BOM-stripped payload parsed: miss note emitted, miss file written
+            self.assertIn("context", out)
+            self.assertTrue((cwd / ".jev-tools-miss.json").exists())
+
+    def test_bom_file_flag_still_processes_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            pf = cwd / "payload.json"
+            pf.write_bytes(
+                self.BOM
+                + json.dumps(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "jwt",
+                        "cwd": str(cwd),
+                    }
+                ).encode("utf-8")
+            )
+            proc = subprocess.run(
+                [sys.executable, str(HOOK), "--file", str(pf)],
+                capture_output=True,
+                env=self._env(cwd),
+                cwd=str(cwd),
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+            out = json.loads(proc.stdout.decode("utf-8", "replace"))
+            self.assertIn("context", out)
+            self.assertTrue((cwd / ".jev-tools-miss.json").exists())
+
+
 class ConcurrentHookTests(unittest.TestCase):
     def test_racing_hooks_leave_parseable_sidecars(self) -> None:
         """Two+ hooks writing the same cwd must not interleave bytes —

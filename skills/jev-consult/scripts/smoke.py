@@ -319,6 +319,56 @@ def step_doctor(tmp: Path) -> dict:
     return _step("doctor_json", ok_json and rc in (0, 1), "rc=%d json=%s" % (rc, ok_json))
 
 
+def step_trigger_lint(tmp: Path) -> dict:
+    cases = SCRIPTS.parent.parent.parent / "tests" / "fixtures" / "jev-consult.trigger-cases.json"
+    if not cases.is_file():
+        return _step("trigger_lint", False, "fixture missing: %s" % cases)
+    rc, out = _run([str(SCRIPTS / "trigger_lint.py"), str(cases)])
+    return _step("trigger_lint", rc == 0, out.strip()[:120] or "rc=%d" % rc)
+
+
+def step_trigger_eval(tmp: Path) -> dict:
+    rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--quiet"])
+    ok = rc == 0 and "PASS" in out
+    return _step("trigger_eval", ok, out.strip()[:120] or "rc=%d" % rc)
+
+
+def step_compact_hook(tmp: Path) -> dict:
+    env = dict(os.environ)  # skillscan:allow
+    env.pop("TYPESAFE_API_KEY", None)
+    env["USERPROFILE"] = str(tmp / "home")
+    env["HOME"] = str(tmp / "home")
+    payload = json.dumps(
+        {"hook_event_name": "PostToolUse", "tool_result": "x" * 90000}
+    )
+    rc, out = _run([str(SCRIPTS / "compact_hook.py")], cwd=tmp, env=env, inp=payload)
+    ok = False
+    if rc == 0:
+        try:
+            ok = isinstance(json.loads(out.strip().splitlines()[0]), dict)
+        except (ValueError, IndexError):
+            ok = False
+    return _step("compact_hook", ok, out.strip()[:120] or "rc=%d" % rc)
+
+
+def step_peer_fill_status(tmp: Path) -> dict:
+    rc, out = _run(
+        [
+            str(SCRIPTS / "peer_fill.py"),
+            "--status",
+            "--cwd",
+            str(tmp / "cwd"),
+        ]
+    )
+    ok = False
+    if rc == 0:
+        try:
+            ok = isinstance(json.loads(out), dict)
+        except ValueError:
+            ok = False
+    return _step("peer_fill_status", ok, out.strip()[:120] or "rc=%d" % rc)
+
+
 STEPS = (
     ("policy", "step_policy"),
     ("policy_lint", "step_policy_lint"),
@@ -333,6 +383,10 @@ STEPS = (
     ("apply_fill", "step_apply_fill"),
     ("hook", "step_hook"),
     ("doctor_json", "step_doctor"),
+    ("trigger_lint", "step_trigger_lint"),
+    ("trigger_eval", "step_trigger_eval"),
+    ("compact_hook", "step_compact_hook"),
+    ("peer_fill_status", "step_peer_fill_status"),
 )
 
 

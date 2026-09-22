@@ -2313,6 +2313,63 @@ def step_trace(tmp: Path) -> dict:
             except (OSError, ValueError):
                 ok = False
     if ok:
+        # init variants: --step seeds current_step, JEV_TRACE_PLAN fills
+        # the plan, and neither given exits 2
+        t2 = tmp / ".jev-trace-init2.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trace.py"),
+                "--file",
+                str(t2),
+                "init",
+                "--plan",
+                "p2",
+                "--step",
+                "build",
+            ]
+        )
+        try:
+            ok = rc == 0 and (
+                json.loads(t2.read_text(encoding="utf-8")).get(
+                    "current_step"
+                )
+                == "build"
+            )
+        except (OSError, ValueError):
+            ok = False
+        if ok:
+            t3 = tmp / ".jev-trace-init3.json"
+            env2 = dict(os.environ)  # skillscan:allow
+            env2["JEV_TRACE_PLAN"] = "env plan"
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(t3),
+                    "init",
+                ],
+                env=env2,
+            )
+            try:
+                ok = rc == 0 and (
+                    json.loads(t3.read_text(encoding="utf-8")).get("plan")
+                    == "env plan"
+                )
+            except (OSError, ValueError):
+                ok = False
+        if ok:
+            env2.pop("JEV_TRACE_PLAN", None)
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(tmp / ".jev-trace-noplan.json"),
+                    "init",
+                ],
+                env=env2,
+            )
+            ok = rc == 2
+    if ok:
         # set --kv lands on the raw file; export surfaces it while the
         # filtered `show` view does not
         rc, out = _run(

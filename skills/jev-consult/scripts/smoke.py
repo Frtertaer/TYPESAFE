@@ -164,6 +164,40 @@ def step_inventory(tmp: Path) -> dict:
         ]
     )
     ok = rc == 0 and "smoke-skill" in out
+    if ok:
+        sidecar = tmp / "sc.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "inventory.py"),
+                "--harness",
+                "codex",
+                "--home",
+                str(home),
+                "--hermes-home",
+                str(hermes),
+                "--task",
+                "smoke",
+                "--include",
+                "smoke-skill",
+                "--sidecar",
+                str(sidecar),
+            ]
+        )
+        ok = rc == 0 and sidecar.is_file()
+    if ok:
+        rc, out = _run(
+            [str(SCRIPTS / "inventory.py"), "--check-sidecar", str(sidecar)]
+        )
+        ok = rc == 0 and "fresh" in out
+    if ok:
+        rc, out = _run([str(SCRIPTS / "inventory.py"), "--show", str(sidecar)])
+        if rc == 0:
+            try:
+                ok = json.loads(out).get("status") == "fresh"
+            except ValueError:
+                ok = False
+        else:
+            ok = False
     return _step("inventory", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

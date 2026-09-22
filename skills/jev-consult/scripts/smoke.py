@@ -287,6 +287,27 @@ def step_policy_lint(tmp: Path) -> dict:
             and "difference(s)" in out
             and "+ endpoint" in out
         )
+    if ok:
+        # ~ line for a changed value; - line for a key only in OTHER
+        changed_policy = tmp / "policy-changed.json"
+        changed = dict(policy)
+        changed["endpoint"] = "http://example.invalid/changed"
+        changed_policy.write_text(
+            json.dumps(changed), encoding="utf-8"
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "policy_lint.py"),
+                str(bad),
+                "--diff",
+                str(changed_policy),
+            ]
+        )
+        ok = (
+            rc == 0
+            and "~ endpoint:" in out
+            and "- smoke_bogus_key" in out
+        )
     return _step("policy_lint", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

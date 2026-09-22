@@ -1251,6 +1251,31 @@ def step_hook(tmp: Path) -> dict:
             and '"explicit": true' in out
             and '"jev_status": "winner"' in out
         )
+    if ok:
+        # JEV_HOOK_WINNER forces the pick by name (question=env)
+        env["HERMES_HOME"] = str(tmp / "hermes")
+        env["JEV_HOOK_WINNER"] = "explicit-skill"
+        cwd4 = tmp / "cwd4"
+        cwd4.mkdir(exist_ok=True)
+        rc, out = _run(
+            [str(SCRIPTS / "inventory_hook.py"), "--json"],
+            cwd=tmp,
+            env=env,
+            inp=json.dumps(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "an unrelated prompt",
+                    "cwd": str(cwd4),
+                }
+            ),
+        )
+        env.pop("JEV_HOOK_WINNER", None)
+        env.pop("HERMES_HOME", None)
+        ok = (
+            rc == 0
+            and '"jev_status": "winner"' in out
+            and '"question": "env"' in out
+        )
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

@@ -160,12 +160,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print only the uncovered case ids (coverage misses), one per line.",
     )
+    try:
+        env_min_cov = float(os.environ.get("JEV_TRIGGER_MIN_COVERAGE", "") or 0) or None
+    except ValueError:
+        env_min_cov = None
     parser.add_argument(
         "--min-coverage",
         type=float,
-        default=None,
+        default=env_min_cov,
         metavar="F",
-        help="Fail (rc 1) when the case hit rate is below F (0-1).",
+        help="Fail (rc 1) when the case hit rate is below F (0-1); JEV_TRIGGER_MIN_COVERAGE presets.",
     )
     parser.add_argument(
         "--dist",
@@ -184,12 +188,16 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="Print only the N weakest rows (implies score-ascending order).",
     )
+    try:
+        env_min_covers = int(os.environ.get("JEV_TRIGGER_MIN_COVERS", "") or 0)
+    except ValueError:
+        env_min_covers = 0
     parser.add_argument(
         "--min-covers",
         metavar="N",
         type=int,
-        default=0,
-        help="Exit 1 when any covers tag has fewer than N cases.",
+        default=env_min_covers,
+        help="Exit 1 when any covers tag has fewer than N cases; JEV_TRIGGER_MIN_COVERS presets.",
     )
     parser.add_argument("--quiet", action="store_true", help="Print only the verdict line.")
     parser.add_argument(

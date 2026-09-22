@@ -694,6 +694,27 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertIn("| pos-approach | True | True |", text)
             self.assertIn("- uncovered:", text)
 
+    def test_min_coverage_env_presets_gate(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_TRIGGER_MIN_COVERAGE": "0.99"}):
+            with redirect_stdout(buf):
+                rc = te.main(["--quiet"])
+        self.assertEqual(rc, 1)  # 0.92 coverage < 0.99 gate
+
+    def test_min_coverage_flag_overrides_env(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_TRIGGER_MIN_COVERAGE": "0.99"}):
+            with redirect_stdout(buf):
+                rc = te.main(["--quiet", "--min-coverage", "0.5"])
+        self.assertEqual(rc, 0)
+
+    def test_min_covers_env_presets_gate(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_TRIGGER_MIN_COVERS": "99"}):
+            with redirect_stdout(buf):
+                rc = te.main(["--quiet"])
+        self.assertEqual(rc, 1)
+
     def test_verdict_writes_slim_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "verdict.json"

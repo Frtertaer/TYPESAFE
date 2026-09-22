@@ -410,6 +410,76 @@ def format_fill_gaps(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def evidence_report(entries: list[dict], now: float | None = None) -> dict:
+    """Compact routing-evidence block for PRs and reviews."""
+    statuses: dict[str, int] = {}
+    harnesses: dict[str, int] = {}
+    winners: dict[str, int] = {}
+    ts_min: float | None = None
+    ts_max: float | None = None
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("jev_status") or "unknown")
+        statuses[status] = statuses.get(status, 0) + 1
+        harness = str(item.get("harness") or "?")
+        harnesses[harness] = harnesses.get(harness, 0) + 1
+        winner = item.get("winner")
+        if isinstance(winner, dict) and winner.get("name"):
+            key = "%s:%s" % (winner.get("kind") or "?", winner["name"])
+            winners[key] = winners.get(key, 0) + 1
+        ts = item.get("ts")
+        if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+            ts_min = ts if ts_min is None else min(ts_min, ts)
+            ts_max = ts if ts_max is None else max(ts_max, ts)
+    gaps = fill_gaps(entries, now=now)
+    open_by_harness = {row["harness"]: row["open"] for row in gaps if row["open"]}
+
+    def _sorted(d: dict[str, int]) -> dict[str, int]:
+        return dict(sorted(d.items(), key=lambda kv: (-kv[1], kv[0])))
+
+    def _iso(ts: float | None) -> str | None:
+        if ts is None:
+            return None
+        return (
+            datetime.datetime.fromtimestamp(float(ts), tz=datetime.timezone.utc)
+            .strftime("%Y-%m-%d %H:%M:%SZ")
+        )
+
+    return {
+        "entries": len(entries),
+        "span": [_iso(ts_min), _iso(ts_max)],
+        "statuses": _sorted(statuses),
+        "harnesses": _sorted(harnesses),
+        "winners": _sorted(winners),
+        "open_misses": sum(open_by_harness.values()),
+        "open_misses_by_harness": _sorted(open_by_harness),
+    }
+
+
+def format_evidence(data: dict) -> str:
+    def _kv(d: dict[str, int]) -> str:
+        return ", ".join("%s %d" % kv for kv in d.items()) or "none"
+
+    span = data.get("span") or [None, None]
+    span_txt = " .. ".join(x or "?" for x in span)
+    lines = [
+        "## Jev routing evidence",
+        "",
+        "- entries: %d (%s)" % (data.get("entries") or 0, span_txt),
+        "- statuses: " + _kv(data.get("statuses") or {}),
+        "- winners: " + _kv(data.get("winners") or {}),
+        "- open misses: %d%s"
+        % (
+            data.get("open_misses") or 0,
+            " (%s)" % _kv(data.get("open_misses_by_harness") or {})
+            if data.get("open_misses")
+            else "",
+        ),
+    ]
+    return "\n".join(lines)
+
+
 def _ts_arg(raw: str) -> float | None:
     """Parse an epoch-seconds or ISO8601 timestamp argument. Empty -> None."""
     text = (raw or "").strip()
@@ -657,6 +727,11 @@ def main(argv: list[str] | None = None) -> int:
         "--daily",
         action="store_true",
         help="Print per-day entry counts (UTC YYYY-MM-DD), sorted desc",
+    )
+    parser.add_argument(
+        "--evidence",
+        action="store_true",
+        help="Print a routing-evidence block (statuses/winners/open misses) for PRs; --json emits it as JSON",
     )
     parser.add_argument(
         "--count",
@@ -1059,6 +1134,13 @@ def main(argv: list[str] | None = None) -> int:
             items = items[skip:]
         return items
     entries = _filtered(entries)
+    if getattr(args, "evidence", False):
+        data = evidence_report(entries)
+        if args.json:
+            sys.stdout.write(json.dumps(data, indent=2) + "\n")
+        else:
+            sys.stdout.write(format_evidence(data) + "\n")
+        return 0
     if getattr(args, "fill_gaps", False):
         rows = fill_gaps(entries)
         if args.json:

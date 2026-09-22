@@ -2957,5 +2957,53 @@ class FillGapsTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
 
 
+class EvidenceTest(unittest.TestCase):
+    def _log(self, tmp: str) -> Path:
+        path = Path(tmp) / "decisions.jsonl"
+        write_log(
+            path,
+            [
+                {"ts": 100, "harness": "hermes", "jev_status": "none", "prompt_head": "fix flaky"},
+                {"ts": 200, "harness": "hermes", "jev_status": "fill", "fill": "apply", "prompt_head": "fix flaky"},
+                {"ts": 300, "harness": "claude-code", "jev_status": "none", "prompt_head": "sql migration"},
+                {"ts": 400, "harness": "claude-code", "jev_status": "winner", "winner": {"kind": "skill", "name": "x"}},
+            ],
+        )
+        return path
+
+    def test_evidence_text_block(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli("--file", str(self._log(tmp)), "--evidence")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            out = proc.stdout
+            self.assertIn("## Jev routing evidence", out)
+            self.assertIn("- entries: 4", out)
+            self.assertIn("none 2", out)
+            self.assertIn("skill:x 1", out)
+            self.assertIn("- open misses: 1 (claude-code 1)", out)
+            self.assertIn("1970-01-01", out)
+
+    def test_evidence_json_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli("--file", str(self._log(tmp)), "--evidence", "--json")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["entries"], 4)
+            self.assertEqual(data["statuses"], {"none": 2, "fill": 1, "winner": 1})
+            self.assertEqual(data["winners"], {"skill:x": 1})
+            self.assertEqual(data["open_misses"], 1)
+            self.assertEqual(data["open_misses_by_harness"], {"claude-code": 1})
+            self.assertEqual(data["span"][0], "1970-01-01 00:01:40Z")
+
+    def test_evidence_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [])
+            proc = run_cli("--file", str(path), "--evidence")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("- entries: 0", proc.stdout)
+            self.assertIn("- open misses: 0", proc.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2313,6 +2313,103 @@ def step_trace(tmp: Path) -> dict:
             except (OSError, ValueError):
                 ok = False
     if ok:
+        # set --kv lands on the raw file; export surfaces it while the
+        # filtered `show` view does not
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trace.py"),
+                "--file",
+                str(trace_file),
+                "set",
+                "--kv",
+                "smoke_extra=1",
+            ]
+        )
+        ok = rc == 0
+        if ok:
+            try:
+                ok = (
+                    json.loads(trace_file.read_text(encoding="utf-8")).get(
+                        "smoke_extra"
+                    )
+                    == "1"
+                )
+            except (OSError, ValueError):
+                ok = False
+        if ok:
+            # the loaded view filters unknown keys: export drops it,
+            # show --key prints an empty line
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "export",
+                ]
+            )
+            ok = rc == 0 and "smoke_extra" not in out
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "export",
+                    "--jq",
+                    "nope.key",
+                ]
+            )
+            ok = rc == 2
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "show",
+                    "--key",
+                    "attempt_count",
+                ]
+            )
+            ok = rc == 0 and out.strip().isdigit()
+        if ok:
+            export_file = tmp / "trace-export.json"
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "export",
+                    "--out",
+                    str(export_file),
+                ]
+            )
+            try:
+                ok = rc == 0 and isinstance(
+                    json.loads(export_file.read_text(encoding="utf-8")),
+                    dict,
+                )
+            except (OSError, ValueError):
+                ok = False
+    if ok:
+        # prune --dry-run reports without deleting; the real call removes
+        os.utime(trace_file, (time.time() - 4000,) * 2)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trace.py"),
+                "--file",
+                str(trace_file),
+                "prune",
+                "--older-than",
+                "60",
+                "--dry-run",
+            ]
+        )
+        try:
+            ok = rc == 0 and trace_file.exists()
+        except (ValueError, AttributeError):
+            ok = False
+    if ok:
         # prune removes a trace file whose mtime is older than the TTL
         os.utime(trace_file, (time.time() - 4000,) * 2)
         rc, out = _run(

@@ -627,6 +627,17 @@ def cmd_ping(args: argparse.Namespace) -> int:
         timeout=args.timeout or env_timeout() or 60,
     )
     answer = (result.get("answers") or {}).get("ok") or {}
+    verdict_path = getattr(args, "verdict", "") or ""
+    if verdict_path and _watch is not None:
+        _watch.write_verdict(
+            verdict_path,
+            {
+                "ok": True,
+                "model": result.get("model"),
+                "noul": answer.get("noul"),
+                "ms": int((time.time() - started) * 1000),
+            },
+        )
     if getattr(args, "json", False):
         sys.stdout.write(
             json.dumps(
@@ -832,6 +843,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Print {ok, model, noul, ms} as a JSON object",
+    )
+    ping.add_argument(
+        "--verdict",
+        metavar="PATH",
+        default="",
+        help="Write a slim {ok, model, noul, ms} JSON to PATH (atomic via .tmp+rename).",
     )
     ping.set_defaults(func=cmd_ping)
     scaffold = sub.add_parser(

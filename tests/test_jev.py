@@ -705,6 +705,22 @@ class JevInternalsTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("ok model=m1 noul=0.95", buf.getvalue())
 
+    def test_cmd_ping_verdict_writes_slim_json(self) -> None:
+        fake = {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.95}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            buf = io.StringIO()
+            with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+                sys, "stdout", buf
+            ):
+                rc = jev.main(["ping", "--verdict", str(verdict)])
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["model"], "m1")
+            self.assertEqual(payload["noul"], 0.95)
+            self.assertIn("ms", payload)
+
     def test_ping_timeout_env_and_flag(self) -> None:
         calls = []
 

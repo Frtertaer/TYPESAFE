@@ -1120,6 +1120,8 @@ def write_ask(path: Path, task: str, harness: str, picked: list[dict]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if _watch.maybe_version(sys.argv[1:] if argv is None else argv):
+        return 0
     parser = argparse.ArgumentParser(description="Inventory installed skills/plugins/MCP for a Jev Choice.")
     parser.add_argument(
         "--task",

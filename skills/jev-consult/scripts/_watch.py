@@ -90,6 +90,29 @@ def emit_or_jq(tick: dict, jq: str, out_path=None, quiet: bool = False, bad=None
     emit(tick, out_path, quiet=quiet, bad=bad)
 
 
+def policy_version() -> str:
+    """policy.json "version" as a string; '?' when unreadable or missing."""
+    try:
+        data = json.loads(
+            (Path(__file__).resolve().parent.parent / "policy.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        return str(data.get("version", "?"))
+    except (OSError, ValueError):
+        return "?"
+
+
+def maybe_version(argv: list, out=None) -> bool:
+    """--version short-circuit for every script: print the pack version and
+    return True when the flag is anywhere in argv (works for argparse and
+    hand-rolled argv parsers alike)."""
+    if "--version" not in argv:
+        return False
+    (out or sys.stdout).write("jev-consult (policy v%s)\n" % policy_version())
+    return True
+
+
 def write_verdict(path: str, payload: dict) -> bool:
     """Write a slim verdict JSON to path; False (with stderr note) on failure.
 

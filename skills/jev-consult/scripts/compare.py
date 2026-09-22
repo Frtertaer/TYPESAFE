@@ -259,6 +259,8 @@ def _atomic_write(path, text):
 
 
 def main(argv: list[str] | None = None) -> int:
+    if _watch.maybe_version(sys.argv[1:] if argv is None else argv):
+        return 0
     parser = argparse.ArgumentParser(
         description="Compare unguarded vs Jev-guarded traces on sticky prompts."
     )

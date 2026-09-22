@@ -959,6 +959,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if _watch.maybe_version(sys.argv[1:] if argv is None else argv):
+        return 0
     parser = build_parser()
     args = parser.parse_args(argv)
     return int(args.func(args))

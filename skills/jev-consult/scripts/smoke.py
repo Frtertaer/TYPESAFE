@@ -337,6 +337,8 @@ STEPS = (
 
 
 def main(argv: list[str] | None = None) -> int:
+    if _watch.maybe_version(sys.argv[1:] if argv is None else argv):
+        return 0
     parser = argparse.ArgumentParser(description="Offline sanity for the jev-consult pack.")
     parser.add_argument(
         "--only",

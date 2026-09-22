@@ -445,6 +445,8 @@ def fill(
 
 
 def main() -> int:
+    if _watch.maybe_version(sys.argv[1:]):
+        return 0
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", default="")
     parser.add_argument("--harness", default="auto")

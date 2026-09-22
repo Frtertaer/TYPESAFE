@@ -17,6 +17,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
+import _watch  # noqa: E402
 import compact as C  # noqa: E402
 
 
@@ -90,7 +91,7 @@ def handle(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-USAGE = 'Usage: python compact_hook.py [--help]\n\nReads one PostToolUse JSON event from stdin. When the tool result is longer\nthan the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n'
+USAGE = 'Usage: python compact_hook.py [--help|--version]\n\nReads one PostToolUse JSON event from stdin. When the tool result is longer\nthan the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n'
 
 
 def _read_stdin() -> str:
@@ -107,6 +108,8 @@ def _read_stdin() -> str:
 
 
 def main() -> int:
+    if _watch.maybe_version(sys.argv[1:]):
+        return 0
     if "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:
         sys.stdout.write(USAGE)
         return 0

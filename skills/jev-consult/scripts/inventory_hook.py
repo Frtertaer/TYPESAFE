@@ -585,11 +585,13 @@ def env_report() -> dict:
     return report
 
 
-USAGE = 'Usage: python inventory_hook.py [--env|--events|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet]\n       [--verdict PATH]] [--repeat N]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n  --events   print allowed hook event names and exit\n  --dry-run  resolve the pick without writing sidecar/miss files\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --verdict P  write a slim {verdict, ticks, winner, keys} JSON\n'
+USAGE = 'Usage: python inventory_hook.py [--env|--events|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet]\n       [--verdict PATH]] [--repeat N]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n  --events   print allowed hook event names and exit\n  --dry-run  resolve the pick without writing sidecar/miss files\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --version  print the pack policy version and exit\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --verdict P  write a slim {verdict, ticks, winner, keys} JSON\n'
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if _watch.maybe_version(list(argv)):
+        return 0
     if "-h" in argv or "--help" in argv:
         sys.stdout.write(USAGE)
         return 0

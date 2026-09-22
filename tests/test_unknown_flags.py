@@ -69,6 +69,34 @@ class UnknownFlagTests(unittest.TestCase):
                 )
 
 
+class VersionSweepTests(unittest.TestCase):
+    """Every script answers --version rc 0 with the pack policy version."""
+
+    def test_every_script_prints_policy_version(self) -> None:
+        import json as _json
+
+        policy_v = str(
+            _json.loads(
+                (SCRIPTS.parent / "policy.json").read_text(encoding="utf-8")
+            ).get("version", "?")
+        )
+        expected = "jev-consult (policy v%s)" % policy_v
+        for script in scripts():
+            proc = subprocess.run(
+                [sys.executable, str(script), "--version"],
+                input="",
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            with self.subTest(script=script.name):
+                if script.name == "skill_scanner.py":
+                    # vendored upstream tool — its own --version semantics
+                    continue
+                self.assertEqual(proc.returncode, 0, proc.stderr[:200])
+                self.assertEqual(proc.stdout.strip(), expected)
+
+
 class EmptyStdinTests(unittest.TestCase):
     """EOF on stdin, bare argv: no script may traceback; hooks emit `{}`."""
 

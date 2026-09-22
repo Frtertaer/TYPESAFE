@@ -110,6 +110,15 @@ class InventoryTests(unittest.TestCase):
         bad = inv.resolve_picker(picked, {"action": "escalate", "picks": {}})
         self.assertEqual(bad["status"], "escalate")
 
+    def test_resolve_picker_malformed_pick_escalates(self) -> None:
+        picked = [{"id": "skill_jwt_auth", "kind": "skill", "name": "jwt-auth"}]
+        for malformed in ({"id": "skill_jwt_auth"}, ["skill_jwt_auth"], 7):
+            out = inv.resolve_picker(
+                picked,
+                {"action": "proceed", "picks": {"load_tools": malformed, "need_skill": 0.9}},
+            )
+            self.assertEqual(out["status"], "escalate")
+
     def test_resolve_picker_strong_pick(self) -> None:
         picked = [{"id": "skill_jwt_auth", "kind": "skill", "name": "jwt-auth"}]
         strong = inv.resolve_picker(

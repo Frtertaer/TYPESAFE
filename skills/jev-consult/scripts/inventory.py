@@ -163,6 +163,7 @@ EXPLICIT_ONLY_RE = re.compile(
     r"(?m)^\s*allow_implicit_invocation:\s*false\s*(?:#.*)?$"
 )
 _BLOCK_MARKERS = (">", ">-", ">+", "|", "|-", "|+")
+_FM_END = re.compile(r"\n---[ \t]*(\r?\n|$)")
 
 
 def _fm_scalar(raw: str) -> str:
@@ -187,9 +188,10 @@ def parse_frontmatter(path: Path) -> dict[str, str]:
         return {"name": name, "description": description}
     if not text.startswith("---"):
         return {"name": name, "description": description}
-    end = text.find("\n---", 3)
-    if end < 0:
+    end_match = _FM_END.search(text, 3)
+    if end_match is None:
         return {"name": name, "description": description}
+    end = end_match.start()
     lines = text[3:end].splitlines()
     i = 0
     while i < len(lines):
@@ -951,6 +953,8 @@ def resolve_picker(picked: list[dict], decision: dict | None, policy: dict | Non
         return {"status": "escalate", "winner": None}
     if load in (None, "none"):
         return {"status": "none", "winner": None}
+    if not isinstance(load, str):
+        return {"status": "escalate", "winner": None}
     by_id = {item["id"]: item for item in picked}
     winner = by_id.get(load)
     probabilities = decision.get("probabilities") or {}

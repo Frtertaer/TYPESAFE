@@ -47,6 +47,23 @@ class VerdictContractTests(unittest.TestCase):
             offenders, [], "watch loops not using _watch emit: %s" % offenders
         )
 
+    def test_watch_knob_flags_route_through_helpers(self) -> None:
+        # --quiet presets read via _watch.quiet; --max-ticks via _watch.cap;
+        # --watch-max via _watch.deadline — so env overrides stay uniform.
+        offenders = []
+        for f in sorted(SCRIPTS.glob("*.py")):
+            if f.name.startswith("_"):
+                continue
+            src = f.read_text(encoding="utf-8")
+            for flag, helper in (
+                ('"--quiet"', "_watch.quiet("),
+                ('"--max-ticks"', "cap("),
+                ('"--watch-max"', "deadline("),
+            ):
+                if flag in src and helper not in src:
+                    offenders.append("%s: %s without %s" % (f.name, flag, helper))
+        self.assertEqual(offenders, [])
+
     def test_write_verdict_injects_ts(self) -> None:
         import importlib.util
         import sys

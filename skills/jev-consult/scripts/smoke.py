@@ -3562,6 +3562,29 @@ def step_hook(tmp: Path) -> dict:
                 )
             except (OSError, ValueError):
                 ok = False
+    if ok:
+        # --jq inside --watch prints just the named tick field(s)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "inventory_hook.py"),
+                "--file",
+                str(event_file),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--jq",
+                "keys",
+            ],
+            cwd=tmp,
+            env=env,
+        )
+        lines = [
+            ln.strip()
+            for ln in out.splitlines()
+            if ln.strip().startswith("[")
+        ]
+        ok = len(lines) == 2 and '"winner_changed"' not in out
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

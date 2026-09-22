@@ -1888,6 +1888,29 @@ def step_hook(tmp: Path) -> dict:
             and '"jev_status": "winner"' in out
             and '"question": "env"' in out
         )
+    if ok:
+        # fail-open: with a key set but Jev unreachable the hook still emits {}
+        bad_policy = tmp / "bad-policy.json"
+        try:
+            pdata = json.loads((SKILL_DIR / "policy.json").read_text(encoding="utf-8"))
+            pdata["endpoint"] = "http://127.0.0.1:1/v1/systemone"
+            bad_policy.write_text(json.dumps(pdata), encoding="utf-8")
+        except (OSError, ValueError):
+            ok = False
+        if ok:
+            env5 = dict(env)
+            env5["JEV_POLICY"] = str(bad_policy)
+            env5["TYPESAFE_API_KEY"] = "smoke-dummy"
+            env5["JEV_HOOK_RETRIES"] = "0"
+            rc, out = _run(
+                [str(SCRIPTS / "inventory_hook.py")], cwd=tmp, env=env5, inp=payload
+            )
+            try:
+                ok = rc == 0 and isinstance(
+                    json.loads(out.strip().splitlines()[0]), dict
+                )
+            except (ValueError, IndexError):
+                ok = False
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

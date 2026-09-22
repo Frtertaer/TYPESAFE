@@ -62,6 +62,40 @@ class ExplainRcTests(unittest.TestCase):
                 self.assertTrue(proc.stdout.strip())
 
 
+class LintRuleExplainParityTests(unittest.TestCase):
+    """Every rule id a lint emits must have an --explain entry in RULES."""
+
+    LINTS = {
+        "question_lint.py": "J",
+        "policy_lint.py": "P",
+        "skill_lint.py": "S",
+        "trigger_lint.py": "T",
+    }
+
+    def test_emitted_rule_ids_are_all_explainable(self) -> None:
+        import re
+        import importlib.util
+
+        for name, prefix in self.LINTS.items():
+            path = SCRIPTS / name
+            src = path.read_text(encoding="utf-8")
+            # drop the RULES dict itself so only emission sites remain
+            body = re.sub(r"RULES = \{.*?\n\}", "", src, flags=re.S)
+            emitted = set(re.findall(r'"(%s\d{3})"' % prefix, body))
+            spec = importlib.util.spec_from_file_location(name[:-3], path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            rules = set(mod.RULES)
+            self.assertTrue(emitted, "%s emits no rule ids?" % name)
+            missing = emitted - rules
+            self.assertEqual(
+                missing, set(), "%s emits rules with no --explain: %s" % (name, missing)
+            )
+            for rule in emitted:
+                proc = run(name, "--explain", rule)
+                self.assertEqual(proc.returncode, 0, "%s --explain %s" % (name, rule))
+
+
 class EnvJqRcTests(unittest.TestCase):
     def test_trigger_eval_env_bad_jq_key_is_rc2(self) -> None:
         proc = run("trigger_eval.py", "--env", "--jq", "definitely_not_a_key")

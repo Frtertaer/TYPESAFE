@@ -68,6 +68,8 @@ RULES = {
     "J013": "score scale has too many levels; use 3 to 5",
     "J014": "true and false criteria are identical",
     "J015": "choice has fewer than two options",
+    "J020": "state exceeds the 32k-token limit; trim or chunk it first",
+    "J021": "state is over 8k tokens; irrelevant state distracts and drops accuracy",
 }
 
 

@@ -3091,6 +3091,86 @@ class GapTest(unittest.TestCase):
             self.assertIn("no quiet periods", proc.stdout)
 
 
+class StreakTest(unittest.TestCase):
+    def _log(self, tmp: str) -> Path:
+        path = Path(tmp) / "decisions.jsonl"
+        write_log(
+            path,
+            [
+                {"ts": 1, "harness": "hermes", "jev_status": "ok"},
+                {"ts": 2, "harness": "hermes", "jev_status": "ok"},
+                {"ts": 3, "harness": "hermes", "jev_status": "none"},
+                {"ts": 4, "harness": "hermes", "jev_status": "ok"},
+                {"ts": 5, "harness": "hermes", "jev_status": "ok"},
+                {"ts": 6, "harness": "hermes", "jev_status": "ok"},
+                {"ts": 7, "harness": "codex", "jev_status": "error"},
+                {"ts": 8, "harness": "codex", "jev_status": "error"},
+            ],
+        )
+        return path
+
+    def test_streaks_json_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli(
+                "--file", str(self._log(tmp)), "--streaks", "--json"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)["streaks"]
+            self.assertEqual(len(rows), 2)
+            hermes = next(r for r in rows if r["harness"] == "hermes")
+            self.assertEqual(hermes["entries"], 6)
+            self.assertEqual(hermes["current_status"], "ok")
+            self.assertEqual(hermes["current_streak"], 3)
+            self.assertEqual(hermes["best_status"], "ok")
+            self.assertEqual(hermes["best_streak"], 3)
+            codex = next(r for r in rows if r["harness"] == "codex")
+            self.assertEqual(codex["current_status"], "error")
+            self.assertEqual(codex["current_streak"], 2)
+            self.assertEqual(codex["best_streak"], 2)
+
+    def test_streaks_sorted_by_best_desc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli(
+                "--file", str(self._log(tmp)), "--streaks", "--json"
+            )
+            rows = json.loads(proc.stdout)["streaks"]
+            self.assertEqual(rows[0]["harness"], "hermes")
+            self.assertEqual(rows[1]["harness"], "codex")
+
+    def test_streaks_text_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli("--file", str(self._log(tmp)), "--streaks")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("harness", proc.stdout)
+            self.assertIn("hermes", proc.stdout)
+            self.assertIn("okx3", proc.stdout)
+            self.assertIn("errorx2", proc.stdout)
+
+    def test_streaks_empty_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text("", encoding="utf-8")
+            proc = run_cli("--file", str(path), "--streaks")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("no entries", proc.stdout)
+
+    def test_streaks_honors_status_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli(
+                "--file",
+                str(self._log(tmp)),
+                "--streaks",
+                "--json",
+                "--status",
+                "error",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = json.loads(proc.stdout)["streaks"]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["harness"], "codex")
+            self.assertEqual(rows[0]["entries"], 2)
+
+
 class ReasonFilterTest(unittest.TestCase):
     def _log(self, tmp: str) -> Path:
         path = Path(tmp) / "decisions.jsonl"

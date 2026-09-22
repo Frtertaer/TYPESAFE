@@ -493,6 +493,59 @@ def quiet_gaps(entries: list[dict], min_seconds: float) -> list[dict]:
     return gaps
 
 
+def status_streaks(entries: list[dict]) -> list[dict]:
+    """Per harness: current and longest runs of consecutive same jev_status."""
+    by_harness: dict[str, list[dict]] = {}
+    for item in entries:
+        by_harness.setdefault(str(item.get("harness") or "-"), []).append(item)
+    rows: list[dict] = []
+    for harness in sorted(by_harness):
+        items = sorted(
+            by_harness[harness],
+            key=lambda i: (_entry_ts(i) is None, _entry_ts(i) or 0.0),
+        )
+        best_status, best_n = "", 0
+        cur_status, cur_n = "", 0
+        for it in items:
+            st = str(it.get("jev_status") or "-")
+            if st == cur_status:
+                cur_n += 1
+            else:
+                if cur_n > best_n:
+                    best_status, best_n = cur_status, cur_n
+                cur_status, cur_n = st, 1
+        if cur_n > best_n:
+            best_status, best_n = cur_status, cur_n
+        rows.append(
+            {
+                "harness": harness,
+                "entries": len(items),
+                "current_status": cur_status,
+                "current_streak": cur_n,
+                "best_status": best_status,
+                "best_streak": best_n,
+            }
+        )
+    return sorted(rows, key=lambda r: (-r["best_streak"], r["harness"]))
+
+
+def format_streaks(rows: list[dict]) -> str:
+    if not rows:
+        return "no entries"
+    lines = ["harness  entries  cur           best"]
+    for row in rows:
+        lines.append(
+            "%-8s %-8d %-13s %s"
+            % (
+                row["harness"],
+                row["entries"],
+                "%sx%d" % (row["current_status"], row["current_streak"]),
+                "%sx%d" % (row["best_status"], row["best_streak"]),
+            )
+        )
+    return "\n".join(lines)
+
+
 def _iso_full(ts: float | None) -> str | None:
     if ts is None:
         return None
@@ -778,6 +831,11 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=None,
         help="List quiet periods: consecutive entries more than S seconds apart (--json emits {gaps: [...]})",
+    )
+    parser.add_argument(
+        "--streaks",
+        action="store_true",
+        help="Print per-harness current/longest runs of consecutive same jev_status (--json emits {streaks: [...]})",
     )
     parser.add_argument(
         "--count",
@@ -1209,6 +1267,13 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(json.dumps({"gaps": gaps}, indent=2) + "\n")
         else:
             sys.stdout.write(format_gaps(gaps) + "\n")
+        return 0
+    if getattr(args, "streaks", False):
+        rows = status_streaks(entries)
+        if args.json:
+            sys.stdout.write(json.dumps({"streaks": rows}, indent=2) + "\n")
+        else:
+            sys.stdout.write(format_streaks(rows) + "\n")
         return 0
     if getattr(args, "fill_gaps", False):
         rows = fill_gaps(entries)

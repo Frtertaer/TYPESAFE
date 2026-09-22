@@ -460,6 +460,61 @@ class InventoryHookTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(buf.getvalue().strip(), "{}")
 
+    def test_nonwatch_verdict_writes_decision(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {
+                        "event": "UserPromptSubmit",
+                        "prompt": "jwt",
+                        "cwd": str(cwd),
+                        "harness": "claude-code",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            verdict = cwd / "v.json"
+            env = {
+                "JEV_HOOK_WINNER": "ascii-art",
+                "JEV_HOOK_NOSIDECAR": "1",
+                "JEV_HOOK_NOMISS": "1",
+            }
+            with patch.dict(os.environ, env):
+                with patch.object(HOOK, "scan_cached", return_value=items):
+                    with patch("sys.stdout", io.StringIO()):
+                        rc = HOOK.main(
+                            ["--file", str(payload), "--verdict", str(verdict)]
+                        )
+            self.assertEqual(rc, 0)
+            out = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(out["verdict"], "pass")
+            self.assertEqual(out["winner"], "ascii-art")
+            self.assertEqual(out["ticks"], 1)
+
+    def test_nonwatch_verdict_fail_when_no_winner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {"event": "UserPromptSubmit", "prompt": "x", "cwd": str(cwd)}
+                ),
+                encoding="utf-8",
+            )
+            verdict = cwd / "v.json"
+            with patch.dict(os.environ, {"JEV_HOOK_OFF": "1"}):
+                with patch("sys.stdout", io.StringIO()):
+                    rc = HOOK.main(
+                        ["--file", str(payload), "--verdict", str(verdict)]
+                    )
+            self.assertEqual(rc, 0)
+            out = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(out["verdict"], "fail")
+            self.assertIsNone(out["winner"])
+
     def test_events_flag_lists_allowed_events(self) -> None:
         buf = io.StringIO()
         with patch.dict(os.environ, {"JEV_HOOK_EVENTS": ""}):

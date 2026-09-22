@@ -669,6 +669,19 @@ def main(argv: list[str] | None = None) -> int:
         out = handle(payload)
     except Exception:
         out = {}
+    if "--verdict" in argv:
+        idx = argv.index("--verdict")
+        if idx + 1 < len(argv):
+            winner = ((LAST_DECISION or {}).get("winner") or {}).get("name") or None
+            _watch.write_verdict(
+                argv[idx + 1],
+                {
+                    "verdict": "pass" if winner else "fail",
+                    "ticks": 1,
+                    "winner": winner,
+                    "keys": sorted(out.keys()) if isinstance(out, dict) else [],
+                },
+            )
     if "--out" in argv:
         idx = argv.index("--out")
         if idx + 1 < len(argv):

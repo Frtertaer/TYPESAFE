@@ -185,6 +185,8 @@ def _write_verdict(path: str, tick: dict[str, Any]) -> None:
         "cases": tick.get("cases"),
         "failures": failures if isinstance(failures, list) else n,
     }
+    if "new_failures" in tick:
+        payload["new_failures"] = tick["new_failures"]
     try:
         Path(path).write_text(
             json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
@@ -289,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
         ticks = 0
         dead = _watch.deadline("JEV_COMPARE_WATCH_SECS", getattr(args, "watch_max", 0.0))
         verdict_ok = True
+        prev_failures: set[str] = set()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             cur = run(
                 live=args.live,
@@ -296,10 +299,14 @@ def main(argv: list[str] | None = None) -> int:
                 path=Path(args.cases) if args.cases else None,
                 only=only,
             )
+            failing = strict_failures(cur["rows"], args.live)
+            new_failures = sorted(set(failing) - prev_failures)
+            prev_failures = set(failing)
             tick = {
                 "ts": int(_time.time()),
                 "cases": len(cur["rows"]),
-                "failures": len(strict_failures(cur["rows"], args.live)),
+                "failures": len(failing),
+                "new_failures": new_failures,
             }
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["failures"]))
             ticks += 1

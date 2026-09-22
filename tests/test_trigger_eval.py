@@ -1184,6 +1184,8 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(ticks[0]["hits"], 3)
         self.assertEqual(ticks[0]["n_positives"], 2)
         self.assertEqual(ticks[0]["n_negatives"], 1)
+        self.assertIn("elapsed_s", ticks[0])
+        self.assertGreaterEqual(ticks[0]["elapsed_s"], 0)
 
     def test_watch_rc_reflects_last_verdict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

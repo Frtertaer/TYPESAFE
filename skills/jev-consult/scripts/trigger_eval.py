@@ -485,6 +485,7 @@ def main(argv: list[str] | None = None) -> int:
         cur = result
         prev_gates: list[str] | None = None
         prev_tick: dict | None = None
+        watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             coverage_ok = (
                 args.min_coverage is None
@@ -550,6 +551,7 @@ def main(argv: list[str] | None = None) -> int:
                 "coverage_ok": coverage_ok,
                 "failed_gates": failed,
                 "gates_changed": prev_gates is not None and failed != prev_gates,
+                "elapsed_s": round(_time.time() - watch_t0, 2),
             }
             prev_gates = list(failed)
             prev_tick = tick

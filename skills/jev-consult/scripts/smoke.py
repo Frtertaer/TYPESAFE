@@ -351,6 +351,36 @@ def step_compact_hook(tmp: Path) -> dict:
     return _step("compact_hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 
+def step_jev_decide(tmp: Path) -> dict:
+    answers = tmp / "answers.json"
+    answers.write_text(
+        json.dumps(
+            {
+                "answers": {
+                    "where": {
+                        "type": "choice",
+                        "choice": "refactor",
+                        "confidence": 0.9,
+                        "probabilities": {"refactor": 0.9, "rewrite": 0.1},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    rc, out = _run(
+        [
+            str(SCRIPTS / "jev.py"),
+            "decide",
+            str(answers),
+            "--jq",
+            "decision.action",
+        ]
+    )
+    ok = rc == 0 and out.strip() == '"proceed"'
+    return _step("jev_decide", ok, out.strip()[:120] or "rc=%d" % rc)
+
+
 def step_peer_fill_status(tmp: Path) -> dict:
     rc, out = _run(
         [
@@ -386,6 +416,7 @@ STEPS = (
     ("trigger_lint", "step_trigger_lint"),
     ("trigger_eval", "step_trigger_eval"),
     ("compact_hook", "step_compact_hook"),
+    ("jev_decide", "step_jev_decide"),
     ("peer_fill_status", "step_peer_fill_status"),
 )
 

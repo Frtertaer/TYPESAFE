@@ -628,6 +628,16 @@ def cmd_export(args: argparse.Namespace) -> int:
             items = data.get(key)
             if isinstance(items, list):
                 data[key] = [item for item in items if _in_window(item)]
+    kinds_raw = getattr(args, "kinds", "") or ""
+    if kinds_raw.strip():
+        wanted = {k.strip() for k in kinds_raw.split(",") if k.strip()}
+        hist = data.get("history")
+        if isinstance(hist, list):
+            data["history"] = [
+                h
+                for h in hist
+                if isinstance(h, dict) and str(h.get("kind") or "") in wanted
+            ]
     data["file"] = str(path)
     rc = emit_jq(data, getattr(args, "jq", ""))
     if rc is not None:
@@ -1127,6 +1137,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export_cmd.add_argument("--since", default=None, help="Only history/notes with ts >= epoch seconds or ISO8601")
     export_cmd.add_argument("--before", default=None, help="Only history/notes with ts <= epoch seconds or ISO8601")
+    export_cmd.add_argument("--kinds", default="", help="Comma list of pick kinds to keep in exported history")
     export_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the export payload (rc 2 on unknown key)")
     export_cmd.set_defaults(func=cmd_export)
     return parser

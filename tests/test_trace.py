@@ -1308,6 +1308,34 @@ class TraceTests(unittest.TestCase):
             self.assertEqual([n["text"] for n in out["notes"]], ["b"])
             self.assertEqual(out["inspected"], [{"name": "untimed"}])
 
+    def test_export_kinds_filters_history_only(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "history": [
+                            {"pick": "a", "ts": 1, "kind": "explicit"},
+                            {"pick": "b", "ts": 2, "kind": "idf"},
+                            {"pick": "c", "ts": 3},
+                        ],
+                        "notes": [{"ts": 1, "text": "n"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(
+                    ["--file", str(path), "export", "--kinds", "explicit,idf"]
+                )
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual([h["pick"] for h in out["history"]], ["a", "b"])
+            self.assertEqual(len(out["notes"]), 1)
+
     def test_export_since_bad_value_rc2(self) -> None:
         import io
 

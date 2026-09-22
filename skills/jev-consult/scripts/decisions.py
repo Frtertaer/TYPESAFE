@@ -669,6 +669,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict, count, added, removed, ticks} JSON to PATH when the loop ends.")
     args = parser.parse_args(argv)
     file_arg = args.file or os.environ.get("JEV_DECISIONS", "").strip()
     path = Path(file_arg) if file_arg else inventory.decisions_log_path()
@@ -913,6 +914,9 @@ def main(argv: list[str] | None = None) -> int:
         ticks = 0
         dead = _watch.deadline("JEV_DECISIONS_WATCH_SECS", getattr(args, "watch_max", 0.0))
         prev_keys: set | None = None
+        total_added = 0
+        total_removed = 0
+        tick: dict = {}
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             cur_keys = {
                 str(e.get("sha") or e.get("ts") or json.dumps(e, sort_keys=True, default=str))
@@ -930,6 +934,8 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 else:
                     tick["delta_pct"] = None
+            total_added += int(tick.get("added", 0))
+            total_removed += int(tick.get("removed", 0))
             _watch.emit(tick, getattr(args, "out", "") or None, quiet=args.quiet, bad=bool(tick.get("added") or tick.get("removed")))
             prev_keys = cur_keys
             ticks += 1
@@ -939,6 +945,25 @@ def main(argv: list[str] | None = None) -> int:
                 entries = _filtered(fresh)
             except Exception:
                 pass
+        if getattr(args, "verdict", ""):
+            try:
+                Path(args.verdict).write_text(
+                    json.dumps(
+                        {
+                            "verdict": "removed" if tick.get("removed") else "ok",
+                            "count": tick.get("count", 0),
+                            "added": total_added,
+                            "removed": total_removed,
+                            "ticks": ticks,
+                        },
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            except OSError as exc:
+                sys.stderr.write("--verdict failed: %s\n" % exc)
+                return 1
         return 1 if tick.get("removed") else 0
 
     if args.prune:

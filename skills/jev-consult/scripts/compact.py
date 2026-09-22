@@ -1235,7 +1235,11 @@ def cmd_compact(args: argparse.Namespace) -> int:
         "min_reduction": args.min_reduction,
         "keep_text": args.keep_text or os.environ.get("JEV_KEEP_TEXT", ""),
         "trace": load_trace(args.trace),
-        "no_spill": bool(getattr(args, "dry_run", False) or getattr(args, "check", False)),
+        "no_spill": bool(
+            getattr(args, "dry_run", False)
+            or getattr(args, "check", False)
+            or getattr(args, "preview", False)
+        ),
     }
     asker: Asker
     if args.fake:
@@ -1352,6 +1356,30 @@ def cmd_compact(args: argparse.Namespace) -> int:
                 + "\n"
             )
             return 0
+    if getattr(args, "preview", False):
+        plan = [
+            {
+                "id": item.get("id"),
+                "tool": item.get("tool"),
+                "action": item.get("action"),
+                "reason": item.get("reason"),
+            }
+            for item in (result.get("decisions") or [])
+            if isinstance(item, dict)
+        ]
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "preview": True,
+                    "plan": plan,
+                    "stats": result.get("stats") or {},
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+        return 0
     if getattr(args, "jq", ""):
         node = result
         found = True
@@ -1519,6 +1547,12 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run",
         action="store_true",
         help="Compute decisions and stats but emit the original messages unchanged.",
+    )
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="Emit the drop plan (per-call action and reason) without writing "
+        "output files or spill; nothing is applied.",
     )
     parser.add_argument(
         "--keep-text",

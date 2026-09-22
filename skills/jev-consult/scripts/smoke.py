@@ -1281,6 +1281,29 @@ def step_compact_fake(tmp: Path) -> dict:
                     encoding="utf-8"
                 )
         if ok:
+            # --preview emits the decision plan and applies nothing
+            prev_out = tmp / "compact-preview.json"
+            rc, out = _run(
+                base + ["--preview", "-o", str(prev_out)],
+                cwd=tmp,
+                env=env2,
+            )
+            try:
+                payload = json.loads(out)
+                plan = payload.get("plan") or []
+                ok = (
+                    rc == 0
+                    and payload.get("preview") is True
+                    and len(plan) == 2
+                    and plan[0].get("action") == "drop_call"
+                    and plan[0].get("reason") == "call_dropped"
+                    and plan[1].get("action") == "drop_call"
+                    and "messages" not in payload
+                    and not prev_out.exists()
+                )
+            except ValueError:
+                ok = False
+        if ok:
             # --goal parses and runs (it shapes the Jev state, not output)
             out_e = tmp / "opt-e.json"
             rc, out = _run(

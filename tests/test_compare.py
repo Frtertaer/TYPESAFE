@@ -762,5 +762,21 @@ class WatchSecsEnvTests(unittest.TestCase):
         self.assertEqual(diff["regressions"][0]["why"], "noul_drop")
         self.assertAlmostEqual(diff["regressions"][0]["delta"], -0.15)
 
+    def test_diff_baseline_counts_summarize_lists(self) -> None:
+        import copy
+
+        base_rows = [compare.row_offline(c) for c in CASES["cases"]]
+        cur_rows = copy.deepcopy(base_rows[1:])
+        new_row = copy.deepcopy(base_rows[0])
+        new_row["id"] = "brand_new"
+        cur_rows.append(new_row)
+        diff = compare.diff_baseline(base_rows, cur_rows, live=False)
+        counts = diff["counts"]
+        self.assertEqual(counts["added"], 1)
+        self.assertEqual(counts["removed"], 1)
+        self.assertEqual(counts["regressions"], len(diff["regressions"]))
+        self.assertEqual(counts["changed"], len(diff["changed"]))
+        self.assertEqual(counts["unchanged"], diff["unchanged"])
+
 if __name__ == "__main__":
     unittest.main()

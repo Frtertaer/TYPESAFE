@@ -308,13 +308,23 @@ def diff_baseline(
             changed.append(cid)
             continue
         unchanged += 1
+    added = sorted(set(after) - set(before))
+    removed = sorted(set(before) - set(after))
     return {
         "regressions": regressions,
         "improved": improved,
         "changed": sorted(changed),
-        "added": sorted(set(after) - set(before)),
-        "removed": sorted(set(before) - set(after)),
+        "added": added,
+        "removed": removed,
         "unchanged": unchanged,
+        "counts": {
+            "regressions": len(regressions),
+            "improved": len(improved),
+            "changed": len(changed),
+            "added": len(added),
+            "removed": len(removed),
+            "unchanged": unchanged,
+        },
     }
 
 

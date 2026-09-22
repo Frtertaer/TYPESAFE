@@ -369,6 +369,41 @@ class IdempotentInstallTests(unittest.TestCase):
             for name, blob in repo_before.items():
                 self.assertEqual((ROOT / name).read_bytes(), blob)
 
+    def test_all_four_harnesses_install_to_tmp_home(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            env = {
+                "USERPROFILE": tmp,
+                "HOME": tmp,
+                "HERMES_HOME": str(base / "hermes"),
+                "TYPESAFE_API_KEY": "",
+            }
+            with patch.dict(os.environ, env, clear=False):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = install.install(
+                        ["hermes", "claude-code", "codex", "grok"], False
+                    )
+            self.assertEqual(rc, 0)
+            expected_skill_dirs = [
+                base / "hermes" / "skills" / "jev-consult",
+                base / ".claude" / "skills" / "jev-consult",
+                base / ".codex" / "skills" / "jev-consult",
+                base / ".agents" / "skills" / "jev-consult",
+                base / ".grok" / "skills" / "jev-consult",
+            ]
+            for d in expected_skill_dirs:
+                self.assertTrue(
+                    (d / "SKILL.md").is_file(), "missing %s" % d
+                )
+            for doc in (
+                base / ".claude" / "CLAUDE.md",
+                base / ".codex" / "AGENTS.md",
+                base / ".grok" / "AGENTS.md",
+            ):
+                self.assertTrue(doc.is_file(), "missing %s" % doc)
+                self.assertIn("jev-consult", doc.read_text(encoding="utf-8"))
+
     def test_dry_run_writes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

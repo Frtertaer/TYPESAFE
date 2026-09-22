@@ -277,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.flush()
             ticks += 1
             _time.sleep(args.watch)
-        return 0
+        return 0 if tick["failures"] == 0 else 1
     result = run(
         live=args.live,
         as_json=args.as_json,

@@ -388,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.flush()
             ticks += 1
             _time.sleep(args.watch)
-        return 0
+        return 0 if tick["ok"] else 1
     steps = _run_steps()
     ok = all(s["ok"] for s in steps)
     text = json.dumps({"ok": ok, "steps": steps}, indent=2) + "\n"

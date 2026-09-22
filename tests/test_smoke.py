@@ -228,13 +228,25 @@ class SmokeTests(unittest.TestCase):
                 buf = io.StringIO()
                 with patch.object(sys, "stdout", buf):
                     rc = MOD.main(["--watch", "0.001", "--only", "policy"])
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 1)
         ticks = [
             json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
         ]
         self.assertEqual(len(ticks), 2)
         self.assertTrue(all(t["ok"] is False for t in ticks))
         self.assertTrue(all(t["failed"] for t in ticks))
+
+    def test_watch_rc_0_when_steps_pass(self) -> None:
+        def ok_step(tmp):
+            return {"name": "policy", "ok": True, "detail": "fake"}
+
+        with patch.dict(os.environ, {"JEV_SMOKE_WATCH_MAX": "1"}):
+            with patch.object(MOD, "step_policy", side_effect=ok_step):
+                import io
+
+                with patch.object(sys, "stdout", io.StringIO()):
+                    rc = MOD.main(["--watch", "0.001", "--only", "policy"])
+        self.assertEqual(rc, 0)
 
     def test_policy_step_real(self) -> None:
         from pathlib import Path as P

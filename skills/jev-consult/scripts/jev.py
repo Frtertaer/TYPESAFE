@@ -470,6 +470,20 @@ def emit(payload: dict[str, Any]) -> None:
     sys.stdout.write("\n")
 
 
+def write_out(path: str, payload: dict[str, Any]) -> bool:
+    """Write the payload JSON to PATH; warn + False on error."""
+    try:
+        Path(path).write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        sys.stderr.write("cannot write %s: %s\n" % (path, exc))
+        return False
+    sys.stderr.write("wrote %s\n" % path)
+    return True
+
+
 def jq_lookup(obj, path: str):
     """Dotted-path lookup; (value, True) or (None, False) when any part misses."""
     cur = obj
@@ -534,6 +548,8 @@ def cmd_ask(args: argparse.Namespace) -> int:
         "usage": result.get("usage"),
         "warnings": warnings,
     }
+    if getattr(args, "out", "") and not write_out(args.out, payload):
+        return 1
     jq_key = getattr(args, "jq", "") or ""
     if jq_key:
         value, found = jq_lookup(payload, jq_key)
@@ -579,6 +595,8 @@ def cmd_decide(args: argparse.Namespace) -> int:
     irreversible = bool(payload.get("irreversible", args.irreversible))
     decision = decide(answers, policy, irreversible=irreversible)
     payload = {"decision": decision, "warnings": policy_warnings(policy)}
+    if getattr(args, "out", "") and not write_out(args.out, payload):
+        return 1
     jq_key = getattr(args, "jq", "") or ""
     if jq_key:
         value, found = jq_lookup(payload, jq_key)
@@ -669,6 +687,8 @@ def cmd_ping(args: argparse.Namespace) -> int:
     verdict_path = getattr(args, "verdict", "") or ""
     if verdict_path and _watch is not None:
         _watch.write_verdict(verdict_path, slim)
+    if getattr(args, "out", "") and not write_out(args.out, slim):
+        return 1
     jq_key = getattr(args, "jq", "") or ""
     if jq_key:
         value, found = jq_lookup(slim, jq_key)
@@ -844,6 +864,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Print just one dotted-path field of the response (e.g. answers.approach.choice); unknown key exits 2.",
     )
+    ask.add_argument(
+        "--out",
+        metavar="PATH",
+        default="",
+        help="Also write the full response JSON to PATH.",
+    )
     ask.set_defaults(func=cmd_ask)
     decide_cmd = sub.add_parser("decide", help="Apply policy to an answers object")
     decide_cmd.add_argument(
@@ -863,6 +889,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="KEY",
         default="",
         help="Print just one dotted-path field (e.g. decision.action); unknown key exits 2.",
+    )
+    decide_cmd.add_argument(
+        "--out",
+        metavar="PATH",
+        default="",
+        help="Also write the decision payload JSON to PATH.",
     )
     decide_cmd.set_defaults(func=cmd_decide)
     lint_cmd = sub.add_parser(
@@ -899,6 +931,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="KEY",
         default="",
         help="Print just one field of the slim payload (ok|model|noul|ms); unknown key exits 2.",
+    )
+    ping.add_argument(
+        "--out",
+        metavar="PATH",
+        default="",
+        help="Also write the slim {ok, model, noul, ms} JSON to PATH.",
     )
     ping.set_defaults(func=cmd_ping)
     scaffold = sub.add_parser(

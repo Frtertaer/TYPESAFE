@@ -726,6 +726,22 @@ class JevInternalsTests(unittest.TestCase):
             rc = jev.main(["ping", "--timeout", "3"])
         self.assertEqual(calls, [3])
 
+    def test_ping_json_emits_object(self) -> None:
+        def fake_post(state, questions, policy, model=None, timeout=60, retries=1):
+            return {"model": "m9", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
+
+        buf = io.StringIO()
+        with patch.object(jev, "post_systemone", side_effect=fake_post), patch.object(
+            sys, "stdout", buf
+        ):
+            rc = jev.main(["ping", "--json"])
+        self.assertEqual(rc, 0)
+        out = json.loads(buf.getvalue())
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["model"], "m9")
+        self.assertEqual(out["noul"], 0.9)
+        self.assertIsInstance(out["ms"], int)
+
     def test_env_timeout_helper(self) -> None:
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("JEV_TIMEOUT", None)

@@ -577,6 +577,7 @@ def cmd_lint(args: argparse.Namespace) -> int:
 
 def cmd_ping(args: argparse.Namespace) -> int:
     policy = load_policy(args.policy)
+    started = time.time()
     result = post_systemone(
         state="ping from jev-consult CLI; connectivity check, not a coding decision",
         questions={
@@ -593,6 +594,19 @@ def cmd_ping(args: argparse.Namespace) -> int:
         timeout=args.timeout or env_timeout() or 60,
     )
     answer = (result.get("answers") or {}).get("ok") or {}
+    if getattr(args, "json", False):
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "ok": True,
+                    "model": result.get("model"),
+                    "noul": answer.get("noul"),
+                    "ms": int((time.time() - started) * 1000),
+                }
+            )
+            + "\n"
+        )
+        return 0
     sys.stdout.write(
         "ok model=%s noul=%s\n" % (result.get("model"), answer.get("noul"))
     )
@@ -768,6 +782,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="HTTP timeout seconds (default JEV_TIMEOUT env or 60)",
+    )
+    ping.add_argument(
+        "--json",
+        action="store_true",
+        help="Print {ok, model, noul, ms} as a JSON object",
     )
     ping.set_defaults(func=cmd_ping)
     scaffold = sub.add_parser(

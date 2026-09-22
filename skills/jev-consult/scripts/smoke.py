@@ -4,9 +4,10 @@
 
 Runs each script's offline path in a temp dir: policy loads + policy_lint,
 jev scaffold + lint (no network ask), inventory scan, compact --fake,
-decisions.py stats over a fixture log, trace.py init + state, doctor.
-Prints JSON {ok, steps:[{name, ok, detail}]}; exit 0/1. Never calls
-the Jev API. Safe for CI.
+decisions.py stats over a fixture log, trace.py init + state, doctor,
+and jev.py ask --verdict against a one-shot 127.0.0.1 stub endpoint
+(never the real Jev API; the stub key is a literal dummy). Prints JSON
+{ok, steps:[{name, ok, detail}]}; exit 0/1. Safe for CI.
 """
 from __future__ import annotations
 
@@ -24,6 +25,9 @@ if str(SCRIPTS) not in sys.path:
 
 import _watch  # noqa: E402
 from xml.sax.saxutils import escape  # noqa: E402
+
+import http.server  # noqa: E402
+import threading  # noqa: E402
 
 SKILL_DIR = SCRIPTS.parent
 
@@ -381,6 +385,84 @@ def step_jev_decide(tmp: Path) -> dict:
     return _step("jev_decide", ok, out.strip()[:120] or "rc=%d" % rc)
 
 
+def step_ask_verdict(tmp: Path) -> dict:
+    """jev.py ask against a one-shot localhost stub (never the real API)."""
+    body = json.dumps(
+        {
+            "answers": {
+                "q": {
+                    "type": "choice",
+                    "choice": "a",
+                    "confidence": 0.9,
+                    "probabilities": {"a": 0.9, "b": 0.1},
+                }
+            }
+        }
+    ).encode("utf-8")
+
+    class Stub(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Stub)
+    thread = threading.Thread(target=server.handle_request, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+    try:
+        policy = json.loads((SKILL_DIR / "policy.json").read_text(encoding="utf-8"))
+        policy["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % port
+        policy_path = tmp / "policy.json"
+        policy_path.write_text(json.dumps(policy), encoding="utf-8")
+        request = tmp / "ask.json"
+        request.write_text(
+            json.dumps(
+                {
+                    "state": "smoke test",
+                    "questions": {
+                        "q": {
+                            "type": "choice",
+                            "instructions": "pick one",
+                            "criteria": {"a": "first", "b": "second"},
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        env = dict(os.environ)  # skillscan:allow
+        env["JEV_POLICY"] = str(policy_path)
+        env["TYPESAFE_API_KEY"] = "smoke-stub-key"
+        verdict = tmp / "verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "jev.py"),
+                "ask",
+                str(request),
+                "--verdict",
+                str(verdict),
+            ],
+            env=env,
+        )
+        ok = False
+        if rc == 0 and verdict.is_file():
+            try:
+                ok = json.loads(verdict.read_text(encoding="utf-8")).get(
+                    "verdict"
+                ) == "proceed"
+            except ValueError:
+                ok = False
+        return _step("ask_verdict", ok, out.strip()[:120] or "rc=%d" % rc)
+    finally:
+        server.server_close()
+
+
 def step_peer_fill_status(tmp: Path) -> dict:
     rc, out = _run(
         [
@@ -418,6 +500,7 @@ STEPS = (
     ("compact_hook", "step_compact_hook"),
     ("jev_decide", "step_jev_decide"),
     ("peer_fill_status", "step_peer_fill_status"),
+    ("ask_verdict", "step_ask_verdict"),
 )
 
 

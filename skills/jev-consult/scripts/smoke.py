@@ -403,6 +403,13 @@ def step_hook(tmp: Path) -> dict:
     if ok:
         # no Jev key + prompt tokens => the hook records a miss marker
         ok = (cwd / ".jev-tools-miss.json").is_file()
+    if ok:
+        # repeat of the same prompt over a fresh sidecar hits the dedupe path
+        env["JEV_HOOK_DEBUG"] = "1"
+        rc, out = _run(
+            [str(SCRIPTS / "inventory_hook.py")], cwd=tmp, env=env, inp=payload
+        )
+        ok = rc == 0 and "dedupe=True" in out
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

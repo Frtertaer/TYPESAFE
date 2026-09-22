@@ -2663,6 +2663,30 @@ def step_compare(tmp: Path) -> dict:
         # a bad --jq key exits 2
         rc, out = _run([str(SCRIPTS / "compare.py"), "--json", "--jq", "nope"])
         ok = rc == 2
+    if ok:
+        # --out writes the result JSON to PATH; --report writes markdown
+        out_file = tmp / "compare-out.json"
+        report = tmp / "compare-report.md"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compare.py"),
+                "--json",
+                "--out",
+                str(out_file),
+                "--report",
+                str(report),
+            ]
+        )
+        try:
+            ok = (
+                rc == 0
+                and isinstance(
+                    json.loads(out_file.read_text(encoding="utf-8")), dict
+                )
+                and len(report.read_text(encoding="utf-8").strip()) > 0
+            )
+        except (OSError, ValueError):
+            ok = False
     return _step("compare", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

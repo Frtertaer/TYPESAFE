@@ -1073,6 +1073,34 @@ class TraceTests(unittest.TestCase):
             self.assertTrue(all(t["attempt_count"] == 2 for t in ticks))
             self.assertTrue(all(t["history"] == 1 for t in ticks))
 
+    def test_stats_watch_appends_ticks_to_out_file(self) -> None:
+        import io
+        import os as _os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps({"attempt_count": 2, "history": [{"ts": 1, "pick": "a"}]}),
+                encoding="utf-8",
+            )
+            out = Path(tmp) / "ticks.jsonl"
+            buf = io.StringIO()
+            with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = tr.main(
+                        ["--file", str(path), "stats", "--watch", "0.01",
+                         "--out", str(out)]
+                    )
+            self.assertEqual(rc, 0)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("exists" in t for t in lines))
+
     def test_state_watch_rc_1_when_state_empty(self) -> None:
         import io
         import os as _os

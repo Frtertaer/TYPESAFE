@@ -1257,7 +1257,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
                 "reduction": stats.get("reduction"),
                 "fallback": bool(stats.get("fallback")),
             }
-            _watch.emit(tick)
+            _watch.emit(tick, getattr(args, "out", "") or None)
             ticks += 1
             _time.sleep(args.watch)
         return 1 if cur.get("stats", {}).get("fallback") else 0

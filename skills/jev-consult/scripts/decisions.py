@@ -897,7 +897,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 else:
                     tick["delta_pct"] = None
-            _watch.emit(tick)
+            _watch.emit(tick, getattr(args, "out", "") or None)
             prev_keys = cur_keys
             ticks += 1
             time.sleep(args.watch)

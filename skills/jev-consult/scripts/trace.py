@@ -332,7 +332,7 @@ def cmd_history(args: argparse.Namespace) -> int:
             )
             filtered = _filtered(fresh)
             tick = {"ts": int(_time.time()), "picks": len(filtered) if filtered is not None else None}
-            _watch.emit(tick)
+            _watch.emit(tick, getattr(args, "out", "") or None)
             ticks += 1
             _time.sleep(args.watch)
         return 0
@@ -464,7 +464,7 @@ def cmd_notes(args: argparse.Namespace) -> int:
             fresh = fresh if isinstance(fresh, list) else []
             filtered = _filtered(fresh)
             tick = {"ts": int(_time.time()), "notes": len(filtered) if filtered is not None else None}
-            _watch.emit(tick)
+            _watch.emit(tick, getattr(args, "out", "") or None)
             ticks += 1
             _time.sleep(args.watch)
         return 0
@@ -520,10 +520,11 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 "history": len(cur.get("history") or []),
                 "inspected": len(cur.get("inspected") or []),
             }
-            _watch.emit(tick)
+            _watch.emit(tick, getattr(args, "out", "") or None)
             ticks += 1
             _time.sleep(args.watch)
         return 0 if tick["exists"] else 1
+    # stats/notes/history watch loops emit ticks through _watch.emit below
     data = load(path)
     out: dict[str, Any] = {
         "exists": path.is_file(),
@@ -564,20 +565,16 @@ def cmd_state(args: argparse.Namespace) -> int:
         while max_ticks <= 0 or ticks < max_ticks:
             data = load(path)
             state = {key: value for key, value in data.items() if _present(value)}
-            sys.stdout.write(
-                json.dumps(
-                    {
-                        "ts": int(_time.time()),
-                        "state": state,
-                        "attempt_count": int(data.get("attempt_count") or 0),
-                        "history": len(data.get("history") or []),
-                        "inspected": len(data.get("inspected") or []),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
+            _watch.emit(
+                {
+                    "ts": int(_time.time()),
+                    "state": state,
+                    "attempt_count": int(data.get("attempt_count") or 0),
+                    "history": len(data.get("history") or []),
+                    "inspected": len(data.get("inspected") or []),
+                },
+                getattr(args, "out", "") or None,
             )
-            sys.stdout.flush()
             ticks += 1
             _time.sleep(args.watch)
         return 0 if any(k != "attempt_count" for k in state) else 1
@@ -684,6 +681,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--grep", default="", help="Only picks whose pick/kind contains SUBSTR (case-insensitive; default JEV_TRACE_HISTORY_GREP)")
     hist_cmd.add_argument("--before", default=None, help="Only picks with ts <= epoch seconds or ISO8601")
     hist_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,picks} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
+    hist_cmd.add_argument("--out", default="", help="With --watch: append each tick line to PATH (fail-open)")
     hist_cmd.set_defaults(func=cmd_history)
     return parser
 

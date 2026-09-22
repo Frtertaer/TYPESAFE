@@ -1961,6 +1961,37 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(len(ticks), 2)
             self.assertTrue(all(t["count"] == 2 for t in ticks))
 
+    def test_watch_appends_ticks_to_out_file(self):
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1}])
+            out = Path(tmp) / "ticks.jsonl"
+            env = dict(_os.environ, JEV_DECISIONS_WATCH_MAX="2")
+            import subprocess as _sp
+
+            proc = _sp.run(
+                [
+                    sys.executable,
+                    str(ROOT / "skills/jev-consult/scripts/decisions.py"),
+                    "--file", str(path), "--watch", "0.01",
+                    "--out", str(out),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all(t["count"] == 1 for t in lines))
+
     def test_watch_ticks_report_added_removed(self):
         import os as _os
         from unittest.mock import patch

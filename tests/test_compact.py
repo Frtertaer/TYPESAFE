@@ -1185,6 +1185,27 @@ class CompactCliTests(unittest.TestCase):
                     )
         self.assertEqual(rc, 1)
 
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            out = Path(tmp) / "ticks.jsonl"
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0",
+                         "--watch", "0.01", "--out", str(out)]
+                    )
+            self.assertEqual(rc, 0)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("reduction" in t for t in lines))
+
     def test_check_exits_1_below_gate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

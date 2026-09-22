@@ -2591,6 +2591,41 @@ def step_trigger_lint(tmp: Path) -> dict:
             ) == "pass"
         except (OSError, ValueError):
             ok = False
+    if ok:
+        # --quiet keeps passing ticks off stdout (stderr still logs them)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trigger_lint.py"),
+                str(cases),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--quiet",
+            ]
+        )
+        stdout_ticks = [ln for ln in out.splitlines() if '"findings"' in ln]
+        ok = rc == 0 and not stdout_ticks and "watch tick=2" in out
+    if ok:
+        # --fail-fast stops the watch on the first erroring tick
+        bad_cases = tmp / "cases-bad.json"
+        bad_cases.write_text(
+            json.dumps({"skill": "x", "cases": [{"id": "c1"}]}),
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trigger_lint.py"),
+                str(bad_cases),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "5",
+                "--fail-fast",
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"findings"' in ln]
+        ok = len(ticks) == 1 and "watch tick=2" not in out
     return _step("trigger_lint", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

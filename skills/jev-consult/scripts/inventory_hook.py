@@ -609,7 +609,13 @@ def main(argv: list[str] | None = None) -> int:
                 except ValueError:
                     watch_max_arg = 0.0
         dead = _watch.deadline("JEV_HOOK_WATCH_SECS", watch_max_arg)
+        verdict_path = ""
+        if "--verdict" in argv:
+            idx = argv.index("--verdict")
+            if idx + 1 < len(argv):
+                verdict_path = argv[idx + 1]
         ticks = 0
+        tick: dict = {}
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             tick: dict = {"ts": int(time.time())}
             try:
@@ -628,6 +634,16 @@ def main(argv: list[str] | None = None) -> int:
             _watch.emit(tick, watch_out, quiet=quiet, bad=not tick["winner"])
             ticks += 1
             time.sleep(watch_seconds)
+        if verdict_path and not _watch.write_verdict(
+            verdict_path,
+            {
+                "verdict": "pass" if tick.get("winner") else "fail",
+                "ticks": ticks,
+                "winner": tick.get("winner"),
+                "keys": tick.get("keys", []),
+            },
+        ):
+            return 1
         return 0 if tick["winner"] else 1
     if not raw:
         raw = sys.stdin.read()

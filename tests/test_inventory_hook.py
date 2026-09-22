@@ -381,6 +381,45 @@ class InventoryHookTests(unittest.TestCase):
             ]
             self.assertEqual(ticks[0]["winner"], "ascii-art")
 
+    def test_watch_verdict_writes_final_state(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {
+                        "event": "UserPromptSubmit",
+                        "prompt": "jwt",
+                        "cwd": str(cwd),
+                        "harness": "claude-code",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            verdict = cwd / "v.json"
+            env = {
+                "JEV_HOOK_WATCH_MAX": "1",
+                "JEV_HOOK_WINNER": "ascii-art",
+                "JEV_HOOK_NOSIDECAR": "1",
+                "JEV_HOOK_NOMISS": "1",
+            }
+            with patch.dict(os.environ, env):
+                with patch.object(HOOK, "scan_cached", return_value=items):
+                    with patch("sys.stdout", io.StringIO()):
+                        rc = HOOK.main(
+                            [
+                                "--file", str(payload), "--watch", "0.01",
+                                "--verdict", str(verdict),
+                            ]
+                        )
+            self.assertEqual(rc, 0)
+            out = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(out["verdict"], "pass")
+            self.assertEqual(out["ticks"], 1)
+            self.assertEqual(out["winner"], "ascii-art")
+            self.assertIsInstance(out["keys"], list)
+
     def test_watch_appends_ticks_to_out_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)

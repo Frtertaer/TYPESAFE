@@ -578,6 +578,8 @@ def cmd_stats(args: argparse.Namespace) -> int:
             ticks += 1
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
+            if getattr(args, "fail_fast", False) and not tick["exists"]:
+                break
             _time.sleep(args.watch)
         if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
             return 1
@@ -662,6 +664,10 @@ def cmd_state(args: argparse.Namespace) -> int:
             ticks += 1
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
+            if getattr(args, "fail_fast", False) and not any(
+                k != "attempt_count" for k in state
+            ):
+                break
             _time.sleep(args.watch)
         if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
             return 1
@@ -744,6 +750,7 @@ def build_parser() -> argparse.ArgumentParser:
     state_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
     state_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     state_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    state_cmd.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick whose state is empty")
     state_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: ok|empty, ticks, attempt_count, state} JSON to PATH, refreshed every tick")
     state_cmd.set_defaults(func=cmd_state)
     stats_cmd = sub.add_parser("stats", help="Summary: counts, last pick, file age")
@@ -752,6 +759,7 @@ def build_parser() -> argparse.ArgumentParser:
     stats_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
     stats_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     stats_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    stats_cmd.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick where the trace file is missing")
     stats_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: exists|missing, ticks, attempt_count, history, inspected} JSON to PATH, refreshed every tick")
     stats_cmd.set_defaults(func=cmd_stats)
     notes_cmd = sub.add_parser("notes", help="List recorded notes (iso + text)")

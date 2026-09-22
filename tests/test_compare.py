@@ -282,6 +282,32 @@ class CliTest(unittest.TestCase):
             # stdout still prints the table
             self.assertIn("before_jev", proc.stdout)
 
+    def test_cli_report_writes_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            report = Path(tmp) / "report.md"
+            proc = self.run_cli("--cases", str(path), "--report", str(report))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = report.read_text(encoding="utf-8")
+            self.assertIn("verdict: **PASS**", text)
+            self.assertIn("- cases: 2", text)
+            self.assertIn("| case | defect |", text)
+
+    def test_cli_report_json_writes_object(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            report = Path(tmp) / "report.json"
+            proc = self.run_cli(
+                "--cases", str(path), "--json", "--report", str(report)
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "PASS")
+            self.assertEqual(payload["cases"], 2)
+            self.assertEqual(payload["rows"][0]["id"], "drift_case")
+
     def test_cli_bad_cases_exits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cases.json"

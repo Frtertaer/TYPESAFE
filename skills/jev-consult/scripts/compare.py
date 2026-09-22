@@ -237,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--md", action="store_true", help="Print rows as a Markdown table")
     parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH")
+    parser.add_argument("--report", metavar="PATH", default="", help="Write a markdown compare report (verdict + per-case table) to PATH; with --json writes the report object instead")
     parser.add_argument("--cases", default=os.environ.get("JEV_COMPARE_CASES", "") or None, help="Path to compare-cases.json")
     parser.add_argument(
         "--only",
@@ -299,6 +300,34 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
             return 1
         sys.stderr.write("wrote %s\n" % out_path)
+    if args.report:
+        failures = strict_failures(result["rows"], args.live)
+        if args.as_json:
+            report_obj = {
+                "verdict": "PASS" if not failures else "FAIL",
+                "goal": result.get("goal"),
+                "live": args.live,
+                "cases": len(result["rows"]),
+                "failures": failures,
+                "rows": result["rows"],
+            }
+            text = json.dumps(report_obj, indent=2, ensure_ascii=False) + "\n"
+        else:
+            text = (
+                "# compare report\n\n"
+                + "verdict: **%s**\n\n" % ("PASS" if not failures else "FAIL")
+                + "- cases: %d\n" % len(result["rows"])
+                + "- failures: %d\n\n" % len(failures)
+                + "".join("- %s\n" % f for f in failures)
+                + "\n"
+                + format_md(result["rows"], live=args.live)
+            )
+        try:
+            Path(args.report).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % args.report)
     if args.as_json:
         json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
         sys.stdout.write("\n")

@@ -106,6 +106,7 @@ RULES = {
     "P011": "unknown top-level key or non-https endpoint; typo guard (auto-fixed by --fix)",
     "P012": "a must_ask kind has no template to send",
     "P013": "template not listed in must_ask; the trigger layer never auto-asks it",
+    "P014": "require_hatch is off and a closed choice list (2+ options) has no none/other escape hatch",
 }
 
 
@@ -345,6 +346,14 @@ def lint_policy(policy) -> list[dict]:
                             path + ".criteria",
                             "require_hatch is on but no hatch option (%s)" % "/".join(sorted(hatch_ids)),
                             "a closed option list must let Jev say 'none of these'",
+                        )
+                    elif not require_hatch and len(criteria) >= 2 and not (hatch_ids & set(criteria)):
+                        add(
+                            "P014",
+                            "warn",
+                            path + ".criteria",
+                            "require_hatch is off and this closed list has no hatch option",
+                            "if the opt-out is deliberate, fine; otherwise add 'none'/'other'",
                         )
             elif qtype in ("noul", "score") and isinstance(criteria, dict) and criteria:
                 add(

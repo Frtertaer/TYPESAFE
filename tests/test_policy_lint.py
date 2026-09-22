@@ -187,6 +187,22 @@ class PolicyLintTests(unittest.TestCase):
         self.assertIn("P009", rule_ids(findings))
         self.assertTrue(errors(findings))
 
+    def test_closed_list_without_hatch_warns_when_require_hatch_off(self) -> None:
+        policy = base_policy()
+        policy["require_hatch"] = False
+        policy["templates"]["keep_vs_change"]["criteria"] = {
+            "keep": "leave it",
+            "change": "edit it",
+        }
+        findings = policy_lint.lint_policy(policy)
+        self.assertIn("P014", rule_ids(findings))
+        self.assertFalse(errors(findings))
+
+    def test_closed_list_without_hatch_clean_when_require_hatch_off_and_hatch_present(self) -> None:
+        policy = base_policy()
+        policy["require_hatch"] = False
+        self.assertNotIn("P014", rule_ids(policy_lint.lint_policy(policy)))
+
     def test_noul_with_criteria_warns(self) -> None:
         policy = base_policy()
         policy["templates"]["delete"]["criteria"] = {"yes": "delete", "no": "keep"}

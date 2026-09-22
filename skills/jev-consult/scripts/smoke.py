@@ -1919,6 +1919,80 @@ def step_trace(tmp: Path) -> dict:
             except (OSError, ValueError):
                 ok = False
         if ok:
+            # history filters: --limit tails, --reverse flips, --grep
+            # matches the pick name, --field digs one field
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "history",
+                    "--limit",
+                    "1",
+                ]
+            )
+            ok = rc == 0 and "smoke-pick-2" in out
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "history",
+                    "--grep",
+                    "pick-2",
+                ]
+            )
+            ok = (
+                rc == 0
+                and "smoke-pick-2" in out
+                and "smoke-pick\n" not in out
+            )
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "history",
+                    "--before",
+                    "1",
+                ]
+            )
+            ok = rc == 0 and "smoke-pick" not in out
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "history",
+                    "--field",
+                    "pick",
+                ]
+            )
+            ok = rc == 0 and "smoke-pick" in out
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "history",
+                    "--reverse",
+                    "--json",
+                ]
+            )
+            try:
+                picks = [p.get("pick", "") for p in json.loads(out)]
+                ok = (
+                    rc == 0
+                    and picks
+                    and picks[0] == "smoke-pick-2"
+                )
+            except (ValueError, AttributeError, IndexError):
+                ok = False
+        if ok:
             # stats --watch emits {exists,attempt_count} ticks + verdict probe
             verdict = tmp / "trace-stats-verdict.json"
             rc, out = _run(

@@ -820,6 +820,27 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertFalse(tick["coverage_ok"])
         self.assertAlmostEqual(tick["min_coverage"], 0.99)
 
+    def test_watch_tick_names_failed_gates(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
+            with redirect_stdout(buf):
+                rc = te.main(
+                    ["--watch", "0.01", "--quiet", "--min-coverage", "0.99"]
+                )
+        self.assertEqual(rc, 1)
+        tick = json.loads(
+            next(l for l in buf.getvalue().splitlines() if l.startswith("{"))
+        )
+        self.assertEqual(tick["failed_gates"], ["coverage"])
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
+            with redirect_stdout(buf):
+                te.main(["--watch", "0.01", "--quiet"])
+        tick = json.loads(
+            next(l for l in buf.getvalue().splitlines() if l.startswith("{"))
+        )
+        self.assertEqual(tick["failed_gates"], [])
+
     def test_watch_appends_ticks_to_out_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "ticks.jsonl"

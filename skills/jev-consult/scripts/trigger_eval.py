@@ -402,6 +402,33 @@ def main(argv: list[str] | None = None) -> int:
         ticks = 0
         cur = result
         while max_ticks <= 0 or ticks < max_ticks:
+            coverage_ok = (
+                args.min_coverage is None
+                or cur["coverage"] >= args.min_coverage
+            )
+            covers_below: list[str] = []
+            if args.min_covers:
+                counts: dict[str, int] = {}
+                for row in cur["cases"]:
+                    for tag in row["covers"] or []:
+                        counts[tag] = counts.get(tag, 0) + 1
+                covers_below = [
+                    tag for tag, n in counts.items() if n < args.min_covers
+                ]
+            strict_bad = args.strict and any(
+                not row["ok"]
+                or (not row["should_trigger"] and (row["score"] or 0) > 0)
+                for row in cur["cases"]
+            )
+            failed = []
+            if not cur["ok"]:
+                failed.append("margin")
+            if not coverage_ok:
+                failed.append("coverage")
+            if covers_below:
+                failed.append("covers")
+            if strict_bad:
+                failed.append("strict")
             tick = {
                 "ts": int(_time.time()),
                 "ok": cur["ok"],
@@ -409,10 +436,8 @@ def main(argv: list[str] | None = None) -> int:
                 "best_negative": cur["best_negative"],
                 "coverage": cur["coverage"],
                 "min_coverage": args.min_coverage,
-                "coverage_ok": (
-                    args.min_coverage is None
-                    or cur["coverage"] >= args.min_coverage
-                ),
+                "coverage_ok": coverage_ok,
+                "failed_gates": failed,
             }
             line = json.dumps(tick) + "\n"
             sys.stdout.write(line)

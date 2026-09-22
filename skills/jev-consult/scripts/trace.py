@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -17,6 +19,49 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import _watch  # noqa: E402
+
+
+def load_jev():
+    path = _SCRIPTS / "jev.py"
+    spec = importlib.util.spec_from_file_location("jev_consult_jev", path)
+    if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["jev_consult_jev"] = mod
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:
+        return None
+    return mod
+
+
+def run_jev(ask_path: Path) -> dict | None:
+    """Run `jev.py ask` on the request file; None on any failure."""
+    script = _SCRIPTS / "jev.py"
+    timeout = 90.0
+    env_timeout = os.environ.get("JEV_FILL_TIMEOUT", "").strip()
+    try:
+        if env_timeout:
+            timeout = max(1.0, float(env_timeout))
+    except ValueError:
+        pass
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(script), "ask", str(ask_path)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
 
 EMPTY: dict[str, Any] = {
     "plan": "",
@@ -286,6 +331,92 @@ def cmd_record(args: argparse.Namespace) -> int:
         data["notes"] = notes[-50:]
     save(data, path)
     emit({"path": str(path), "trace": data})
+    return 0
+
+
+def cmd_suggest(args: argparse.Namespace) -> int:
+    """Ask Jev for the next move using a policy template + the trace state,
+    then record the pick into the trace history."""
+    path = Path(args.file) if args.file else default_path()
+    trace = load(path)
+    question_name = args.template or "next_move"
+    jev = load_jev()
+    question: dict[str, Any] = {}
+    if jev is not None:
+        try:
+            policy = jev.load_policy()
+        except SystemExit:
+            policy = {}
+        template = (policy.get("templates") or {}).get(question_name) or {}
+        if isinstance(template, dict):
+            question = dict(template)
+    if not isinstance(question.get("criteria"), dict) or not question["criteria"]:
+        sys.stderr.write(
+            "template %r has no criteria in policy.json\n" % question_name
+        )
+        return 2
+    question.setdefault("type", "choice")
+    question.setdefault("instructions", "Which move next?")
+    state = {
+        "plan": trace.get("plan"),
+        "current_step": trace.get("current_step"),
+        "attempt_count": trace.get("attempt_count"),
+        "last_error": trace.get("last_error"),
+        "last_pick": trace.get("last_pick"),
+        "inspected": trace.get("inspected") or [],
+    }
+    if args.task:
+        state["task"] = args.task
+    request = {"state": state, "questions": {question_name: question}}
+    if args.out:
+        try:
+            _atomic_write(
+                Path(args.out),
+                json.dumps(request, indent=2, ensure_ascii=False) + "\n",
+            )
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+            return 1
+    if args.dry_run:
+        emit(request)
+        return 0
+    pick = args.pick
+    confidence = None
+    if not pick:
+        ask_path = (
+            Path(args.ask_file)
+            if args.ask_file
+            else path.with_name("jev-suggest.ask.json")
+        )
+        _atomic_write(
+            ask_path, json.dumps(request, indent=2, ensure_ascii=False) + "\n"
+        )
+        resp = run_jev(ask_path)
+        if resp is None:
+            sys.stderr.write("jev ask failed; request saved to %s\n" % ask_path)
+            return 1
+        answers = resp.get("answers") if isinstance(resp, dict) else {}
+        answer = answers.get(question_name) if isinstance(answers, dict) else {}
+        if isinstance(answer, dict):
+            pick = str(answer.get("choice") or "")
+            confidence = answer.get("confidence")
+    if not pick:
+        sys.stderr.write("no pick\n")
+        return 1
+    data = record(trace, pick=pick, kind=args.kind or "suggest")
+    save(data, path)
+    payload: dict[str, Any] = {
+        "path": str(path),
+        "question": question_name,
+        "pick": pick,
+        "trace": data,
+    }
+    if confidence is not None:
+        payload["confidence"] = confidence
+    rc = emit_jq(payload, args.jq)
+    if rc is not None:
+        return rc
+    emit(payload)
     return 0
 
 
@@ -947,6 +1078,19 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: picks|empty, ticks, picks} JSON to PATH, refreshed every tick")
     hist_cmd.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick with zero picks")
     hist_cmd.set_defaults(func=cmd_history)
+    sug = sub.add_parser(
+        "suggest",
+        help="Ask Jev for the next move (policy template + trace state) and record the pick",
+    )
+    sug.add_argument("--template", default="next_move", help="policy.json templates key (default next_move)")
+    sug.add_argument("--task", default="", help="Task text folded into the ask state")
+    sug.add_argument("--ask-file", default="", help="Write the ask request JSON to PATH (default <trace>.jev-suggest.ask.json)")
+    sug.add_argument("--out", default="", help="Also write the ask request JSON to PATH")
+    sug.add_argument("--dry-run", action="store_true", help="Print the ask request without calling Jev or recording")
+    sug.add_argument("--pick", default="", help="Skip Jev; record this choice directly")
+    sug.add_argument("--kind", default="suggest", help="Kind tag for the history entry (default suggest)")
+    sug.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the result payload (rc 2 on unknown key)")
+    sug.set_defaults(func=cmd_suggest)
     export_cmd = sub.add_parser(
         "export", help="Dump the whole trace bundle as JSON"
     )

@@ -119,15 +119,19 @@ def _stub_handler(noul: float = 0.99, drop_results: bool = False):
             answers: dict = {}
             for qid, q in (request.get("questions") or {}).items():
                 if q.get("type") == "choice":
+                    criteria = list(q.get("criteria") or [])
                     pick = next(
-                        (k for k in (q.get("criteria") or {}) if k != "none"),
-                        "none",
+                        (k for k in criteria if k != "none"), "none"
                     )
+                    rest = 0.1 / max(1, len(criteria) - 1)
                     answers[qid] = {
                         "type": "choice",
                         "choice": pick,
                         "confidence": 0.9,
-                        "probabilities": {pick: 0.9, "none": 0.1},
+                        "probabilities": {
+                            k: (0.9 if k == pick else rest)
+                            for k in criteria
+                        },
                     }
                 else:
                     drop = drop_results and str(qid).startswith("result_")
@@ -3254,6 +3258,91 @@ def step_trace(tmp: Path) -> dict:
                 )
             except (ValueError, AttributeError, TypeError):
                 ok = False
+        if ok:
+            # suggest --dry-run emits the ask request without Jev/record
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "suggest",
+                    "--dry-run",
+                ]
+            )
+            try:
+                req = json.loads(out)
+                criteria = (
+                    req.get("questions", {})
+                    .get("next_move", {})
+                    .get("criteria", {})
+                )
+                ok = rc == 0 and "return_to_plan" in criteria
+            except (ValueError, AttributeError, TypeError):
+                ok = False
+        if ok:
+            # --pick records the choice into history without calling Jev
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "suggest",
+                    "--pick",
+                    "ask_human",
+                    "--kind",
+                    "smoke-suggest",
+                    "--jq",
+                    "pick",
+                ]
+            )
+            ok = rc == 0 and '"ask_human"' in out
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "history",
+                    "--json",
+                ]
+            )
+            try:
+                ok = rc == 0 and any(
+                    h.get("kind") == "smoke-suggest"
+                    and h.get("pick") == "ask_human"
+                    for h in json.loads(out)
+                )
+            except (ValueError, AttributeError, TypeError):
+                ok = False
+        if ok:
+            # full loop: stub Jev picks the first non-'none' criterion
+            sug_env = dict(os.environ)  # skillscan:allow
+            sug_env["TYPESAFE_API_KEY"] = "smoke-stub-key"
+            sug_env["JEV_CONSULT_LOG"] = "0"
+            sug_server = http.server.HTTPServer(
+                ("127.0.0.1", 0), _stub_handler()
+            )
+            _stub_policy(tmp, "trace-suggest", sug_server.server_port, sug_env)
+            try:
+                threading.Thread(
+                    target=sug_server.handle_request, daemon=True
+                ).start()
+                rc, out = _run(
+                    [
+                        str(SCRIPTS / "trace.py"),
+                        "--file",
+                        str(trace_file),
+                        "suggest",
+                        "--ask-file",
+                        str(tmp / "suggest-ask.json"),
+                        "--jq",
+                        "pick",
+                    ],
+                    env=sug_env,
+                )
+                ok = rc == 0 and '"return_to_plan"' in out
+            finally:
+                sug_server.server_close()
     return _step("trace", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

@@ -1733,6 +1733,97 @@ class AtomicWriteTests(unittest.TestCase):
             self.assertFalse(path.exists())
             self.assertFalse((Path(tmp) / "trace.json.tmp").exists())
 
+    def test_suggest_dry_run_uses_next_move_template(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.save({"plan": "p", "current_step": "s2"}, path)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "suggest", "--dry-run"]
+                )
+            self.assertEqual(rc, 0)
+            req = json.loads(buf.getvalue())
+            q = req["questions"]["next_move"]
+            self.assertIn("return_to_plan", q["criteria"])
+            self.assertEqual(req["state"]["plan"], "p")
+            # dry-run records nothing
+            self.assertFalse(tr.load(path)["history"])
+
+    def test_suggest_pick_records_history(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.save({"plan": "p"}, path)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    [
+                        "--file",
+                        str(path),
+                        "suggest",
+                        "--pick",
+                        "ask_human",
+                        "--kind",
+                        "suggest",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            data = tr.load(path)
+            self.assertEqual(data["last_pick"], "ask_human")
+            self.assertEqual(data["history"][-1]["pick"], "ask_human")
+            self.assertEqual(data["history"][-1]["kind"], "suggest")
+
+    def test_suggest_unknown_template_rc2(self) -> None:
+        import io
+        from contextlib import redirect_stderr
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.save({"plan": "p"}, path)
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                rc = tr.main(
+                    [
+                        "--file",
+                        str(path),
+                        "suggest",
+                        "--template",
+                        "no_such_template",
+                    ]
+                )
+            self.assertEqual(rc, 2)
+            self.assertIn("no criteria", buf.getvalue())
+
+    def test_suggest_out_writes_request(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            out_path = Path(tmp) / "req.json"
+            tr.save({"plan": "p"}, path)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    [
+                        "--file",
+                        str(path),
+                        "suggest",
+                        "--dry-run",
+                        "--out",
+                        str(out_path),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            req = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertIn("next_move", req["questions"])
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

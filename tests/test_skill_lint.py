@@ -402,6 +402,32 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 0)
 
+    def test_watch_appends_ticks_to_out_file(self):
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            good = write_skill(tmp, "ok", GOOD.format(name="ok"))
+            out = Path(tmp) / "ticks.jsonl"
+            env = dict(_os.environ, JEV_SLINT_WATCH_MAX="2")
+            proc = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), str(good),
+                    "--watch", "0.01", "--out", str(out),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("findings" in t for t in lines))
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

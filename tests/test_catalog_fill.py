@@ -345,6 +345,39 @@ class CatalogFillTests(unittest.TestCase):
             self.assertTrue(all(t["hits"] == 1 and t["cached"] for t in ticks))
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
 
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            out = base / "ticks.jsonl"
+            with patch.object(FILL, "search_hits", return_value=[]), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--cwd",
+                    str(base),
+                    "--watch",
+                    "0.01",
+                    "--out",
+                    str(out),
+                ],
+            ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "2"}), patch(
+                "sys.stdout", io.StringIO()
+            ):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("hits" in t and "cached" in t for t in lines))
+
     def test_json_no_task_emits_object(self) -> None:
         import io
 

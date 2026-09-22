@@ -230,8 +230,15 @@ def main(argv: list[str] | None = None) -> int:
                 "warnings": sum(1 for r in rows if r["severity"] == "warn"),
                 "infos": sum(1 for r in rows if r["severity"] == "info"),
             }
-            sys.stdout.write(_json.dumps(tick) + "\n")
+            line = _json.dumps(tick) + "\n"
+            sys.stdout.write(line)
             sys.stdout.flush()
+            if out_path:
+                try:
+                    with Path(out_path).open("a", encoding="utf-8") as fh:
+                        fh.write(line)
+                except OSError:
+                    pass
             ticks += 1
             _time.sleep(watch_seconds)
         return 1 if (tick["errors"] or (strict and tick["findings"])) else 0

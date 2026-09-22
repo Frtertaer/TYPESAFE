@@ -273,8 +273,15 @@ def main(argv: list[str] | None = None) -> int:
                 "cases": len(cur["rows"]),
                 "failures": len(strict_failures(cur["rows"], args.live)),
             }
-            sys.stdout.write(json.dumps(tick) + "\n")
+            line = json.dumps(tick) + "\n"
+            sys.stdout.write(line)
             sys.stdout.flush()
+            if args.out:
+                try:
+                    with Path(args.out).open("a", encoding="utf-8") as fh:
+                        fh.write(line)
+                except OSError:
+                    pass
             ticks += 1
             _time.sleep(args.watch)
         return 0 if tick["failures"] == 0 else 1

@@ -507,6 +507,27 @@ class WatchFlagTests(unittest.TestCase):
                     rc = policy_lint.main(["--watch", "0.01"])
             self.assertEqual(rc, 0)
 
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        import os
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "ticks.jsonl"
+            with mock.patch.dict(os.environ, {"JEV_PLINT_WATCH_MAX": "2"}):
+                with redirect_stdout(io.StringIO()):
+                    rc = policy_lint.main(
+                        ["--watch", "0.01", "--out", str(out)]
+                    )
+            self.assertEqual(rc, 0)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("findings" in t and "errors" in t for t in lines))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -248,6 +248,28 @@ class SmokeTests(unittest.TestCase):
                     rc = MOD.main(["--watch", "0.001", "--only", "policy"])
         self.assertEqual(rc, 0)
 
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        def ok_step(tmp):
+            return {"name": "policy", "ok": True, "detail": "fake"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "ticks.jsonl"
+            with patch.dict(os.environ, {"JEV_SMOKE_WATCH_MAX": "2"}):
+                with patch.object(MOD, "step_policy", side_effect=ok_step):
+                    with patch.object(sys, "stdout", __import__("io").StringIO()):
+                        rc = MOD.main(
+                            ["--watch", "0.001", "--only", "policy",
+                             "--out", str(out)]
+                        )
+            self.assertEqual(rc, 0)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all(t["ok"] is True for t in lines))
+
     def test_policy_step_real(self) -> None:
         from pathlib import Path as P
         import tempfile

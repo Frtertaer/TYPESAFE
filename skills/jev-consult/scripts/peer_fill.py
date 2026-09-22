@@ -318,6 +318,12 @@ def main() -> int:
         default=0.0,
         help="Re-print the fill state as a {ts,miss,ask} JSON tick every S seconds (JEV_PEER_WATCH_MAX caps ticks).",
     )
+    parser.add_argument(
+        "--out",
+        default="",
+        metavar="PATH",
+        help="With --watch, append each tick line to PATH (fail-open).",
+    )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     task = args.task
@@ -366,8 +372,15 @@ def main() -> int:
                 }
             except Exception:
                 tick = {"ts": int(time.time()), "miss": None, "ask": None}
-            sys.stdout.write(json.dumps(tick) + "\n")
+            line = json.dumps(tick) + "\n"
+            sys.stdout.write(line)
             sys.stdout.flush()
+            if args.out:
+                try:
+                    with Path(args.out).open("a", encoding="utf-8") as fh:
+                        fh.write(line)
+                except OSError:
+                    pass
             ticks += 1
             time.sleep(args.watch)
         return 0

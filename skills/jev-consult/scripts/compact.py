@@ -1366,6 +1366,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
                         "check": "ok" if ok else "FAIL",
                         "reduction": ratio,
                         "min_reduction": args.min_reduction,
+                        "rc": 0 if ok else 1,
                     }
                 )
                 + "\n"

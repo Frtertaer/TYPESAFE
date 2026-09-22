@@ -138,6 +138,7 @@ class HookE2ETests(unittest.TestCase):
         if home:
             env["USERPROFILE"] = home
             env["HOME"] = home
+            env["HERMES_HOME"] = str(Path(home) / ".hermes")
         if spill:
             env["JEV_CONSULT_SPILL"] = spill
         proc = subprocess.run(

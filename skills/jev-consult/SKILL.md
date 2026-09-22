@@ -165,3 +165,27 @@ Trigger evals: `trigger-cases.json` in the repo's test fixtures lists prompts th
 python scripts/install.py
 python skills/jev-consult/scripts/doctor.py  # verify hooks/skill/key/policy per harness; exit 0 = all ok; failing checks carry a `hint`; `--quiet` reports only failures
 ```
+
+## Opt-in contribution review
+
+`progress.py` is a stateful CLI, not a daemon or a mechanism that remotely controls a Devin session. Enable it only for an explicitly agreed stage. The caller must read its `action` and honor review, repair and budget-exhaustion states. Routing hooks remain unchanged and fail-open.
+
+Review and commit a stage plan before `init`: goal, fixed work-item IDs, literal repository-relative paths for each item, trusted verification commands, required checks, operating system and any preauthorized next directions. Commands in a plan execute locally without a shell; never initialize an untrusted plan. `{python}` selects the current Python interpreter. The example plan requires Windows and must be adapted to the actual agreed outcomes.
+
+The initial rubric is zero/small/material/major = 0/1/2/3, with a review checkpoint of 12 credits. These are starting heuristics, not measured accuracy or percentages of completion. Settings and prompts come only from `policy.json` and are frozen in each stage. A custom scale requires matching rubric categories and point mappings before initializing a new stage.
+
+Assess a clean committed tree after completing an agreed item. Commands run against that tree; the captured baseline, scoped diff, check exit codes and output hashes ground the Jev request. Passing a command alone does not prove the goal was met. Raw diffs and command output are not retained in the ledger. Unknown, uncertain, unavailable or oversized evidence is unscored, not zero. No silent truncation is used.
+
+One item earns positive credit once. Repeated item/tree requests are cached even if the commit ID or summary changes; an identical previously credited patch earns no new credit under another item. `--retry-unavailable` retries only an unavailable request, never a low grade or uncertain answer. Assessment of a credited item on a changed tree and stage review detect a full return of its scoped source to the baseline and revoke that credit. Explicitly invalidate other disproven or partially regressed outcomes; this is not a background regression detector. A reviewed, freshly verified restoration restores only the original credit and requires a current scoped change relative to the baseline.
+
+A checkpoint triggers review, not completion. Review reruns checks and asks Jev to continue, finish or choose a direction authorized in the frozen plan. `--approve-finish` is an explicit caller acknowledgement, not authenticated human identity or proof of independent review. Use it only after actual acceptance review; passing checks and an unblocked Jev decision are still required. Finishing below the checkpoint is allowed. A pivot closes the stage without claiming completion. Continue reviews never reset the assessment or request-attempt budgets.
+
+The SQLite ledger is local, under `.devin/progress.sqlite3` by default. Keep it out of Git, protect its directory with appropriate OS permissions and retain it separately if a cloud VM will be discarded. History and hashes support audit and reproducibility; they are not tamper-proof attestations against an actor with filesystem access. Request-attempt limits are workflow safeguards, not a cloud billing quota or a guarantee about a process killed during a request. No hooks, repository settings, deployments or cloud-session controls are changed automatically.
+
+```text
+python skills/jev-consult/scripts/progress.py init skills/jev-consult/examples/progress-plan.json
+python skills/jev-consult/scripts/progress.py assess reliability client --summary "Describe the verified agreed change"
+python skills/jev-consult/scripts/progress.py status reliability
+python skills/jev-consult/scripts/progress.py review reliability --reason "Acceptance evidence reviewed" --reviewer "review-reference"
+python skills/jev-consult/scripts/progress.py history reliability
+```

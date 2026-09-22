@@ -72,6 +72,7 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "hook_budget_seconds",
     "hook_jev_retries",
     "hook_jev_timeout_seconds",
+    "progress",
     "stop_words",
 )
 
@@ -339,6 +340,11 @@ def lint_policy(policy) -> list[dict]:
                     "template not listed in must_ask",
                     "internal templates are fine; this is a reminder the trigger layer never auto-asks it",
                 )
+
+    if "progress" in policy:
+        from progress_core import lint_progress
+
+        findings.extend(lint_progress(policy))
 
     return findings
 

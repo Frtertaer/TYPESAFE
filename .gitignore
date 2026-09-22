@@ -19,3 +19,4 @@ Thumbs.db
 .jev-*.out
 .jev-*.err
 .tmp-jev*
+.devin/progress.sqlite3*

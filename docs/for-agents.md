@@ -28,6 +28,12 @@ python skills/jev-consult/scripts/decisions.py                          # stats 
                                                                         # filters, --tail/--json/--csv/--md, count lists
                                                                         # --statuses/--harnesses/--winners/--outcomes/--fills/--fields,
                                                                         # --jsonl raw entries; --prune keeps only filtered
+python skills/jev-consult/scripts/progress.py init skills/jev-consult/examples/progress-plan.json
+python skills/jev-consult/scripts/progress.py assess reliability client --summary "Describe the verified agreed change"
+python skills/jev-consult/scripts/progress.py status reliability
+python skills/jev-consult/scripts/progress.py review reliability --reason "Acceptance evidence reviewed" --reviewer "review-reference"
+python skills/jev-consult/scripts/progress.py history reliability
+python skills/jev-consult/scripts/progress.py evidence reliability 1     # rebuild the recorded Jev input for event 1
 python skills/jev-consult/scripts/compare.py --live
 python skills/jev-consult/scripts/compact.py transcript.json --history --fake   # --dir DIR for batch, --prune-spill S, --list-spill
 python skills/jev-consult/scripts/trace.py show --key plan                      # single field from .jev-trace.json

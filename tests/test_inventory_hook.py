@@ -1458,6 +1458,9 @@ class HookE2ETests(unittest.TestCase):
         if home:
             env["USERPROFILE"] = home
             env["HOME"] = home
+            env["HERMES_HOME"] = str(Path(home) / ".hermes")
+        else:
+            env.pop("HERMES_HOME", None)
         proc = subprocess.run(
             [sys.executable, str(self.HOOK_PATH)],
             input=stdin_text,
@@ -1519,6 +1522,7 @@ class HookE2ETests(unittest.TestCase):
         env["JEV_CONSULT_LOG"] = "0"
         env["USERPROFILE"] = home
         env["HOME"] = home
+        env["HERMES_HOME"] = str(Path(home) / ".hermes")
         proc = subprocess.run(
             [sys.executable, str(script)],
             input=stdin_text,

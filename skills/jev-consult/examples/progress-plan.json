@@ -1,0 +1,26 @@
+{
+  "id": "reliability",
+  "goal": "Deliver the agreed Jev client and routing reliability improvements, with reproducible regression checks",
+  "checks": {
+    "suite": ["{python}", "-m", "unittest", "discover", "-s", "tests"],
+    "client_tests": ["{python}", "-m", "unittest", "discover", "-s", "tests", "-p", "test_jev.py"],
+    "routing_tests": ["{python}", "-m", "unittest", "discover", "-s", "tests", "-p", "test_inventory_hook.py"]
+  },
+  "required_checks": ["suite"],
+  "items": [
+    {
+      "id": "client",
+      "description": "Deliver the specifically agreed client validation fix and its regression tests",
+      "checks": ["client_tests"],
+      "paths": ["skills/jev-consult/scripts/jev.py", "tests/test_jev.py"]
+    },
+    {
+      "id": "routing",
+      "description": "Deliver the specifically agreed routing reliability fix and its regression tests",
+      "checks": ["routing_tests"],
+      "paths": ["skills/jev-consult/scripts/inventory.py", "skills/jev-consult/scripts/inventory_hook.py", "tests/test_inventory_hook.py"]
+    }
+  ],
+  "directions": {},
+  "platform": "win32"
+}

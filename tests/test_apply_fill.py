@@ -328,6 +328,7 @@ class ApplyFillE2ETests(unittest.TestCase):
         if home:
             env["USERPROFILE"] = home
             env["HOME"] = home
+            env["HERMES_HOME"] = str(Path(home) / ".hermes")
         proc = subprocess.run(
             [sys.executable, str(self.SCRIPT)] + argv,
             capture_output=True,

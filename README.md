@@ -91,3 +91,15 @@ Jev — не демон. Он не стартует сам. Новая сесс�
 3. для живого вызова задан `TYPESAFE_API_KEY` в env этого харнесса, в `.env` репо, или в Hermes `.env`.
 
 Кодер обязан вызвать `jev.py ask` до своего keep/change.
+
+## Ревью вклада (opt-in)
+
+`progress.py` — отдельный CLI с локальным SQLite-журналом (`.devin/progress.sqlite3`), не демон и не управление облачной сессией. Включается только на явно согласованный этап: план проверяется и коммитится до `init`, оценка идёт по чистому закоммиченному дереву Git. Шкала zero/small/material/major = 0/1/2/3, контрольная точка — 12 кредитов; пороги и промпты берутся только из `policy.json` и замораживаются внутри этапа. Неизвестное/неуверенное/недоступное/слишком большое — «не оценено», это не ноль. Чекпоинт вызывает ревью, а не завершение проекта: финиш требует свежих проверок и явного `--approve-finish`. Пример плана — `skills/jev-consult/examples/progress-plan.json`, правила — секция «Opt-in contribution review» в `skills/jev-consult/SKILL.md`.
+
+```text
+python skills/jev-consult/scripts/progress.py init skills/jev-consult/examples/progress-plan.json
+python skills/jev-consult/scripts/progress.py assess reliability client --summary "Describe the verified agreed change"
+python skills/jev-consult/scripts/progress.py status reliability
+python skills/jev-consult/scripts/progress.py review reliability --reason "Acceptance evidence reviewed" --reviewer "review-reference"
+python skills/jev-consult/scripts/progress.py history reliability
+```

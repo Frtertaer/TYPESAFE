@@ -570,6 +570,7 @@ class PeerFillE2ETests(unittest.TestCase):
             env["JEV_CONSULT_LOG"] = log
         env["USERPROFILE"] = home
         env["HOME"] = home
+        env["HERMES_HOME"] = str(Path(home) / ".hermes")
         proc = subprocess.run(
             [sys.executable, str(self.SCRIPT)] + argv,
             capture_output=True,

@@ -251,6 +251,16 @@ class PolicyLintTests(unittest.TestCase):
         warnings = jev.policy_warnings(policy)
         self.assertTrue(any("policy_lint P005" in w for w in warnings))
 
+    def test_progress_invalid_limit_reaches_policy_lint(self):
+        candidate = base_policy()
+        candidate["progress"]["review_points"] = 0
+        self.assertIn("P014", rule_ids(policy_lint.lint_policy(candidate)))
+
+    def test_progress_category_map_must_match_rubric(self):
+        candidate = base_policy()
+        candidate["progress"]["points"].pop("material")
+        self.assertIn("P014", rule_ids(policy_lint.lint_policy(candidate)))
+
     def test_main_defaults_to_pack_policy(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

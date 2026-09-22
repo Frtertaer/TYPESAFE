@@ -1953,6 +1953,30 @@ def step_skill_lint(tmp: Path) -> dict:
         )
         ticks = [ln for ln in out.splitlines() if '"findings"' in ln]
         ok = len(ticks) == 1 and "watch tick=2" not in out
+    if ok:
+        # --fix rewrites a mismatched frontmatter name to the dir name
+        fix_dir = tmp / "fix-skill"
+        fix_dir.mkdir(exist_ok=True)
+        fix_md = fix_dir / "SKILL.md"
+        fix_md.write_text(
+            "---\nname: Other Name\ndescription: a test skill\n---\nbody\n",
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [str(SCRIPTS / "skill_lint.py"), str(fix_md), "--fix"]
+        )
+        ok = rc == 0 and "name: fix-skill" in fix_md.read_text(
+            encoding="utf-8"
+        )
+        if ok:
+            # after the fix the file lints clean
+            rc, out = _run(
+                [str(SCRIPTS / "skill_lint.py"), str(fix_md), "--json"]
+            )
+            try:
+                ok = rc == 0 and json.loads(out).get("findings") == []
+            except ValueError:
+                ok = False
     return _step("skill_lint", ok, out.strip()[:160] or "rc=%d" % rc)
 
 

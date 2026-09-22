@@ -466,6 +466,55 @@ def step_inventory(tmp: Path) -> dict:
             out_file = tmp / "inv-out.json"
             rc, out = _run(base + ["--out", str(out_file)])
             ok = rc == 0 and out_file.is_file()
+    if ok:
+        # --watch emits {counts,shortlist,added,removed} ticks; the first
+        # tick always prints (baseline) and --quiet keeps later clean
+        # ticks off stdout
+        rc, out = _run(
+            base + ["--watch", "0.03", "--max-ticks", "2", "--quiet"]
+        )
+        ticks = [ln for ln in out.splitlines() if '"added"' in ln]
+        ok = rc == 0 and len(ticks) == 1 and "watch tick=2" in out
+    if ok:
+        # --fail-fast stops the watch when a new skill appears mid-run
+        ff_home = tmp / "inv-ff-home"
+        (ff_home / ".codex" / "skills" / "a").mkdir(parents=True)
+        (ff_home / ".codex" / "skills" / "a" / "SKILL.md").write_text(
+            "---\nname: alpha-skill\n---\n", encoding="utf-8"
+        )
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                str(SCRIPTS / "inventory.py"),
+                "--harness",
+                "codex",
+                "--home",
+                str(ff_home),
+                "--hermes-home",
+                str(tmp / "inv-ff-hermes"),
+                "--task",
+                "smoke",
+                "--watch",
+                "0.15",
+                "--fail-fast",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        time.sleep(0.4)
+        (ff_home / ".codex" / "skills" / "b").mkdir(parents=True)
+        (ff_home / "b-skill").mkdir(exist_ok=True)
+        (ff_home / ".codex" / "skills" / "b" / "SKILL.md").write_text(
+            "---\nname: beta-skill\n---\n", encoding="utf-8"
+        )
+        try:
+            wout, _ = proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            wout = ""
+        ok = proc.returncode == 0 and '"added"' in wout and "beta" in wout
     return _step("inventory", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

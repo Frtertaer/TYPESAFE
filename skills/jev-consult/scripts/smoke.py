@@ -1476,8 +1476,23 @@ def step_trace(tmp: Path) -> dict:
 
 
 def step_skill_lint(tmp: Path) -> dict:
-    rc, out = _run([str(SCRIPTS / "skill_lint.py"), str(SKILL_DIR / "SKILL.md")])
-    return _step("skill_lint", rc == 0, out.strip()[:160] or "rc=%d" % rc)
+    skill = SKILL_DIR / "SKILL.md"
+    rc, out = _run([str(SCRIPTS / "skill_lint.py"), str(skill)])
+    ok = rc == 0
+    if ok:
+        # --json emits a findings payload; the shipped SKILL.md is clean
+        rc, out = _run([str(SCRIPTS / "skill_lint.py"), str(skill), "--json"])
+        try:
+            ok = rc == 0 and json.loads(out).get("findings") == []
+        except ValueError:
+            ok = False
+    if ok:
+        # --explain RULE prints one rule's description
+        rc, out = _run(
+            [str(SCRIPTS / "skill_lint.py"), str(skill), "--explain", "S001"]
+        )
+        ok = rc == 0 and "S001" in out
+    return _step("skill_lint", ok, out.strip()[:160] or "rc=%d" % rc)
 
 
 def step_question_lint(tmp: Path) -> dict:

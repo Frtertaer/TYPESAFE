@@ -2715,6 +2715,92 @@ def step_doctor(tmp: Path) -> dict:
             ok = rc in (0, 1) and agents_seen == {"codex"}
         except ValueError:
             ok = False
+    if ok:
+        # --jq digs one field; an empty-home run reports ok=false
+        rc, out = _run(
+            [
+                str(SCRIPTS / "doctor.py"),
+                "--agents",
+                "codex",
+                "--home",
+                str(tmp / "home"),
+                "--hermes-home",
+                str(tmp / "hermes"),
+                "--jq",
+                "ok",
+            ]
+        )
+        ok = rc == 0 and out.strip() == "false"
+    if ok:
+        # --watch emits {checks,failed,ok} ticks; --verdict writes the probe
+        verdict = tmp / "doctor-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "doctor.py"),
+                "--agents",
+                "codex",
+                "--home",
+                str(tmp / "home"),
+                "--hermes-home",
+                str(tmp / "hermes"),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--verdict",
+                str(verdict),
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"failed"' in ln]
+        ok = rc in (0, 1) and len(ticks) == 2
+        try:
+            ok = ok and json.loads(verdict.read_text(encoding="utf-8")).get(
+                "verdict"
+            ) == "fail"
+        except (OSError, ValueError):
+            ok = False
+    if ok:
+        # --fail-fast stops the watch on the first failing tick
+        rc, out = _run(
+            [
+                str(SCRIPTS / "doctor.py"),
+                "--agents",
+                "codex",
+                "--home",
+                str(tmp / "home"),
+                "--hermes-home",
+                str(tmp / "hermes"),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "5",
+                "--fail-fast",
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"failed"' in ln]
+        ok = len(ticks) == 1 and "watch tick=2" not in out
+    if ok:
+        # --report writes a markdown probe alongside the JSON stdout
+        report = tmp / "doctor-report.md"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "doctor.py"),
+                "--agents",
+                "codex",
+                "--home",
+                str(tmp / "home"),
+                "--hermes-home",
+                str(tmp / "hermes"),
+                "--report",
+                str(report),
+            ]
+        )
+        try:
+            ok = rc in (0, 1) and len(
+                report.read_text(encoding="utf-8").strip()
+            ) > 0
+        except OSError:
+            ok = False
     return _step("doctor_json", ok, "rc=%d" % rc)
 
 

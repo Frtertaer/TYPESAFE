@@ -582,6 +582,20 @@ def step_decisions(tmp: Path) -> dict:
             )
         except (ValueError, IndexError):
             ok = False
+    if ok:
+        # --watch emits {ts,count} ticks until --max-ticks stops it
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--watch",
+                "0.05",
+                "--max-ticks",
+                "2",
+            ]
+        )
+        ok = rc == 0 and '"count": 1' in out and "watch tick=2" in out
     return _step("decisions", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

@@ -2926,6 +2926,23 @@ class FillGapsTest(unittest.TestCase):
             self.assertIn("age_s", proc.stdout.splitlines()[0])
             self.assertRegex(proc.stdout, r"claude-code\s+1\s+0\s+1\s+\d")
 
+    def test_fill_gaps_max_open_gates_by_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._log(tmp)  # 1 open hermes + 1 open claude-code = 2
+            proc = run_cli("--file", str(path), "--fill-gaps", "--max-open", "1")
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("max-open:", proc.stderr)
+            proc = run_cli("--file", str(path), "--fill-gaps", "--max-open", "2")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_fill_gaps_max_open_zero_matches_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._log(tmp)
+            proc = run_cli("--file", str(path), "--fill-gaps", "--max-open", "0")
+            self.assertEqual(proc.returncode, 1)
+            proc = run_cli("--file", str(path), "--fill-gaps", "--strict")
+            self.assertEqual(proc.returncode, 1)
+
     def test_fill_gaps_strict_passes_when_all_filled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

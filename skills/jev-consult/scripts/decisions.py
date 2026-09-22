@@ -718,6 +718,13 @@ def main(argv: list[str] | None = None) -> int:
         help="With --fill-gaps: exit 1 when any harness has open misses",
     )
     parser.add_argument(
+        "--max-open",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --fill-gaps: exit 1 when total open misses exceed N (--strict is --max-open 0)",
+    )
+    parser.add_argument(
         "--prune",
         action="store_true",
         help="Rewrite the log keeping only entries matching the time/status filters",
@@ -1059,7 +1066,15 @@ def main(argv: list[str] | None = None) -> int:
         else:
             sys.stdout.write(format_fill_gaps(rows) + "\n")
         open_total = sum(row["open"] for row in rows)
-        if getattr(args, "strict", False) and open_total:
+        max_open = getattr(args, "max_open", None)
+        gate_fail = open_total > 0 if getattr(args, "strict", False) else False
+        if max_open is not None and open_total > max_open:
+            sys.stderr.write(
+                "max-open: %d open miss%s exceeds %d\n"
+                % (open_total, "es" if open_total != 1 else "", max_open)
+            )
+            return 1
+        if gate_fail:
             sys.stderr.write(
                 "strict: %d open miss%s across %d harness%s\n"
                 % (

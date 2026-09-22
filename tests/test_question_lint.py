@@ -1062,5 +1062,38 @@ class WatchSecsEnvTests(unittest.TestCase):
         )
         self.assertNotIn(("J016", "warn"), rules(findings))
 
+    def test_duplicate_option_descriptions_warn_j017(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which of these should the coder use?",
+                "criteria": {
+                    "a": "the fast path",
+                    "b": "  The Fast Path  ",
+                    "none": "none of these",
+                },
+            },
+        )
+        self.assertIn(("J017", "warn"), rules(findings))
+        msg = [f for f in findings if f["rule"] == "J017"][0]["message"]
+        self.assertIn("'a'", msg)
+        self.assertIn("'b'", msg)
+
+    def test_distinct_option_descriptions_clean_j017(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which of these should the coder use?",
+                "criteria": {
+                    "a": "the fast path",
+                    "b": "the safe path",
+                    "none": "none of these",
+                },
+            },
+        )
+        self.assertNotIn(("J017", "warn"), rules(findings))
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

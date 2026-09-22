@@ -69,6 +69,7 @@ RULES = {
     "J014": "true and false criteria are identical",
     "J015": "choice has fewer than two options",
     "J016": "choice has no 'none'/'other' escape; a forced pick returns a wrong answer",
+    "J017": "two options carry identical descriptions; Jev has no basis to tell them apart",
     "J020": "state exceeds the 32k-token limit; trim or chunk it first",
     "J021": "state is over 8k tokens; irrelevant state distracts and drops accuracy",
 }
@@ -198,6 +199,20 @@ def lint_question(qid: str, q: dict, max_options: int = 255) -> list[dict]:
                 "%d of %d options have no description" % (len(undescribed), len(options)),
                 "Option descriptions are where domain rules live. Describe each option.",
             )
+        seen_meanings: dict[str, str] = {}
+        for key, meaning in options.items():
+            norm = str(meaning or "").strip().lower()
+            if not norm:
+                continue
+            if norm in seen_meanings:
+                add(
+                    "J017",
+                    "warn",
+                    "options %r and %r share the same description" % (seen_meanings[norm], key),
+                    "Identical descriptions give Jev no basis to distinguish the options; sharpen one.",
+                )
+            else:
+                seen_meanings[norm] = key
         keys = list(options)
         for i, first in enumerate(keys):
             for second in keys[i + 1:]:

@@ -286,5 +286,54 @@ class WriteVerdictAtomicityTests(unittest.TestCase):
             self.assertEqual([p.name for p in Path(tmp).iterdir()], ["blocker"])
 
 
+class EmitOrJqTests(unittest.TestCase):
+    def test_jq_prints_named_fields_not_tick_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "ticks.jsonl"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                watch.emit_or_jq(
+                    {"count": 2, "winner": "a"},
+                    "count,missing",
+                    str(out_path),
+                )
+            self.assertEqual(buf.getvalue().splitlines(), ["2", "null"])
+            # jq mode writes no tick JSON and never touches --out
+            self.assertNotIn('"count": 2', buf.getvalue())
+            self.assertFalse(out_path.exists())
+
+    def test_no_jq_delegates_to_emit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "ticks.jsonl"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                watch.emit_or_jq({"count": 3}, "", str(out_path))
+            line = buf.getvalue().strip()
+            self.assertEqual(json.loads(line)["count"], 3)
+            self.assertIn('"count"', line)
+            self.assertTrue(out_path.exists())
+
+
+class MaybeVersionTests(unittest.TestCase):
+    def test_prints_pack_version(self) -> None:
+        buf = io.StringIO()
+        handled = watch.maybe_version(["--version"], out=buf)
+        self.assertTrue(handled)
+        self.assertIn("jev-consult (policy v", buf.getvalue())
+
+    def test_ignores_argv_without_flag(self) -> None:
+        buf = io.StringIO()
+        handled = watch.maybe_version(["--watch", "5"], out=buf)
+        self.assertFalse(handled)
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_policy_version_reads_shipped_policy(self) -> None:
+        version = watch.policy_version()
+        policy = json.loads(
+            (SCRIPTS.parent / "policy.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(version, str(policy.get("version", "?")))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

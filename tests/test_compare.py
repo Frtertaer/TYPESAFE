@@ -221,6 +221,25 @@ class CliTest(unittest.TestCase):
         self.assertFalse(payload["live"])
         self.assertEqual(len(payload["rows"]), 2)
 
+    def test_offline_runs_are_deterministic(self) -> None:
+        # same input → byte-identical stdout and --out payload
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            outs = []
+            outs_json = []
+            for i in range(2):
+                o = Path(tmp) / ("out%d.json" % i)
+                proc = self.run_cli("--cases", str(path), "--out", str(o))
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                outs.append(proc.stdout)
+                outs_json.append(o.read_text(encoding="utf-8"))
+            self.assertEqual(outs[0], outs[1])
+            self.assertEqual(outs_json[0], outs_json[1])
+            proc = self.run_cli("--json", "--cases", str(path))
+            proc2 = self.run_cli("--json", "--cases", str(path))
+            self.assertEqual(proc.stdout, proc2.stdout)
+
     def test_cli_only_filters_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cases.json"

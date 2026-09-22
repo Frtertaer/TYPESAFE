@@ -244,6 +244,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first failing tick.")
+    parser.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the {ok,checks} payload (e.g. ok); unknown key exits 2")
     args = parser.parse_args(argv)
     agents = [a.strip() for a in args.agents.split(",") if a.strip()]
     bad = [a for a in agents if a not in ALLOWED]
@@ -345,7 +346,25 @@ def main(argv: list[str] | None = None) -> int:
             if hint:
                 check["hint"] = hint.replace("<agent>", check["agent"])
     shown = checks if not args.quiet else [c for c in checks if not c["ok"]]
-    text = json.dumps({"ok": ok, "checks": shown}, indent=2) + "\n"
+    payload = {"ok": ok, "checks": shown}
+    if getattr(args, "jq", ""):
+        node = payload
+        found = True
+        for part in args.jq.split("."):
+            if isinstance(node, dict) and part in node:
+                node = node[part]
+            else:
+                found = False
+                break
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (args.jq, ", ".join(sorted(payload)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+        return 0
+    text = json.dumps(payload, indent=2) + "\n"
     sys.stdout.write(text)
     if args.out:
         try:

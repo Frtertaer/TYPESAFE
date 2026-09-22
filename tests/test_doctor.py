@@ -85,6 +85,24 @@ class DoctorTests(unittest.TestCase):
         self.assertFalse(out["ok"])
         self.assertFalse(check_of(out, "api_key")["ok"])
 
+    def test_jq_prints_one_field_of_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run_main(
+                ["--home", tmp, "--hermes-home", str(Path(tmp) / "h"), "--jq", "ok"],
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 0)
+            self.assertIs(out, False)
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with patch.object(sys, "stderr", buf):
+                rc, out, _ = run_main(
+                    ["--home", tmp, "--hermes-home", str(Path(tmp) / "h"), "--jq", "nope"],
+                    cwd=tmp,
+                )
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --jq key", buf.getvalue())
+
     def test_full_install_ok(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"

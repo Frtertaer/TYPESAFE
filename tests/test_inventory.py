@@ -785,6 +785,27 @@ class HookBudgetEnvTests(unittest.TestCase):
             )
 
 
+class AtomicWriteTests(unittest.TestCase):
+    def test_writes_content_and_leaves_no_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "state.json"
+            inv.atomic_write_text(target, '{"a": 1}\n')
+            self.assertEqual(target.read_text(encoding="utf-8"), '{"a": 1}\n')
+            leftovers = [p for p in Path(tmp).iterdir() if p != target]
+            self.assertEqual(leftovers, [])
+
+    def test_replaces_existing_and_cleans_tmp_on_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "state.json"
+            target.write_text("old", encoding="utf-8")
+            inv.atomic_write_text(target, "new")
+            self.assertEqual(target.read_text(encoding="utf-8"), "new")
+            with self.assertRaises(OSError):
+                inv.atomic_write_text(Path(tmp) / "no-dir" / "x.json", "x")
+            leftovers = [p.name for p in Path(tmp).iterdir() if p.name != "state.json"]
+            self.assertEqual(leftovers, [])
+
+
 class HookRetriesEnvTests(unittest.TestCase):
     def test_env_override_wins(self) -> None:
         import os

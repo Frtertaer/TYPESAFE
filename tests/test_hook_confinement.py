@@ -334,16 +334,22 @@ class StubJevE2ETests(unittest.TestCase):
     lands in the sidecar. Exercises the wire path, auth header, response
     validation, and the pick→sidecar leg — not just the miss path."""
 
-    def _stub_server(self, fail_first: int = 0):
+    def _stub_server(self, fail_first: int = 0, garbage: bool = False):
         from http.server import BaseHTTPRequestHandler, HTTPServer
 
         picked_id: dict = {}
-        state = {"calls": 0, "fail_first": fail_first}
+        state = {"calls": 0, "fail_first": fail_first, "garbage": garbage}
 
         class H(BaseHTTPRequestHandler):
             def do_POST(self):  # noqa: N802 - stdlib handler name
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
                 state["calls"] += 1
+                if state["garbage"]:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b"<html>not json at all</html>")
+                    return
                 if state["calls"] <= state["fail_first"]:
                     self.send_response(429)
                     self.send_header("Content-Length", "2")
@@ -386,7 +392,12 @@ class StubJevE2ETests(unittest.TestCase):
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         return srv, picked_id, state
 
-    def _run_against_stub(self, fail_first: int = 0, extra_env: dict | None = None):
+    def _run_against_stub(
+        self,
+        fail_first: int = 0,
+        extra_env: dict | None = None,
+        garbage: bool = False,
+    ):
         """Run the hook subprocess against the stub; return (proc, picked,
         state, sidecar dict, log rows)."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -404,7 +415,9 @@ class StubJevE2ETests(unittest.TestCase):
             policy_src = json.loads(
                 (SCRIPTS.parent / "policy.json").read_text(encoding="utf-8")
             )
-            srv, picked, state = self._stub_server(fail_first=fail_first)
+            srv, picked, state = self._stub_server(
+                fail_first=fail_first, garbage=garbage
+            )
             try:
                 policy_src["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
                     srv.server_address[1]
@@ -487,6 +500,15 @@ class StubJevE2ETests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr[:400])
         self.assertNotIn("id", picked)
+        self.assertEqual(data.get("jev_pick"), None)
+
+    def test_hook_survives_stub_garbage_body(self) -> None:
+        # 200 with a non-JSON body -> fail-open, no traceback, no pick
+        proc, picked, state, data, _rows = self._run_against_stub(garbage=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr[:400])
+        self.assertGreaterEqual(state["calls"], 1)
+        self.assertNotIn("id", picked)
+        self.assertNotIn(b"Traceback", proc.stderr)
         self.assertEqual(data.get("jev_pick"), None)
 
 

@@ -4039,6 +4039,63 @@ def step_doctor(tmp: Path) -> dict:
             )
             ticks = [ln for ln in out.splitlines() if '"failed"' in ln]
             ok = len(ticks) == 2
+    if ok:
+        # a bad --jq key exits 2; --watch-max bounds the loop to one tick
+        rc, out = _run(
+            [
+                str(SCRIPTS / "doctor.py"),
+                "--agents",
+                "codex",
+                "--home",
+                str(tmp / "home"),
+                "--hermes-home",
+                str(tmp / "hermes"),
+                "--jq",
+                "nope.nope",
+            ]
+        )
+        ok = rc == 2
+        if ok:
+            # --watch-max bounds elapsed: tick N+1 fires after the sleep,
+            # sees the deadline passed, and stops — 2 ticks total here
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "doctor.py"),
+                    "--agents",
+                    "codex",
+                    "--home",
+                    str(tmp / "home"),
+                    "--hermes-home",
+                    str(tmp / "hermes"),
+                    "--watch",
+                    "0.2",
+                    "--watch-max",
+                    "0.05",
+                    "--max-ticks",
+                    "20",
+                ]
+            )
+            ticks = [ln for ln in out.splitlines() if '"failed"' in ln]
+            ok = len(ticks) == 2
+        if ok:
+            # --agents accepts a comma list; both harnesses get checks
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "doctor.py"),
+                    "--agents",
+                    "codex,grok",
+                    "--home",
+                    str(tmp / "home"),
+                    "--hermes-home",
+                    str(tmp / "hermes"),
+                ]
+            )
+            try:
+                checks = json.loads(out).get("checks", [])
+                agents = {c.get("agent") for c in checks}
+                ok = rc in (0, 1) and "codex" in agents and "grok" in agents
+            except (ValueError, AttributeError, TypeError):
+                ok = False
     return _step("doctor_json", ok, "rc=%d" % rc)
 
 

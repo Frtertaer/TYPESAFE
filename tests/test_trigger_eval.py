@@ -544,6 +544,33 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertIn("neg-format", payload["uncovered"])
         self.assertTrue(payload["ok"])
 
+    def test_every_must_ask_kind_is_covered_by_a_case(self) -> None:
+        policy = json.loads(
+            (SKILL / "policy.json").read_text(encoding="utf-8")
+        )
+        must_ask = set(policy["must_ask"])
+        cases = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
+        covered = set()
+        for case in cases:
+            covered.update(case.get("covers") or [])
+        missing = sorted(must_ask - covered)
+        self.assertEqual(missing, [], "policy must_ask kinds with no case covers tag")
+
+    def test_covers_tags_are_known_must_ask_kinds(self) -> None:
+        policy = json.loads(
+            (SKILL / "policy.json").read_text(encoding="utf-8")
+        )
+        must_ask = set(policy["must_ask"])
+        cases = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
+        unknown = set()
+        for case in cases:
+            for tag in case.get("covers") or []:
+                if tag not in must_ask:
+                    unknown.add(tag)
+        self.assertEqual(
+            sorted(unknown), [], "case covers tags that are not must_ask kinds"
+        )
+
     def test_tokens_shows_matched_tokens(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

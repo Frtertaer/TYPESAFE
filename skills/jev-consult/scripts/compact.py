@@ -1284,6 +1284,8 @@ def cmd_compact(args: argparse.Namespace) -> int:
             ticks += 1
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
+            if getattr(args, "fail_fast", False) and tick["fallback"]:
+                break
             _time.sleep(args.watch)
         if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
             return 1
@@ -1485,6 +1487,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that fell back to the original transcript")
     parser.add_argument("--verdict", default="", metavar="PATH", help="Write a slim {verdict: ok|fallback, ticks, reduction, fallback} JSON to PATH — refreshed every --watch tick; without --watch a one-shot probe after the run.")
     parser.add_argument(
         "--prune-spill",

@@ -639,7 +639,23 @@ def cmd_lint(args: argparse.Namespace) -> int:
     errors = sum(1 for f in findings if f["severity"] == "error")
     warns = sum(1 for f in findings if f["severity"] == "warn")
     infos = sum(1 for f in findings if f["severity"] == "info")
-    if getattr(args, "json", False):
+    jq_key = getattr(args, "jq", "") or ""
+    if jq_key:
+        payload = {
+            "findings": findings,
+            "errors": errors,
+            "warnings": warns,
+            "infos": infos,
+        }
+        value, found = jq_lookup(payload, jq_key)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (jq_key, ", ".join(sorted(payload)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+    elif getattr(args, "json", False):
         emit(
             {
                 "findings": findings,
@@ -906,6 +922,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     lint_cmd.add_argument(
         "--json", action="store_true", help="Machine-readable findings"
+    )
+    lint_cmd.add_argument(
+        "--jq",
+        metavar="KEY",
+        default="",
+        help="Print just one dotted-path field of the lint payload (e.g. errors); unknown key exits 2.",
     )
     lint_cmd.set_defaults(func=cmd_lint)
     ping = sub.add_parser("ping", help="Live connectivity check; prints model and noul only")

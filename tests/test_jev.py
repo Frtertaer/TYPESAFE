@@ -821,6 +821,35 @@ class JevInternalsTests(unittest.TestCase):
             self.assertEqual(payload["answers"]["q"]["choice"], "a")
             self.assertIn("decision", payload)
 
+    def test_cmd_lint_jq_prints_one_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "r.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "questions": {
+                            "q": {
+                                "type": "choice",
+                                "instructions": "How many files are there?",
+                                "criteria": {"a": "one", "b": "two"},
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = jev.main(["lint", str(path), "--jq", "warnings"])
+            self.assertEqual(json.loads(buf.getvalue()), 1)
+            self.assertEqual(rc, 0)
+            with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", io.StringIO()
+            ) as err:
+                rc = jev.main(["lint", str(path), "--jq", "nope"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --jq key", err.getvalue())
+
     def test_ping_json_emits_object(self) -> None:
         def fake_post(state, questions, policy, model=None, timeout=60, retries=1):
             return {"model": "m9", "answers": {"ok": {"type": "noul", "noul": 0.9}}}

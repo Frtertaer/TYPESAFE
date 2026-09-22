@@ -2734,5 +2734,35 @@ class ConcurrentAppendTests(unittest.TestCase):
             self.assertTrue(path.is_file())
 
 
+class Utf8RoundtripTests(unittest.TestCase):
+    def test_non_ascii_entries_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            entry = {
+                "ts": 1700000000.0,
+                "harness": "h",
+                "jev_status": "winner",
+                "prompt_head": "Ajoute l'authentification à l'API — русский 🔒",
+                "winner": {"name": "sécurité-スキル"},
+            }
+            inventory.append_decision(entry, path=path)
+            entries, bad = decisions.load_entries(path)
+            self.assertEqual(bad, 0)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["prompt_head"], entry["prompt_head"])
+            self.assertEqual(entries[0]["winner"]["name"], "sécurité-スキル")
+
+    def test_utf8_json_filter_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"jev_status": "winner", "prompt_head": "écran"}])
+            proc = run_cli(
+                "--file", str(path), "--prompt", "écran", "--json"
+            )
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn("u00e9cran", proc.stdout)
+            self.assertIn('"filtered": 1', proc.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

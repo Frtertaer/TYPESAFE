@@ -600,6 +600,34 @@ def cmd_export(args: argparse.Namespace) -> int:
     """Dump the whole trace bundle (state, history, notes, counts) as JSON."""
     path = Path(args.file) if args.file else default_path()
     data = load(path)
+    since_ts = None
+    before_ts = None
+    since = getattr(args, "since", None)
+    if since is not None:
+        since_ts = _ts_arg(since)
+        if since_ts is None:
+            sys.stderr.write("bad --since: %s\n" % since)
+            return 2
+    before = getattr(args, "before", None)
+    if before is not None:
+        before_ts = _ts_arg(before)
+        if before_ts is None:
+            sys.stderr.write("bad --before: %s\n" % before)
+            return 2
+    if since_ts is not None or before_ts is not None:
+        def _in_window(item) -> bool:
+            ts = item.get("ts") if isinstance(item, dict) else None
+            if not isinstance(ts, (int, float)):
+                return False
+            if since_ts is not None and ts < since_ts:
+                return False
+            if before_ts is not None and ts > before_ts:
+                return False
+            return True
+        for key in ("history", "notes"):
+            items = data.get(key)
+            if isinstance(items, list):
+                data[key] = [item for item in items if _in_window(item)]
     data["file"] = str(path)
     rc = emit_jq(data, getattr(args, "jq", ""))
     if rc is not None:
@@ -1097,6 +1125,8 @@ def build_parser() -> argparse.ArgumentParser:
     export_cmd.add_argument(
         "--out", default="", help="Write the export JSON to PATH instead of stdout"
     )
+    export_cmd.add_argument("--since", default=None, help="Only history/notes with ts >= epoch seconds or ISO8601")
+    export_cmd.add_argument("--before", default=None, help="Only history/notes with ts <= epoch seconds or ISO8601")
     export_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the export payload (rc 2 on unknown key)")
     export_cmd.set_defaults(func=cmd_export)
     return parser

@@ -1278,6 +1278,49 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("history", json.loads(out_path.read_text(encoding="utf-8")))
 
+    def test_export_since_before_bounds_history_and_notes(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "history": [
+                            {"ts": 10, "pick": "old"},
+                            {"ts": 20, "pick": "mid"},
+                            {"ts": 30, "pick": "new"},
+                        ],
+                        "notes": [{"ts": 10, "text": "a"}, {"ts": 25, "text": "b"}],
+                        "inspected": [{"name": "untimed"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(
+                    ["--file", str(path), "export", "--since", "15", "--before", "25"]
+                )
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual([h["pick"] for h in out["history"]], ["mid"])
+            self.assertEqual([n["text"] for n in out["notes"]], ["b"])
+            self.assertEqual(out["inspected"], [{"name": "untimed"}])
+
+    def test_export_since_bad_value_rc2(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(json.dumps({"history": []}), encoding="utf-8")
+            with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", io.StringIO()
+            ) as err:
+                rc = tr.main(["--file", str(path), "export", "--since", "bogus"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --since", err.getvalue())
+
     def test_history_watch_verdict_writes_pick_count(self) -> None:
         import io
         import os as _os

@@ -2903,6 +2903,25 @@ def step_trigger_eval(tmp: Path) -> dict:
                 [str(SCRIPTS / "trigger_eval.py"), "--desc", "refactor code"]
             )
             ok = rc in (0, 1) and "margin:" in out
+    if ok:
+        # --fail prints only failing rows (none on the shipped fixture);
+        # --min-score F keeps only rows scoring >= F
+        rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--fail"])
+        ok = rc == 0 and "PASS" in out
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trigger_eval.py"),
+                    "--min-score",
+                    "1.0",
+                    "--ids",
+                ]
+            )
+            ok = rc == 0 and all(
+                ln.strip().startswith("pos-")
+                for ln in out.splitlines()
+                if ln.strip()
+            )
     return _step("trigger_eval", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

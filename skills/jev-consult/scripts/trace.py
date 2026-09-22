@@ -417,11 +417,40 @@ def cmd_prune(args: argparse.Namespace) -> int:
     return 0
 
 
+def jq_lookup(obj, path: str):
+    """Dotted-path dict traversal: returns (value, True) or (None, False)."""
+    node = obj
+    for part in path.split("."):
+        if isinstance(node, dict) and part in node:
+            node = node[part]
+        else:
+            return None, False
+    return node, True
+
+
+def emit_jq(payload: dict, jq: str) -> int | None:
+    """When --jq is set, print just that dotted field and return an rc; else None."""
+    if not jq:
+        return None
+    value, found = jq_lookup(payload, jq)
+    if not found:
+        sys.stderr.write(
+            "bad --jq key %r (payload has: %s)\n"
+            % (jq, ", ".join(sorted(payload)))
+        )
+        return 2
+    sys.stdout.write(json.dumps(value, ensure_ascii=False) + "\n")
+    return 0
+
+
 def cmd_export(args: argparse.Namespace) -> int:
     """Dump the whole trace bundle (state, history, notes, counts) as JSON."""
     path = Path(args.file) if args.file else default_path()
     data = load(path)
     data["file"] = str(path)
+    rc = emit_jq(data, getattr(args, "jq", ""))
+    if rc is not None:
+        return rc
     out_text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
     out_path = getattr(args, "out", "") or ""
     if out_path:
@@ -648,6 +677,9 @@ def cmd_stats(args: argparse.Namespace) -> int:
             out["age_seconds"] = int(time.time() - path.stat().st_mtime)
         except OSError:
             pass
+    rc = emit_jq(out, getattr(args, "jq", ""))
+    if rc is not None:
+        return rc
     if getattr(args, "out", ""):
         try:
             Path(args.out).write_text(
@@ -809,6 +841,7 @@ def build_parser() -> argparse.ArgumentParser:
     state_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: ok|empty, ticks, attempt_count, state} JSON to PATH, refreshed every tick")
     state_cmd.set_defaults(func=cmd_state)
     stats_cmd = sub.add_parser("stats", help="Summary: counts, last pick, file age")
+    stats_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the stats payload (rc 2 on unknown key)")
     stats_cmd.add_argument("--out", default="", help="Write the stats JSON to PATH instead of stdout")
     stats_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,exists,attempt_count,history,inspected} tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     stats_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
@@ -858,6 +891,7 @@ def build_parser() -> argparse.ArgumentParser:
     export_cmd.add_argument(
         "--out", default="", help="Write the export JSON to PATH instead of stdout"
     )
+    export_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the export payload (rc 2 on unknown key)")
     export_cmd.set_defaults(func=cmd_export)
     return parser
 

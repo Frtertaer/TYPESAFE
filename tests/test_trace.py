@@ -112,6 +112,37 @@ class TraceTests(unittest.TestCase):
             self.assertTrue(out["has_unknown"])
             self.assertGreaterEqual(out["age_seconds"], 0)
 
+    def test_stats_jq_prints_one_field(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.save({"plan": "p", "attempt_count": 3}, path)
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "stats", "--jq", "attempt_count"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), 3)
+            err = StringIO()
+            with redirect_stderr(err):
+                rc = tr.main(["--file", str(path), "stats", "--jq", "nope"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --jq key", err.getvalue())
+
+    def test_export_jq_prints_nested_field(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.save({"plan": "p", "attempt_count": 4}, path)
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "export", "--jq", "attempt_count"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), 4)
+
     def test_stats_out_writes_file(self) -> None:
         from io import StringIO
         from contextlib import redirect_stderr

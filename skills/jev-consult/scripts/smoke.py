@@ -546,6 +546,31 @@ def step_decisions(tmp: Path) -> dict:
         )
         ok = rc == 0 and "none" in out.splitlines()[-1] and "winner" not in out.splitlines()[-1]
     if ok:
+        # --first 1 lists only the earliest entry (a "winner" row)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--first",
+                "1",
+            ]
+        )
+        ok = rc == 0 and "winner" in out.splitlines()[-1] and "none" not in out.splitlines()[-1]
+    if ok:
+        # --reverse flips the listed rows (the "none" row leads)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--first",
+                "2",
+                "--reverse",
+            ]
+        )
+        ok = rc == 0 and "none" in out.splitlines()[-2] and "winner" in out.splitlines()[-1]
+    if ok:
         # --last prints the newest matching entry as JSON
         rc, out = _run(
             [

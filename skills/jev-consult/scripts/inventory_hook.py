@@ -33,6 +33,7 @@ from inventory import (  # noqa: E402
     format_winner_note,
     hook_budget_seconds,
     hook_dedupe_ttl_seconds,
+    hook_max_prompt_chars,
     hook_note_limit,
     hook_jev_retries,
     hook_jev_timeout_seconds,
@@ -263,6 +264,10 @@ def handle(
     prompt = extract_prompt(payload) or os.environ.get("JEV_HOOK_PROMPT", "").strip()
     if not prompt:
         return {}
+    prompt_cap = hook_max_prompt_chars()
+    prompt_truncated = bool(prompt_cap) and len(prompt) > prompt_cap
+    if prompt_truncated:
+        prompt = prompt[:prompt_cap]
     harness = (
         harness
         or os.environ.get("JEV_HOOK_HARNESS", "").strip()
@@ -398,6 +403,7 @@ def handle(
         "prompt_head": _redact_prompt(prompt[:240])[:160],
         "prompt_tail": _redact_prompt(prompt[-80:]),
         "prompt_len": len(prompt),
+        "prompt_truncated": prompt_truncated,
         "n_catalog": len(catalog),
         "shortlist_n": len(picked),
         "shortlist": [item.get("id") for item in picked],
@@ -523,6 +529,7 @@ def env_report() -> dict:
         "jev_retries": hook_jev_retries(),
         "budget_seconds": hook_budget_seconds(),
         "max_age_seconds": hook_max_age(),
+        "max_prompt_chars": hook_max_prompt_chars(),
         "dedupe_ttl_seconds": hook_dedupe_ttl_seconds(),
     }
     for name in onoff:

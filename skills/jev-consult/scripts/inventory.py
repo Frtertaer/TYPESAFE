@@ -821,6 +821,24 @@ def hook_note_limit() -> int:
 HOOK_JEV_RETRIES_KEY = "hook_jev_retries"
 DEFAULT_HOOK_JEV_RETRIES = 0
 
+HOOK_MAX_PROMPT_KEY = "hook_max_prompt_chars"
+DEFAULT_HOOK_MAX_PROMPT_CHARS = 20000
+
+
+def hook_max_prompt_chars() -> int:
+    """Cap on prompt chars fed to the hook's IDF/Jev pick (0 = unlimited).
+    Env JEV_HOOK_MAX_PROMPT > policy hook_max_prompt_chars > default."""
+    try:
+        env = int(os.environ.get("JEV_HOOK_MAX_PROMPT", "") or -1)
+        if env >= 0:
+            return env
+    except ValueError:
+        pass
+    try:
+        return max(0, int(_policy_dict().get(HOOK_MAX_PROMPT_KEY, DEFAULT_HOOK_MAX_PROMPT_CHARS)))
+    except (TypeError, ValueError):
+        return DEFAULT_HOOK_MAX_PROMPT_CHARS
+
 
 def hook_jev_retries() -> int:
     """Retry count for the hook's Jev call (0 = single attempt, fail fast)."""

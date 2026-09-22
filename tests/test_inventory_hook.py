@@ -3038,5 +3038,60 @@ class WatchSecsEnvTests(unittest.TestCase):
             self.assertLessEqual(len(ticks), 10)
             self.assertGreaterEqual(len(ticks), 1)
 
+class MaxPromptCharsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+
+    def _handle(self, prompt: str, env: dict) -> dict:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, env):
+                out = HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": prompt,
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+        return out
+
+    def test_over_cap_truncates_before_pick(self) -> None:
+        prompt = "jwt " + ("x" * 300)
+        self._handle(prompt, {"JEV_HOOK_MAX_PROMPT": "50"})
+        self.assertTrue(HOOK.LAST_DECISION["prompt_truncated"])
+        self.assertEqual(HOOK.LAST_DECISION["prompt_len"], 50)
+
+    def test_under_cap_untouched(self) -> None:
+        prompt = "Add JWT access tokens in Python"
+        self._handle(prompt, {"JEV_HOOK_MAX_PROMPT": "500"})
+        self.assertFalse(HOOK.LAST_DECISION["prompt_truncated"])
+        self.assertEqual(HOOK.LAST_DECISION["prompt_len"], len(prompt))
+
+    def test_cap_zero_never_truncates(self) -> None:
+        prompt = "jwt " + ("x" * 50000)
+        self._handle(prompt, {"JEV_HOOK_MAX_PROMPT": "0"})
+        self.assertFalse(HOOK.LAST_DECISION["prompt_truncated"])
+        self.assertEqual(HOOK.LAST_DECISION["prompt_len"], len(prompt))
+
+    def test_helper_env_and_policy_and_default(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_MAX_PROMPT": "123"}):
+            self.assertEqual(INV.hook_max_prompt_chars(), 123)
+        with patch.dict(os.environ, {"JEV_HOOK_MAX_PROMPT": "bogus"}):
+            self.assertEqual(INV.hook_max_prompt_chars(), 20000)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("JEV_HOOK_MAX_PROMPT", None)
+            self.assertEqual(INV.hook_max_prompt_chars(), 20000)
+
+    def test_env_report_exposes_resolved_cap(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_MAX_PROMPT": "77"}):
+            report = HOOK.env_report()
+        self.assertEqual(report["max_prompt_chars"], 77)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

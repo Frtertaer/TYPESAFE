@@ -5798,7 +5798,12 @@ def step_compact_hook(tmp: Path) -> dict:
                 str(spill),
             ]
         )
-        ok = rc == 0 and not stale.is_file()
+        # stale.txt is gone while the spill index ledger survives pruning
+        ok = (
+            rc == 0
+            and not stale.is_file()
+            and (spill / "index.jsonl").is_file()
+        )
     if ok:
         # fail-open stdin variants: empty, invalid JSON, non-dict, a small
         # result under the live-fat threshold, and a truncated event all

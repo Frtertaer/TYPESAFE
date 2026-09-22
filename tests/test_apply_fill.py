@@ -755,5 +755,27 @@ class WriteAskAtomicTests(unittest.TestCase):
             data = json.loads(out.read_text(encoding="utf-8"))
             self.assertIn("questions", data)
 
+    def test_ask_payload_is_lint_clean_choice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "ask.json"
+            hits = [
+                {"id": "kind:a", "kind": "kind", "name": "a", "description": "A"},
+                {"id": "kind:b", "kind": "kind", "name": "b"},
+            ]
+            FILL.write_apply_ask(out, "task", hits)
+            data = json.loads(out.read_text(encoding="utf-8"))
+        self.assertIn("state", data)
+        self.assertIn("task", data["state"])
+        questions = data["questions"]
+        self.assertIn("load_tools", questions)
+        q = questions["load_tools"]
+        self.assertEqual(q["type"], "choice")
+        criteria = q["criteria"]
+        self.assertIn("none", criteria)
+        self.assertIn("kind:a", criteria)
+        self.assertIn("kind:b", criteria)
+        for key, label in criteria.items():
+            self.assertTrue(str(label).strip(), "empty label for %s" % key)
+
 if __name__ == "__main__":
     unittest.main()

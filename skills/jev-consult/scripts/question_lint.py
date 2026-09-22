@@ -136,6 +136,15 @@ def lint_question(qid: str, q: dict, max_options: int = 255) -> list[dict]:
                 "noul has no criteria",
                 "Describe what a yes and a no mean, especially near the boundary.",
             )
+        elif isinstance(criteria, dict) and bool(
+            str(criteria.get("true", "")).strip()
+        ) != bool(str(criteria.get("false", "")).strip()):
+            add(
+                "J009",
+                "info",
+                "noul criteria describes only one side",
+                "Describe what a yes and a no mean, especially near the boundary.",
+            )
         elif (
             isinstance(criteria, dict)
             and str(criteria.get("true", "")).strip()
@@ -165,7 +174,7 @@ def lint_question(qid: str, q: dict, max_options: int = 255) -> list[dict]:
                 "%d of %d options have no description" % (len(undescribed), len(options)),
                 "Option descriptions are where domain rules live. Describe each option.",
             )
-        keys = list(options)
+        keys = list(options) if len(options) <= 512 else []
         for i, first in enumerate(keys):
             for second in keys[i + 1:]:
                 if not options[first] or not options[second]:

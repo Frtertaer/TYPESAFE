@@ -103,6 +103,31 @@ class LintQuestionTests(unittest.TestCase):
         findings = question_lint.lint_question("q", q)
         self.assertIn(("J011", "error"), rules(findings))
 
+    def test_j009_one_sided_noul_criteria(self) -> None:
+        for criteria in ({"true": "it holds"}, {"false": "it does not"}):
+            findings = question_lint.lint_question(
+                "q",
+                noul("Is the shortlist enough for this task?", criteria),
+            )
+            self.assertIn(("J009", "info"), rules(findings), "criteria=%r" % criteria)
+        # both sides described, or neither key present at all: no J009
+        for criteria in ({"true": "y", "false": "n"}, {"boundary": "edge"}):
+            findings = question_lint.lint_question(
+                "q",
+                noul("Is the shortlist enough for this task?", criteria),
+            )
+            self.assertNotIn(("J009", "info"), rules(findings), "criteria=%r" % criteria)
+
+    def test_j012_skips_oversized_criteria(self) -> None:
+        q = {
+            "type": "choice",
+            "instructions": "Which option should the coder pick for this task?",
+            "criteria": {"opt%d" % i: "same description" for i in range(600)},
+        }
+        findings = question_lint.lint_question("q", q)
+        self.assertIn(("J011", "error"), rules(findings))
+        self.assertNotIn(("J012", "warn"), rules(findings))
+
     def test_j014_identical_true_false_is_error(self) -> None:
         findings = question_lint.lint_question(
             "q",

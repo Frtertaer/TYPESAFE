@@ -5609,6 +5609,52 @@ def step_peer_fill_status(tmp: Path) -> dict:
                     )
                 except (OSError, ValueError):
                     ok = False
+            if ok:
+                # --from-miss loop: a miss marker written by the hook
+                # carries task+harness; the fill picks it up and copies
+                # the peer skill into the marker's harness (grok)
+                miss_cwd2 = tmp / "peer-miss-cwd"
+                miss_cwd2.mkdir(parents=True, exist_ok=True)
+                (miss_cwd2 / ".jev-tools-miss.json").write_text(
+                    json.dumps(
+                        {
+                            "task": "smoke",
+                            "harness": "grok",
+                            "written_at": int(time.time()),
+                            "empty": True,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                threading.Thread(
+                    target=server.handle_request, daemon=True
+                ).start()
+                rc, out = _run(
+                    [
+                        str(SCRIPTS / "peer_fill.py"),
+                        "--from-miss",
+                        "--home",
+                        str(peer_home),
+                        "--cwd",
+                        str(miss_cwd2),
+                        "--ask-file",
+                        str(tmp / "peer-miss-ask.json"),
+                    ],
+                    cwd=miss_cwd2,
+                    env=env2,
+                )
+                ok = (
+                    rc == 0
+                    and "copied" in out
+                    and (
+                        peer_home
+                        / ".grok"
+                        / "skills"
+                        / "smoke-thing"
+                        / "SKILL.md"
+                    ).is_file()
+                    and not (miss_cwd2 / ".jev-tools-miss.json").is_file()
+                )
         finally:
             server.server_close()
     return _step("peer_fill_status", ok, out.strip()[:120] or "rc=%d" % rc)

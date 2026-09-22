@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import socket
 import sys
 import time
 from pathlib import Path
@@ -215,10 +216,13 @@ def pick_with_jev(
         if not isinstance(answers, dict):
             return {"status": "error", "winner": None}
         decision = jev_mod.decide(answers, policy, irreversible=False)
-    except SystemExit:
-        return {"status": "error", "winner": None}
-    except Exception:
-        return {"status": "error", "winner": None}
+    except SystemExit as err:
+        msg = str(err.code or "").lower()
+        status = "timeout" if ("timed out" in msg or "timeout" in msg) else "error"
+        return {"status": status, "winner": None}
+    except Exception as err:
+        status = "timeout" if isinstance(err, (TimeoutError, socket.timeout)) else "error"
+        return {"status": status, "winner": None}
     picker = resolve_picker(picked, decision, policy)
     try:
         need = float((decision.get("picks") or {}).get("need_skill"))

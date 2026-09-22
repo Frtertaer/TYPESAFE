@@ -1418,7 +1418,24 @@ class PickWithJevTests(unittest.TestCase):
         )
         out = HOOK.pick_with_jev("t", "hermes", PICKED)
         self.assertEqual(out["status"], "none")
-        self.assertIsNone(out["winner"])
+
+    def test_post_timeout_message_maps_to_timeout(self) -> None:
+        sys.modules["jev"] = fake_jev(post_exc=SystemExit("Jev network error: timed out"))
+        self.assertEqual(HOOK.pick_with_jev("t", "hermes", PICKED)["status"], "timeout")
+
+    def test_post_timeout_error_maps_to_timeout(self) -> None:
+        sys.modules["jev"] = fake_jev(post_exc=TimeoutError("timed out"))
+        self.assertEqual(HOOK.pick_with_jev("t", "hermes", PICKED)["status"], "timeout")
+
+    def test_post_socket_timeout_maps_to_timeout(self) -> None:
+        import socket
+
+        sys.modules["jev"] = fake_jev(post_exc=socket.timeout("timed out"))
+        self.assertEqual(HOOK.pick_with_jev("t", "hermes", PICKED)["status"], "timeout")
+
+    def test_post_http_systemexit_stays_error(self) -> None:
+        sys.modules["jev"] = fake_jev(post_exc=SystemExit("Jev HTTP 500: nope"))
+        self.assertEqual(HOOK.pick_with_jev("t", "hermes", PICKED)["status"], "error")
 
     def test_strong_winner_sets_fields(self) -> None:
         sys.modules["jev"] = fake_jev(

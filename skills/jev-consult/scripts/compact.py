@@ -109,14 +109,14 @@ def spill(text: str, spill_dir: Path | None = None) -> Path | None:
             os.chmod(target, 0o700)
         except OSError:
             pass
-        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+        digest = hashlib.sha256(text.encode("utf-8", "surrogateescape")).hexdigest()[:16]
         path = target / (digest + ".txt")
         if path.exists():
             path.touch()
         else:
             tmp = target / (digest + ".tmp.%d" % os.getpid())
             try:
-                tmp.write_text(text, encoding="utf-8")
+                tmp.write_text(text, encoding="utf-8", errors="surrogateescape")
                 try:
                     os.chmod(tmp, 0o600)
                 except OSError:

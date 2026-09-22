@@ -560,6 +560,18 @@ class CompactTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(len(files), 1)
 
+    def test_spill_surrogate_bytes_do_not_crash(self):
+        # Tool output decoded with surrogateescape can carry lone surrogates;
+        # spill must still write (and round-trip) instead of raising UnicodeError.
+        text = "x" * C.LIVE_FAT + "\udcff\udc80\udcaa"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = C.spill(text, Path(tmp))
+            self.assertIsNotNone(path)
+            read_back = path.read_text(encoding="utf-8", errors="surrogateescape")
+            self.assertEqual(read_back, text)
+            cut = C.abridge_live(text, spill_dir=Path(tmp))
+            self.assertIn(str(path), cut)
+
     def test_spill_env_path_override_and_disable(self):
         text = "w" * (C.LIVE_FAT + 10)
         with tempfile.TemporaryDirectory() as tmp:

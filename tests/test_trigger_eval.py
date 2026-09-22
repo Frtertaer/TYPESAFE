@@ -1027,6 +1027,45 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertTrue(all(t["ok"] for t in lines))
             self.assertEqual(len(buf.getvalue().splitlines()), 2)
 
+    def test_watch_tick_reports_gates_changed(self) -> None:
+        def res(cov):
+            return {
+                "ok": True,
+                "coverage": cov,
+                "hits": 1,
+                "cases": [
+                    {
+                        "id": "x",
+                        "covers": [],
+                        "ok": True,
+                        "should_trigger": True,
+                        "score": 1.0,
+                        "lexical": True,
+                    }
+                ],
+                "worst_positive": 1.0,
+                "best_negative": 0.0,
+                "margin": 1.15,
+                "n_positives": 1,
+                "n_negatives": 0,
+            }
+
+        buf = io.StringIO()
+        with patch.object(
+            te, "evaluate", side_effect=[res(1.0), res(0.5), res(0.5)]
+        ):
+            with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "2"}):
+                with redirect_stdout(buf):
+                    te.main(["--watch", "0.01", "--min-coverage", "0.9"])
+        ticks = [
+            json.loads(l)
+            for l in buf.getvalue().splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertFalse(ticks[0]["gates_changed"])
+        self.assertTrue(ticks[1]["gates_changed"])
+
     def test_watch_rc_reflects_last_verdict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cases = write_cases(

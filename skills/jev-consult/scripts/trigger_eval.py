@@ -483,6 +483,7 @@ def main(argv: list[str] | None = None) -> int:
         ticks = 0
         dead = _watch.deadline("JEV_TRIGGER_WATCH_SECS", getattr(args, "watch_max", 0.0))
         cur = result
+        prev_gates: list[str] | None = None
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             coverage_ok = (
                 args.min_coverage is None
@@ -520,7 +521,9 @@ def main(argv: list[str] | None = None) -> int:
                 "min_coverage": args.min_coverage,
                 "coverage_ok": coverage_ok,
                 "failed_gates": failed,
+                "gates_changed": prev_gates is not None and failed != prev_gates,
             }
+            prev_gates = list(failed)
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(failed))
             if not _write_verdict(cur):
                 args.verdict = ""  # warn once, stop retrying

@@ -334,7 +334,9 @@ class StubJevE2ETests(unittest.TestCase):
     lands in the sidecar. Exercises the wire path, auth header, response
     validation, and the pick→sidecar leg — not just the miss path."""
 
-    def _stub_server(self, fail_first: int = 0, garbage: bool = False):
+    def _stub_server(
+        self, fail_first: int = 0, garbage: bool = False, stall_s: float = 0
+    ):
         from http.server import BaseHTTPRequestHandler, HTTPServer
 
         picked_id: dict = {}
@@ -344,6 +346,19 @@ class StubJevE2ETests(unittest.TestCase):
             def do_POST(self):  # noqa: N802 - stdlib handler name
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
                 state["calls"] += 1
+                if stall_s:
+                    import time as _t
+
+                    _t.sleep(stall_s)
+                    # client already timed out; answering now raises EPIPE
+                    try:
+                        self.send_response(200)
+                        self.send_header("Content-Length", "2")
+                        self.end_headers()
+                        self.wfile.write(b"{}")
+                    except OSError:
+                        pass
+                    return
                 if state["garbage"]:
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
@@ -397,6 +412,7 @@ class StubJevE2ETests(unittest.TestCase):
         fail_first: int = 0,
         extra_env: dict | None = None,
         garbage: bool = False,
+        stall_s: float = 0,
     ):
         """Run the hook subprocess against the stub; return (proc, picked,
         state, sidecar dict, log rows)."""
@@ -416,7 +432,7 @@ class StubJevE2ETests(unittest.TestCase):
                 (SCRIPTS.parent / "policy.json").read_text(encoding="utf-8")
             )
             srv, picked, state = self._stub_server(
-                fail_first=fail_first, garbage=garbage
+                fail_first=fail_first, garbage=garbage, stall_s=stall_s
             )
             try:
                 policy_src["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
@@ -508,6 +524,16 @@ class StubJevE2ETests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr[:400])
         self.assertGreaterEqual(state["calls"], 1)
         self.assertNotIn("id", picked)
+        self.assertNotIn(b"Traceback", proc.stderr)
+        self.assertEqual(data.get("jev_pick"), None)
+
+    def test_hook_survives_stalled_stub(self) -> None:
+        # server accepts then sleeps past JEV_HOOK_TIMEOUT -> timeout, rc 0
+        proc, picked, state, data, _rows = self._run_against_stub(
+            stall_s=4, extra_env={"JEV_HOOK_TIMEOUT": "0.5"}
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[:400])
+        self.assertGreaterEqual(state["calls"], 1)
         self.assertNotIn(b"Traceback", proc.stderr)
         self.assertEqual(data.get("jev_pick"), None)
 

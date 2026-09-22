@@ -1109,7 +1109,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
-    parser.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim verdict JSON (stable|changed, ticks, added, removed) to PATH when the loop ends.")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim verdict JSON (stable|changed, ticks, added, removed) to PATH, refreshed every tick.")
     parser.add_argument("--id", metavar="NAME", default="", help="Print the single matching item's JSON (matches id or name).")
     parser.add_argument(
         "--explain",
@@ -1327,6 +1327,22 @@ def main(argv: list[str] | None = None) -> int:
     all_added: set = set()
     all_removed: set = set()
     last_tick: dict | None = None
+    verdict_ok = True
+
+    def _write_verdict(tick_count: int) -> bool:
+        if not args.verdict:
+            return True
+        return _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "changed" if (all_added or all_removed) else "stable",
+                "ticks": tick_count,
+                "added": sorted(all_added),
+                "removed": sorted(all_removed),
+                "counts": (last_tick or {}).get("counts", {}),
+            },
+        )
+
     while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
         time.sleep(watch_seconds)
         fresh = scan(harness, home=home, hermes=hermes)
@@ -1351,25 +1367,10 @@ def main(argv: list[str] | None = None) -> int:
         last_tick = tick
         _watch.emit(tick, args.out, quiet=args.quiet, bad=ticks == 0 or bool(tick.get("added") or tick.get("removed")))
         ticks += 1
-    if args.verdict:
-        try:
-            Path(args.verdict).write_text(
-                json.dumps(
-                    {
-                        "verdict": "changed" if (all_added or all_removed) else "stable",
-                        "ticks": ticks,
-                        "added": sorted(all_added),
-                        "removed": sorted(all_removed),
-                        "counts": (last_tick or {}).get("counts", {}),
-                    },
-                    indent=2,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-        except OSError as exc:
-            sys.stderr.write("--verdict failed: %s\n" % exc)
-            return 1
+        if verdict_ok and not _write_verdict(ticks):
+            verdict_ok = False  # warn once, stop retrying
+    if args.verdict and verdict_ok and not _write_verdict(ticks):
+        return 1
     return 0
 
 

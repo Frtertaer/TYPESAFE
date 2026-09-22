@@ -325,6 +325,36 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(payload["added"], ["b"])
             self.assertEqual(payload["removed"], ["a"])
 
+    def test_watch_verdict_refreshed_every_tick(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            buf = StringIO()
+            real_write = Path.write_text
+            calls = []
+
+            def counting_write(self, *a, **kw):
+                calls.append(str(self))
+                return real_write(self, *a, **kw)
+
+            with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+                with patch.object(Path, "write_text", counting_write):
+                    with redirect_stdout(buf):
+                        code = inv.main(
+                            [
+                                "--harness", "hermes",
+                                "--hermes-home", str(FIXTURE),
+                                "--watch", "0.01",
+                                "--verdict", str(verdict),
+                            ]
+                        )
+            self.assertEqual(code, 0)
+            verdict_writes = [c for c in calls if c == str(verdict)]
+            self.assertGreaterEqual(len(verdict_writes), 2)
+
     def test_diff_reports_added_removed_names(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

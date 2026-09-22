@@ -1833,6 +1833,27 @@ def step_decisions(tmp: Path) -> dict:
             ok = rc == 0 and payload.get("verdict") == "empty"
         except (OSError, ValueError):
             ok = False
+    if ok:
+        # --jq inside --watch prints just the named tick field(s)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--jq",
+                "count",
+            ]
+        )
+        lines = [
+            ln.strip()
+            for ln in out.splitlines()
+            if ln.strip().isdigit()
+        ]
+        ok = rc == 0 and len(lines) == 2 and len(set(lines)) == 1
     return _step("decisions", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

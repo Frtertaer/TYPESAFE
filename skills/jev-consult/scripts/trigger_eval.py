@@ -287,6 +287,12 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="Write a markdown eval report (verdict, stats, per-case table) to PATH.",
     )
+    parser.add_argument(
+        "--verdict",
+        metavar="PATH",
+        default="",
+        help="Write a slim verdict JSON ({verdict, ok, failed_gates, coverage, hits, total, worst_positive, best_negative, margin}) to PATH.",
+    )
     args = parser.parse_args(argv)
     if args.env:
         scorer_margin = None
@@ -400,6 +406,42 @@ def main(argv: list[str] | None = None) -> int:
             )
         ]
 
+    def _write_verdict(res: dict) -> bool:
+        """Write the slim verdict JSON to --verdict PATH; True on success."""
+        if not args.verdict or not res:
+            return True
+        failed = []
+        if not res["ok"]:
+            failed.append("margin")
+        if args.min_coverage is not None and res["coverage"] < args.min_coverage:
+            failed.append("coverage")
+        if args.min_covers:
+            counts: dict[str, int] = {}
+            for row in res["cases"]:
+                for tag in row["covers"] or []:
+                    counts[tag] = counts.get(tag, 0) + 1
+            if any(n < args.min_covers for n in counts.values()):
+                failed.append("covers")
+        payload = {
+            "verdict": "PASS" if not failed else "FAIL",
+            "ok": bool(res["ok"]),
+            "failed_gates": failed,
+            "coverage": res["coverage"],
+            "hits": res["hits"],
+            "total": len(res["cases"]),
+            "worst_positive": res["worst_positive"],
+            "best_negative": res["best_negative"],
+            "margin": res["margin"],
+        }
+        try:
+            Path(args.verdict).write_text(
+                json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            sys.stderr.write("--verdict failed: %s\n" % exc)
+            return False
+        return True
+
     if args.watch and args.watch > 0:
         import time as _time
 
@@ -462,6 +504,8 @@ def main(argv: list[str] | None = None) -> int:
                 _watch.emit({"ts": int(_time.time()), "ok": None}, args.out)
                 ticks += 1
                 cur = result
+        if cur is not None:
+            _write_verdict(cur)
         if cur is None or not cur["ok"]:
             return 1
         if args.min_coverage is not None and cur["coverage"] < args.min_coverage:
@@ -480,6 +524,8 @@ def main(argv: list[str] | None = None) -> int:
         ):
             return 1
         return 0
+    if args.verdict and not _write_verdict(result):
+        return 1
     if args.report:
         if args.json:
             uncovered_ids = _uncovered()

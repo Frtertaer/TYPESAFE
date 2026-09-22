@@ -694,6 +694,56 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertIn("| pos-approach | True | True |", text)
             self.assertIn("- uncovered:", text)
 
+    def test_verdict_writes_slim_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "verdict.json"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(["--verdict", str(path), "--quiet"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "PASS")
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["failed_gates"], [])
+            self.assertEqual(payload["total"], 25)
+            self.assertNotIn("cases", payload)
+            self.assertNotIn("uncovered", payload)
+
+    def test_verdict_names_failed_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "verdict.json"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(
+                    [
+                        "--verdict",
+                        str(path),
+                        "--quiet",
+                        "--min-coverage",
+                        "0.99",
+                    ]
+                )
+            self.assertEqual(rc, 1)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "FAIL")
+            self.assertIn("coverage", payload["failed_gates"])
+
+    def test_verdict_watch_writes_final_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "verdict.json"
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {"JEV_TRIGGER_WATCH_MAX": "1", "TYPESAFE_API_KEY": ""},
+            ):
+                with redirect_stdout(buf):
+                    rc = te.main(
+                        ["--watch", "0.01", "--verdict", str(path), "--quiet"]
+                    )
+            self.assertIn(rc, (0, 1))
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertIn(payload["verdict"], ("PASS", "FAIL"))
+
     def test_report_json_writes_object(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "report.json"

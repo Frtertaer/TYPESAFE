@@ -1685,5 +1685,30 @@ class WatchSecsEnvTests(unittest.TestCase):
         self.assertLessEqual(len(ticks), 10)
         self.assertGreaterEqual(len(ticks), 1)
 
+class WatchJqNestedTests(unittest.TestCase):
+    def test_watch_jq_digs_nested_tick_field(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+        from unittest.mock import patch
+
+        buf = StringIO()
+        err = StringIO()
+        with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+            with redirect_stdout(buf), redirect_stderr(err):
+                code = inv.main(
+                    [
+                        "--harness", "hermes",
+                        "--hermes-home", str(FIXTURE),
+                        "--watch", "0.01",
+                        "--jq", "counts.skill,counts.mcp",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        lines = [l for l in buf.getvalue().splitlines() if l.strip()]
+        self.assertEqual(len(lines), 4)
+        for line in lines:
+            self.assertTrue(line.isdigit() or line == "null", line)
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

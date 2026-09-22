@@ -23,6 +23,12 @@ import re
 import sys
 from pathlib import Path
 
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+import _watch  # noqa: E402
+
 DEFAULT_POLICY = Path(__file__).resolve().parent.parent / "policy.json"
 
 QUESTION_TYPES = ("choice", "noul", "score")
@@ -499,10 +505,7 @@ def main(argv: list[str] | None = None) -> int:
     if watch_seconds > 0:
         import time as _time
 
-        try:
-            max_ticks = int(os.environ.get("JEV_PLINT_WATCH_MAX", "") or 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_PLINT_WATCH_MAX")
         ticks = 0
         while max_ticks <= 0 or ticks < max_ticks:
             rows = lint_policy(policy)
@@ -513,15 +516,7 @@ def main(argv: list[str] | None = None) -> int:
                 "warnings": sum(1 for r in rows if r["severity"] == "warn"),
                 "infos": sum(1 for r in rows if r["severity"] == "info"),
             }
-            line = json.dumps(tick) + "\n"
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            if out_path:
-                try:
-                    with Path(out_path).open("a", encoding="utf-8") as fh:
-                        fh.write(line)
-                except OSError:
-                    pass
+            _watch.emit(tick, out_path)
             ticks += 1
             _time.sleep(watch_seconds)
             try:

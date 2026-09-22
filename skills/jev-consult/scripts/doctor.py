@@ -16,6 +16,12 @@ import os
 import sys
 from pathlib import Path
 
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+import _watch  # noqa: E402
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
 POLICY_PATH = SKILL_DIR / "policy.json"
@@ -262,10 +268,7 @@ def main(argv: list[str] | None = None) -> int:
         import time as _time
         from datetime import datetime, timezone
 
-        try:
-            max_ticks = max(int(os.environ.get("JEV_DOCTOR_WATCH_MAX", "0")), 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_DOCTOR_WATCH_MAX")
         count = 0
         last: dict = {}
         while True:
@@ -277,15 +280,7 @@ def main(argv: list[str] | None = None) -> int:
                 "failed": failed,
                 "ok": failed == 0,
             }
-            line = json.dumps(last) + "\n"
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            if args.out:
-                try:
-                    with Path(args.out).open("a", encoding="utf-8") as fh:
-                        fh.write(line)
-                except OSError:
-                    pass
+            _watch.emit(last, args.out)
             count += 1
             if max_ticks and count >= max_ticks:
                 break

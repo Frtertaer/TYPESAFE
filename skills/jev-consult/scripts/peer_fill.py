@@ -20,6 +20,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import _watch  # noqa: E402
 from inventory import (  # noqa: E402
     HARNESSES,
     KIND_SKILL,
@@ -355,10 +356,7 @@ def main() -> int:
             sys.stdout.write(json.dumps({"error": "fail_open"}) + "\n")
         return 0
     if args.watch and args.watch > 0:
-        try:
-            max_ticks = int(os.environ.get("JEV_PEER_WATCH_MAX", "") or 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_PEER_WATCH_MAX")
         ticks = 0
         ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
         while max_ticks <= 0 or ticks < max_ticks:
@@ -372,15 +370,7 @@ def main() -> int:
                 }
             except Exception:
                 tick = {"ts": int(time.time()), "miss": None, "ask": None}
-            line = json.dumps(tick) + "\n"
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            if args.out:
-                try:
-                    with Path(args.out).open("a", encoding="utf-8") as fh:
-                        fh.write(line)
-                except OSError:
-                    pass
+            _watch.emit(tick, args.out)
             ticks += 1
             time.sleep(args.watch)
         return 0

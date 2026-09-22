@@ -12,6 +12,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+import _watch  # noqa: E402
+
 EMPTY: dict[str, Any] = {
     "plan": "",
     "current_step": "",
@@ -315,10 +321,7 @@ def cmd_history(args: argparse.Namespace) -> int:
     if getattr(args, "watch", 0.0) and args.watch > 0:
         import time as _time
 
-        try:
-            max_ticks = int(os.environ.get("JEV_TRACE_WATCH_MAX", "") or 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX")
         ticks = 0
         while max_ticks <= 0 or ticks < max_ticks:
             fresh = load(path).get("history")
@@ -329,8 +332,7 @@ def cmd_history(args: argparse.Namespace) -> int:
             )
             filtered = _filtered(fresh)
             tick = {"ts": int(_time.time()), "picks": len(filtered) if filtered is not None else None}
-            sys.stdout.write(json.dumps(tick) + "\n")
-            sys.stdout.flush()
+            _watch.emit(tick)
             ticks += 1
             _time.sleep(args.watch)
         return 0
@@ -455,18 +457,14 @@ def cmd_notes(args: argparse.Namespace) -> int:
     if getattr(args, "watch", 0.0) and args.watch > 0:
         import time as _time
 
-        try:
-            max_ticks = int(os.environ.get("JEV_TRACE_WATCH_MAX", "") or 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX")
         ticks = 0
         while max_ticks <= 0 or ticks < max_ticks:
             fresh = load(path).get("notes")
             fresh = fresh if isinstance(fresh, list) else []
             filtered = _filtered(fresh)
             tick = {"ts": int(_time.time()), "notes": len(filtered) if filtered is not None else None}
-            sys.stdout.write(json.dumps(tick) + "\n")
-            sys.stdout.flush()
+            _watch.emit(tick)
             ticks += 1
             _time.sleep(args.watch)
         return 0
@@ -511,10 +509,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
     if getattr(args, "watch", 0.0) and args.watch > 0:
         import time as _time
 
-        try:
-            max_ticks = int(os.environ.get("JEV_TRACE_WATCH_MAX", "") or 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX")
         ticks = 0
         while max_ticks <= 0 or ticks < max_ticks:
             cur = load(path)
@@ -525,8 +520,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 "history": len(cur.get("history") or []),
                 "inspected": len(cur.get("inspected") or []),
             }
-            sys.stdout.write(json.dumps(tick) + "\n")
-            sys.stdout.flush()
+            _watch.emit(tick)
             ticks += 1
             _time.sleep(args.watch)
         return 0 if tick["exists"] else 1
@@ -565,10 +559,7 @@ def cmd_state(args: argparse.Namespace) -> int:
     if getattr(args, "watch", 0.0) and args.watch > 0:
         import time as _time
 
-        try:
-            max_ticks = int(os.environ.get("JEV_TRACE_WATCH_MAX", "") or 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX")
         ticks = 0
         while max_ticks <= 0 or ticks < max_ticks:
             data = load(path)

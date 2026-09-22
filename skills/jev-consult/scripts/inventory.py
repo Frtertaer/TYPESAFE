@@ -15,6 +15,12 @@ import sys
 import time
 from pathlib import Path
 
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+import _watch  # noqa: E402
+
 CATALOGS = (
     ("skills.sh", "https://skills.sh"),
     ("claude-plugins-official", "https://github.com/anthropics/claude-plugins-official"),
@@ -1307,10 +1313,7 @@ def main(argv: list[str] | None = None) -> int:
     watch_seconds = getattr(args, "watch", 0.0) or 0.0
     if watch_seconds <= 0:
         return 0
-    try:
-        max_ticks = int(os.environ.get("JEV_INV_WATCH_MAX", "") or 0)
-    except ValueError:
-        max_ticks = 0
+    max_ticks = _watch.cap("JEV_INV_WATCH_MAX")
     ticks = 0
     prev_ids: set | None = None
     while max_ticks <= 0 or ticks < max_ticks:
@@ -1332,15 +1335,7 @@ def main(argv: list[str] | None = None) -> int:
             tick["added"] = sorted(cur_ids - prev_ids)
             tick["removed"] = sorted(prev_ids - cur_ids)
         prev_ids = cur_ids
-        line = json.dumps(tick) + "\n"
-        sys.stdout.write(line)
-        sys.stdout.flush()
-        if args.out:
-            try:
-                with Path(args.out).open("a", encoding="utf-8") as fh:
-                    fh.write(line)
-            except OSError:
-                pass
+        _watch.emit(tick, args.out)
         ticks += 1
     return 0
 

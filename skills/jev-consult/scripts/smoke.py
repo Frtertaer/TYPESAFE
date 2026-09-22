@@ -19,6 +19,11 @@ import tempfile
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+import _watch  # noqa: E402
+
 SKILL_DIR = SCRIPTS.parent
 
 
@@ -372,10 +377,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.watch and args.watch > 0:
         import time as _time
 
-        try:
-            max_ticks = int(os.environ.get("JEV_SMOKE_WATCH_MAX", "") or 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_SMOKE_WATCH_MAX")
         ticks = 0
         while max_ticks <= 0 or ticks < max_ticks:
             steps = _run_steps()
@@ -384,15 +386,7 @@ def main(argv: list[str] | None = None) -> int:
                 "ok": all(s["ok"] for s in steps),
                 "failed": [s["name"] for s in steps if not s["ok"]],
             }
-            line = json.dumps(tick) + "\n"
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            if args.out:
-                try:
-                    with Path(args.out).open("a", encoding="utf-8") as fh:
-                        fh.write(line)
-                except OSError:
-                    pass
+            _watch.emit(tick, args.out)
             ticks += 1
             _time.sleep(args.watch)
         return 0 if tick["ok"] else 1

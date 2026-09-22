@@ -2097,6 +2097,10 @@ class HookE2ETests(unittest.TestCase):
                 self.HOOK_PATH.parent / "inventory.py",
                 grok_hook.parent / "inventory.py",
             )
+            shutil.copyfile(
+                self.HOOK_PATH.parent / "_watch.py",
+                grok_hook.parent / "_watch.py",
+            )
             skill = home / ".grok" / "skills" / "jwt-stuff"
             skill.mkdir(parents=True)
             (skill / "SKILL.md").write_text(

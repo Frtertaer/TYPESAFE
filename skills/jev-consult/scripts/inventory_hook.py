@@ -19,6 +19,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import _watch  # noqa: E402
 from inventory import (  # noqa: E402
     hook_limit,
     MISS_NAME,
@@ -571,10 +572,7 @@ def main(argv: list[str] | None = None) -> int:
             idx = argv.index("--out")
             if idx + 1 < len(argv):
                 watch_out = argv[idx + 1]
-        try:
-            max_ticks = int(os.environ.get("JEV_HOOK_WATCH_MAX", "") or 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_HOOK_WATCH_MAX")
         ticks = 0
         while max_ticks <= 0 or ticks < max_ticks:
             tick: dict = {"ts": int(time.time())}
@@ -591,15 +589,7 @@ def main(argv: list[str] | None = None) -> int:
             tick["winner"] = (
                 ((LAST_DECISION or {}).get("winner") or {}).get("name") or None
             )
-            line = json.dumps(tick) + "\n"
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            if watch_out:
-                try:
-                    with Path(watch_out).open("a", encoding="utf-8") as fh:
-                        fh.write(line)
-                except OSError:
-                    pass
+            _watch.emit(tick, watch_out)
             ticks += 1
             time.sleep(watch_seconds)
         return 0 if tick["winner"] else 1

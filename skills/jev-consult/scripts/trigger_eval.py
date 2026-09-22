@@ -18,6 +18,12 @@ import os
 import sys
 from pathlib import Path
 
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+import _watch  # noqa: E402
+
 SCRIPTS = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPTS.parent
 REPO_ROOT = SCRIPTS.parents[2]
@@ -395,10 +401,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.watch and args.watch > 0:
         import time as _time
 
-        try:
-            max_ticks = int(os.environ.get("JEV_TRIGGER_WATCH_MAX", "") or 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_TRIGGER_WATCH_MAX")
         ticks = 0
         cur = result
         while max_ticks <= 0 or ticks < max_ticks:
@@ -439,15 +442,7 @@ def main(argv: list[str] | None = None) -> int:
                 "coverage_ok": coverage_ok,
                 "failed_gates": failed,
             }
-            line = json.dumps(tick) + "\n"
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            if args.out:
-                try:
-                    with open(args.out, "a", encoding="utf-8") as fh:
-                        fh.write(line)
-                except OSError:
-                    pass  # fail-open: ticks still print to stdout
+            _watch.emit(tick, args.out)
             ticks += 1
             _time.sleep(args.watch)
             try:
@@ -461,15 +456,7 @@ def main(argv: list[str] | None = None) -> int:
             except (OSError, ValueError, KeyError):
                 cur = None
             if cur is None:
-                line = json.dumps({"ts": int(_time.time()), "ok": None}) + "\n"
-                sys.stdout.write(line)
-                sys.stdout.flush()
-                if args.out:
-                    try:
-                        with open(args.out, "a", encoding="utf-8") as fh:
-                            fh.write(line)
-                    except OSError:
-                        pass
+                _watch.emit({"ts": int(_time.time()), "ok": None}, args.out)
                 ticks += 1
                 cur = result
         if cur is None or not cur["ok"]:

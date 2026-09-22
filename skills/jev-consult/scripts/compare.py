@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+import _watch  # noqa: E402
 
 
 def load_jev():
@@ -256,10 +260,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.watch and args.watch > 0:
         import time as _time
 
-        try:
-            max_ticks = int(os.environ.get("JEV_COMPARE_WATCH_MAX", "") or 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_COMPARE_WATCH_MAX")
         ticks = 0
         while max_ticks <= 0 or ticks < max_ticks:
             cur = run(
@@ -273,15 +274,7 @@ def main(argv: list[str] | None = None) -> int:
                 "cases": len(cur["rows"]),
                 "failures": len(strict_failures(cur["rows"], args.live)),
             }
-            line = json.dumps(tick) + "\n"
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            if args.out:
-                try:
-                    with Path(args.out).open("a", encoding="utf-8") as fh:
-                        fh.write(line)
-                except OSError:
-                    pass
+            _watch.emit(tick, args.out)
             ticks += 1
             _time.sleep(args.watch)
         return 0 if tick["failures"] == 0 else 1

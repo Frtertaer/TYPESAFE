@@ -21,6 +21,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import _watch  # noqa: E402
 from inventory import (  # noqa: E402
     MISS_NAME,
     SIDECAR_NAME,
@@ -450,10 +451,7 @@ def main() -> int:
     home = Path(args.home) if args.home else user_home()
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home()
     if args.watch and args.watch > 0:
-        try:
-            max_ticks = int(os.environ.get("JEV_CATALOG_WATCH_MAX", "") or 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_CATALOG_WATCH_MAX")
         ticks = 0
         while max_ticks <= 0 or ticks < max_ticks:
             tick = {"ts": int(time.time())}
@@ -464,15 +462,7 @@ def main() -> int:
             except Exception:
                 tick["hits"] = 0
                 tick["cached"] = False
-            line = json.dumps(tick) + "\n"
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            if args.out:
-                try:
-                    with Path(args.out).open("a", encoding="utf-8") as fh:
-                        fh.write(line)
-                except OSError:
-                    pass
+            _watch.emit(tick, args.out)
             ticks += 1
             time.sleep(args.watch)
         return 0

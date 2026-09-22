@@ -22,6 +22,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import _watch  # noqa: E402
 from catalog_fill import BLOCKED_INSPECT, blocked_text, slug_id  # noqa: E402
 from inventory import (  # noqa: E402
     MISS_NAME,
@@ -371,10 +372,7 @@ def main() -> int:
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     if args.watch and args.watch > 0:
-        try:
-            max_ticks = int(os.environ.get("JEV_APPLY_WATCH_MAX", "") or 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_APPLY_WATCH_MAX")
         ticks = 0
         ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
         miss_path = cwd / MISS_NAME
@@ -385,14 +383,7 @@ def main() -> int:
                 "miss": bool(miss),
                 "ask": ask_path.is_file(),
             }
-            sys.stdout.write(json.dumps(tick) + "\n")
-            sys.stdout.flush()
-            if args.out:
-                try:
-                    with Path(args.out).open("a", encoding="utf-8") as fh:
-                        fh.write(json.dumps(tick) + "\n")
-                except OSError:
-                    pass
+            _watch.emit(tick, args.out)
             ticks += 1
             time.sleep(args.watch)
         return 0

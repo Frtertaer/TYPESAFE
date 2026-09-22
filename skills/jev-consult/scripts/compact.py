@@ -27,6 +27,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+import _watch  # noqa: E402
+
 STATE_CONTEXT = (
     "A coding assistant conversation is being compacted to free context. "
     "`history` is the whole conversation so far, oldest first; tool outputs "
@@ -1231,10 +1237,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
     if getattr(args, "watch", None):
         import time as _time
 
-        try:
-            max_ticks = int(os.environ.get("JEV_COMPACT_WATCH_MAX", "") or 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_COMPACT_WATCH_MAX")
         ticks = 0
         cur: dict[str, Any] = {}
         while max_ticks <= 0 or ticks < max_ticks:
@@ -1254,8 +1257,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
                 "reduction": stats.get("reduction"),
                 "fallback": bool(stats.get("fallback")),
             }
-            sys.stdout.write(json.dumps(tick) + "\n")
-            sys.stdout.flush()
+            _watch.emit(tick)
             ticks += 1
             _time.sleep(args.watch)
         return 1 if cur.get("stats", {}).get("fallback") else 0

@@ -18,6 +18,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import _watch  # noqa: E402
 import inventory
 
 
@@ -876,10 +877,7 @@ def main(argv: list[str] | None = None) -> int:
         return items
     entries = _filtered(entries)
     if getattr(args, "watch", 0) > 0:
-        try:
-            max_ticks = int(os.environ.get("JEV_DECISIONS_WATCH_MAX", "") or 0)
-        except ValueError:
-            max_ticks = 0
+        max_ticks = _watch.cap("JEV_DECISIONS_WATCH_MAX")
         ticks = 0
         prev_keys: set | None = None
         while max_ticks <= 0 or ticks < max_ticks:
@@ -899,8 +897,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 else:
                     tick["delta_pct"] = None
-            sys.stdout.write(json.dumps(tick) + "\n")
-            sys.stdout.flush()
+            _watch.emit(tick)
             prev_keys = cur_keys
             ticks += 1
             time.sleep(args.watch)

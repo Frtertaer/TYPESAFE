@@ -328,11 +328,15 @@ class GitEvidence:
         self.repo = repo.resolve()
         self.database = database.resolve()
 
+    @staticmethod
+    def _git_env():
+        return {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+
     def _git(self, args, settings, allowed=(0,)):
         try:
             result = subprocess.run(
                 ["git", *GIT_FLAGS, "--no-pager", "-C", str(self.repo), *args], capture_output=True,
-                timeout=settings["command_timeout_seconds"], check=False,
+                timeout=settings["command_timeout_seconds"], check=False, env=self._git_env(),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ProgressError("GIT_UNAVAILABLE", "Git command could not complete") from exc
@@ -396,12 +400,14 @@ class GitEvidence:
     @staticmethod
     def _check_env():
         scrub = re.compile(r"(?i)(api[_-]?key|secret|token|password|credential)")
-        return {key: value for key, value in os.environ.items() if not scrub.search(key)}
+        return {key: value for key, value in os.environ.items()
+                if not key.upper().startswith("GIT_") and not scrub.search(key)}
 
     def checks(self, definitions, names, settings, revision):
         results = []
         with self._worktree(revision, settings) as cwd:
             env = self._check_env()
+            env["PYTHONPATH"] = str(cwd) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
             for name in names:
                 argv = list(definitions[name])
                 if argv[0] == "{python}":
@@ -469,7 +475,7 @@ def _clean_checks(checks):
 
 
 def _line_digest(path: str, text: str) -> str:
-    return hashlib.sha256((path + "\x00" + text).encode("utf-8")).hexdigest()
+    return hashlib.sha256((path + "\x00" + text).encode("utf-8", "surrogateescape")).hexdigest()
 
 
 STRUCTURAL_PREFIXES = ("new file mode", "deleted file mode", "old mode", "new mode",
@@ -479,7 +485,7 @@ BINARY_MARKERS = ("Binary files", "GIT binary patch", "Submodule ")
 
 
 def _content_digest(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return hashlib.sha256(text.encode("utf-8", "surrogateescape")).hexdigest()
 
 
 def _diff_line_hashes(diff: str) -> dict:

@@ -669,7 +669,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
-    parser.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict, count, added, removed, ticks} JSON to PATH, refreshed every tick.")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON to PATH — with --watch a {verdict, count, added, removed, ticks} payload refreshed every tick; without it a one-shot {verdict: ok|empty, count, ticks: 1} probe of the filtered entries.")
     args = parser.parse_args(argv)
     file_arg = args.file or os.environ.get("JEV_DECISIONS", "").strip()
     path = Path(file_arg) if file_arg else inventory.decisions_log_path()
@@ -964,6 +964,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.verdict and verdict_ok and not _write_verdict():
             return 1
         return 1 if tick.get("removed") else 0
+
+    if args.verdict:
+        if not _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "ok" if entries else "empty",
+                "ticks": 1,
+                "count": len(entries),
+            },
+        ):
+            return 1
 
     if args.prune:
         if since is None and until is None and not (

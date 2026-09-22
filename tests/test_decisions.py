@@ -2090,6 +2090,46 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(payload["added"], 1)
             self.assertEqual(payload["removed"], 1)
 
+    def test_nonwatch_verdict_ok_with_entries(self):
+        import io
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1, "jev_status": "winner"}])
+            verdict = Path(tmp) / "v.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                rc = decisions.main(
+                    ["--file", str(path), "--verdict", str(verdict), "--count"]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "ok")
+            self.assertEqual(payload["count"], 1)
+            self.assertEqual(payload["ticks"], 1)
+
+    def test_nonwatch_verdict_empty_when_no_matches(self):
+        import io
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1, "jev_status": "winner"}])
+            verdict = Path(tmp) / "v.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                rc = decisions.main(
+                    [
+                        "--file", str(path),
+                        "--verdict", str(verdict),
+                        "--status", "timeout",
+                        "--count",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "empty")
+            self.assertEqual(payload["count"], 0)
+
     def test_nth_prints_nth_entry(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

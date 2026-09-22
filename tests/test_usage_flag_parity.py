@@ -28,13 +28,32 @@ class UsageFlagParityTests(unittest.TestCase):
             if not usage:
                 continue
             body = src.replace(usage, "")
-            claimed = set(re.findall(r"--[a-z-]+", usage))
-            implemented = set(re.findall(r"[\"'](--[a-z-]+)[\"']", body))
+            claimed = set(re.findall(r"--[a-z][a-z-]*", usage))
+            implemented = set(re.findall(r"[\"'](--[a-z][a-z-]*)[\"']", body))
             if "maybe_version" in body:
                 implemented.add("--version")
             missing = claimed - implemented
             if missing:
                 problems.append("%s: %s" % (path.name, sorted(missing)))
+        self.assertEqual(problems, [])
+
+    def test_every_implemented_flag_is_in_usage(self) -> None:
+        # inverse direction: a flag parsed but absent from USAGE is
+        # undocumented (e.g. --help handled but not listed).
+        problems = []
+        for path in sorted(SCRIPTS.glob("*.py")):
+            src = path.read_text(encoding="utf-8")
+            usage = _usage_text(src)
+            if not usage:
+                continue
+            body = src.replace(usage, "")
+            claimed = set(re.findall(r"--[a-z][a-z-]*", usage))
+            implemented = set(re.findall(r"[\"'](--[a-z][a-z-]*)[\"']", body))
+            if "maybe_version" in body:
+                implemented.add("--version")
+            undocumented = implemented - claimed
+            if undocumented:
+                problems.append("%s: %s" % (path.name, sorted(undocumented)))
         self.assertEqual(problems, [])
 
 

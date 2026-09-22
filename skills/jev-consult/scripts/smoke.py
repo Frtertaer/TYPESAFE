@@ -892,6 +892,23 @@ def step_hook(tmp: Path) -> dict:
         )
         env.pop("JEV_HOOK_MAX_PROMPT", None)
         ok = rc == 0 and '"prompt_truncated": true' in out
+    if ok:
+        # JEV_HOOK_OFF emits {} and --verbose says why
+        env["JEV_HOOK_OFF"] = "1"
+        rc, out = _run(
+            [str(SCRIPTS / "inventory_hook.py"), "--verbose"],
+            cwd=tmp,
+            env=env,
+            inp=json.dumps(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "kill switch smoke",
+                    "cwd": str(cwd2),
+                }
+            ),
+        )
+        env.pop("JEV_HOOK_OFF", None)
+        ok = rc == 0 and "{}" in out and "disabled" in out
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

@@ -253,6 +253,43 @@ def step_decisions(tmp: Path) -> dict:
                 ok = False
         else:
             ok = False
+    if ok:
+        bad_log = tmp / "decisions-bad.jsonl"
+        bad_log.write_text(
+            "not json\n" + json.dumps({"harness": "smoke"}) + "\n",
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(bad_log),
+                "--errors",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 1 and len(json.loads(out)) == 1
+        except ValueError:
+            ok = False
+    if ok:
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(bad_log),
+                "--validate",
+                "--json",
+            ]
+        )
+        try:
+            rows = json.loads(out)
+            ok = rc == 1 and rows and rows[0]["missing"] == [
+                "ts",
+                "jev_status",
+            ]
+        except (ValueError, IndexError, KeyError):
+            ok = False
     return _step("decisions", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

@@ -675,6 +675,24 @@ def step_compact_fake(tmp: Path) -> dict:
             except (OSError, ValueError):
                 ok = False
     if ok:
+        # --fail-fast breaks the watch on the first fallback tick
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compact.py"),
+                str(transcript),
+                "--history",
+                "--fake",
+                "--min-reduction",
+                "50",
+                "--watch",
+                "0.05",
+                "--max-ticks",
+                "5",
+                "--fail-fast",
+            ]
+        )
+        ok = rc == 1 and out.count("watch tick=") == 1
+    if ok:
         # --stats prints a one-line summary; --stats-json the stats dict
         # (both on stderr, after the result JSON)
         rc, out = _run(

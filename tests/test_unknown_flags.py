@@ -69,5 +69,38 @@ class UnknownFlagTests(unittest.TestCase):
                 )
 
 
+class EmptyStdinTests(unittest.TestCase):
+    """EOF on stdin, bare argv: no script may traceback; hooks emit `{}`."""
+
+    def test_no_traceback_on_empty_stdin(self) -> None:
+        for script in scripts():
+            proc = subprocess.run(
+                [sys.executable, str(script)],
+                input="",
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            with self.subTest(script=script.name):
+                self.assertNotIn(
+                    "Traceback",
+                    proc.stderr + proc.stdout,
+                    "%s crashed on empty stdin" % script.name,
+                )
+
+    def test_hooks_emit_empty_payload_on_eof(self) -> None:
+        for name in HOOKS:
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPTS / name)],
+                input="",
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            with self.subTest(script=name):
+                self.assertEqual(proc.returncode, 0, proc.stderr[:200])
+                self.assertEqual(proc.stdout.strip(), "{}")
+
+
 if __name__ == "__main__":
     unittest.main()

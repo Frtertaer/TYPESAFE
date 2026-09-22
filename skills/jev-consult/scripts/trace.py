@@ -357,6 +357,8 @@ def cmd_history(args: argparse.Namespace) -> int:
             ticks += 1
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
+            if getattr(args, "fail_fast", False) and not tick["picks"]:
+                break
             _time.sleep(args.watch)
         if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
             return 1
@@ -812,6 +814,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     hist_cmd.add_argument("--out", default="", help="With --watch: append each tick line to PATH (fail-open)")
     hist_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: picks|empty, ticks, picks} JSON to PATH, refreshed every tick")
+    hist_cmd.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick with zero picks")
     hist_cmd.set_defaults(func=cmd_history)
     return parser
 

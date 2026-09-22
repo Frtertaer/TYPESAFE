@@ -1710,5 +1710,38 @@ class WatchJqNestedTests(unittest.TestCase):
             self.assertTrue(line.isdigit() or line == "null", line)
 
 
+class ConcurrentAppendTests(unittest.TestCase):
+    def test_concurrent_append_decision_keeps_all_lines(self) -> None:
+        import threading
+
+        n_threads, n_writes = 8, 25
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            barrier = threading.Barrier(n_threads)
+
+            def worker(tid: int) -> None:
+                barrier.wait()
+                for i in range(n_writes):
+                    inv.append_decision(
+                        {"sha": "t%di%d" % (tid, i), "ts": i, "jev_status": "ok"},
+                        path,
+                    )
+
+            threads = [threading.Thread(target=worker, args=(t,)) for t in range(n_threads)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), n_threads * n_writes)
+            seen = set()
+            for line in lines:
+                row = json.loads(line)
+                self.assertNotIn(row["sha"], seen)
+                seen.add(row["sha"])
+            self.assertEqual(len(seen), n_threads * n_writes)
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

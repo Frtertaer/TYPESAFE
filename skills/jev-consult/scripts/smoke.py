@@ -28,6 +28,17 @@ from xml.sax.saxutils import escape  # noqa: E402
 SKILL_DIR = SCRIPTS.parent
 
 
+def jq_lookup(obj, path: str):
+    """Dotted-path lookup; (value, True) or (None, False) when any part misses."""
+    cur = obj
+    for part in path.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            return None, False
+    return cur, True
+
+
 def junit_xml(steps: list[dict]) -> str:
     """Render a JUnit <testsuite> document for the step rows."""
     failures = sum(1 for s in steps if not s.get("ok"))
@@ -372,6 +383,12 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="Run each step N times; a step fails when any attempt does (default 1; JEV_SMOKE_REPEAT presets).",
     )
+    parser.add_argument(
+        "--jq",
+        metavar="KEY",
+        default="",
+        help="Print just one dotted-path field of the results payload (e.g. ok); unknown key exits 2.",
+    )
     args = parser.parse_args(argv)
     names = {name for name, _ in STEPS}
     if args.list:
@@ -488,7 +505,16 @@ def main(argv: list[str] | None = None) -> int:
     steps = _run_steps()
     ok = all(s["ok"] for s in steps)
     text = json.dumps({"ok": ok, "steps": steps}, indent=2) + "\n"
-    sys.stdout.write(text)
+    if args.jq:
+        value, found = jq_lookup({"ok": ok, "steps": steps}, args.jq)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: ok, steps)\n" % args.jq
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+    else:
+        sys.stdout.write(text)
     if args.out:
         try:
             Path(args.out).write_text(text, encoding="utf-8")

@@ -132,6 +132,24 @@ class SmokeTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertEqual({s["name"] for s in payload["steps"]}, {"policy"})
 
+    def test_jq_prints_one_field_of_result(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "policy", "--jq", "ok"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout), True)
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "policy", "--jq", "nope"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("bad --jq key", proc.stderr)
+
     def test_report_writes_markdown_table(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report = Path(tmp) / "smoke.md"

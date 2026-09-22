@@ -2880,6 +2880,52 @@ def step_apply_fill(tmp: Path) -> dict:
         )
         ticks = [ln for ln in out.splitlines() if '"miss"' in ln]
         ok = len(ticks) == 1 and "watch tick=2" not in out
+    if ok:
+        # one-shot --verdict reports clean on a fresh cwd and pending on
+        # a cwd carrying a miss marker
+        clean_v = tmp / "apply-clean-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "apply_fill.py"),
+                "--cwd",
+                str(tmp / "apply-clean-cwd"),
+                "--verdict",
+                str(clean_v),
+            ],
+            env=env,
+        )
+        try:
+            ok = (
+                rc == 0
+                and json.loads(clean_v.read_text(encoding="utf-8")).get(
+                    "verdict"
+                )
+                == "clean"
+            )
+        except (OSError, ValueError):
+            ok = False
+        if ok:
+            miss_v = tmp / "apply-miss-verdict.json"
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--cwd",
+                    str(tmp / "apply-miss-cwd"),
+                    "--verdict",
+                    str(miss_v),
+                ],
+                env=env,
+            )
+            try:
+                ok = (
+                    rc == 0
+                    and json.loads(miss_v.read_text(encoding="utf-8")).get(
+                        "verdict"
+                    )
+                    == "pending"
+                )
+            except (OSError, ValueError):
+                ok = False
     return _step("apply_fill", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

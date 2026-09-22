@@ -615,5 +615,24 @@ class DecisionsRowSchemaTests(unittest.TestCase):
                 blob = json.dumps(row)
                 self.assertNotIn(os.environ.get("TYPESAFE_API_KEY", "unset-x"), blob)
 
+class HookRuleInvariantTests(unittest.TestCase):
+    """Repo rules: hooks never install, never npx, never --force."""
+
+    FORBIDDEN = ("subprocess", "os.system", "os.popen", "spawnl", "pip ", "npx", "npm ", "--force")
+
+    def test_hook_scripts_have_no_install_or_exec_calls(self) -> None:
+        for name in ("inventory_hook.py", "compact_hook.py"):
+            src = (SCRIPTS / name).read_text(encoding="utf-8")
+            for token in self.FORBIDDEN:
+                self.assertNotIn(
+                    token, src, "%s contains forbidden token %r" % (name, token)
+                )
+
+    def test_hook_usage_docs_carry_the_rules(self) -> None:
+        for name in ("inventory_hook.py", "compact_hook.py"):
+            src = (SCRIPTS / name).read_text(encoding="utf-8")
+            self.assertIn("never", src.lower(), name)
+
+
 if __name__ == "__main__":
     unittest.main()

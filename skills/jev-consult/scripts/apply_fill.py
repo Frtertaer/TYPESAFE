@@ -402,10 +402,13 @@ def main() -> int:
             )
 
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
+            now = time.time()
             miss = read_miss(miss_path)
+            miss_ts = miss.get("written_at") if isinstance(miss.get("written_at"), (int, float)) else None
             tick = {
-                "ts": int(time.time()),
+                "ts": int(now),
                 "miss": bool(miss),
+                "miss_age_s": round(now - miss_ts, 1) if miss_ts is not None else None,
                 "ask": ask_path.is_file(),
             }
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["miss"] or tick["ask"]))

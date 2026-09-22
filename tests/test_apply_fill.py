@@ -121,6 +121,34 @@ class ApplyFillTests(unittest.TestCase):
             self.assertEqual(len(ticks), 2)
             self.assertTrue(all(t["miss"] is True for t in ticks))
             self.assertTrue(all(t["ask"] is False for t in ticks))
+            self.assertTrue(all(t["miss_age_s"] >= 0 for t in ticks))
+
+    def test_watch_tick_miss_age_none_without_miss(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            env = dict(os.environ, JEV_APPLY_WATCH_MAX="1")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--watch", "0.01",
+                    "--cwd", str(cwd),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            ticks = [
+                json.loads(l)
+                for l in proc.stdout.splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 1)
+            self.assertIsNone(ticks[0]["miss_age_s"])
 
     def test_watch_verdict_writes_state_json(self) -> None:
         import subprocess

@@ -1024,5 +1024,23 @@ class WatchSecsEnvTests(unittest.TestCase):
             self.assertLessEqual(len(ticks), 10)
             self.assertGreaterEqual(len(ticks), 1)
 
+class WriteAskAtomicTests(unittest.TestCase):
+    def test_write_catalog_ask_atomic_no_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "ask.json"
+            hits = [{"id": "1", "name": "x", "identifier": "cat/x"}]
+            FILL.write_catalog_ask(out, "task", "claude", hits)
+            names = sorted(p.name for p in Path(tmp).iterdir())
+            self.assertEqual(names, ["ask.json"])
+            data = json.loads(out.read_text(encoding="utf-8"))
+            self.assertIn("questions", data)
+
+    def test_catalog_cache_write_atomic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache.json"
+            FILL.write_catalog_cache("q", [{"id": "1"}], path=cache)
+            names = sorted(p.name for p in Path(tmp).iterdir())
+            self.assertEqual(names, ["cache.json"])
+
 if __name__ == "__main__":
     unittest.main()

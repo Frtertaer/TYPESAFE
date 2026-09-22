@@ -243,7 +243,20 @@ def write_apply_ask(path: Path, task: str, hits: list[dict]) -> None:
             }
         },
     }
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def item_for_pick(pick: str, hits: list[dict]) -> dict | None:

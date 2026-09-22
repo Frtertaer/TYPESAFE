@@ -177,8 +177,8 @@ def write_catalog_cache(query: str, hits: list[dict], path: Path | None = None) 
         del raw[oldest]
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(
-            json.dumps(raw, indent=2) + "\n", encoding="utf-8"
+        _atomic_write(
+            target, json.dumps(raw, indent=2) + "\n"
         )
     except OSError:
         pass
@@ -196,7 +196,7 @@ def clear_catalog_cache(query: str, path: Path | None = None) -> bool:
     del raw[query]
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+        _atomic_write(target, json.dumps(raw, indent=2) + "\n")
     except OSError:
         return False
     return True
@@ -322,7 +322,20 @@ def write_catalog_ask(path: Path, task: str, dest: str, hits: list[dict]) -> Non
             }
         },
     }
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def item_for_pick(pick: str, hits: list[dict]) -> dict | None:

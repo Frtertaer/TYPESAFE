@@ -124,7 +124,7 @@ def write_peer_ask(path: Path, task: str, dest: str, picked: list[dict]) -> None
             }
         },
     }
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _atomic_write(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 
 
 def fill_timeout_seconds() -> float:
@@ -156,6 +156,19 @@ def run_jev(ask_path: Path) -> dict | None:
     except json.JSONDecodeError:
         return None
     return data if isinstance(data, dict) else None
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def item_for_pick(pick: str, candidates: list[dict]) -> dict | None:

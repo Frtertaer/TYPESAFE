@@ -478,6 +478,33 @@ class DoctorTests(unittest.TestCase):
                 [t["ok_changed"] for t in ticks], [False, True, False]
             )
 
+    def test_watch_tick_reports_elapsed_s(self) -> None:
+        ok = [{"agent": "claude-code", "check": "c", "ok": True, "detail": "d"}]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {"TYPESAFE_API_KEY": "", "JEV_DOCTOR_WATCH_MAX": "2"},
+            ):
+                with patch.object(DOC, "check_claude", side_effect=lambda *a: ok), patch.object(
+                    DOC, "check_common", side_effect=lambda h, hh: []
+                ):
+                    old = os.getcwd()
+                    os.chdir(tmp)
+                    try:
+                        with patch.object(sys, "stdout", buf):
+                            rc = DOC.main(["--agents", "claude-code", "--watch", "0.01"])
+                    finally:
+                        os.chdir(old)
+            ticks = [
+                json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(isinstance(t["elapsed_s"], float) for t in ticks))
+            self.assertGreaterEqual(ticks[1]["elapsed_s"], ticks[0]["elapsed_s"])
+
     def test_watch_fail_fast_breaks_on_first_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rc, _, text = run_main(

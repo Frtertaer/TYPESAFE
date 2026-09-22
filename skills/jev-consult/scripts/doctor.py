@@ -298,6 +298,7 @@ def main(argv: list[str] | None = None) -> int:
         last_checks: list[dict] = []
         verdict_ok = True
         prev_ok: bool | None = None
+        watch_t0 = _time.time()
         while True:
             cur = collect()
             failed = sum(1 for c in cur if not c["ok"])
@@ -308,6 +309,7 @@ def main(argv: list[str] | None = None) -> int:
                 "failed": failed,
                 "ok": ok,
                 "ok_changed": prev_ok is not None and ok != prev_ok,
+                "elapsed_s": round(_time.time() - watch_t0, 2),
             }
             prev_ok = ok
             _watch.emit(last, args.out, quiet=args.quiet, bad=not last["ok"])

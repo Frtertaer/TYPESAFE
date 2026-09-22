@@ -549,6 +549,39 @@ class InventoryTests(unittest.TestCase):
         self.assertIn("jwt-auth", names)
         self.assertNotIn("ascii-art", names)
 
+    def test_cli_jq_prints_one_field(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--jq",
+                    "counts.skill",
+                ]
+            )
+        self.assertEqual(code, 0)
+        self.assertIsInstance(json.loads(buf.getvalue()), int)
+        err = StringIO()
+        with redirect_stderr(err):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--jq",
+                    "nope.missing",
+                ]
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("bad --jq key", err.getvalue())
+
     def test_cli_csv_shortlist(self) -> None:
         import csv as _csv
         from io import StringIO

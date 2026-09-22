@@ -1094,6 +1094,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scores", action="store_true", help="Add IDF score to each shortlist item.")
     parser.add_argument("--csv", action="store_true", help="Emit the shortlist as CSV rows instead of JSON.")
     parser.add_argument("--jsonl", action="store_true", help="Emit the shortlist as JSON lines, one item per row (for piping).")
+    parser.add_argument("--jq", metavar="KEY", default="", help="Print just one dotted-path field of the JSON payload (e.g. counts.skill); unknown key exits 2")
     parser.add_argument("--out", metavar="PATH", default="", help="Write the payload JSON to PATH instead of stdout.")
     parser.add_argument("--names", action="store_true", help="Print bare shortlist ids, one per line (for piping).")
     parser.add_argument("--paths", action="store_true", help="Print bare shortlist item paths, one per line (for piping).")
@@ -1302,6 +1303,23 @@ def main(argv: list[str] | None = None) -> int:
                 row.append("%.4f" % (item.get("score") or 0))
             writer.writerow(row)
     else:
+        if getattr(args, "jq", ""):
+            cur = payload
+            found = True
+            for part in args.jq.split("."):
+                if isinstance(cur, dict) and part in cur:
+                    cur = cur[part]
+                else:
+                    found = False
+                    break
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (payload has: %s)\n"
+                    % (args.jq, ", ".join(sorted(payload)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(cur) + "\n")
+            return 0
         text = json.dumps(payload, indent=2) + "\n"
         if getattr(args, "out", ""):
             out_path = Path(args.out)

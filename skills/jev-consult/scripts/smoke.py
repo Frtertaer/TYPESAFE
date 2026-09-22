@@ -104,6 +104,61 @@ def _run(
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
+def _stub_handler(noul: float = 0.99, drop_results: bool = False):
+    """Localhost Jev stub: choice questions pick the first non-'none'
+    criterion at 0.9 confidence; noul questions answer `noul` (or 0.1
+    for result_* ids when drop_results is set)."""
+
+    class _Stub(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                request = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, TypeError):
+                request = {}
+            answers: dict = {}
+            for qid, q in (request.get("questions") or {}).items():
+                if q.get("type") == "choice":
+                    pick = next(
+                        (k for k in (q.get("criteria") or {}) if k != "none"),
+                        "none",
+                    )
+                    answers[qid] = {
+                        "type": "choice",
+                        "choice": pick,
+                        "confidence": 0.9,
+                        "probabilities": {pick: 0.9, "none": 0.1},
+                    }
+                else:
+                    drop = drop_results and str(qid).startswith("result_")
+                    answers[qid] = {
+                        "type": "noul",
+                        "noul": 0.1 if drop else noul,
+                    }
+            reply = json.dumps({"answers": answers}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(reply)))
+            self.end_headers()
+            self.wfile.write(reply)
+
+        def log_message(self, *args) -> None:
+            pass
+
+    return _Stub
+
+
+def _stub_policy(tmp: Path, name: str, port: int, env: dict) -> None:
+    """Write a policy copy pointing at the stub port and set JEV_POLICY."""
+    policy = json.loads(
+        (SKILL_DIR / "policy.json").read_text(encoding="utf-8")
+    )
+    policy["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % port
+    policy_path = tmp / name
+    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+    env["JEV_POLICY"] = str(policy_path)
+
+
 def step_policy(tmp: Path) -> dict:
     path = SKILL_DIR / "policy.json"
     try:
@@ -893,59 +948,19 @@ def step_compact_fake(tmp: Path) -> dict:
         env2["HOME"] = str(tmp / "compact-home")
         env2["JEV_CONSULT_SPILL"] = str(spill_dir)
 
-        class CompactStub(http.server.BaseHTTPRequestHandler):
-            def do_POST(self) -> None:
-                try:
-                    length = int(self.headers.get("Content-Length") or 0)
-                    request = json.loads(self.rfile.read(length) or b"{}")
-                except (ValueError, TypeError):
-                    request = {}
-                answers: dict = {}
-                for qid, q in (request.get("questions") or {}).items():
-                    if q.get("type") == "choice":
-                        pick = next(
-                            (
-                                k
-                                for k in (q.get("criteria") or {})
-                                if k != "none"
-                            ),
-                            "none",
-                        )
-                        answers[qid] = {
-                            "type": "choice",
-                            "choice": pick,
-                            "confidence": 0.9,
-                            "probabilities": {pick: 0.9, "none": 0.1},
-                        }
-                    else:
-                        # keep the call, drop the result body so the
-                        # lossless spill path is exercised
-                        drop = str(qid).startswith("result_")
-                        answers[qid] = {
-                            "type": "noul",
-                            "noul": 0.1 if drop else 0.99,
-                        }
-                reply = json.dumps({"answers": answers}).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(reply)))
-                self.end_headers()
-                self.wfile.write(reply)
+        server = http.server.HTTPServer(
 
-            def log_message(self, *args) -> None:
-                pass
+            ("127.0.0.1", 0), _stub_handler(drop_results=True)
 
-        server = http.server.HTTPServer(("127.0.0.1", 0), CompactStub)
+        )
+
         try:
-            policy = json.loads(
-                (SKILL_DIR / "policy.json").read_text(encoding="utf-8")
+
+            _stub_policy(
+
+                tmp, "compact-policy.json", server.server_address[1], env2,
+
             )
-            policy["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
-                server.server_address[1]
-            )
-            policy_path = tmp / "compact-policy.json"
-            policy_path.write_text(json.dumps(policy), encoding="utf-8")
-            env2["JEV_POLICY"] = str(policy_path)
             threading.Thread(
                 target=server.handle_request, daemon=True
             ).start()
@@ -3371,53 +3386,19 @@ def step_apply_fill(tmp: Path) -> dict:
         env2["TYPESAFE_API_KEY"] = "smoke-stub-key"
         env2["JEV_CONSULT_LOG"] = str(tmp / "apply-decisions.jsonl")
 
-        class ApplyStub(http.server.BaseHTTPRequestHandler):
-            def do_POST(self) -> None:
-                try:
-                    length = int(self.headers.get("Content-Length") or 0)
-                    request = json.loads(self.rfile.read(length) or b"{}")
-                except (ValueError, TypeError):
-                    request = {}
-                answers: dict = {}
-                for qid, q in (request.get("questions") or {}).items():
-                    if q.get("type") == "choice":
-                        pick = next(
-                            (
-                                k
-                                for k in (q.get("criteria") or {})
-                                if k != "none"
-                            ),
-                            "none",
-                        )
-                        answers[qid] = {
-                            "type": "choice",
-                            "choice": pick,
-                            "confidence": 0.9,
-                            "probabilities": {pick: 0.9, "none": 0.1},
-                        }
-                    else:
-                        answers[qid] = {"type": "noul", "noul": 0.99}
-                reply = json.dumps({"answers": answers}).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(reply)))
-                self.end_headers()
-                self.wfile.write(reply)
+        server = http.server.HTTPServer(
 
-            def log_message(self, *args) -> None:
-                pass
+            ("127.0.0.1", 0), _stub_handler()
 
-        server = http.server.HTTPServer(("127.0.0.1", 0), ApplyStub)
+        )
+
         try:
-            policy = json.loads(
-                (SKILL_DIR / "policy.json").read_text(encoding="utf-8")
+
+            _stub_policy(
+
+                tmp, "apply-policy.json", server.server_address[1], env2,
+
             )
-            policy["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
-                server.server_address[1]
-            )
-            policy_path = tmp / "apply-policy.json"
-            policy_path.write_text(json.dumps(policy), encoding="utf-8")
-            env2["JEV_POLICY"] = str(policy_path)
             threading.Thread(
                 target=server.handle_request, daemon=True
             ).start()
@@ -3955,53 +3936,19 @@ def step_hook(tmp: Path) -> dict:
         env3["TYPESAFE_API_KEY"] = "smoke-stub-key"
         env3["JEV_HOOK_HARNESS"] = "codex"
 
-        class HookStub(http.server.BaseHTTPRequestHandler):
-            def do_POST(self) -> None:
-                try:
-                    length = int(self.headers.get("Content-Length") or 0)
-                    request = json.loads(self.rfile.read(length) or b"{}")
-                except (ValueError, TypeError):
-                    request = {}
-                answers: dict = {}
-                for qid, q in (request.get("questions") or {}).items():
-                    if q.get("type") == "choice":
-                        pick = next(
-                            (
-                                k
-                                for k in (q.get("criteria") or {})
-                                if k != "none"
-                            ),
-                            "none",
-                        )
-                        answers[qid] = {
-                            "type": "choice",
-                            "choice": pick,
-                            "confidence": 0.9,
-                            "probabilities": {pick: 0.9, "none": 0.1},
-                        }
-                    else:
-                        answers[qid] = {"type": "noul", "noul": 0.99}
-                reply = json.dumps({"answers": answers}).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(reply)))
-                self.end_headers()
-                self.wfile.write(reply)
+        server = http.server.HTTPServer(
 
-            def log_message(self, *args) -> None:
-                pass
+            ("127.0.0.1", 0), _stub_handler()
 
-        server = http.server.HTTPServer(("127.0.0.1", 0), HookStub)
+        )
+
         try:
-            policy = json.loads(
-                (SKILL_DIR / "policy.json").read_text(encoding="utf-8")
+
+            _stub_policy(
+
+                tmp, "hook-policy.json", server.server_address[1], env3,
+
             )
-            policy["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
-                server.server_address[1]
-            )
-            policy_path = tmp / "hook-policy.json"
-            policy_path.write_text(json.dumps(policy), encoding="utf-8")
-            env3["JEV_POLICY"] = str(policy_path)
             threading.Thread(
                 target=server.handle_request, daemon=True
             ).start()
@@ -4292,53 +4239,19 @@ def step_compare(tmp: Path) -> dict:
         env2 = dict(os.environ)  # skillscan:allow
         env2["TYPESAFE_API_KEY"] = "smoke-stub-key"
 
-        class CmpStub(http.server.BaseHTTPRequestHandler):
-            def do_POST(self) -> None:
-                try:
-                    length = int(self.headers.get("Content-Length") or 0)
-                    request = json.loads(self.rfile.read(length) or b"{}")
-                except (ValueError, TypeError):
-                    request = {}
-                answers: dict = {}
-                for qid, q in (request.get("questions") or {}).items():
-                    if q.get("type") == "choice":
-                        pick = next(
-                            (
-                                k
-                                for k in (q.get("criteria") or {})
-                                if k != "none"
-                            ),
-                            "none",
-                        )
-                        answers[qid] = {
-                            "type": "choice",
-                            "choice": pick,
-                            "confidence": 0.9,
-                            "probabilities": {pick: 0.9, "none": 0.1},
-                        }
-                    else:
-                        answers[qid] = {"type": "noul", "noul": 0.99}
-                reply = json.dumps({"answers": answers}).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(reply)))
-                self.end_headers()
-                self.wfile.write(reply)
+        server = http.server.HTTPServer(
 
-            def log_message(self, *args) -> None:
-                pass
+            ("127.0.0.1", 0), _stub_handler()
 
-        server = http.server.HTTPServer(("127.0.0.1", 0), CmpStub)
+        )
+
         try:
-            policy = json.loads(
-                (SKILL_DIR / "policy.json").read_text(encoding="utf-8")
+
+            _stub_policy(
+
+                tmp, "cmp-policy.json", server.server_address[1], env2,
+
             )
-            policy["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
-                server.server_address[1]
-            )
-            policy_path = tmp / "cmp-policy.json"
-            policy_path.write_text(json.dumps(policy), encoding="utf-8")
-            env2["JEV_POLICY"] = str(policy_path)
             # one case scores two sides — serve both POSTs
             for _ in range(2):
                 threading.Thread(
@@ -5640,53 +5553,19 @@ def step_peer_fill_status(tmp: Path) -> dict:
         env2["TYPESAFE_API_KEY"] = "smoke-stub-key"
         env2["JEV_CONSULT_LOG"] = str(tmp / "peer-decisions.jsonl")
 
-        class PeerStub(http.server.BaseHTTPRequestHandler):
-            def do_POST(self) -> None:
-                try:
-                    length = int(self.headers.get("Content-Length") or 0)
-                    request = json.loads(self.rfile.read(length) or b"{}")
-                except (ValueError, TypeError):
-                    request = {}
-                answers: dict = {}
-                for qid, q in (request.get("questions") or {}).items():
-                    if q.get("type") == "choice":
-                        pick = next(
-                            (
-                                k
-                                for k in (q.get("criteria") or {})
-                                if k != "none"
-                            ),
-                            "none",
-                        )
-                        answers[qid] = {
-                            "type": "choice",
-                            "choice": pick,
-                            "confidence": 0.9,
-                            "probabilities": {pick: 0.9, "none": 0.1},
-                        }
-                    else:
-                        answers[qid] = {"type": "noul", "noul": 0.99}
-                reply = json.dumps({"answers": answers}).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(reply)))
-                self.end_headers()
-                self.wfile.write(reply)
+        server = http.server.HTTPServer(
 
-            def log_message(self, *args) -> None:
-                pass
+            ("127.0.0.1", 0), _stub_handler()
 
-        server = http.server.HTTPServer(("127.0.0.1", 0), PeerStub)
+        )
+
         try:
-            policy = json.loads(
-                (SKILL_DIR / "policy.json").read_text(encoding="utf-8")
+
+            _stub_policy(
+
+                tmp, "peer-policy.json", server.server_address[1], env2,
+
             )
-            policy["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
-                server.server_address[1]
-            )
-            policy_path = tmp / "peer-policy.json"
-            policy_path.write_text(json.dumps(policy), encoding="utf-8")
-            env2["JEV_POLICY"] = str(policy_path)
             threading.Thread(
                 target=server.handle_request, daemon=True
             ).start()
@@ -5768,49 +5647,19 @@ def step_catalog_fill(tmp: Path) -> dict:
     env["JEV_CONSULT_LOG"] = str(tmp / "cat-decisions.jsonl")
     env["TYPESAFE_API_KEY"] = "smoke-stub-key"
 
-    class CatStub(http.server.BaseHTTPRequestHandler):
-        def do_POST(self) -> None:
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-                request = json.loads(self.rfile.read(length) or b"{}")
-            except (ValueError, TypeError):
-                request = {}
-            answers: dict = {}
-            for qid, q in (request.get("questions") or {}).items():
-                if q.get("type") == "choice":
-                    pick = next(
-                        (k for k in (q.get("criteria") or {}) if k != "none"),
-                        "none",
-                    )
-                    answers[qid] = {
-                        "type": "choice",
-                        "choice": pick,
-                        "confidence": 0.9,
-                        "probabilities": {pick: 0.9, "none": 0.1},
-                    }
-                else:
-                    answers[qid] = {"type": "noul", "noul": 0.99}
-            reply = json.dumps({"answers": answers}).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(reply)))
-            self.end_headers()
-            self.wfile.write(reply)
+    server = http.server.HTTPServer(
 
-        def log_message(self, *args) -> None:
-            pass
+        ("127.0.0.1", 0), _stub_handler()
 
-    server = http.server.HTTPServer(("127.0.0.1", 0), CatStub)
+    )
+
     try:
-        policy = json.loads(
-            (SKILL_DIR / "policy.json").read_text(encoding="utf-8")
+
+        _stub_policy(
+
+            tmp, "cat-policy.json", server.server_address[1], env,
+
         )
-        policy["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
-            server.server_address[1]
-        )
-        policy_path = tmp / "cat-policy.json"
-        policy_path.write_text(json.dumps(policy), encoding="utf-8")
-        env["JEV_POLICY"] = str(policy_path)
         thread = threading.Thread(
             target=server.handle_request, daemon=True
         )

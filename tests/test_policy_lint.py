@@ -758,5 +758,25 @@ class WatchDeadlineEnvTests(unittest.TestCase):
         self.assertLessEqual(len(ticks), 10)
         self.assertGreaterEqual(len(ticks), 1)
 
+
+class PolicyKeyUsageTests(unittest.TestCase):
+    """Every top-level policy.json key must be referenced by name in some
+    script — a key nobody reads is dead config (usually a typo)."""
+
+    def test_every_policy_key_is_referenced(self) -> None:
+        src = ""
+        for p in SCRIPTS.glob("*.py"):
+            src += p.read_text(encoding="utf-8")
+        installer = ROOT / "scripts" / "install.py"
+        if installer.is_file():
+            src += installer.read_text(encoding="utf-8")
+        unused = [
+            k
+            for k in base_policy()
+            if '"%s"' % k not in src and "'%s'" % k not in src
+        ]
+        self.assertEqual([], unused, "policy keys never read: %s" % unused)
+
+
 if __name__ == "__main__":
     unittest.main()

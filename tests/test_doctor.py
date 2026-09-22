@@ -478,6 +478,25 @@ class DoctorTests(unittest.TestCase):
                 [t["ok_changed"] for t in ticks], [False, True, False]
             )
 
+    def test_watch_fail_fast_breaks_on_first_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(
+                [
+                    "--agents", "claude-code",
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--watch", "0.01", "--fail-fast",
+                ],
+                env_extra={"JEV_DOCTOR_WATCH_MAX": "9"},
+                cwd=tmp,
+            )
+            ticks = [
+                json.loads(l) for l in text.splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(rc, 1)
+            self.assertEqual(len(ticks), 1)
+            self.assertFalse(ticks[0]["ok"])
+
     def test_watch_rc_0_when_all_pass(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home, hermes = self._full_home(tmp)

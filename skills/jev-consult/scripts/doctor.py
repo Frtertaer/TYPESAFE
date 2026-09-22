@@ -243,6 +243,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first failing tick.")
     args = parser.parse_args(argv)
     agents = [a.strip() for a in args.agents.split(",") if a.strip()]
     bad = [a for a in agents if a not in ALLOWED]
@@ -314,6 +315,8 @@ def main(argv: list[str] | None = None) -> int:
             count += 1
             if verdict_ok and not _write_verdict(last_checks, count):
                 verdict_ok = False  # warn once, stop retrying
+            if args.fail_fast and not ok:
+                break
             if max_ticks and count >= max_ticks:
                 break
             if dead and _time.time() >= dead:

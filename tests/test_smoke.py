@@ -286,6 +286,48 @@ class SmokeTests(unittest.TestCase):
         self.assertTrue(all(t["ok"] is False for t in ticks))
         self.assertTrue(all(t["failed"] for t in ticks))
 
+    def test_junit_writes_xml(self) -> None:
+        def ok_step(tmp):
+            return {"name": "policy", "ok": True, "detail": "fake"}
+
+        def bad_step(tmp):
+            return {"name": "compact", "ok": False, "detail": "broke <x>"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "j.xml"
+            with patch.object(MOD, "step_policy", side_effect=ok_step), patch.object(
+                MOD, "step_compact_fake", side_effect=bad_step
+            ):
+                import io
+
+                with patch.object(sys, "stdout", io.StringIO()):
+                    rc = MOD.main(["--only", "policy,compact_fake", "--junit", str(out)])
+            self.assertEqual(rc, 1)
+            import xml.etree.ElementTree as ET
+
+            root = ET.fromstring(out.read_text(encoding="utf-8"))
+            self.assertEqual(root.tag, "testsuite")
+            self.assertEqual(root.get("tests"), "2")
+            self.assertEqual(root.get("failures"), "1")
+            cases = root.findall("testcase")
+            self.assertEqual([c.get("name") for c in cases], ["policy", "compact"])
+            failure = cases[1].find("failure")
+            self.assertIsNotNone(failure)
+            self.assertIn("broke <x>", failure.text)
+
+    def test_junit_none_when_flag_absent(self) -> None:
+        def ok_step(tmp):
+            return {"name": "policy", "ok": True, "detail": "fake"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(MOD, "step_policy", side_effect=ok_step):
+                import io
+
+                with patch.object(sys, "stdout", io.StringIO()):
+                    rc = MOD.main(["--only", "policy"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
     def test_watch_fail_fast_breaks_on_first_failing_tick(self) -> None:
         def boom(tmp):
             raise RuntimeError("explode")

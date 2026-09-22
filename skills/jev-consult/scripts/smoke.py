@@ -23,8 +23,28 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import _watch  # noqa: E402
+from xml.sax.saxutils import escape  # noqa: E402
 
 SKILL_DIR = SCRIPTS.parent
+
+
+def junit_xml(steps: list[dict]) -> str:
+    """Render a JUnit <testsuite> document for the step rows."""
+    failures = sum(1 for s in steps if not s.get("ok"))
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<testsuite name="jev-smoke" tests="%d" failures="%d">'
+        % (len(steps), failures),
+    ]
+    for s in steps:
+        name = escape(str(s.get("name") or "step"))
+        lines.append('  <testcase name="%s">' % name)
+        if not s.get("ok"):
+            detail = escape(str(s.get("detail") or "failed"))
+            lines.append('    <failure>%s</failure>' % detail)
+        lines.append("  </testcase>")
+    lines.append("</testsuite>")
+    return "\n".join(lines) + "\n"
 
 
 def _step(name: str, ok: bool, detail: str) -> dict:
@@ -342,6 +362,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, steps, failed} JSON to PATH when finished (in --watch mode, the final pass state).")
+    parser.add_argument("--junit", metavar="PATH", default="", help="Write a JUnit XML <testsuite> for the step results to PATH (in --watch mode, the final pass).")
     args = parser.parse_args(argv)
     names = {name for name, _ in STEPS}
     if args.list:
@@ -421,6 +442,12 @@ def main(argv: list[str] | None = None) -> int:
             _time.sleep(args.watch)
         if args.verdict and verdict_ok and not _write_verdict(last_steps):
             return 1
+        if args.junit:
+            try:
+                Path(args.junit).write_text(junit_xml(last_steps), encoding="utf-8")
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.junit, exc))
+                return 1
         return 0 if tick["ok"] else 1
     steps = _run_steps()
     ok = all(s["ok"] for s in steps)
@@ -458,6 +485,13 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
             return 1
         sys.stderr.write("wrote %s\n" % args.report)
+    if args.junit:
+        try:
+            Path(args.junit).write_text(junit_xml(steps), encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.junit, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % args.junit)
     return 0 if ok else 1
 
 

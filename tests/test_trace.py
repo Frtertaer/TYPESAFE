@@ -1073,6 +1073,35 @@ class TraceTests(unittest.TestCase):
             self.assertTrue(all(t["attempt_count"] == 2 for t in ticks))
             self.assertTrue(all(t["history"] == 1 for t in ticks))
 
+    def test_state_watch_rc_1_when_state_empty(self) -> None:
+        import io
+        import os as _os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text("{}", encoding="utf-8")
+            with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "1"}):
+                with patch.object(sys, "stdout", io.StringIO()):
+                    rc = tr.main(
+                        ["--file", str(path), "state", "--watch", "0.01"]
+                    )
+            self.assertEqual(rc, 1)
+
+    def test_stats_watch_rc_1_when_file_missing(self) -> None:
+        import io
+        import os as _os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "nope.json"
+            with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "1"}):
+                with patch.object(sys, "stdout", io.StringIO()):
+                    rc = tr.main(
+                        ["--file", str(path), "stats", "--watch", "0.01"]
+                    )
+            self.assertEqual(rc, 1)
+
     def test_jev_apply_trace_fills_forgotten_plan(self) -> None:
         jev_path = ROOT / "skills" / "jev-consult" / "scripts" / "jev.py"
         spec = importlib.util.spec_from_file_location("jev_consult_jev", jev_path)

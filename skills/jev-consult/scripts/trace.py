@@ -529,7 +529,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
             sys.stdout.flush()
             ticks += 1
             _time.sleep(args.watch)
-        return 0
+        return 0 if tick["exists"] else 1
     data = load(path)
     out: dict[str, Any] = {
         "exists": path.is_file(),
@@ -589,7 +589,7 @@ def cmd_state(args: argparse.Namespace) -> int:
             sys.stdout.flush()
             ticks += 1
             _time.sleep(args.watch)
-        return 0
+        return 0 if any(k != "attempt_count" for k in state) else 1
     data = load(path)
     state = {key: value for key, value in data.items() if _present(value)}
     if args.out:

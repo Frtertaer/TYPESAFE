@@ -71,6 +71,10 @@ def _redact_prompt(prompt: str) -> str:
         return prompt
 
 
+def _env_on(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _avg_score(items: list[dict], pool: list[dict], text: str) -> float | None:
     """Mean IDF score of `items` under the prompt query; None when no query."""
     query = tokens(text)
@@ -256,7 +260,7 @@ def handle(
 ) -> dict:
     global LAST_DECISION
     LAST_DECISION = None
-    if os.environ.get("JEV_HOOK_OFF", "").strip() in {"1", "true", "yes"}:
+    if _env_on("JEV_HOOK_OFF"):
         return {}
     t0 = time.monotonic()
     event = event_name(payload)
@@ -436,13 +440,13 @@ def handle(
     append_decision(LAST_DECISION)
     if note:
         extra["note_sha"] = hashlib.sha256(note.encode("utf-8")).hexdigest()[:12]
-    no_sidecar = os.environ.get("JEV_HOOK_NOSIDECAR", "").strip() in {"1", "true", "yes"}
+    no_sidecar = _env_on("JEV_HOOK_NOSIDECAR")
     if cwd is not None and not no_sidecar:
         try:
             write_sidecar(cwd / SIDECAR_NAME, harness, prompt, picked, extra)
         except OSError:
             pass
-        no_miss = os.environ.get("JEV_HOOK_NOMISS", "").strip() in {"1", "true", "yes"}
+        no_miss = _env_on("JEV_HOOK_NOMISS")
         miss_path = cwd / MISS_NAME
         try:
             if picked or no_miss:
@@ -474,7 +478,7 @@ def handle(
 
 def _silence_reason(payload: dict) -> str:
     """Why handle() emitted no context — mirrors its early returns in order."""
-    if os.environ.get("JEV_HOOK_OFF", "").strip() in {"1", "true", "yes"}:
+    if _env_on("JEV_HOOK_OFF"):
         return "hook disabled (JEV_HOOK_OFF)"
     event = event_name(payload) if isinstance(payload, dict) else None
     if event and event not in allowed_events():
@@ -499,7 +503,7 @@ def _debug_enabled(argv: list[str]) -> bool:
 
     if "--debug" in argv:
         return True
-    return os.environ.get("JEV_HOOK_DEBUG", "").strip().lower() in {"1", "true", "yes"}
+    return _env_on("JEV_HOOK_DEBUG")
 
 
 def allowed_events() -> set[str]:

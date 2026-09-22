@@ -3237,5 +3237,54 @@ class StdinGuardTests(unittest.TestCase):
         self.assertEqual(out.strip(), "{}")
 
 
+
+class EnvOnMatrixTests(unittest.TestCase):
+    TRUTHY = ["1", "true", "yes", "on", "TRUE", "On"]
+    FALSY = ["0", "false", "no", "off", "", "2"]
+
+    def test_env_on_accepts_documented_truthy_forms(self) -> None:
+        for val in self.TRUTHY:
+            for name in (
+                "JEV_HOOK_OFF",
+                "JEV_HOOK_NOSIDECAR",
+                "JEV_HOOK_NOMISS",
+                "JEV_HOOK_DEBUG",
+            ):
+                with patch.dict(os.environ, {name: val}):
+                    self.assertTrue(HOOK._env_on(name), "%s=%r" % (name, val))
+
+    def test_env_on_rejects_other_values(self) -> None:
+        for val in self.FALSY:
+            for name in (
+                "JEV_HOOK_OFF",
+                "JEV_HOOK_NOSIDECAR",
+                "JEV_HOOK_NOMISS",
+                "JEV_HOOK_DEBUG",
+            ):
+                with patch.dict(os.environ, {name: val}):
+                    self.assertFalse(HOOK._env_on(name), "%s=%r" % (name, val))
+
+    def test_hook_off_uppercase_disables(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_OFF": "TRUE"}):
+            self.assertEqual(
+                HOOK.handle(
+                    {"hook_event_name": "UserPromptSubmit", "prompt": "jwt"},
+                    items=[
+                        {
+                            "kind": "skill",
+                            "name": "jwt-auth",
+                            "id": "skill_jwt_auth",
+                            "description": "jwt",
+                        }
+                    ],
+                    harness="claude-code",
+                ),
+                {},
+            )
+
+    def test_debug_enabled_accepts_on(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_DEBUG": "on"}):
+            self.assertTrue(HOOK._debug_enabled([]))
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

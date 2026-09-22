@@ -430,6 +430,18 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("bad --watch %r (seconds)\n" % argv[i + 1])
             return 2
         del argv[i : i + 2]
+    max_ticks_arg = 0
+    if "--max-ticks" in argv:
+        i = argv.index("--max-ticks")
+        if i + 1 >= len(argv):
+            sys.stderr.write("--max-ticks needs an N value\n")
+            return 2
+        try:
+            max_ticks_arg = int(argv[i + 1])
+        except ValueError:
+            sys.stderr.write("bad --max-ticks %r (integer)\n" % argv[i + 1])
+            return 2
+        del argv[i : i + 2]
     argv = [a for a in argv if a not in {"--strict", "--show", "--quiet", "--json"}]
     if len(argv) > 1:
         results = []
@@ -505,7 +517,7 @@ def main(argv: list[str] | None = None) -> int:
     if watch_seconds > 0:
         import time as _time
 
-        max_ticks = _watch.cap("JEV_PLINT_WATCH_MAX")
+        max_ticks = _watch.cap("JEV_PLINT_WATCH_MAX", max_ticks_arg)
         ticks = 0
         while max_ticks <= 0 or ticks < max_ticks:
             rows = lint_policy(policy)

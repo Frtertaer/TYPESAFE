@@ -364,6 +364,7 @@ def main() -> int:
         default=0.0,
         help="Re-scan the cwd for miss/ask files every S seconds, printing {ts,miss,ask} ticks (read-only; JEV_APPLY_WATCH_MAX caps ticks).",
     )
+    parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument(
         "--out",
         default="",
@@ -372,7 +373,7 @@ def main() -> int:
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     if args.watch and args.watch > 0:
-        max_ticks = _watch.cap("JEV_APPLY_WATCH_MAX")
+        max_ticks = _watch.cap("JEV_APPLY_WATCH_MAX", args.max_ticks)
         ticks = 0
         ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
         miss_path = cwd / MISS_NAME

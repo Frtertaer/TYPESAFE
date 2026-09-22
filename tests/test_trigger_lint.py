@@ -363,6 +363,35 @@ class CliTests(unittest.TestCase):
                     rc = trigger_lint.main([str(bad), "--watch", "0.01"])
             self.assertEqual(rc, 1)
 
+    def test_max_ticks_flag_overrides_env_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(tmp, [dict(GOOD_CASE)])
+            with mock.patch.dict(os.environ, {"JEV_TLINT_WATCH_MAX": "5"}):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = trigger_lint.main(
+                        [str(path), "--watch", "0.01", "--max-ticks", "2"]
+                    )
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+
+    def test_max_ticks_bad_value_is_usage_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(tmp, [dict(GOOD_CASE)])
+            buf = io.StringIO()
+            err = io.StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = trigger_lint.main(
+                    [str(path), "--watch", "0.01", "--max-ticks", "nope"]
+                )
+            self.assertEqual(rc, 2)
+            self.assertIn("max-ticks", err.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

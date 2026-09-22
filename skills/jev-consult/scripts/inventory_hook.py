@@ -572,7 +572,15 @@ def main(argv: list[str] | None = None) -> int:
             idx = argv.index("--out")
             if idx + 1 < len(argv):
                 watch_out = argv[idx + 1]
-        max_ticks = _watch.cap("JEV_HOOK_WATCH_MAX")
+        max_ticks_arg = 0
+        if "--max-ticks" in argv:
+            idx = argv.index("--max-ticks")
+            if idx + 1 < len(argv):
+                try:
+                    max_ticks_arg = int(argv[idx + 1])
+                except ValueError:
+                    max_ticks_arg = 0
+        max_ticks = _watch.cap("JEV_HOOK_WATCH_MAX", max_ticks_arg)
         ticks = 0
         while max_ticks <= 0 or ticks < max_ticks:
             tick: dict = {"ts": int(time.time())}

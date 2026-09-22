@@ -428,6 +428,7 @@ def main() -> int:
         default=0.0,
         help="Re-run the catalog search for --task every S seconds, printing {ts,hits,cached} ticks (read-only; JEV_CATALOG_WATCH_MAX caps ticks).",
     )
+    parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument(
         "--out",
         default="",
@@ -451,7 +452,7 @@ def main() -> int:
     home = Path(args.home) if args.home else user_home()
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home()
     if args.watch and args.watch > 0:
-        max_ticks = _watch.cap("JEV_CATALOG_WATCH_MAX")
+        max_ticks = _watch.cap("JEV_CATALOG_WATCH_MAX", args.max_ticks)
         ticks = 0
         while max_ticks <= 0 or ticks < max_ticks:
             tick = {"ts": int(time.time())}

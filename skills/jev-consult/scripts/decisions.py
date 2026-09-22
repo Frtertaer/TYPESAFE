@@ -657,6 +657,7 @@ def main(argv: list[str] | None = None) -> int:
         default=0.0,
         help="Re-read the log every S seconds and print a {\"ts\",\"count\"} JSON tick",
     )
+    parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     args = parser.parse_args(argv)
     file_arg = args.file or os.environ.get("JEV_DECISIONS", "").strip()
     path = Path(file_arg) if file_arg else inventory.decisions_log_path()
@@ -877,7 +878,7 @@ def main(argv: list[str] | None = None) -> int:
         return items
     entries = _filtered(entries)
     if getattr(args, "watch", 0) > 0:
-        max_ticks = _watch.cap("JEV_DECISIONS_WATCH_MAX")
+        max_ticks = _watch.cap("JEV_DECISIONS_WATCH_MAX", args.max_ticks)
         ticks = 0
         prev_keys: set | None = None
         while max_ticks <= 0 or ticks < max_ticks:

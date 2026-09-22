@@ -204,6 +204,18 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("bad --watch %r (seconds)\n" % argv[idx + 1])
             return 2
         argv = argv[:idx] + argv[idx + 2 :]
+    max_ticks_arg = 0
+    if "--max-ticks" in argv:
+        idx = argv.index("--max-ticks")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--max-ticks needs an N value\n")
+            return 2
+        try:
+            max_ticks_arg = int(argv[idx + 1])
+        except ValueError:
+            sys.stderr.write("bad --max-ticks %r (integer)\n" % argv[idx + 1])
+            return 2
+        argv = argv[:idx] + argv[idx + 2 :]
     argv = [a for a in argv if a not in ("--fix", "--json", "--strict", "--quiet")]
     if not argv:
         sys.stderr.write(
@@ -221,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     if watch_seconds > 0:
         import time as _time
 
-        max_ticks = _watch.cap("JEV_SLINT_WATCH_MAX")
+        max_ticks = _watch.cap("JEV_SLINT_WATCH_MAX", max_ticks_arg)
         ticks = 0
         while max_ticks <= 0 or ticks < max_ticks:
             rows = [f for path in paths for f in lint_skill(path)]

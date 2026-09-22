@@ -270,6 +270,26 @@ class SmokeTests(unittest.TestCase):
             self.assertEqual(len(lines), 2)
             self.assertTrue(all(t["ok"] is True for t in lines))
 
+    def test_max_ticks_flag_overrides_env_cap(self) -> None:
+        def ok_step(tmp):
+            return {"name": "policy", "ok": True, "detail": "fake"}
+
+        import io
+
+        with patch.dict(os.environ, {"JEV_SMOKE_WATCH_MAX": "9"}):
+            with patch.object(MOD, "step_policy", side_effect=ok_step):
+                buf = io.StringIO()
+                with patch.object(sys, "stdout", buf):
+                    rc = MOD.main(
+                        ["--watch", "0.001", "--only", "policy",
+                         "--max-ticks", "3"]
+                    )
+        self.assertEqual(rc, 0)
+        ticks = [
+            json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 3)
+
     def test_policy_step_real(self) -> None:
         from pathlib import Path as P
         import tempfile

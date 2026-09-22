@@ -1103,6 +1103,7 @@ def main(argv: list[str] | None = None) -> int:
         default=0.0,
         help="Rescan and reprint the JSON payload every SECONDS until interrupted.",
     )
+    parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--id", metavar="NAME", default="", help="Print the single matching item's JSON (matches id or name).")
     parser.add_argument(
         "--explain",
@@ -1313,7 +1314,7 @@ def main(argv: list[str] | None = None) -> int:
     watch_seconds = getattr(args, "watch", 0.0) or 0.0
     if watch_seconds <= 0:
         return 0
-    max_ticks = _watch.cap("JEV_INV_WATCH_MAX")
+    max_ticks = _watch.cap("JEV_INV_WATCH_MAX", args.max_ticks)
     ticks = 0
     prev_ids: set | None = None
     while max_ticks <= 0 or ticks < max_ticks:

@@ -14,7 +14,13 @@ import sys
 from pathlib import Path
 
 
-def cap(env_name: str) -> int:
+def cap(env_name: str, override=None) -> int:
+    """Tick cap: --max-ticks N wins, else the JEV_*_WATCH_MAX env (0 = uncapped)."""
+    if override:
+        try:
+            return max(int(override), 0)
+        except (TypeError, ValueError):
+            return 0
     try:
         return max(int(os.environ.get(env_name, "0") or 0), 0)
     except ValueError:

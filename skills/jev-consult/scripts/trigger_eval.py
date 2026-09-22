@@ -265,6 +265,7 @@ def main(argv: list[str] | None = None) -> int:
         default=0.0,
         help="Re-evaluate every S seconds, printing one verdict tick per pass.",
     )
+    parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument(
         "--strict",
         action="store_true",
@@ -401,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.watch and args.watch > 0:
         import time as _time
 
-        max_ticks = _watch.cap("JEV_TRIGGER_WATCH_MAX")
+        max_ticks = _watch.cap("JEV_TRIGGER_WATCH_MAX", args.max_ticks)
         ticks = 0
         cur = result
         while max_ticks <= 0 or ticks < max_ticks:

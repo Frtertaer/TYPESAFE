@@ -319,6 +319,7 @@ def main() -> int:
         default=0.0,
         help="Re-print the fill state as a {ts,miss,ask} JSON tick every S seconds (JEV_PEER_WATCH_MAX caps ticks).",
     )
+    parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument(
         "--out",
         default="",
@@ -356,7 +357,7 @@ def main() -> int:
             sys.stdout.write(json.dumps({"error": "fail_open"}) + "\n")
         return 0
     if args.watch and args.watch > 0:
-        max_ticks = _watch.cap("JEV_PEER_WATCH_MAX")
+        max_ticks = _watch.cap("JEV_PEER_WATCH_MAX", args.max_ticks)
         ticks = 0
         ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
         while max_ticks <= 0 or ticks < max_ticks:

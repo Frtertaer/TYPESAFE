@@ -38,6 +38,14 @@ class CapTests(unittest.TestCase):
         with patch.dict("os.environ", {"JEV_X_WATCH_MAX": "-5"}):
             self.assertEqual(watch.cap("JEV_X_WATCH_MAX"), 0)
 
+    def test_override_wins_over_env(self) -> None:
+        with patch.dict("os.environ", {"JEV_X_WATCH_MAX": "9"}):
+            self.assertEqual(watch.cap("JEV_X_WATCH_MAX", 2), 2)
+            self.assertEqual(watch.cap("JEV_X_WATCH_MAX", "3"), 3)
+            self.assertEqual(watch.cap("JEV_X_WATCH_MAX", -4), 0)
+            self.assertEqual(watch.cap("JEV_X_WATCH_MAX", "junk"), 0)
+            self.assertEqual(watch.cap("JEV_X_WATCH_MAX", 0), 9)
+
 
 class EmitTests(unittest.TestCase):
     def test_prints_json_line(self) -> None:

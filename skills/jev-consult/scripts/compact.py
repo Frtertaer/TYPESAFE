@@ -1237,7 +1237,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
     if getattr(args, "watch", None):
         import time as _time
 
-        max_ticks = _watch.cap("JEV_COMPACT_WATCH_MAX")
+        max_ticks = _watch.cap("JEV_COMPACT_WATCH_MAX", args.max_ticks)
         ticks = 0
         cur: dict[str, Any] = {}
         while max_ticks <= 0 or ticks < max_ticks:
@@ -1434,6 +1434,7 @@ def main(argv: list[str] | None = None) -> int:
         metavar="SECONDS",
         help="Re-read the transcript file and re-run compaction every S seconds, emitting a stats tick per pass (JEV_COMPACT_WATCH_MAX caps ticks).",
     )
+    parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument(
         "--prune-spill",
         type=float,

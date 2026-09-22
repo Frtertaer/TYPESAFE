@@ -253,6 +253,39 @@ class InventoryHookTests(unittest.TestCase):
             self.assertTrue(HOOK.LAST_DECISION["explicit"])
             self.assertEqual(HOOK.LAST_DECISION["jev_status"], "winner")
             self.assertEqual(HOOK.LAST_DECISION["question"], "env")
+            self.assertEqual(HOOK.LAST_DECISION["reason"], "pick forced by JEV_HOOK_WINNER")
+
+    def test_last_decision_reason_per_status(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "Add JWT access tokens in Python",
+                "cwd": tmp,
+            }
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=skip_pick)
+            self.assertEqual(
+                HOOK.LAST_DECISION["reason"], "event skipped by hook config"
+            )
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=skip_pick)
+            self.assertEqual(
+                HOOK.LAST_DECISION["reason"],
+                "same prompt inside a fresh sidecar; picks reused without a Jev call",
+            )
+
+            def winner_pick(*_args, **_kwargs):
+                return {
+                    "status": "winner",
+                    "winner": {"kind": "skill", "name": "jwt-auth"},
+                    "question": "load_tools",
+                }
+
+            payload2 = dict(payload, prompt="refresh JWT tokens in Python", cwd=str(Path(tmp) / "other"))
+            HOOK.handle(payload2, items=items, harness="claude-code", pick_fn=winner_pick)
+            self.assertEqual(
+                HOOK.LAST_DECISION["reason"],
+                "jev picked jwt-auth from the shortlist",
+            )
 
     def test_question_marks_pick_source(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)

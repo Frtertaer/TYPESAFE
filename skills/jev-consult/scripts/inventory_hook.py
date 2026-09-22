@@ -255,6 +255,33 @@ def pick_with_jev(
     return picker
 
 
+def _status_reason(status: str, winner_name: str | None = None, via: str = "") -> str:
+    """One-line human explanation of a jev_status for the routing log."""
+    if status == "dedupe":
+        return "same prompt inside a fresh sidecar; picks reused without a Jev call"
+    if status == "winner":
+        if via == "env":
+            return "pick forced by JEV_HOOK_WINNER"
+        if via == "explicit":
+            return "prompt named the item explicitly ($name)"
+        if via == "dedupe":
+            return "winner carried over from the fresh dedupe sidecar"
+        return "jev picked %s from the shortlist" % (winner_name or "an item")
+    if status == "none":
+        return "jev answered none for the shortlist"
+    if status == "idf":
+        return "jev unavailable or no ask made; IDF shortlist only"
+    if status == "empty":
+        return "jev returned an empty answer"
+    if status == "error":
+        return "pick chooser raised; fell back to the IDF shortlist"
+    if status == "budget":
+        return "hook budget hit after shortlisting; Jev call skipped"
+    if status == "skip":
+        return "event skipped by hook config"
+    return "status=%s" % status
+
+
 def _note_for_picker(picked: list[dict], picker: dict) -> str:
     status = str(picker.get("status") or "")
     winner = picker.get("winner")
@@ -357,6 +384,7 @@ def handle(
             "explicit": False,
             "dedupe": True,
             "jev_status": extra["jev_status"],
+            "reason": _status_reason(extra["jev_status"], (winner_out or {}).get("name"), "dedupe"),
             "question": "dedupe",
             "winner": {"kind": winner_out.get("kind"), "name": winner_out.get("name")}
             if winner_out
@@ -435,6 +463,7 @@ def handle(
         "shortlist": [item.get("id") for item in picked],
         "explicit": explicit_winner is not None,
         "jev_status": extra["jev_status"],
+        "reason": _status_reason(extra["jev_status"], (winner or {}).get("name"), str(picker.get("question") or "")),
         "question": picker.get("question"),
         "need": picker.get("need"),
         "probabilities": picker.get("probabilities") or {},

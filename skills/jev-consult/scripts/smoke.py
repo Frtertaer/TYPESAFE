@@ -2883,6 +2883,26 @@ def step_trigger_eval(tmp: Path) -> dict:
         if ok:
             rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--prompts"])
             ok = rc == 0 and ":" in out
+    if ok:
+        # gate/sort flags: --min-covers 1 passes (every tag has a case),
+        # --min-covers 3 fails; --sort orders weakest-first; --desc swaps
+        # the description the prompts are scored against
+        rc, _ = _run([str(SCRIPTS / "trigger_eval.py"), "--min-covers", "1"])
+        ok = rc == 0
+        rc, _ = _run([str(SCRIPTS / "trigger_eval.py"), "--min-covers", "3"])
+        ok = ok and rc == 1
+        if ok:
+            rc, out = _run(
+                [str(SCRIPTS / "trigger_eval.py"), "--sort", "--ids"]
+            )
+            ok = rc == 0 and len(
+                [ln for ln in out.splitlines() if ln.strip()]
+            ) >= 2
+        if ok:
+            rc, out = _run(
+                [str(SCRIPTS / "trigger_eval.py"), "--desc", "refactor code"]
+            )
+            ok = rc in (0, 1) and "margin:" in out
     return _step("trigger_eval", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

@@ -319,7 +319,7 @@ def post_systemone(
     while True:
         try:
             with opener.open(request, timeout=timeout) as response:
-                body = response.read().decode("utf-8")
+                body = response.read().decode("utf-8", errors="replace")
             break
         except urllib.error.HTTPError as err:
             if 300 <= err.code < 400:
@@ -332,7 +332,10 @@ def post_systemone(
             raise SystemExit("Jev HTTP %s: %s" % (err.code, redact(raw)[:500])) from None
         except urllib.error.URLError as err:
             raise SystemExit("Jev network error: %s" % err.reason) from None
-    parsed = json.loads(body)
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        raise SystemExit("Jev response was not JSON") from None
     return validate_response(parsed, questions)
 
 

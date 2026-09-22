@@ -405,6 +405,8 @@ class _FakeOpener:
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
+        if hasattr(outcome, "read") and hasattr(outcome, "__enter__"):
+            return outcome
         return _FakeResponse(outcome)
 
 
@@ -512,6 +514,38 @@ class PostSystemoneTests(unittest.TestCase):
             ), patch("urllib.request.build_opener", return_value=opener):
                 jev.post_systemone({"task": "t"}, self.QUESTIONS, {}, retries=1)
         self.assertEqual(opener.calls, 1)
+
+    def test_network_error_is_clean_systemexit(self) -> None:
+        opener = _FakeOpener(
+            [urllib.error.URLError("name or service not known")]
+        )
+        env = {"TYPESAFE_API_KEY": "dummy-test-key-not-a-real-secret"}
+        with self.assertRaises(SystemExit) as ctx:
+            with patch.dict(os.environ, env), patch.object(
+                jev, "load_api_key", return_value=env["TYPESAFE_API_KEY"]
+            ), patch("urllib.request.build_opener", return_value=opener):
+                jev.post_systemone({"task": "t"}, self.QUESTIONS, {}, retries=0)
+        self.assertIn("Jev network error", str(ctx.exception))
+
+    def test_non_json_body_is_clean_systemexit(self) -> None:
+        class _Raw(_FakeResponse):
+            def __init__(self, raw: bytes) -> None:
+                self._raw = raw
+
+        for body in (b"<html>upstream error</html>", b"\xff\xfe not utf8"):
+            with self.subTest(body=body[:16]):
+                opener = _FakeOpener([_Raw(body)])
+                env = {"TYPESAFE_API_KEY": "dummy-test-key-not-a-real-secret"}
+                with self.assertRaises(SystemExit) as ctx:
+                    with patch.dict(os.environ, env), patch.object(
+                        jev, "load_api_key", return_value=env["TYPESAFE_API_KEY"]
+                    ), patch(
+                        "urllib.request.build_opener", return_value=opener
+                    ):
+                        jev.post_systemone(
+                            {"task": "t"}, self.QUESTIONS, {}, retries=0
+                        )
+                self.assertIn("Jev response was not JSON", str(ctx.exception))
 
     def test_secret_in_state_blocked_before_http(self) -> None:
         opener = _FakeOpener([self.GOOD])

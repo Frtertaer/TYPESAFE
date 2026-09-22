@@ -778,5 +778,65 @@ class WatchSecsEnvTests(unittest.TestCase):
         self.assertEqual(counts["changed"], len(diff["changed"]))
         self.assertEqual(counts["unchanged"], diff["unchanged"])
 
+class TrendTest(unittest.TestCase):
+    def run_cli(self, *argv: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(COMPARE), *argv],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_trend_dir_summarizes_baselines_by_ts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases_path = Path(tmp) / "cases.json"
+            cases_path.write_text(json.dumps(CASES), encoding="utf-8")
+            trend_dir = Path(tmp) / "baselines"
+            trend_dir.mkdir()
+            for name in ("b1.json", "b2.json"):
+                proc = self.run_cli(
+                    "--cases", str(cases_path), "--baseline", str(trend_dir / name)
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+            # scramble the embedded ts so ts order diverges from filename order
+            b1 = json.loads((trend_dir / "b1.json").read_text(encoding="utf-8"))
+            b1["ts"] = 2000
+            (trend_dir / "b1.json").write_text(json.dumps(b1), encoding="utf-8")
+            b2 = json.loads((trend_dir / "b2.json").read_text(encoding="utf-8"))
+            b2["ts"] = 1000
+            (trend_dir / "b2.json").write_text(json.dumps(b2), encoding="utf-8")
+            proc = self.run_cli(
+                "--cases", str(cases_path), "--trend", str(trend_dir), "--json"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            trend = payload["trend"]
+            self.assertEqual(len(trend), 2)
+            self.assertEqual([row["file"] for row in trend], ["b2.json", "b1.json"])
+            self.assertEqual([row["ts"] for row in trend], [1000, 2000])
+            for row in trend:
+                self.assertEqual(row["regressions"], 0)
+                self.assertEqual(row["unchanged"], 2)
+            self.assertIn("trend: b1.json", proc.stderr)
+
+    def test_trend_missing_dir_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = self.run_cli("--trend", str(Path(tmp) / "nope"))
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("trend dir", proc.stderr)
+
+    def test_trend_skips_unparseable_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            trend_dir = Path(tmp) / "baselines"
+            trend_dir.mkdir()
+            (trend_dir / "junk.json").write_text("not json", encoding="utf-8")
+            (trend_dir / "norows.json").write_text(
+                json.dumps({"ts": 1, "rows": "nope"}), encoding="utf-8"
+            )
+            proc = self.run_cli("--trend", str(trend_dir), "--json")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["trend"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

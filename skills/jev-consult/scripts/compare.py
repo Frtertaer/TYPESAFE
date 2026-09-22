@@ -379,6 +379,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick with failures.")
     parser.add_argument("--baseline", metavar="PATH", default="", help="Write the current rows to PATH as a baseline file for a later --diff")
     parser.add_argument("--diff", metavar="PATH", default="", help="Load a --baseline file and add a diff block (regressions/improved/changed/added/removed) to the result payload; regressions also join the --strict failure list")
+    parser.add_argument("--trend", metavar="DIR", default="", help="Diff the current rows against every *.json baseline in DIR; adds a trend list ({file,ts,regressions,improved,changed,added,removed,unchanged} sorted by ts) to the payload and one stderr line per baseline")
     args = parser.parse_args(argv)
     only = {s.strip() for s in args.only.split(",") if s.strip()} or None
     if args.watch and args.watch > 0:
@@ -460,6 +461,48 @@ def main(argv: list[str] | None = None) -> int:
         for entry in result["diff"]["regressions"]:
             sys.stderr.write(
                 "regression: %s (%s)\n" % (entry["id"], entry["why"])
+            )
+    if getattr(args, "trend", ""):
+        trend_dir = Path(args.trend)
+        if not trend_dir.is_dir():
+            sys.stderr.write("trend dir %s missing\n" % trend_dir)
+            return 2
+        trend = []
+        for path in sorted(trend_dir.glob("*.json")):
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            base_rows = raw.get("rows") if isinstance(raw, dict) else raw
+            if not isinstance(base_rows, list):
+                continue
+            diff = diff_baseline(base_rows, result["rows"], args.live)
+            counts = diff.get("counts") or {}
+            trend.append(
+                {
+                    "file": path.name,
+                    "ts": raw.get("ts") if isinstance(raw, dict) else None,
+                    "regressions": counts.get("regressions", 0),
+                    "improved": counts.get("improved", 0),
+                    "changed": counts.get("changed", 0),
+                    "added": counts.get("added", 0),
+                    "removed": counts.get("removed", 0),
+                    "unchanged": counts.get("unchanged", 0),
+                }
+            )
+        trend.sort(key=lambda row: (row["ts"] is None, row["ts"], row["file"]))
+        result["trend"] = trend
+        for row in trend:
+            sys.stderr.write(
+                "trend: %s regressions=%d improved=%d changed=%d added=%d removed=%d\n"
+                % (
+                    row["file"],
+                    row["regressions"],
+                    row["improved"],
+                    row["changed"],
+                    row["added"],
+                    row["removed"],
+                )
             )
     if args.failing:
         failing_ids = {

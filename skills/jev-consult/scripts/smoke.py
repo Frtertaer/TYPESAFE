@@ -321,6 +321,50 @@ def step_decisions(tmp: Path) -> dict:
             ]
         except (ValueError, IndexError, KeyError):
             ok = False
+    if ok:
+        # --prune --dry-run reports counts without rewriting; --prune applies
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--status",
+                "winner",
+                "--prune",
+                "--dry-run",
+                "--json",
+            ]
+        )
+        try:
+            summary = json.loads(out).get("prune_dry_run", {})
+            ok = (
+                rc == 0
+                and summary.get("kept") == 1
+                and summary.get("would_prune") == 1
+                and len(log.read_text(encoding="utf-8").splitlines()) == 2
+            )
+        except (ValueError, AttributeError):
+            ok = False
+    if ok:
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--status",
+                "none",
+                "--prune",
+            ]
+        )
+        try:
+            lines = log.read_text(encoding="utf-8").splitlines()
+            ok = (
+                rc == 0
+                and len(lines) == 1
+                and json.loads(lines[0]).get("jev_status") == "none"
+            )
+        except (ValueError, IndexError):
+            ok = False
     return _step("decisions", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

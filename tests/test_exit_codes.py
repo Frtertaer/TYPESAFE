@@ -96,6 +96,95 @@ class LintRuleExplainParityTests(unittest.TestCase):
                 self.assertEqual(proc.returncode, 0, "%s --explain %s" % (name, rule))
 
 
+class SeverityEnvSweepTests(unittest.TestCase):
+    """JEV_*_SEVERITY presets the --severity floor on every lint."""
+
+    def _fixture(self, tmp: Path, name: str) -> Path:
+        import json as _json
+
+        if name == "question_lint.py":
+            f = tmp / "req.json"
+            f.write_text(
+                _json.dumps(
+                    {
+                        "questions": {
+                            "a": {
+                                "type": "noul",
+                                "instructions": "Should the coder not proceed with this task?",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return f
+        if name == "policy_lint.py":
+            import shutil
+
+            src = SCRIPTS.parent / "policy.json"
+            f = tmp / "policy.json"
+            shutil.copy(src, f)
+            data = _json.loads(f.read_text(encoding="utf-8"))
+            data["bogus_key"] = 1  # P011 warn only
+            f.write_text(_json.dumps(data), encoding="utf-8")
+            return f
+        if name == "skill_lint.py":
+            d = tmp / "x-skill"
+            d.mkdir()
+            f = d / "SKILL.md"
+            f.write_text("---\nname: x-skill\n---\nbody\n", encoding="utf-8")
+            return f  # S004 warn: missing description
+        f = tmp / "cases.json"
+        f.write_text(
+            _json.dumps(
+                {
+                    "cases": [
+                        {
+                            "id": "BadId",  # T005 warn: not pos-/neg- prefixed
+                            "prompt": "use the jev consult skill now please",
+                            "should_trigger": True,
+                            "covers": ["approach"],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return f
+
+    CASES = (
+        ("question_lint.py", "JEV_QLINT_SEVERITY", "J001"),
+        ("policy_lint.py", "JEV_PLINT_SEVERITY", "P011"),
+        ("skill_lint.py", "JEV_SLINT_SEVERITY", "S004"),
+        ("trigger_lint.py", "JEV_TLINT_SEVERITY", "T005"),
+    )
+
+    def test_env_floor_suppresses_warn_findings(self) -> None:
+        import json
+        import os
+        import tempfile
+
+        for name, env_name, rule in self.CASES:
+            with self.subTest(lint=name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    fixture = self._fixture(Path(tmp), name)
+                    proc = subprocess.run(
+                        [sys.executable, str(SCRIPTS / name), str(fixture), "--json"],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    data = json.loads(proc.stdout)
+                    rows = data["findings"] if isinstance(data, dict) else data
+                    self.assertIn(rule, [r["rule"] for r in rows], proc.stdout[:300])
+                    env = dict(os.environ, **{env_name: "error"})
+                    proc = subprocess.run(
+                        [sys.executable, str(SCRIPTS / name), str(fixture), "--json"],
+                        capture_output=True, text=True, timeout=30, env=env,
+                    )
+                    data = json.loads(proc.stdout)
+                    rows = data["findings"] if isinstance(data, dict) else data
+                    self.assertNotIn(rule, [r["rule"] for r in rows], proc.stdout[:300])
+
+
 class EnvJqRcTests(unittest.TestCase):
     def test_trigger_eval_env_bad_jq_key_is_rc2(self) -> None:
         proc = run("trigger_eval.py", "--env", "--jq", "definitely_not_a_key")

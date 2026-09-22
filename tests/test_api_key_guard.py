@@ -16,10 +16,14 @@ SCRIPTS = ROOT / "skills" / "jev-consult" / "scripts"
 CANARY = "CANARY_KEY_9f8e7d6c5b4a"
 
 
-def run(script: str, argv: list, stdin: str = "") -> subprocess.CompletedProcess:
+def run(
+    script: str, argv: list, stdin: str = "", extra_env: dict | None = None
+) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     env["TYPESAFE_API_KEY"] = CANARY
     env["JEV_CONSULT_LOG"] = "0"
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [sys.executable, str(SCRIPTS / script), *argv],
         input=stdin,
@@ -70,6 +74,41 @@ class ApiKeyGuardTests(unittest.TestCase):
         )
         self._assert_no_canary(proc, "check-key")
 
+
+
+    def test_hook_debug_stderr_no_leak(self) -> None:
+        proc = run(
+            "inventory_hook.py",
+            ["--debug"],
+            stdin='{"hook_event_name": "UserPromptSubmit", "prompt": "jwt"}',
+            extra_env={"JEV_HOOK_DEBUG": "1"},
+        )
+        self._assert_no_canary(proc, "hook-debug")
+
+    def test_hook_bad_env_values_warn_no_leak(self) -> None:
+        proc = run(
+            "inventory_hook.py",
+            [],
+            stdin="{}",
+            extra_env={
+                "JEV_HOOK_TIMEOUT": "bogus",
+                "JEV_HOOK_COOLDOWN": "bogus",
+                "JEV_HOOK_MAX_PROMPT": "bogus",
+            },
+        )
+        self._assert_no_canary(proc, "hook-badenv")
+
+    def test_hook_jq_stderr_no_leak(self) -> None:
+        proc = run("inventory_hook.py", ["--jq"], stdin="{}")
+        self._assert_no_canary(proc, "hook-jq")
+
+    def test_compact_missing_file_no_leak(self) -> None:
+        proc = run("compact.py", ["does-not-exist-transcript.json"])
+        self._assert_no_canary(proc, "compact-missing")
+
+    def test_decisions_missing_log_no_leak(self) -> None:
+        proc = run("decisions.py", ["--log", "does-not-exist.jsonl"])
+        self._assert_no_canary(proc, "decisions-missing")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

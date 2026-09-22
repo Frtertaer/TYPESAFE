@@ -1133,6 +1133,23 @@ class CompactCliTests(unittest.TestCase):
         self.assertEqual(out["stats"]["calls"], 1)
         self.assertIn(out["decisions"][0]["action"], ("drop_result", "drop_call", "keep", "kept"))
 
+    def test_compact_is_idempotent(self) -> None:
+        # compacting an already-compacted transcript yields the same payload
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf1 = io.StringIO()
+            with patch.object(sys, "stdout", buf1):
+                rc1 = C.main([str(f), "--history", "--fake", "--min-reduction", "0"])
+            self.assertEqual(rc1, 0)
+            f2 = Path(tmp) / "t2.json"
+            f2.write_text(buf1.getvalue(), encoding="utf-8")
+            buf2 = io.StringIO()
+            with patch.object(sys, "stdout", buf2):
+                rc2 = C.main([str(f2), "--history", "--fake", "--min-reduction", "0"])
+            self.assertEqual(rc2, 0)
+            self.assertEqual(json.loads(buf1.getvalue()), json.loads(buf2.getvalue()))
+
     def test_jq_prints_one_field_of_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

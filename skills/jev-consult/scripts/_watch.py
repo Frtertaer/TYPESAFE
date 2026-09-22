@@ -65,8 +65,11 @@ def emit(tick: dict, out_path=None, quiet: bool = False, bad=None) -> None:
 def write_verdict(path: str, payload: dict) -> bool:
     """Write a slim verdict JSON to path; False (with stderr note) on failure.
 
-    Writes a sibling ``<name>.tmp`` file first and ``os.replace``s it over the
-    target so readers never see a half-written payload."""
+    A ``ts`` epoch field is injected when the caller did not set one. Writes a
+    sibling ``<name>.tmp`` file first and ``os.replace``s it over the target
+    so readers never see a half-written payload."""
+    if "ts" not in payload:
+        payload = dict(payload, ts=int(time.time()))
     target = Path(path)
     tmp = target.with_name(target.name + ".tmp")
     try:

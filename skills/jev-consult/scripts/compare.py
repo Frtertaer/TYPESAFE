@@ -187,15 +187,7 @@ def _write_verdict(path: str, tick: dict[str, Any]) -> None:
     }
     if "new_failures" in tick:
         payload["new_failures"] = tick["new_failures"]
-    try:
-        Path(path).write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-    except OSError as exc:
-        sys.stderr.write("--verdict failed: %s\n" % exc)
-        return False
-    return True
+    return _watch.write_verdict(path, payload)
 
 
 def strict_failures(rows: list[dict[str, Any]], live: bool) -> list[str]:

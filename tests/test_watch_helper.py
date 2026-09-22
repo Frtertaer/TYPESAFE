@@ -179,6 +179,22 @@ class WriteVerdictTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("--verdict failed", buf_err.getvalue())
 
+    def test_injects_ts_when_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v.json"
+            watch.write_verdict(str(path), {"verdict": "ok"})
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertIn("ts", payload)
+            self.assertIsInstance(payload["ts"], int)
+            self.assertGreater(payload["ts"], 0)
+
+    def test_preserves_caller_ts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v.json"
+            watch.write_verdict(str(path), {"verdict": "ok", "ts": 1234})
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["ts"], 1234)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

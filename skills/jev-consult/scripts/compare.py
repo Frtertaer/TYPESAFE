@@ -250,6 +250,7 @@ def main(argv: list[str] | None = None) -> int:
         description="Compare unguarded vs Jev-guarded traces on sticky prompts."
     )
     parser.add_argument("--live", action="store_true", help="Call Jev Noul for each side")
+    parser.add_argument("--failing", action="store_true", help="Show only cases whose guarded (after) side fails the strict gate")
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--md", action="store_true", help="Print rows as a Markdown table")
     parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH")
@@ -325,6 +326,14 @@ def main(argv: list[str] | None = None) -> int:
         path=Path(args.cases) if args.cases else None,
         only=only,
     )
+    if args.failing:
+        failing_ids = {
+            f.split(":", 1)[0]
+            for f in strict_failures(result["rows"], args.live)
+        }
+        result["rows"] = [
+            r for r in result["rows"] if str(r.get("id") or "?") in failing_ids
+        ]
     if args.out:
         out_path = Path(args.out)
         try:

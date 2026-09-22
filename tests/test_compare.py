@@ -475,6 +475,23 @@ class StrictGateTest(unittest.TestCase):
             self.assertIn("cases=2", lines[0])
             self.assertIn("failures=0", lines[0])
 
+    def test_failing_shows_only_failed_cases(self) -> None:
+        bad_cases = json.loads(json.dumps(CASES))
+        bad_cases["cases"][0]["after"]["called_jev"] = False
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bad.json"
+            path.write_text(json.dumps(bad_cases), encoding="utf-8")
+            import io as _io
+            from contextlib import redirect_stdout
+
+            buf = _io.StringIO()
+            with redirect_stdout(buf):
+                rc = compare.main(["--cases", str(path), "--failing", "--json"])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(len(out["rows"]), 1)
+            self.assertFalse(out["rows"][0]["after"]["called_jev"])
+
     def test_watch_rc_1_when_last_tick_has_failures(self) -> None:
         import os as _os
 

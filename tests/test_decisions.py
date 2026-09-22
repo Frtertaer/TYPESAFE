@@ -3005,5 +3005,43 @@ class EvidenceTest(unittest.TestCase):
             self.assertIn("- open misses: 0", proc.stdout)
 
 
+class ReasonFilterTest(unittest.TestCase):
+    def _log(self, tmp: str) -> Path:
+        path = Path(tmp) / "decisions.jsonl"
+        write_log(
+            path,
+            [
+                {"ts": 1, "harness": "h", "jev_status": "winner", "reason": "pick forced by JEV_HOOK_WINNER"},
+                {"ts": 2, "harness": "h", "jev_status": "none", "reason": "jev answered none"},
+                {"ts": 3, "harness": "h", "jev_status": "dedupe"},
+            ],
+        )
+        return path
+
+    def test_reason_substring_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._log(tmp)
+            proc = run_cli("--file", str(path), "--reason", "forced", "--count")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip(), "1")
+
+    def test_reason_is_case_insensitive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._log(tmp)
+            proc = run_cli("--file", str(path), "--reason", "JEV", "--count")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip(), "2")
+
+    def test_reason_env_preset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._log(tmp)
+            proc = run_cli(
+                "--file", str(path), "--count",
+                env={"JEV_DECISIONS_REASON": "answered"},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip(), "1")
+
+
 if __name__ == "__main__":
     unittest.main()

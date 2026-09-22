@@ -605,6 +605,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fill", default=os.environ.get("JEV_DECISIONS_FILL", ""), help="Only entries with this fill kind (apply, catalog, peer)")
     parser.add_argument("--field", default=os.environ.get("JEV_DECISIONS_FIELD", ""), help="Generic filter: KEY=VALUE equality on any entry field (a.b digs into nested objects)")
     parser.add_argument("--prompt", default=os.environ.get("JEV_DECISIONS_PROMPT", ""), help="Only entries whose prompt_head/prompt_tail contain this substring (case-insensitive)")
+    parser.add_argument("--reason", default=os.environ.get("JEV_DECISIONS_REASON", ""), help="Only entries whose reason field contains this substring (case-insensitive)")
     parser.add_argument("--grep", default=os.environ.get("JEV_DECISIONS_GREP", ""), help="Only entries where any string field contains this substring (case-insensitive, one nesting level deep)")
     env_min_need = os.environ.get("JEV_DECISIONS_MIN_NEED", "").strip()
     try:
@@ -1116,6 +1117,13 @@ def main(argv: list[str] | None = None) -> int:
                 if needle in str(item.get("prompt_head") or "").lower()
                 or needle in str(item.get("prompt_tail") or "").lower()
             ]
+        if args.reason:
+            needle = args.reason.lower()
+            items = [
+                item
+                for item in items
+                if needle in str(item.get("reason") or "").lower()
+            ]
         if args.grep:
             needle = args.grep.lower()
 
@@ -1275,6 +1283,7 @@ def main(argv: list[str] | None = None) -> int:
             or args.fill
             or args.field
             or args.prompt
+            or args.reason
             or args.grep
             or args.min_need is not None
             or args.min_latency is not None

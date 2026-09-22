@@ -199,6 +199,33 @@ def step_policy_lint(tmp: Path) -> dict:
         )
         ticks = [ln for ln in out.splitlines() if '"findings"' in ln]
         ok = len(ticks) == 1 and "watch tick=2" not in out
+    if ok:
+        # --show dumps the effective policy JSON and exits
+        rc, out = _run(
+            [str(SCRIPTS / "policy_lint.py"), str(bad), "--show"]
+        )
+        try:
+            shown = json.loads(out)
+            ok = rc == 0 and shown.get("policy", {}).get(
+                "endpoint"
+            ) == policy["endpoint"]
+        except (ValueError, KeyError, TypeError):
+            ok = False
+    if ok:
+        # --diff OTHER prints a key-level diff of OTHER -> PATH
+        rc, out = _run(
+            [
+                str(SCRIPTS / "policy_lint.py"),
+                str(bad),
+                "--diff",
+                str(empty_policy),
+            ]
+        )
+        ok = (
+            rc == 0
+            and "difference(s)" in out
+            and "+ endpoint" in out
+        )
     return _step("policy_lint", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

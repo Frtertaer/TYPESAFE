@@ -855,6 +855,24 @@ class JevInternalsTests(unittest.TestCase):
                 rc = jev.main(["ask", str(req), "--jq", "nope.deep"])
             self.assertEqual(rc, 2)
 
+    def test_cmd_decide_jq_prints_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "d.json"
+            path.write_text(
+                json.dumps({"answers": {"q": {"type": "noul", "noul": 0.9}}}),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = jev.main(["decide", str(path), "--jq", "decision.action"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "proceed")
+            with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", io.StringIO()
+            ):
+                rc = jev.main(["decide", str(path), "--jq", "nope"])
+            self.assertEqual(rc, 2)
+
     def test_lint_json_emits_findings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             req = Path(tmp) / "req.json"

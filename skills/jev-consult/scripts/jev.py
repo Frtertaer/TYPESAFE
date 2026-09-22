@@ -578,7 +578,19 @@ def cmd_decide(args: argparse.Namespace) -> int:
         raise SystemExit("answers must be an object")
     irreversible = bool(payload.get("irreversible", args.irreversible))
     decision = decide(answers, policy, irreversible=irreversible)
-    emit({"decision": decision, "warnings": policy_warnings(policy)})
+    payload = {"decision": decision, "warnings": policy_warnings(policy)}
+    jq_key = getattr(args, "jq", "") or ""
+    if jq_key:
+        value, found = jq_lookup(payload, jq_key)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (jq_key, ", ".join(sorted(payload)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+    else:
+        emit(payload)
     verdict_path = getattr(args, "verdict", "") or ""
     if verdict_path and _watch is not None:
         _watch.write_verdict(
@@ -846,6 +858,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--irreversible",
         action="store_true",
         help="Treat the pending action as hard to undo",
+    )
+    decide_cmd.add_argument(
+        "--jq",
+        metavar="KEY",
+        default="",
+        help="Print just one dotted-path field (e.g. decision.action); unknown key exits 2.",
     )
     decide_cmd.set_defaults(func=cmd_decide)
     lint_cmd = sub.add_parser(

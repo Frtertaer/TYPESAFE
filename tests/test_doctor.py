@@ -238,6 +238,26 @@ class DoctorTests(unittest.TestCase):
         self.assertTrue(c["ok"])
         self.assertIn("2 lines", c["detail"])
 
+    def test_api_key_export_prefix_in_env_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".env").write_text(
+                "export TYPESAFE_API_KEY=abc123\n", encoding="utf-8"
+            )
+            rc, out, _ = run_main(
+                ["--agents", "hermes", "--home", tmp, "--hermes-home", str(Path(tmp) / "h")],
+                cwd=tmp,
+            )
+        self.assertTrue(check_of(out, "api_key")["ok"])
+
+    def test_decisions_log_disabled_reports_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run_main(
+                ["--agents", "hermes", "--home", tmp, "--hermes-home", str(Path(tmp) / "h")],
+            )
+        c = check_of(out, "decisions_log")
+        self.assertTrue(c["ok"])
+        self.assertIn("disabled", c["detail"])
+
     def test_failed_checks_carry_hints(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rc, out, _ = run_main(

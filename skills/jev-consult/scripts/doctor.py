@@ -167,7 +167,10 @@ def _env_file_has_key(path: Path) -> bool:
         line = line.strip()
         if line.startswith("#") or "=" not in line:
             continue
-        if line.split("=", 1)[0].strip() == "TYPESAFE_API_KEY":
+        key = line.split("=", 1)[0].strip()
+        if key.startswith("export "):
+            key = key[7:].strip()
+        if key == "TYPESAFE_API_KEY":
             return True
     return False
 
@@ -186,7 +189,11 @@ def check_common(home: Path, hermes: Path) -> list[dict]:
         policy_ok = bool(data.get("question_soft_max"))
         detail = "ok" if policy_ok else "no question_soft_max"
     out.append(_check("*", "policy", policy_ok, detail))
-    log = Path(os.environ.get("JEV_CONSULT_LOG") or (home / ".cache" / "jev-consult" / "decisions.jsonl"))
+    raw_log = os.environ.get("JEV_CONSULT_LOG") or ""
+    if raw_log.strip() == "0":
+        out.append(_check("*", "decisions_log", True, "disabled (JEV_CONSULT_LOG=0)"))
+        return out
+    log = Path(raw_log) if raw_log else home / ".cache" / "jev-consult" / "decisions.jsonl"
     lines = 0
     if log.is_file():
         try:

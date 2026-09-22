@@ -1019,6 +1019,15 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertAlmostEqual(ticks[0]["coverage"], 0.92)
         self.assertTrue(ticks[0]["coverage_ok"])
 
+    def test_watch_jq_prints_only_the_named_tick_field(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "2"}):
+            with redirect_stdout(buf):
+                rc = te.main(["--watch", "0.01", "--jq", "verdict"])
+        self.assertEqual(rc, 0)
+        lines = [l for l in buf.getvalue().splitlines() if l.strip()]
+        self.assertEqual(lines, ['"PASS"', '"PASS"'])
+
     def test_watch_tick_reports_coverage_gate(self) -> None:
         buf = io.StringIO()
         with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):

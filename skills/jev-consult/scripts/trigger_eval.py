@@ -587,7 +587,12 @@ def main(argv: list[str] | None = None) -> int:
             prev_gates = list(failed)
             prev_tick = tick
             gates_seen.update(failed)
-            _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_TRIGGER_WATCH_QUIET", args.quiet), bad=bool(failed))
+            if getattr(args, "jq", ""):
+                for field in [f.strip() for f in args.jq.split(",") if f.strip()]:
+                    value, _found = jq_lookup(tick, field)
+                    sys.stdout.write(json.dumps(value) + "\n")
+            else:
+                _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_TRIGGER_WATCH_QUIET", args.quiet), bad=bool(failed))
             if not _write_verdict(
                 cur,
                 {

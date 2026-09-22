@@ -1261,6 +1261,23 @@ class CompactCliTests(unittest.TestCase):
             self.assertIn("messages", out)
             self.assertTrue(out["stats"]["dry_run"])
 
+    def test_watch_jq_prints_only_the_named_tick_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", buf), patch.object(
+                    sys, "stderr", io.StringIO()
+                ):
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0",
+                         "--watch", "0.01", "--jq", "fallback"]
+                    )
+        self.assertEqual(rc, 0)
+        lines = [l for l in buf.getvalue().splitlines() if l.strip()]
+        self.assertEqual(lines, ["false", "false"])
+
     def test_watch_emits_stats_ticks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

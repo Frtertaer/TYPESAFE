@@ -150,6 +150,23 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         self.assertIn("bad --jq key", proc.stderr)
 
+    def test_watch_jq_prints_only_the_named_tick_field(self) -> None:
+        with patch.dict(os.environ, {"JEV_SMOKE_WATCH_MAX": "2"}), patch.object(
+            MOD, "_run", return_value=(0, "ok")
+        ):
+            import io
+
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf), patch.object(
+                sys, "stderr", io.StringIO()
+            ):
+                rc = MOD.main(["--watch", "0.001", "--only", "policy", "--jq", "ok,failed"])
+        self.assertEqual(rc, 0)
+        lines = [l for l in buf.getvalue().splitlines() if l.strip()]
+        self.assertEqual(len(lines), 4)
+        self.assertEqual(lines[0], "true")
+        self.assertEqual(json.loads(lines[1]), [])
+
     def test_report_writes_markdown_table(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report = Path(tmp) / "smoke.md"

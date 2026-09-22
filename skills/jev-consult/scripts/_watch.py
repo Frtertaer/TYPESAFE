@@ -16,16 +16,22 @@ from pathlib import Path
 
 
 def cap(env_name: str, override=None) -> int:
-    """Tick cap: --max-ticks N wins, else the JEV_*_WATCH_MAX env (0 = uncapped)."""
+    """Tick cap: --max-ticks N wins, else the JEV_*_WATCH_MAX env (0 = uncapped).
+
+    A non-empty env value that is not a parseable integer warns on stderr and
+    falls back to uncapped — a typo must never silently disable the cap."""
     if override:
         try:
             return max(int(override), 0)
         except (TypeError, ValueError):
             return 0
-    try:
-        return max(int(os.environ.get(env_name, "0") or 0), 0)
-    except ValueError:
-        return 0
+    raw = os.environ.get(env_name, "")
+    if raw:
+        try:
+            return max(int(raw), 0)
+        except ValueError:
+            sys.stderr.write("bad %s %r (want int ticks); uncapped\n" % (env_name, raw))
+    return 0
 
 
 def deadline(env_name: str, override=None) -> float:

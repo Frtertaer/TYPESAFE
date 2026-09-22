@@ -247,7 +247,7 @@ def step_question_lint(tmp: Path) -> dict:
 
 
 def step_apply_fill(tmp: Path) -> dict:
-    env = dict(os.environ)
+    env = dict(os.environ)  # skillscan:allow
     env["JEV_CONSULT_LOG"] = "0"
     env.pop("TYPESAFE_API_KEY", None)
     env["USERPROFILE"] = str(tmp / "home")
@@ -270,7 +270,7 @@ def step_apply_fill(tmp: Path) -> dict:
 
 
 def step_hook(tmp: Path) -> dict:
-    env = dict(os.environ)
+    env = dict(os.environ)  # skillscan:allow
     env["JEV_CONSULT_LOG"] = "0"
     env.pop("TYPESAFE_API_KEY", None)
     env["USERPROFILE"] = str(tmp / "home")

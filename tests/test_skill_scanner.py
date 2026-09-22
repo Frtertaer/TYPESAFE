@@ -184,5 +184,19 @@ class SkillScannerTests(unittest.TestCase):
             self.assertNotEqual(payload["verdict"], "REJECT-PENDING-REVIEW")
 
 
+class SelfScanTests(unittest.TestCase):
+    def test_pack_self_scan_has_no_critical(self) -> None:
+        skill_dir = ROOT / "skills" / "jev-consult"
+        findings = scanner.scan_skill(skill_dir)
+        crit = [f.as_dict() for f in findings if f.severity == "CRITICAL"]
+        self.assertEqual(crit, [])
+
+    def test_pack_self_scan_warns_bounded(self) -> None:
+        skill_dir = ROOT / "skills" / "jev-consult"
+        findings = scanner.scan_skill(skill_dir)
+        warn = [f.check for f in findings if f.severity == "WARN"]
+        self.assertLessEqual(len(warn), 3, "new WARN findings appeared: %s" % warn)
+
+
 if __name__ == "__main__":
     unittest.main()

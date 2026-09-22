@@ -187,6 +187,39 @@ class InventoryTests(unittest.TestCase):
         self.assertGreater(ticks[0]["counts"]["skill"], 0)
         self.assertIn("shortlist", ticks[0])
 
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "inv.jsonl"
+            buf = StringIO()
+            with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness",
+                            "hermes",
+                            "--hermes-home",
+                            str(FIXTURE),
+                            "--watch",
+                            "0.01",
+                            "--out",
+                            str(out),
+                        ]
+                    )
+            self.assertEqual(code, 0)
+            text = out.read_text(encoding="utf-8")
+            ticks = [
+                json.loads(l)
+                for l in text.splitlines()
+                if l.startswith('{"ts"')
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all("counts" in t and "shortlist" in t for t in ticks))
+            self.assertTrue(text.lstrip().startswith("{"))
+
     def test_watch_ticks_report_added_removed(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

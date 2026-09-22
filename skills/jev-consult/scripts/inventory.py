@@ -1332,8 +1332,15 @@ def main(argv: list[str] | None = None) -> int:
             tick["added"] = sorted(cur_ids - prev_ids)
             tick["removed"] = sorted(prev_ids - cur_ids)
         prev_ids = cur_ids
-        sys.stdout.write(json.dumps(tick) + "\n")
+        line = json.dumps(tick) + "\n"
+        sys.stdout.write(line)
         sys.stdout.flush()
+        if args.out:
+            try:
+                with Path(args.out).open("a", encoding="utf-8") as fh:
+                    fh.write(line)
+            except OSError:
+                pass
         ticks += 1
     return 0
 

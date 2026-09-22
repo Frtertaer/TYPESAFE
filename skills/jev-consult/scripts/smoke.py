@@ -3291,6 +3291,21 @@ def step_compare(tmp: Path) -> dict:
             )
         except (OSError, ValueError):
             ok = False
+    if ok:
+        # --watch emits {ts,cases,failures} ticks; --quiet keeps the
+        # clean ones off stdout while stderr still logs them
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compare.py"),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--quiet",
+            ]
+        )
+        stdout_ticks = [ln for ln in out.splitlines() if '"failures"' in ln]
+        ok = rc == 0 and not stdout_ticks and "watch tick=2" in out
     return _step("compare", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

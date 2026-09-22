@@ -514,6 +514,23 @@ def step_decisions(tmp: Path) -> dict:
         except ValueError:
             ok = False
     if ok:
+        # --csv emits a header plus one row per entry, no stats
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--csv",
+            ]
+        )
+        lines = out.strip().splitlines()
+        ok = (
+            rc == 0
+            and len(lines) == 3
+            and lines[0].startswith("ts,")
+            and lines[2].split(",")[2] == "none"
+        )
+    if ok:
         rc, out = _run(
             [
                 str(SCRIPTS / "decisions.py"),

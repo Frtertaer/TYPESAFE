@@ -334,6 +334,10 @@ class SmokeTests(unittest.TestCase):
             self.assertEqual(root.get("failures"), "1")
             cases = root.findall("testcase")
             self.assertEqual([c.get("name") for c in cases], ["policy", "compact"])
+            self.assertEqual(
+                [c.get("classname") for c in cases],
+                ["jev-consult.smoke"] * 2,
+            )
             failure = cases[1].find("failure")
             self.assertIsNotNone(failure)
             self.assertIn("broke <x>", failure.text)

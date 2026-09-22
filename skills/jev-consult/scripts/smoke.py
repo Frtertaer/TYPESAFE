@@ -1159,6 +1159,38 @@ def step_decisions(tmp: Path) -> dict:
         except ValueError:
             ok = False
     if ok:
+        # --days N bounds the window directly: far-past rows drop for small
+        # N, a huge N keeps them all
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--days",
+                "30",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 0
+        except ValueError:
+            ok = False
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "decisions.py"),
+                    "--file",
+                    str(log),
+                    "--days",
+                    "99999",
+                    "--json",
+                ]
+            )
+            try:
+                ok = rc == 0 and json.loads(out).get("total") == 2
+            except ValueError:
+                ok = False
+    if ok:
         # --since-last STATUS keeps entries after the newest row of that status
         rc, out = _run(
             [

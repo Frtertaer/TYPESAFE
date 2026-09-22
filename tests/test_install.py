@@ -446,5 +446,61 @@ class IdempotentInstallTests(unittest.TestCase):
             self.assertEqual(self._snapshot(base), {})
 
 
+
+class WrapperScriptTests(unittest.TestCase):
+    """The documented one-command entrypoints actually run install.py."""
+
+    def _env(self) -> dict:
+        env = dict(os.environ)
+        env["TYPESAFE_API_KEY"] = env.get("TYPESAFE_API_KEY") or "x"
+        return env
+
+    def test_install_cmd_check_key_windows(self) -> None:
+        if os.name != "nt":
+            self.skipTest("install.cmd is Windows-only")
+        import subprocess
+
+        proc = subprocess.run(
+            ["cmd", "/c", str(ROOT / "install.cmd"), "--check-key"],
+            capture_output=True,
+            text=True,
+            env=self._env(),
+            cwd=str(ROOT),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+        self.assertIn("TYPESAFE_API_KEY", proc.stdout)
+        self.assertNotIn("x" * 20, proc.stdout)  # never prints the key
+
+    def test_install_sh_check_key_posix(self) -> None:
+        import shutil
+        import subprocess
+
+        sh = shutil.which("sh")
+        if not sh:
+            self.skipTest("no sh on this box")
+        proc = subprocess.run(
+            [sh, str(ROOT / "install.sh"), "--check-key"],
+            capture_output=True,
+            text=True,
+            env=self._env(),
+            cwd=str(ROOT),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+        self.assertIn("TYPESAFE_API_KEY", proc.stdout)
+
+    def test_install_sh_syntax_clean(self) -> None:
+        import shutil
+        import subprocess
+
+        sh = shutil.which("sh")
+        if not sh:
+            self.skipTest("no sh on this box")
+        proc = subprocess.run(
+            [sh, "-n", str(ROOT / "install.sh")],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

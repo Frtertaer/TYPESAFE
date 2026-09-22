@@ -776,6 +776,21 @@ class JevInternalsTests(unittest.TestCase):
             rc = jev.main(["ping", "--timeout", "3"])
         self.assertEqual(calls, [3])
 
+    def test_ping_retries_flag_passed_to_post(self) -> None:
+        calls = []
+
+        def fake_post(state, questions, policy, model=None, timeout=60, retries=1):
+            calls.append(retries)
+            return {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
+
+        with patch.object(jev, "post_systemone", side_effect=fake_post), patch.object(
+            sys, "stdout", io.StringIO()
+        ):
+            rc = jev.main(["ping", "--retries", "4"])
+            rc2 = jev.main(["ping"])
+        self.assertEqual((rc, rc2), (0, 0))
+        self.assertEqual(calls, [4, 1])
+
     def test_ping_jq_prints_one_field(self) -> None:
         fake = {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
         buf = io.StringIO()
@@ -1227,6 +1242,25 @@ class AskTimeoutTests(unittest.TestCase):
             self._ask_with_timeout(["--timeout", "2"], {"JEV_TIMEOUT": "9.5"}),
             [2],
         )
+
+    def test_ask_retries_flag_passed_to_post(self) -> None:
+        calls = []
+
+        def fake_post(state, questions, policy, model=None, timeout=60, retries=1):
+            calls.append(retries)
+            return dict(self.FAKE)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "req.json"
+            req.write_text(json.dumps(self.REQ), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(
+                jev, "post_systemone", side_effect=fake_post
+            ), patch.object(sys, "stdout", buf):
+                rc = jev.main(["ask", str(req), "--retries", "3"])
+                rc2 = jev.main(["ask", str(req)])
+        self.assertEqual((rc, rc2), (0, 0), buf.getvalue())
+        self.assertEqual(calls, [3, 1])
 
     def test_ask_timeout_defaults_60(self) -> None:
         with patch.dict(os.environ, {}, clear=False):

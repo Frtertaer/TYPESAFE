@@ -556,6 +556,7 @@ def cmd_ask(args: argparse.Namespace) -> int:
         policy,
         model=request.get("model"),
         timeout=args.timeout or env_timeout() or 60,
+        retries=max(0, args.retries),
     )
     answers = result.get("answers") or {}
     if not isinstance(answers, dict):
@@ -716,6 +717,7 @@ def cmd_ping(args: argparse.Namespace) -> int:
         },
         policy=policy,
         timeout=args.timeout or env_timeout() or 60,
+        retries=max(0, args.retries),
     )
     answer = (result.get("answers") or {}).get("ok") or {}
     slim = {
@@ -893,6 +895,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="HTTP timeout seconds (default JEV_TIMEOUT env or 60)",
     )
     ask.add_argument(
+        "--retries",
+        type=int,
+        default=1,
+        help="extra attempts on HTTP 429/5xx (default 1)",
+    )
+    ask.add_argument(
         "--verdict",
         metavar="PATH",
         default="",
@@ -960,6 +968,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="HTTP timeout seconds (default JEV_TIMEOUT env or 60)",
+    )
+    ping.add_argument(
+        "--retries",
+        type=int,
+        default=1,
+        help="extra attempts on HTTP 429/5xx (default 1)",
     )
     ping.add_argument(
         "--json",

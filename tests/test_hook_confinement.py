@@ -1,0 +1,113 @@
+"""Confinement: a hook run may only create its declared files.
+
+In a sandbox cwd with JEV_CONSULT_LOG redirected inside the sandbox, the
+hook may touch only .jev-tools.json, .jev-tools-miss.json and the log —
+nothing else inside the sandbox, nothing outside it.
+"""
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "skills" / "jev-consult" / "scripts"
+HOOK = SCRIPTS / "inventory_hook.py"
+
+ALLOWED = {".jev-tools.json", ".jev-tools-miss.json", "decisions.jsonl"}
+
+
+def run_hook(cwd: Path, log: Path, payload: dict) -> subprocess.CompletedProcess:
+    env = dict(os.environ)
+    env.pop("TYPESAFE_API_KEY", None)
+    env["JEV_CONSULT_LOG"] = str(log)
+    env["JEV_HOOK_CWD"] = str(cwd)
+    env["JEV_HOOK_TIMEOUT"] = "0.01"  # Jev unreachable — fail-open fast
+    return subprocess.run(
+        [sys.executable, str(HOOK)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        cwd=str(cwd),
+        env=env,
+        timeout=30,
+    )
+
+
+class HookConfinementTests(unittest.TestCase):
+    def _snapshot(self, root: Path) -> set[Path]:
+        return {p.relative_to(root) for p in root.rglob("*") if p.is_file()}
+
+    def test_hook_writes_only_declared_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            log = cwd / "decisions.jsonl"
+            before = self._snapshot(cwd)
+            payload = {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "jwt auth",
+                "cwd": str(cwd),
+            }
+            proc = run_hook(cwd, log, payload)
+            self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+            created = self._snapshot(cwd) - before
+            self.assertLessEqual(
+                {p.name for p in created},
+                ALLOWED,
+                "hook wrote undeclared files: %s" % created,
+            )
+            # anything created lives directly under the sandbox (no dirs)
+            for p in created:
+                self.assertEqual(len(p.parts), 1, "unexpected nested path: %s" % p)
+
+    def test_dry_run_writes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            env = dict(os.environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env["JEV_CONSULT_LOG"] = str(cwd / "decisions.jsonl")
+            env["JEV_HOOK_CWD"] = str(cwd)
+            proc = subprocess.run(
+                [sys.executable, str(HOOK), "--dry-run"],
+                input=json.dumps(
+                    {"hook_event_name": "UserPromptSubmit", "prompt": "jwt", "cwd": str(cwd)}
+                ),
+                capture_output=True,
+                text=True,
+                cwd=str(cwd),
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+            leftovers = [p.name for p in cwd.iterdir() if p.name != "decisions.jsonl"]
+            self.assertEqual(
+                leftovers, [], "--dry-run leaked files: %s" % leftovers
+            )
+
+    def test_log_disabled_writes_no_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            env = dict(os.environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env["JEV_CONSULT_LOG"] = "0"
+            env["JEV_HOOK_CWD"] = str(cwd)
+            proc = subprocess.run(
+                [sys.executable, str(HOOK)],
+                input=json.dumps(
+                    {"hook_event_name": "UserPromptSubmit", "prompt": "jwt", "cwd": str(cwd)}
+                ),
+                capture_output=True,
+                text=True,
+                cwd=str(cwd),
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+            self.assertFalse((cwd / "decisions.jsonl").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

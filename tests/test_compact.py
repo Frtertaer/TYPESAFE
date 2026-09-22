@@ -2268,5 +2268,35 @@ class WatchSecsEnvTests(unittest.TestCase):
             self.assertLessEqual(len(ticks), 10)
             self.assertGreaterEqual(len(ticks), 1)
 
+class SpillGcTests(unittest.TestCase):
+    def test_spill_prunes_oldest_beyond_max_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp)
+            oldest = None
+            for i in range(C.SPILL_MAX_FILES + 5):
+                p = C.spill("old-%d" % i, spill_dir)
+                self.assertIsNotNone(p)
+                # deterministic order: ascending mtime, oldest first
+                os.utime(p, (i, i))
+                if i == 0:
+                    oldest = p
+            p = C.spill("fresh", spill_dir)
+            self.assertIsNotNone(p)
+            files = [f for f in spill_dir.iterdir() if f.is_file()]
+            self.assertLessEqual(len(files), C.SPILL_MAX_FILES)
+            self.assertTrue(p.is_file())
+            self.assertFalse(oldest.exists())
+
+    def test_spill_keeps_under_caps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp)
+            paths = [C.spill("keep-%d" % i, spill_dir) for i in range(3)]
+            for p in paths:
+                self.assertTrue(p.is_file())
+            self.assertEqual(
+                len([f for f in spill_dir.iterdir() if f.is_file()]), 3
+            )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

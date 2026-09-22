@@ -564,6 +564,27 @@ def step_decisions(tmp: Path) -> dict:
             and "| none |" in lines[3]
         )
     if ok:
+        # --skip 1 drops the first match; --jsonl emits the rest raw
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--skip",
+                "1",
+                "--jsonl",
+            ]
+        )
+        lines = out.strip().splitlines()
+        try:
+            ok = (
+                rc == 0
+                and len(lines) == 1
+                and json.loads(lines[0]).get("jev_status") == "none"
+            )
+        except ValueError:
+            ok = False
+    if ok:
         rc, out = _run(
             [
                 str(SCRIPTS / "decisions.py"),

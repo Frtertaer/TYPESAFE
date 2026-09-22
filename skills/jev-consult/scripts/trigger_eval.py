@@ -500,10 +500,20 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             sys.stderr.write("wrote %s\n" % args.report)
             return 0 if (result["ok"] and _covers_ok() and _coverage_ok()) else 1
+        gate_failures = []
+        if not result["ok"]:
+            gate_failures.append("margin")
+        if args.min_coverage is not None and not _coverage_ok():
+            gate_failures.append("coverage")
+        if args.min_covers and not _covers_ok():
+            gate_failures.append("covers")
+        verdict = "PASS" if not gate_failures else "FAIL"
+        if gate_failures:
+            verdict += " (%s)" % ", ".join(gate_failures)
         lines = [
             "# trigger eval report",
             "",
-            "verdict: **%s**" % ("PASS" if result["ok"] else "FAIL"),
+            "verdict: **%s**" % verdict,
             "",
             "- positives: %d" % result["n_positives"],
             "- negatives: %d" % result["n_negatives"],

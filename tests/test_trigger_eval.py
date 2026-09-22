@@ -750,6 +750,24 @@ class TriggerEvalTests(unittest.TestCase):
                 path2.read_text(encoding="utf-8"),
             )
 
+    def test_report_verdict_names_failing_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.md"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(
+                    ["--report", str(path), "--quiet", "--min-coverage", "0.99"]
+                )
+            self.assertEqual(rc, 1)
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("verdict: **FAIL (coverage)**", text)
+            path2 = Path(tmp) / "report2.md"
+            with redirect_stdout(io.StringIO()):
+                te.main(["--report", str(path2), "--quiet"])
+            self.assertIn(
+                "verdict: **PASS**", path2.read_text(encoding="utf-8")
+            )
+
     def test_positive_cases_declare_covers(self) -> None:
         cases = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
         missing = [

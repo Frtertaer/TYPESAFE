@@ -516,6 +516,8 @@ def cmd_notes(args: argparse.Namespace) -> int:
             ticks += 1
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
+            if getattr(args, "fail_fast", False) and not tick["notes"]:
+                break
             _time.sleep(args.watch)
         if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
             return 1
@@ -799,6 +801,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     notes_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     notes_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: notes|empty, ticks, notes} JSON to PATH, refreshed every tick")
+    notes_cmd.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick with zero notes")
     notes_cmd.set_defaults(func=cmd_notes)
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")

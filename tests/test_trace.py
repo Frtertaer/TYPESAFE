@@ -1254,6 +1254,27 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(len(ticks), 1)
             self.assertEqual(ticks[0]["picks"], 0)
 
+    def test_notes_watch_fail_fast_stops_on_empty(self) -> None:
+        import io
+        import os as _os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(json.dumps({"notes": []}), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "5"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = tr.main(
+                        ["--file", str(path), "notes", "--watch", "0.01", "--fail-fast"]
+                    )
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 1)
+            self.assertEqual(ticks[0]["notes"], 0)
+
     def test_stats_watch_verdict_writes_state(self) -> None:
         import io
         import os as _os

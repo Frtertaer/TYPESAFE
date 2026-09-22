@@ -3221,6 +3221,132 @@ def step_apply_fill(tmp: Path) -> dict:
                 )
             except (OSError, ValueError):
                 ok = False
+    if ok:
+        # end-to-end fill path: a fake `hermes` on PATH serves
+        # plugins search / mcp catalog / plugins install, and a
+        # localhost stub answers the Jev pick ask.
+        bin_dir = tmp / "apply-bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        (bin_dir / "hermes.bat").write_text(
+            '@echo off\r\n'
+            'if "%1"=="plugins" if "%2"=="search" echo '
+            '[{"name":"smoke-thing","description":"smoke thing"}]\r\n'
+            'exit /b 0\r\n',
+            encoding="utf-8",
+        )
+        fill_cwd = tmp / "apply-fill-cwd"
+        fill_cwd.mkdir(parents=True, exist_ok=True)
+        env2 = dict(env)  # skillscan:allow
+        env2["PATH"] = str(bin_dir) + os.pathsep + env2.get("PATH", "")
+        env2["TYPESAFE_API_KEY"] = "smoke-stub-key"
+        env2["JEV_CONSULT_LOG"] = str(tmp / "apply-decisions.jsonl")
+
+        class ApplyStub(http.server.BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                    request = json.loads(self.rfile.read(length) or b"{}")
+                except (ValueError, TypeError):
+                    request = {}
+                answers: dict = {}
+                for qid, q in (request.get("questions") or {}).items():
+                    if q.get("type") == "choice":
+                        pick = next(
+                            (
+                                k
+                                for k in (q.get("criteria") or {})
+                                if k != "none"
+                            ),
+                            "none",
+                        )
+                        answers[qid] = {
+                            "type": "choice",
+                            "choice": pick,
+                            "confidence": 0.9,
+                            "probabilities": {pick: 0.9, "none": 0.1},
+                        }
+                    else:
+                        answers[qid] = {"type": "noul", "noul": 0.99}
+                reply = json.dumps({"answers": answers}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(reply)))
+                self.end_headers()
+                self.wfile.write(reply)
+
+            def log_message(self, *args) -> None:
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), ApplyStub)
+        try:
+            policy = json.loads(
+                (SKILL_DIR / "policy.json").read_text(encoding="utf-8")
+            )
+            policy["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
+                server.server_address[1]
+            )
+            policy_path = tmp / "apply-policy.json"
+            policy_path.write_text(json.dumps(policy), encoding="utf-8")
+            env2["JEV_POLICY"] = str(policy_path)
+            threading.Thread(
+                target=server.handle_request, daemon=True
+            ).start()
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--task",
+                    "smoke",
+                    "--harness",
+                    "hermes",
+                    "--cwd",
+                    str(fill_cwd),
+                    "--home",
+                    str(tmp / "home"),
+                    "--ask-file",
+                    str(tmp / "apply-ask.json"),
+                ],
+                cwd=fill_cwd,
+                env=env2,
+            )
+            ok = rc == 0 and "installed plugin smoke-thing" in out
+            if ok:
+                # the sidecar records the pick; --pick + --dry-run
+                # short-circuits to a would_install line
+                try:
+                    ok = bool(
+                        json.loads(
+                            (fill_cwd / ".jev-tools.json").read_text(
+                                encoding="utf-8"
+                            )
+                        )
+                    )
+                except (OSError, ValueError):
+                    ok = False
+                dry_cwd = tmp / "apply-dry-cwd"
+                dry_cwd.mkdir(parents=True, exist_ok=True)
+                rc, out = _run(
+                    [
+                        str(SCRIPTS / "apply_fill.py"),
+                        "--task",
+                        "smoke",
+                        "--harness",
+                        "hermes",
+                        "--cwd",
+                        str(dry_cwd),
+                        "--pick",
+                        "plugin:smoke-thing",
+                        "--dry-run",
+                    ],
+                    cwd=dry_cwd,
+                    env=env2,
+                )
+                ok = (
+                    ok
+                    and rc == 0
+                    and "would_install plugin smoke-thing" in out
+                )
+        finally:
+            server.server_close()
     return _step("apply_fill", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

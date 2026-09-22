@@ -1226,6 +1226,17 @@ class BatchDirTests(unittest.TestCase):
             self.assertEqual({r["file"] for r in rows}, {"a.json", "b.json"})
             self.assertEqual(lines[-1], "batch: 2 file(s)")
 
+    def test_dir_uppercase_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self._write_transcript(d, "upper.JSON")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(["--dir", str(d), "--history", "--fake", "--min-reduction", "0"])
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in buf.getvalue().strip().splitlines()[:-1]]
+            self.assertEqual([r["file"] for r in rows], ["upper.JSON"])
+
     def test_dir_per_file_fail_open(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
@@ -1276,6 +1287,27 @@ class StatsFlagTests(unittest.TestCase):
                 rc = C.main([str(path), "--history", "--fake", "--min-reduction", "0"])
             self.assertEqual(rc, 0)
             self.assertNotIn("stats:", err.getvalue())
+
+    def test_output_unwritable_rc1(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._transcript_file(tmp)
+            err = io.StringIO()
+            with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", err
+            ):
+                rc = C.main(
+                    [
+                        str(path),
+                        "--history",
+                        "--fake",
+                        "--min-reduction",
+                        "0",
+                        "-o",
+                        str(Path(tmp) / "nodir" / "out.json"),
+                    ]
+                )
+            self.assertEqual(rc, 1)
+            self.assertIn("output write failed", err.getvalue())
 
     def test_stats_json_prints_stats_dict_to_stderr(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

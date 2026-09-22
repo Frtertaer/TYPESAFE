@@ -1239,7 +1239,11 @@ def cmd_compact(args: argparse.Namespace) -> int:
             return {"answers": answers}
     else:
         asker = jev_asker
-    result = compact_or_keep(messages, asker, options)
+    try:
+        result = compact_or_keep(messages, asker, options)
+    except (RuntimeError, ValueError) as exc:
+        sys.stderr.write("compact failed: %s\n" % exc)
+        return 1
     if getattr(args, "dry_run", False):
         result["messages"] = messages
         stats = result.setdefault("stats", {})
@@ -1248,7 +1252,11 @@ def cmd_compact(args: argparse.Namespace) -> int:
         stats["dry_run"] = True
     text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     if args.output:
-        Path(args.output).write_text(text, encoding="utf-8")
+        try:
+            Path(args.output).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("output write failed: %s\n" % exc)
+            return 1
     else:
         sys.stdout.write(text)
     if getattr(args, "stats_json", False):
@@ -1436,7 +1444,11 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("--dir requires --history (same opt-in as single-file mode)\n")
             return 2
         files = sorted(
-            [p for p in batch.iterdir() if p.is_file() and p.suffix in (".json", ".jsonl")]
+            [
+                p
+                for p in batch.iterdir()
+                if p.is_file() and p.suffix.lower() in (".json", ".jsonl")
+            ]
         )
         for p in files:
             row = {"file": p.name}

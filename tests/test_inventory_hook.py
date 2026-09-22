@@ -2218,6 +2218,47 @@ class HookE2ETests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return proc.stdout.strip()
 
+    def test_jq_prints_one_field_of_emitted_payload(self) -> None:
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "p.json"
+            f.write_text(
+                json.dumps(
+                    {"hook_event_name": "UserPromptSubmit", "prompt": "Add JWT", "cwd": tmp}
+                ),
+                encoding="utf-8",
+            )
+            proc = subprocess.run(
+                [sys.executable, str(self.HOOK_PATH), "--file", str(f), "--jq", "context"],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("jev-consult:", json.loads(proc.stdout))
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "p.json"
+            f.write_text(
+                json.dumps(
+                    {"hook_event_name": "UserPromptSubmit", "prompt": "Add JWT", "cwd": tmp}
+                ),
+                encoding="utf-8",
+            )
+            proc = subprocess.run(
+                [sys.executable, str(self.HOOK_PATH), "--file", str(f), "--jq", "nope.x"],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("bad --jq key", proc.stderr)
+
     def test_empty_stdin(self) -> None:
         self.assertEqual(json.loads(self._run("")), {})
 

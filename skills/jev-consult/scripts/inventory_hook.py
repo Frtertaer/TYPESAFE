@@ -727,6 +727,27 @@ def main(argv: list[str] | None = None) -> int:
                 Path(argv[idx + 1]).write_text(json.dumps(out) + "\n", encoding="utf-8")
             except OSError:
                 pass
+    if "--jq" in argv:
+        idx = argv.index("--jq")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--jq needs a KEY value\n")
+            return 2
+        node = out
+        found = True
+        for part in argv[idx + 1].split("."):
+            if isinstance(node, dict) and part in node:
+                node = node[part]
+            else:
+                found = False
+                break
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (argv[idx + 1], ", ".join(sorted(out)) if isinstance(out, dict) else "")
+            )
+            return 2
+        sys.stdout.write(json.dumps(node) + "\n")
+        return 0
     sys.stdout.write(json.dumps(out) + "\n")
     if "--json" in argv and LAST_DECISION is not None:
         sys.stderr.write(json.dumps(LAST_DECISION, sort_keys=True) + "\n")

@@ -585,6 +585,27 @@ def step_decisions(tmp: Path) -> dict:
         except ValueError:
             ok = False
     if ok:
+        # --out writes the filtered entries as JSONL instead of printing
+        filtered = tmp / "filtered.jsonl"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--out",
+                str(filtered),
+            ]
+        )
+        try:
+            rows = [
+                json.loads(line)
+                for line in filtered.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            ok = rc == 0 and len(rows) == 2
+        except (OSError, ValueError):
+            ok = False
+    if ok:
         rc, out = _run(
             [
                 str(SCRIPTS / "decisions.py"),

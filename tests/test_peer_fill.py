@@ -910,6 +910,41 @@ class PeerFillE2ETests(unittest.TestCase):
             self.assertEqual(report["miss_task"], "jwt")
             self.assertTrue(report["ask_file_exists"])
 
+    def test_status_jq_prints_one_field(self) -> None:
+        import os
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".jev-tools-miss.json").write_text(
+                json.dumps({"task": "jwt", "harness": "codex", "written_at": time.time()}),
+                encoding="utf-8",
+            )
+            env = dict(os.environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env["JEV_CONSULT_LOG"] = "0"
+            env["USERPROFILE"] = tmp
+            env["HOME"] = tmp
+            proc = subprocess.run(
+                [sys.executable, str(self.SCRIPT), "--status", "--cwd", tmp, "--jq", "miss_task"],
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout), "jwt")
+            proc = subprocess.run(
+                [sys.executable, str(self.SCRIPT), "--status", "--cwd", tmp, "--jq", "nope"],
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("bad --jq key", proc.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

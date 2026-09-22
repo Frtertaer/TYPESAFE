@@ -319,6 +319,7 @@ def main() -> int:
         default=0.0,
         help="Re-print the fill state as a {ts,miss,ask} JSON tick every S seconds (JEV_PEER_WATCH_MAX caps ticks).",
     )
+    parser.add_argument("--jq", metavar="KEY", default="", help="With --status: print just one dotted-path field of the report (e.g. miss); unknown key exits 2.")
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
@@ -361,7 +362,24 @@ def main() -> int:
                 "ask_file_exists": ask_path.is_file(),
                 "task": task,
             }
-            sys.stdout.write(json.dumps(report, indent=2) + "\n")
+            if args.jq:
+                cur = report
+                found = True
+                for part in args.jq.split("."):
+                    if isinstance(cur, dict) and part in cur:
+                        cur = cur[part]
+                    else:
+                        found = False
+                        break
+                if not found:
+                    sys.stderr.write(
+                        "bad --jq key %r (payload has: %s)\n"
+                        % (args.jq, ", ".join(sorted(report)))
+                    )
+                    return 2
+                sys.stdout.write(json.dumps(cur) + "\n")
+            else:
+                sys.stdout.write(json.dumps(report, indent=2) + "\n")
         except Exception:
             sys.stdout.write(json.dumps({"error": "fail_open"}) + "\n")
         return 0

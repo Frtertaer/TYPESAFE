@@ -345,6 +345,24 @@ class CliTest(unittest.TestCase):
             payload = json.loads(verdict.read_text(encoding="utf-8"))
             self.assertIn(payload["verdict"], ("PASS", "FAIL"))
 
+    def test_capped_watch_failing_last_tick_rc1(self) -> None:
+        import os
+        bad_cases = json.loads(json.dumps(CASES))
+        bad_cases["cases"][0]["after"]["called_jev"] = False
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bad.json"
+            path.write_text(json.dumps(bad_cases), encoding="utf-8")
+            env = dict(os.environ, JEV_COMPARE_WATCH_MAX="1")
+            proc = subprocess.run(
+                [
+                    sys.executable, str(COMPARE),
+                    "--cases", str(path),
+                    "--watch", "0.01",
+                ],
+                capture_output=True, text=True, env=env,
+            )
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+
     def test_cli_report_json_writes_object(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cases.json"

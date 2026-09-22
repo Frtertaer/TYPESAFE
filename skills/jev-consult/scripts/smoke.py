@@ -603,6 +603,22 @@ def step_decisions(tmp: Path) -> dict:
         except ValueError:
             ok = False
     if ok:
+        # --harness filters on the harness field
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--harness",
+                "smoke",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 2
+        except ValueError:
+            ok = False
+    if ok:
         # --outcome filters on the fill outcome field
         outcome_log = tmp / "decisions-outcome.jsonl"
         outcome_log.write_text(

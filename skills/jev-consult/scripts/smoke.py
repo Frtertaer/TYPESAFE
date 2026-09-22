@@ -2549,6 +2549,37 @@ def step_skill_lint(tmp: Path) -> dict:
                 ok = rc == 0 and json.loads(out).get("findings") == []
             except ValueError:
                 ok = False
+    if ok:
+        # --out writes the findings payload to a file; --watch-max stops
+        # a slow watch by elapsed time before --max-ticks would
+        out_file = tmp / "slint-oneshot-out.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "skill_lint.py"),
+                str(skill),
+                "--json",
+                "--out",
+                str(out_file),
+            ]
+        )
+        ok = rc == 0 and out_file.is_file()
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "skill_lint.py"),
+                    str(skill),
+                    "--watch",
+                    "0.2",
+                    "--watch-max",
+                    "0.05",
+                    "--max-ticks",
+                    "20",
+                ]
+            )
+            ticks = [
+                ln for ln in out.splitlines() if '"findings"' in ln
+            ]
+            ok = rc == 0 and len(ticks) == 1
     return _step("skill_lint", ok, out.strip()[:160] or "rc=%d" % rc)
 
 

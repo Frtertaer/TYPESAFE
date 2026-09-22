@@ -2081,6 +2081,33 @@ def step_question_lint(tmp: Path) -> dict:
         )
         ticks = [ln for ln in out.splitlines() if '"findings"' in ln]
         ok = len(ticks) == 1 and "watch tick=2" not in out
+    if ok:
+        # --fix rewrites identical noul criteria in place (J014); after the
+        # fix the request re-lints without errors
+        rc, out = _run(
+            [str(SCRIPTS / "question_lint.py"), str(bad_req), "--fix"]
+        )
+        try:
+            fixed_req = json.loads(bad_req.read_text(encoding="utf-8"))
+            ok = (
+                rc == 0
+                and "fixed J014" in out
+                and fixed_req["questions"]["q"]["criteria"]["false"]
+                != fixed_req["questions"]["q"]["criteria"]["true"]
+            )
+        except (OSError, ValueError, KeyError, TypeError):
+            ok = False
+        if ok:
+            rc, out = _run(
+                [str(SCRIPTS / "question_lint.py"), str(bad_req), "--json"]
+            )
+            try:
+                ok = rc == 0 and all(
+                    f.get("rule") != "J014"
+                    for f in json.loads(out).get("findings", [])
+                )
+            except (ValueError, AttributeError):
+                ok = False
     return _step("question_lint", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

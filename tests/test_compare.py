@@ -84,6 +84,18 @@ class LoadCasesTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 compare.load_cases(path)
 
+    def test_rejects_bad_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text("{{{", encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                compare.load_cases(path)
+
+    def test_rejects_missing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit):
+                compare.load_cases(Path(tmp) / "nope.json")
+
 
 class HelpersTest(unittest.TestCase):
     def test_side_state_strips_bookkeeping(self) -> None:
@@ -180,6 +192,15 @@ class RunTest(unittest.TestCase):
         policy = {"templates": {"on_track": {"type": "noul", "instructions": "on track?"}}}
         out = compare.score_live(fake, policy, {"score": "on_track"}, {})
         self.assertIsNone(out["noul"])
+
+    def test_run_live_error_captured(self) -> None:
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(compare, "load_jev", side_effect=RuntimeError("no jev")):
+                result = compare.run(live=True, as_json=False, path=self.write_cases(tmp))
+        self.assertIn("no jev", result["error"])
+        self.assertEqual(len(result["rows"]), 2)
 
 
 class CliTest(unittest.TestCase):

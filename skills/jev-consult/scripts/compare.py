@@ -28,7 +28,12 @@ def cases_path() -> Path:
 
 
 def load_cases(path: Path | None = None) -> dict[str, Any]:
-    data = json.loads((path or cases_path()).read_text(encoding="utf-8"))
+    try:
+        data = json.loads((path or cases_path()).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise SystemExit("cannot read cases: %s" % exc)
+    except ValueError as exc:
+        raise SystemExit("cases file is not JSON: %s" % exc)
     if not isinstance(data, dict) or not isinstance(data.get("cases"), list):
         raise SystemExit("compare-cases.json must have a cases list")
     return data
@@ -177,14 +182,17 @@ def run(
     rows = [row_offline(case) for case in cases]
     live_error = ""
     if live:
-        jev = load_jev()
-        policy = jev.load_policy()
-        for index, case in enumerate(cases):
-            before = score_live(jev, policy, case, case.get("before") or {})
-            after = score_live(jev, policy, case, case.get("after") or {})
-            rows[index]["before"]["noul"] = before.get("noul")
-            rows[index]["after"]["noul"] = after.get("noul")
-            rows[index]["model"] = after.get("model") or before.get("model")
+        try:
+            jev = load_jev()
+            policy = jev.load_policy()
+            for index, case in enumerate(cases):
+                before = score_live(jev, policy, case, case.get("before") or {})
+                after = score_live(jev, policy, case, case.get("after") or {})
+                rows[index]["before"]["noul"] = before.get("noul")
+                rows[index]["after"]["noul"] = after.get("noul")
+                rows[index]["model"] = after.get("model") or before.get("model")
+        except Exception as exc:
+            live_error = str(exc) or exc.__class__.__name__
     return {
         "goal": blob.get("goal"),
         "live": live,
@@ -223,6 +231,8 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("\n")
     else:
         sys.stdout.write(format_table(result["rows"], live=args.live))
+    if result.get("error"):
+        sys.stderr.write("live scoring failed: %s\n" % result["error"])
     if args.strict:
         failures = strict_failures(result["rows"], args.live)
         for failure in failures:

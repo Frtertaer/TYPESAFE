@@ -1911,6 +1911,26 @@ def step_hook(tmp: Path) -> dict:
                 )
             except (ValueError, IndexError):
                 ok = False
+    if ok:
+        # --watch S --max-ticks N emits N tick lines and stops
+        event_file = tmp / "hook-event.json"
+        event_file.write_text(payload, encoding="utf-8")
+        rc, out = _run(
+            [
+                str(SCRIPTS / "inventory_hook.py"),
+                "--file",
+                str(event_file),
+                "--watch",
+                "0.05",
+                "--max-ticks",
+                "2",
+            ],
+            cwd=tmp,
+            env=env,
+        )
+        # exits 1 when no tick produced a winner
+        ticks = [ln for ln in out.splitlines() if '"winner_changed"' in ln]
+        ok = rc in (0, 1) and len(ticks) == 2 and 'watch tick=2' in out
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

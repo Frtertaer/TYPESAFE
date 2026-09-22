@@ -1641,6 +1641,31 @@ def step_trace(tmp: Path) -> dict:
                 ]
             )
             ok = rc == 0 and "second note" in out
+        if ok:
+            # history --watch emits {picks} ticks; --verdict writes the probe
+            verdict = tmp / "trace-verdict.json"
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "history",
+                    "--watch",
+                    "0.03",
+                    "--max-ticks",
+                    "2",
+                    "--verdict",
+                    str(verdict),
+                ]
+            )
+            ticks = [ln for ln in out.splitlines() if '"picks"' in ln]
+            ok = rc == 0 and len(ticks) == 2
+            try:
+                ok = ok and json.loads(verdict.read_text(encoding="utf-8")).get(
+                    "verdict"
+                ) == "picks"
+            except (OSError, ValueError):
+                ok = False
     if ok:
         # prune removes a trace file whose mtime is older than the TTL
         os.utime(trace_file, (time.time() - 4000,) * 2)

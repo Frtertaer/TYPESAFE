@@ -1743,5 +1743,44 @@ class ConcurrentAppendTests(unittest.TestCase):
             self.assertEqual(len(seen), n_threads * n_writes)
 
 
+class AtomicWriteTests(unittest.TestCase):
+    def test_write_sidecar_leaves_no_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            inv.write_sidecar(path, "hermes", "task", [])
+            self.assertTrue(path.is_file())
+            self.assertEqual([p.name for p in Path(tmp).iterdir()], [".jev-tools.json"])
+
+    def test_write_miss_leaves_no_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools-miss.json"
+            inv.write_miss(path, "hermes", "task")
+            self.assertTrue(path.is_file())
+            self.assertEqual(
+                [p.name for p in Path(tmp).iterdir()], [".jev-tools-miss.json"]
+            )
+
+    def test_write_ask_leaves_no_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-ask.json"
+            picked = [{"kind": "skill", "name": "x", "id": "s1"}]
+            inv.write_ask(path, "task", "hermes", picked)
+            self.assertTrue(path.is_file())
+            self.assertEqual(
+                [p.name for p in Path(tmp).iterdir()], [".jev-ask.json"]
+            )
+
+    def test_atomic_write_failure_leaves_no_partial(self) -> None:
+        from unittest.mock import patch as _patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            with _patch.object(inv.os, "replace", side_effect=OSError("boom")):
+                with self.assertRaises(OSError):
+                    inv.write_sidecar(path, "hermes", "task", [])
+            self.assertFalse(path.exists())
+            self.assertFalse((Path(tmp) / ".jev-tools.json.tmp").exists())
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

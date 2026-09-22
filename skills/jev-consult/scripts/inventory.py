@@ -595,6 +595,22 @@ def format_miss_note(script: Path) -> str:
     ) % (peer, catalog, apply_fill)
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write text via a sibling <name>.tmp + os.replace so readers never see a
+    half-written file. Raises OSError on failure (callers decide); the .tmp is
+    cleaned up either way."""
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def write_miss(path: Path, harness: str, task: str) -> None:
     task = (task or "")[:500]
     prior = read_sidecar(path)
@@ -606,7 +622,7 @@ def write_miss(path: Path, harness: str, task: str) -> None:
         "empty": True,
         "written_at": int(time.time()),
     }
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    _atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
 
 def clear_miss(path: Path) -> None:
@@ -713,7 +729,7 @@ def write_sidecar(
     }
     if extra:
         payload.update(extra)
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    _atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
 
 def sidecar_items(payload: dict) -> list[dict]:
@@ -1082,7 +1098,7 @@ def write_ask(path: Path, task: str, harness: str, picked: list[dict]) -> None:
         "type": "noul",
         "instructions": "Is the installed shortlist enough for this task, so the coder can skip the marketplace search?",
     }
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    _atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -418,6 +418,28 @@ def main(argv: list[str] | None = None) -> int:
         """Write the slim verdict JSON to --verdict PATH; True on success."""
         if not args.verdict or not res:
             return True
+        if args.id:
+            row = res["cases"][0] if res["cases"] else None
+            case_payload = (
+                {
+                    "verdict": "PASS" if row["ok"] else "FAIL",
+                    "id": row["id"],
+                    "ok": bool(row["ok"]),
+                    "should_trigger": row["should_trigger"],
+                    "score": row["score"],
+                    "covers": row["covers"],
+                }
+                if row
+                else {"verdict": "FAIL", "id": args.id, "missing": True}
+            )
+            try:
+                Path(args.verdict).write_text(
+                    json.dumps(case_payload, indent=2) + "\n", encoding="utf-8"
+                )
+            except OSError as exc:
+                sys.stderr.write("--verdict failed: %s\n" % exc)
+                return False
+            return True
         failed = []
         if not res["ok"]:
             failed.append("margin")

@@ -819,6 +819,23 @@ class TriggerEvalTests(unittest.TestCase):
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertIn(payload["verdict"], ("PASS", "FAIL"))
 
+    def test_verdict_with_id_writes_single_case(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "verdict.json"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = te.main(
+                    ["--id", "pos-approach", "--verdict", str(path), "--quiet"]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["id"], "pos-approach")
+            self.assertEqual(payload["verdict"], "PASS")
+            self.assertTrue(payload["ok"])
+            self.assertTrue(payload["should_trigger"])
+            self.assertIn("score", payload)
+            self.assertNotIn("cases", payload)
+
     def test_report_json_writes_object(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "report.json"

@@ -1260,9 +1260,11 @@ def cmd_compact(args: argparse.Namespace) -> int:
                     "ticks": ticks,
                     "reduction": cur.get("stats", {}).get("reduction"),
                     "fallback": bool(cur.get("stats", {}).get("fallback")),
+                    "elapsed_s": round(_time.time() - watch_t0, 2),
                 },
             )
 
+        watch_t0 = time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             if args.file != "-":
                 try:

@@ -651,6 +651,7 @@ def main(argv: list[str] | None = None) -> int:
                     "ticks": ticks,
                     "winner": tick.get("winner"),
                     "keys": tick.get("keys", []),
+                    "elapsed_s": round(time.time() - watch_t0, 2),
                 },
             )
 

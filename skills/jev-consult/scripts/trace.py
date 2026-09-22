@@ -335,6 +335,7 @@ def cmd_history(args: argparse.Namespace) -> int:
                     "verdict": "picks" if picks else "empty",
                     "ticks": ticks,
                     "picks": picks,
+                    "elapsed_s": round(_time.time() - watch_t0, 2),
                 },
             )
 
@@ -495,6 +496,7 @@ def cmd_notes(args: argparse.Namespace) -> int:
                     "verdict": "notes" if notes_count else "empty",
                     "ticks": ticks,
                     "notes": notes_count,
+                    "elapsed_s": round(_time.time() - watch_t0, 2),
                 },
             )
 
@@ -572,6 +574,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
                     "attempt_count": tick.get("attempt_count", 0),
                     "history": tick.get("history", 0),
                     "inspected": tick.get("inspected", 0),
+                    "elapsed_s": round(_time.time() - watch_t0, 2),
                 },
             )
 
@@ -649,6 +652,7 @@ def cmd_state(args: argparse.Namespace) -> int:
                     "ticks": ticks,
                     "attempt_count": int(state.get("attempt_count") or 0),
                     "state": state,
+                    "elapsed_s": round(_time.time() - watch_t0, 2),
                 },
             )
 

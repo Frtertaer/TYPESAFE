@@ -2121,6 +2121,27 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(lines[0]["newest_ts"], 100)
             self.assertEqual(lines[1]["newest_ts"], 200)
 
+    def test_watch_verdict_reports_elapsed_s(self):
+        import os as _os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text('{"sha":"a"}\n', encoding="utf-8")
+            verdict = Path(tmp) / "v.json"
+            with patch.dict(_os.environ, {"JEV_DECISIONS_WATCH_MAX": "2"}):
+                import io
+
+                with patch.object(sys, "stdout", io.StringIO()):
+                    rc = decisions.main(
+                        ["--file", str(path), "--watch", "0.001",
+                         "--verdict", str(verdict)]
+                    )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertIsInstance(payload["elapsed_s"], float)
+            self.assertGreaterEqual(payload["elapsed_s"], 0.0)
+
     def test_watch_verdict_reports_newest_ts(self):
         import os as _os
         from unittest.mock import patch

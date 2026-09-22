@@ -1351,9 +1351,11 @@ def main(argv: list[str] | None = None) -> int:
                 "added": sorted(all_added),
                 "removed": sorted(all_removed),
                 "counts": (last_tick or {}).get("counts", {}),
+                "elapsed_s": round(time.time() - watch_t0, 2),
             },
         )
 
+    watch_t0 = time.time()
     while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
         time.sleep(watch_seconds)
         fresh = scan(harness, home=home, hermes=hermes)

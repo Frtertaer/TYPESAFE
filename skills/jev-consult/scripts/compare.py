@@ -187,6 +187,8 @@ def _write_verdict(path: str, tick: dict[str, Any]) -> None:
     }
     if "new_failures" in tick:
         payload["new_failures"] = tick["new_failures"]
+    if "elapsed_s" in tick:
+        payload["elapsed_s"] = tick["elapsed_s"]
     return _watch.write_verdict(path, payload)
 
 

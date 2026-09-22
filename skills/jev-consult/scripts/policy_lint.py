@@ -558,9 +558,11 @@ def main(argv: list[str] | None = None) -> int:
                     "errors": tick.get("errors", 0),
                     "warnings": tick.get("warnings", 0),
                     "infos": tick.get("infos", 0),
+                    "elapsed_s": round(_time.time() - watch_t0, 2),
                 },
             )
 
+        watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             rows = lint_policy(policy)
             tick = {

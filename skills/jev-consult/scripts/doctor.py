@@ -280,12 +280,15 @@ def main(argv: list[str] | None = None) -> int:
             "agents": agents,
         }
 
-    def _write_verdict(checks_now: list[dict], ticks: int = 1) -> bool:
+    def _write_verdict(
+        checks_now: list[dict], ticks: int = 1, elapsed_s=None
+    ) -> bool:
         if not args.verdict:
             return True
-        return _watch.write_verdict(
-            args.verdict, _verdict_payload(checks_now, ticks)
-        )
+        payload = _verdict_payload(checks_now, ticks)
+        if elapsed_s is not None:
+            payload["elapsed_s"] = elapsed_s
+        return _watch.write_verdict(args.verdict, payload)
 
     if args.watch:
         import time as _time
@@ -315,7 +318,9 @@ def main(argv: list[str] | None = None) -> int:
             _watch.emit(last, args.out, quiet=_watch.quiet("JEV_DOCTOR_WATCH_QUIET", args.quiet), bad=not last["ok"])
             last_checks = cur
             count += 1
-            if verdict_ok and not _write_verdict(last_checks, count):
+            if verdict_ok and not _write_verdict(
+                last_checks, count, elapsed_s=round(_time.time() - watch_t0, 2)
+            ):
                 verdict_ok = False  # warn once, stop retrying
             if args.fail_fast and not ok:
                 break
@@ -324,7 +329,9 @@ def main(argv: list[str] | None = None) -> int:
             if dead and _time.time() >= dead:
                 break
             _time.sleep(args.watch)
-        if args.verdict and verdict_ok and not _write_verdict(last_checks, count):
+        if args.verdict and verdict_ok and not _write_verdict(
+            last_checks, count, elapsed_s=round(_time.time() - watch_t0, 2)
+        ):
             return 1
         return 0 if last["ok"] else 1
     checks = collect()

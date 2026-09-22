@@ -931,6 +931,7 @@ def main(argv: list[str] | None = None) -> int:
                     "added": total_added,
                     "removed": total_removed,
                     "ticks": ticks,
+                    "elapsed_s": round(time.time() - watch_t0, 2),
                 },
             )
 

@@ -383,9 +383,11 @@ def main() -> int:
                     "miss": tick.get("miss"),
                     "miss_task": tick.get("miss_task", ""),
                     "ask": tick.get("ask"),
+                    "elapsed_s": round(time.time() - watch_t0, 2),
                 },
             )
 
+        watch_t0 = time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             try:
                 miss = read_miss(cwd / MISS_NAME)

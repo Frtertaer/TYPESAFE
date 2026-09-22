@@ -405,17 +405,17 @@ def main(argv: list[str] | None = None) -> int:
                     break
         return rows
 
-    def _write_verdict(steps_now: list[dict]) -> bool:
+    def _write_verdict(steps_now: list[dict], elapsed_s=None) -> bool:
         if not args.verdict:
             return True
-        return _watch.write_verdict(
-            args.verdict,
-            {
-                "verdict": "PASS" if all(s["ok"] for s in steps_now) else "FAIL",
-                "steps": len(steps_now),
-                "failed": [s["name"] for s in steps_now if not s["ok"]],
-            },
-        )
+        payload = {
+            "verdict": "PASS" if all(s["ok"] for s in steps_now) else "FAIL",
+            "steps": len(steps_now),
+            "failed": [s["name"] for s in steps_now if not s["ok"]],
+        }
+        if elapsed_s is not None:
+            payload["elapsed_s"] = elapsed_s
+        return _watch.write_verdict(args.verdict, payload)
 
     if args.watch and args.watch > 0:
         import time as _time
@@ -437,12 +437,16 @@ def main(argv: list[str] | None = None) -> int:
             _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_SMOKE_WATCH_QUIET", args.quiet), bad=bool(tick["failed"]))
             last_steps = steps
             ticks += 1
-            if verdict_ok and not _write_verdict(last_steps):
+            if verdict_ok and not _write_verdict(
+                last_steps, elapsed_s=round(_time.time() - watch_t0, 2)
+            ):
                 verdict_ok = False  # warn once, stop retrying
             if args.fail_fast and tick["failed"]:
                 break
             _time.sleep(args.watch)
-        if args.verdict and verdict_ok and not _write_verdict(last_steps):
+        if args.verdict and verdict_ok and not _write_verdict(
+            last_steps, elapsed_s=round(_time.time() - watch_t0, 2)
+        ):
             return 1
         if args.junit:
             try:

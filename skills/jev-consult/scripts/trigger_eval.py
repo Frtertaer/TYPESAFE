@@ -568,7 +568,11 @@ def main(argv: list[str] | None = None) -> int:
             _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_TRIGGER_WATCH_QUIET", args.quiet), bad=bool(failed))
             if not _write_verdict(
                 cur,
-                {"error_ticks": error_ticks, "gates_seen": sorted(gates_seen)},
+                {
+                    "error_ticks": error_ticks,
+                    "gates_seen": sorted(gates_seen),
+                    "elapsed_s": round(_time.time() - watch_t0, 2),
+                },
             ):
                 args.verdict = ""  # warn once, stop retrying
             ticks += 1
@@ -597,7 +601,12 @@ def main(argv: list[str] | None = None) -> int:
                 cur = result
         if cur is not None:
             _write_verdict(
-                cur, {"error_ticks": error_ticks, "gates_seen": sorted(gates_seen)}
+                cur,
+                {
+                    "error_ticks": error_ticks,
+                    "gates_seen": sorted(gates_seen),
+                    "elapsed_s": round(_time.time() - watch_t0, 2),
+                },
             )
         if cur is None or not cur["ok"]:
             return 1

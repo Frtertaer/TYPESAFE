@@ -484,9 +484,11 @@ def main() -> int:
                     "ticks": ticks,
                     "hits": tick.get("hits", 0),
                     "cached": bool(tick.get("cached")),
+                    "elapsed_s": round(time.time() - watch_t0, 2),
                 },
             )
 
+        watch_t0 = time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             tick = {"ts": int(time.time())}
             try:

@@ -181,6 +181,37 @@ class DecideTests(unittest.TestCase):
             decision["probabilities"], {"where": {"new_module": 0.8, "none": 0.2}}
         )
 
+    def test_decide_malformed_numerics_escalate(self) -> None:
+        for raw in ("abc", None, float("nan"), 1.5):
+            decision = jev.decide(
+                {"q": {"type": "noul", "noul": raw}}, self.policy
+            )
+            self.assertEqual(decision["action"], "escalate", "noul=%r" % raw)
+        nan_conf = jev.decide(
+            {
+                "q": {
+                    "type": "choice",
+                    "choice": "a",
+                    "confidence": float("nan"),
+                    "probabilities": {"a": 0.9, "b": 0.1},
+                }
+            },
+            self.policy,
+        )
+        self.assertEqual(nan_conf["action"], "escalate")
+        bad_probs = jev.decide(
+            {
+                "q": {
+                    "type": "choice",
+                    "choice": "a",
+                    "confidence": 0.9,
+                    "probabilities": {"a": "x", "b": 0.1},
+                }
+            },
+            self.policy,
+        )
+        self.assertEqual(bad_probs["action"], "proceed")
+
 
 class SecretTests(unittest.TestCase):
     def test_redact(self) -> None:

@@ -85,7 +85,9 @@ def parse_env_file(path: Path) -> dict[str, str]:
         key = key.strip()
         value = value.strip()
         if value[:1] in ("'", '"'):
-            value = value.strip().strip("'").strip('"')
+            quote = value[0]
+            close = value.find(quote, 1)
+            value = value[1:close] if close > 0 else value.strip("'\"")
         else:
             value = value.split(" #", 1)[0].rstrip()
         if key:
@@ -315,12 +317,17 @@ def post_systemone(
             raise SystemExit("Jev HTTP %s: %s" % (err.code, redact(raw)[:500])) from None
         except urllib.error.URLError as err:
             raise SystemExit("Jev network error: %s" % err.reason) from None
-    parsed = json.loads(body)
+    try:
+        parsed = json.loads(body)
+    except ValueError as exc:
+        raise SystemExit("Jev response invalid: not JSON (%s)" % exc) from None
     return validate_response(parsed, questions)
 
 
 def top_two_gap(probabilities: dict[str, Any]) -> float:
-    values = sorted((float(v) for v in probabilities.values()), reverse=True)
+    values = sorted(
+        (float(v) for v in probabilities.values() if _finite(v)), reverse=True
+    )
     if len(values) < 2:
         return 1.0
     return values[0] - values[1]
@@ -377,7 +384,12 @@ def decide(
         if qtype == "choice":
             picked = answer.get("choice")
             picks[qid] = picked
-            confidence = float(answer.get("confidence") or 0.0)
+            try:
+                confidence = float(answer.get("confidence"))
+            except (TypeError, ValueError):
+                confidence = 0.0
+            if not math.isfinite(confidence):
+                confidence = 0.0
             probabilities = answer.get("probabilities") or {}
             if not isinstance(probabilities, dict):
                 probabilities = {}
@@ -396,7 +408,14 @@ def decide(
             else:
                 notes.append("%s: %s (max probability)" % (qid, picked))
         elif qtype == "noul":
-            probability = float(answer.get("noul"))
+            try:
+                probability = float(answer.get("noul"))
+            except (TypeError, ValueError):
+                probability = math.nan
+            if not _finite(probability, 0, 1):
+                notes.append("%s: malformed noul" % qid)
+                action = "escalate"
+                continue
             picks[qid] = probability
             if probability >= yes_above:
                 notes.append("%s: yes (%.3f)" % (qid, probability))
@@ -411,7 +430,12 @@ def decide(
                     action = "escalate"
         elif qtype == "score":
             picks[qid] = answer.get("score")
-            confidence = float(answer.get("confidence") or 0.0)
+            try:
+                confidence = float(answer.get("confidence"))
+            except (TypeError, ValueError):
+                confidence = 0.0
+            if not math.isfinite(confidence):
+                confidence = 0.0
             if confidence < score_floor:
                 notes.append("%s: low score confidence %.3f" % (qid, confidence))
                 action = "escalate"

@@ -338,6 +338,7 @@ def cmd_history(args: argparse.Namespace) -> int:
                 },
             )
 
+        watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             fresh = load(path).get("history")
             fresh = (
@@ -346,7 +347,11 @@ def cmd_history(args: argparse.Namespace) -> int:
                 else []
             )
             filtered = _filtered(fresh)
-            tick = {"ts": int(_time.time()), "picks": len(filtered) if filtered is not None else None}
+            tick = {
+                "ts": int(_time.time()),
+                "picks": len(filtered) if filtered is not None else None,
+                "elapsed_s": round(_time.time() - watch_t0, 2),
+            }
             _watch.emit(tick, getattr(args, "out", "") or None, quiet=getattr(args, "quiet", False), bad=bool(tick["picks"]))
             ticks += 1
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
@@ -493,11 +498,16 @@ def cmd_notes(args: argparse.Namespace) -> int:
                 },
             )
 
+        watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             fresh = load(path).get("notes")
             fresh = fresh if isinstance(fresh, list) else []
             filtered = _filtered(fresh)
-            tick = {"ts": int(_time.time()), "notes": len(filtered) if filtered is not None else None}
+            tick = {
+                "ts": int(_time.time()),
+                "notes": len(filtered) if filtered is not None else None,
+                "elapsed_s": round(_time.time() - watch_t0, 2),
+            }
             _watch.emit(tick, getattr(args, "out", "") or None, quiet=getattr(args, "quiet", False), bad=bool(tick["notes"]))
             ticks += 1
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
@@ -565,6 +575,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 },
             )
 
+        watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             cur = load(path)
             tick = {
@@ -573,6 +584,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 "attempt_count": int(cur.get("attempt_count") or 0),
                 "history": len(cur.get("history") or []),
                 "inspected": len(cur.get("inspected") or []),
+                "elapsed_s": round(_time.time() - watch_t0, 2),
             }
             _watch.emit(tick, getattr(args, "out", "") or None, quiet=getattr(args, "quiet", False), bad=not tick["exists"])
             ticks += 1
@@ -626,6 +638,7 @@ def cmd_state(args: argparse.Namespace) -> int:
         state: dict = {}
         verdict_ok = True
         prev_attempt: int | None = None
+        watch_t0 = _time.time()
 
         def _write_verdict() -> bool:
             nonempty = any(k != "attempt_count" for k in state)
@@ -655,6 +668,7 @@ def cmd_state(args: argparse.Namespace) -> int:
                     ),
                     "history": len(data.get("history") or []),
                     "inspected": len(data.get("inspected") or []),
+                    "elapsed_s": round(_time.time() - watch_t0, 2),
                 },
                 getattr(args, "out", "") or None,
                 quiet=getattr(args, "quiet", False),

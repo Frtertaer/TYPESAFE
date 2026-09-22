@@ -1024,6 +1024,52 @@ class TraceTests(unittest.TestCase):
             self.assertIsNone(ticks[0]["attempt_count_delta"])
             self.assertEqual(ticks[1]["attempt_count_delta"], 3)
 
+    def test_state_watch_tick_reports_elapsed_s(self) -> None:
+        import io
+        import os as _os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text('{"plan": "P", "attempt_count": 2}\n', encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = tr.main(
+                        ["--file", str(path), "state", "--watch", "0.01"]
+                    )
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(isinstance(t["elapsed_s"], float) for t in ticks))
+            self.assertGreaterEqual(ticks[1]["elapsed_s"], ticks[0]["elapsed_s"])
+
+    def test_stats_watch_tick_reports_elapsed_s(self) -> None:
+        import io
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text('{"plan": "P"}\n', encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = tr.main(
+                        ["--file", str(path), "stats", "--watch", "0.01"]
+                    )
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(isinstance(t["elapsed_s"], float) for t in ticks))
+
     def test_state_watch_fail_fast_breaks_on_empty(self) -> None:
         import io
         import os as _os

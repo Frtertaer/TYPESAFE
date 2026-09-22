@@ -258,5 +258,33 @@ class WriteVerdictTests(unittest.TestCase):
             self.assertEqual(payload["ts"], 1234)
 
 
+class WriteVerdictAtomicityTests(unittest.TestCase):
+    def test_replace_failure_cleans_up_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v.json"
+            buf_err = io.StringIO()
+            with patch.object(
+                watch.os, "replace", side_effect=OSError("boom")
+            ), patch.object(sys, "stderr", buf_err):
+                ok = watch.write_verdict(str(path), {"verdict": "x"})
+            self.assertFalse(ok)
+            self.assertIn("--verdict failed", buf_err.getvalue())
+            self.assertFalse(path.exists())
+            self.assertFalse((Path(tmp) / "v.json.tmp").exists())
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_write_failure_leaves_no_tmp(self) -> None:
+        # target dir is a file: tmp write fails before any replace
+        with tempfile.TemporaryDirectory() as tmp:
+            blocker = Path(tmp) / "blocker"
+            blocker.write_text("x", encoding="utf-8")
+            buf_err = io.StringIO()
+            with patch.object(sys, "stderr", buf_err):
+                ok = watch.write_verdict(str(blocker / "v.json"), {"a": 1})
+            self.assertFalse(ok)
+            self.assertIn("--verdict failed", buf_err.getvalue())
+            self.assertEqual([p.name for p in Path(tmp).iterdir()], ["blocker"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

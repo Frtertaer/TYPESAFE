@@ -374,6 +374,7 @@ def fill(
     if src is not None:
         critical = scan_critical(src)
         if critical is not None and critical > 0:
+            shutil.rmtree(src, ignore_errors=True)
             emit("scan_fail %s" % ident)
             return 0
     copied: list[str] = []

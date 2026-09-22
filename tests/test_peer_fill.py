@@ -455,6 +455,29 @@ class PeerFillInternalsTests(unittest.TestCase):
         )
         self.assertEqual(skipped, {".git", "node_modules", "__pycache__", "mod.pyc"})
 
+    def test_copy_skips_symlinks(self) -> None:
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            src = base / "src" / "jwt-auth"
+            src.mkdir(parents=True)
+            (src / "SKILL.md").write_text(JWT_MD, encoding="utf-8")
+            secret = base / "secret.txt"
+            secret.write_text("s3cr3t", encoding="utf-8")
+            try:
+                os.symlink(secret, src / "loot.txt")
+                os.symlink(base / "missing-target", src / "gone.txt")
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable")
+            dest_parent = base / "dest"
+            copied = FILL.copy_one(src, dest_parent, False)
+            self.assertIsNotNone(copied)
+            self.assertTrue((dest_parent / "jwt-auth" / "SKILL.md").is_file())
+            self.assertFalse((dest_parent / "jwt-auth" / "loot.txt").exists())
+            self.assertFalse((dest_parent / "jwt-auth" / "gone.txt").exists())
+            self.assertEqual(secret.read_text(encoding="utf-8"), "s3cr3t")
+
     def test_names_in_lowercases(self) -> None:
         self.assertEqual(FILL.names_in([{"name": "JWT-Auth"}, {"name": "x"}]), {"jwt-auth", "x"})
         self.assertIn("", FILL.names_in([{}]))

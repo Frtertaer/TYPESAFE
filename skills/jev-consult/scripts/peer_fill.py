@@ -154,8 +154,14 @@ def item_for_pick(pick: str, candidates: list[dict]) -> dict | None:
     return None
 
 
-def ignore(_directory: str, names: list[str]) -> set[str]:
-    return {n for n in names if n in COPY_SKIP or n.endswith(".pyc")}
+def ignore(directory: str, names: list[str]) -> set[str]:
+    return {
+        n
+        for n in names
+        if n in COPY_SKIP
+        or n.endswith(".pyc")
+        or (Path(directory) / n).is_symlink()
+    }
 
 
 def copy_one(src: Path, dest_parent: Path, dry_run: bool) -> Path | None:

@@ -235,6 +235,7 @@ class CatalogFillTests(unittest.TestCase):
             self.assertEqual(out, "scan_fail skills-sh/acme/jwt-auth\n")
             dest = base / "home" / ".claude" / "skills" / "jwt-auth"
             self.assertFalse(dest.exists())
+            self.assertFalse((base / "hermes" / "skills" / "jwt-auth").exists())
             self.assertFalse((base / "cwd" / INV.SIDECAR_NAME).exists())
             self.assertTrue((base / "cwd" / INV.MISS_NAME).is_file())
 

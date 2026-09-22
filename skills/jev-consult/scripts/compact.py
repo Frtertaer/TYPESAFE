@@ -1208,7 +1208,7 @@ def load_jev():
 
 def jev_asker(state: dict[str, Any], questions: dict[str, Any]) -> dict[str, Any]:
     jev = load_jev()
-    policy = jev.load_policy(str(Path(__file__).resolve().parent.parent / "policy.json"))
+    policy = jev.load_policy()
     return jev.post_systemone(state, questions, policy)
 
 

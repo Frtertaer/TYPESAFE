@@ -856,7 +856,7 @@ class InternalsTests(unittest.TestCase):
 
         class FakeJev:
             @staticmethod
-            def load_policy(path):
+            def load_policy(path=None):
                 seen["policy_path"] = path
                 return {"fake": True}
 
@@ -867,7 +867,9 @@ class InternalsTests(unittest.TestCase):
 
         with patch.object(C, "load_jev", return_value=FakeJev):
             C.jev_asker({"a": 1}, {"q": {}})
-        self.assertTrue(str(seen["policy_path"]).endswith("policy.json"))
+        # no explicit path — load_policy() falls back to the pack
+        # policy.json and honors the JEV_POLICY override
+        self.assertIsNone(seen["policy_path"])
         self.assertEqual(seen["policy"], {"fake": True})
 
 

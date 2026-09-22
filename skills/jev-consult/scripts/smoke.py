@@ -851,6 +851,136 @@ def step_compact_fake(tmp: Path) -> dict:
             ]
         )
         ok = rc == 0
+    if ok:
+        # real (non-fake) path: a localhost stub Jev keeps the call
+        # but drops the result — the output shrinks and the spilled
+        # body lands on disk (lossless). A fat tool_result fixture.
+        real_t = tmp / "t-real.json"
+        real_t.write_text(
+            json.dumps(
+                [
+                    {"role": "user", "content": "read the file"},
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "r1",
+                                "name": "read_file",
+                                "input": {"path": "a.py"},
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "r1",
+                                "content": "# body\n" + "line\n" * 800,
+                            }
+                        ],
+                    },
+                    {"role": "assistant", "content": "done"},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        spill_dir = tmp / "compact-spill"
+        env2 = dict(os.environ)  # skillscan:allow
+        env2["TYPESAFE_API_KEY"] = "smoke-stub-key"
+        env2["USERPROFILE"] = str(tmp / "compact-home")
+        env2["HOME"] = str(tmp / "compact-home")
+        env2["JEV_CONSULT_SPILL"] = str(spill_dir)
+
+        class CompactStub(http.server.BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                    request = json.loads(self.rfile.read(length) or b"{}")
+                except (ValueError, TypeError):
+                    request = {}
+                answers: dict = {}
+                for qid, q in (request.get("questions") or {}).items():
+                    if q.get("type") == "choice":
+                        pick = next(
+                            (
+                                k
+                                for k in (q.get("criteria") or {})
+                                if k != "none"
+                            ),
+                            "none",
+                        )
+                        answers[qid] = {
+                            "type": "choice",
+                            "choice": pick,
+                            "confidence": 0.9,
+                            "probabilities": {pick: 0.9, "none": 0.1},
+                        }
+                    else:
+                        # keep the call, drop the result body so the
+                        # lossless spill path is exercised
+                        drop = str(qid).startswith("result_")
+                        answers[qid] = {
+                            "type": "noul",
+                            "noul": 0.1 if drop else 0.99,
+                        }
+                reply = json.dumps({"answers": answers}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(reply)))
+                self.end_headers()
+                self.wfile.write(reply)
+
+            def log_message(self, *args) -> None:
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), CompactStub)
+        try:
+            policy = json.loads(
+                (SKILL_DIR / "policy.json").read_text(encoding="utf-8")
+            )
+            policy["endpoint"] = "http://127.0.0.1:%d/v1/systemone" % (
+                server.server_address[1]
+            )
+            policy_path = tmp / "compact-policy.json"
+            policy_path.write_text(json.dumps(policy), encoding="utf-8")
+            env2["JEV_POLICY"] = str(policy_path)
+            threading.Thread(
+                target=server.handle_request, daemon=True
+            ).start()
+            real_out = tmp / "t-compacted.json"
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "compact.py"),
+                    str(real_t),
+                    "--history",
+                    "--min-reduction",
+                    "0",
+                    "--preserve-recent",
+                    "0",
+                    "-o",
+                    str(real_out),
+                ],
+                env=env2,
+            )
+            ok = rc == 0
+            if ok:
+                try:
+                    compacted = json.loads(
+                        real_out.read_text(encoding="utf-8")
+                    )
+                    stats = compacted.get("stats") or {}
+                    ok = (
+                        int(stats.get("charsAfter") or 0)
+                        < int(stats.get("charsBefore") or 0)
+                        and int(stats.get("resultsDropped") or 0) == 1
+                        and any(spill_dir.iterdir())
+                    )
+                except (OSError, ValueError, TypeError):
+                    ok = False
+        finally:
+            server.server_close()
     return _step("compact_fake", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

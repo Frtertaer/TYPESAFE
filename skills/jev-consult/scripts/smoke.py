@@ -4541,6 +4541,65 @@ def step_doctor(tmp: Path) -> dict:
                 ok = rc in (0, 1) and "codex" in agents and "grok" in agents
             except (ValueError, AttributeError, TypeError):
                 ok = False
+        if ok:
+            # green path: a seeded .claude install (skill + settings.json
+            # hooks wired to both scripts) passes every claude-code check
+            home2 = tmp / "doctor-home"
+            skill_dir = home2 / ".claude" / "skills" / "jev-consult"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: jev-consult\ndescription: x\n---\n",
+                encoding="utf-8",
+            )
+            (home2 / ".claude" / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "hooks": {
+                            "PostToolUse": [
+                                {
+                                    "hooks": [
+                                        {"command": "python compact_hook.py"}
+                                    ]
+                                }
+                            ],
+                            "UserPromptSubmit": [
+                                {
+                                    "hooks": [
+                                        {
+                                            "command": "python inventory_hook.py"
+                                        }
+                                    ]
+                                }
+                            ],
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "doctor.py"),
+                    "--agents",
+                    "claude-code",
+                    "--home",
+                    str(home2),
+                    "--hermes-home",
+                    str(tmp / "hermes"),
+                ]
+            )
+            try:
+                checks = [
+                    c
+                    for c in json.loads(out).get("checks", [])
+                    if c.get("agent") == "claude-code"
+                ]
+                ok = (
+                    rc in (0, 1)
+                    and checks
+                    and all(c.get("ok") for c in checks)
+                )
+            except (ValueError, AttributeError, TypeError):
+                ok = False
     return _step("doctor_json", ok, "rc=%d" % rc)
 
 

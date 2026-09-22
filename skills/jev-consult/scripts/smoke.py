@@ -4056,6 +4056,7 @@ def step_hook(tmp: Path) -> dict:
             "cwd": str(cwd),
         }
     )
+    winner_detail = None
     rc, out = _run(
         [str(SCRIPTS / "inventory_hook.py")], cwd=tmp, env=env, inp=payload
     )
@@ -4344,6 +4345,8 @@ def step_hook(tmp: Path) -> dict:
             and '"jev_status": "winner"' in out
             and '"question": "env"' in out
         )
+        if ok:
+            winner_detail = "explicit-skill"
     if ok:
         # fail-open: with a key set but Jev unreachable the hook still emits {}
         bad_policy = tmp / "bad-policy.json"
@@ -4581,7 +4584,10 @@ def step_hook(tmp: Path) -> dict:
                 ok = (pick_cwd / ".jev-tools.json").is_file()
         finally:
             server.server_close()
-    return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
+    detail = out.strip()[:120] or "rc=%d" % rc
+    if winner_detail:
+        detail = "winner=%s %s" % (winner_detail, detail)
+    return _step("hook", ok, detail)
 
 
 def step_install(tmp: Path) -> dict:

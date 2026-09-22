@@ -3315,6 +3315,39 @@ def step_install(tmp: Path) -> dict:
             and ("remove" in out or "missing" in out)
             and not writes
         )
+    if ok:
+        # a real install into the redirected home writes the skill tree,
+        # instructions and the codex hooks file — never the API key
+        rc, out = _run(
+            [str(repo_root / "scripts" / "install.py"), "--agents", "codex"],
+            env=env,
+        )
+        skill_md = home / ".codex" / "skills" / "jev-consult" / "SKILL.md"
+        agents_md = home / ".codex" / "AGENTS.md"
+        hooks = home / ".codex" / "hooks.json"
+        try:
+            ok = (
+                rc == 0
+                and skill_md.is_file()
+                and agents_md.is_file()
+                and hooks.is_file()
+                and "jev" in hooks.read_text(encoding="utf-8")
+                and "apikey_" not in out
+            )
+        except OSError:
+            ok = False
+        if ok:
+            # --uninstall removes what it wrote
+            rc, out = _run(
+                [
+                    str(repo_root / "scripts" / "install.py"),
+                    "--uninstall",
+                    "--agents",
+                    "codex",
+                ],
+                env=env,
+            )
+            ok = rc == 0 and not skill_md.exists()
     return _step("install", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

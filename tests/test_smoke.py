@@ -377,6 +377,17 @@ class SmokeTests(unittest.TestCase):
             self.assertIsNotNone(failure)
             self.assertIn("broke <x>", failure.text)
 
+    def test_junit_escapes_quotes_in_names(self) -> None:
+        import xml.etree.ElementTree as ET
+
+        xml_text = MOD.junit_xml(
+            [{"name": 'say "hi" <now>', "ok": False, "detail": 'bad "quote"'}]
+        )
+        root = ET.fromstring(xml_text)
+        case = root.find("testcase")
+        self.assertEqual(case.get("name"), 'say "hi" <now>')
+        self.assertEqual(case.find("failure").text, 'bad "quote"')
+
     def test_junit_none_when_flag_absent(self) -> None:
         def ok_step(tmp):
             return {"name": "policy", "ok": True, "detail": "fake"}

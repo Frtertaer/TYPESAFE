@@ -48,7 +48,7 @@ def junit_xml(steps: list[dict]) -> str:
         % (len(steps), failures),
     ]
     for s in steps:
-        name = escape(str(s.get("name") or "step"))
+        name = escape(str(s.get("name") or "step"), {'"': "&quot;"})
         lines.append(
             '  <testcase name="%s" classname="jev-consult.smoke">' % name
         )

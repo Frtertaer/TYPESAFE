@@ -299,6 +299,20 @@ def step_compact_fake(tmp: Path) -> dict:
         [str(SCRIPTS / "compact.py"), str(transcript), "--history", "--fake", "--min-reduction", "0"]
     )
     ok = rc == 0 and '"stats"' in out
+    if ok:
+        # --check exits 1 when the transcript compacts below the gate
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compact.py"),
+                str(transcript),
+                "--history",
+                "--fake",
+                "--check",
+                "--min-reduction",
+                "50",
+            ]
+        )
+        ok = rc == 1 and "check: FAIL" in out
     return _step("compact_fake", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

@@ -431,7 +431,7 @@ def main() -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
-    parser.add_argument("--verdict", default="", metavar="PATH", help="With --watch: write a slim {verdict: hits|none, ticks, hits, cached} JSON when the loop ends.")
+    parser.add_argument("--verdict", default="", metavar="PATH", help="Write a slim {verdict: hits|none, ticks, hits, cached} JSON — refreshed every tick with --watch; in --list/--show mode a one-shot {ticks: 1} payload.")
     parser.add_argument(
         "--out",
         default="",
@@ -491,9 +491,23 @@ def main() -> int:
         return 0
     if dest == "auto":
         dest = detect_harness(Path(__file__))
+    def _oneshot_verdict(hits_now) -> bool:
+        hits_list = hits_now or []
+        return _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "hits" if hits_list else "none",
+                "ticks": 1,
+                "hits": len(hits_list),
+                "cached": read_catalog_cache(task) is not None,
+            },
+        )
+
     if args.list:
         try:
             hits = search_hits(task)
+            if args.verdict and not _oneshot_verdict(hits):
+                return 1
             if args.json:
                 rows = [
                     {
@@ -515,6 +529,8 @@ def main() -> int:
     if args.show:
         try:
             hits = search_hits(task)
+            if args.verdict and not _oneshot_verdict(hits):
+                return 1
             match = next(
                 (item for item in (hits or []) if item.get("name") == args.show),
                 None,

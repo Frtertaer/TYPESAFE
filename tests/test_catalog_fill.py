@@ -280,6 +280,66 @@ class CatalogFillTests(unittest.TestCase):
             self.assertIn("jwt-auth", buf.getvalue())
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
 
+    def test_list_verdict_writes_oneshot(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            verdict = base / "v.json"
+            hits = [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--harness",
+                    "claude-code",
+                    "--cwd",
+                    str(base),
+                    "--list",
+                    "--verdict",
+                    str(verdict),
+                ],
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "hits")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertEqual(payload["hits"], 1)
+
+    def test_list_verdict_none_when_no_hits(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            verdict = base / "v.json"
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=[]), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--harness",
+                    "claude-code",
+                    "--cwd",
+                    str(base),
+                    "--list",
+                    "--verdict",
+                    str(verdict),
+                ],
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "none")
+            self.assertEqual(payload["ticks"], 1)
+
     def test_list_json_emits_array(self) -> None:
         import io
 

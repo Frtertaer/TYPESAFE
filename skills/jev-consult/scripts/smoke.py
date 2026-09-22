@@ -429,6 +429,41 @@ def step_decisions(tmp: Path) -> dict:
         except (ValueError, IndexError, KeyError):
             ok = False
     if ok:
+        # --drop-bad --dry-run reports without rewriting; --drop-bad applies
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(bad_log),
+                "--drop-bad",
+                "--dry-run",
+            ]
+        )
+        ok = (
+            rc == 0
+            and "would drop 1" in out
+            and len(bad_log.read_text(encoding="utf-8").splitlines()) == 2
+        )
+    if ok:
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(bad_log),
+                "--drop-bad",
+            ]
+        )
+        try:
+            lines = bad_log.read_text(encoding="utf-8").splitlines()
+            ok = (
+                rc == 0
+                and "dropped 1" in out
+                and len(lines) == 1
+                and json.loads(lines[0]).get("harness") == "smoke"
+            )
+        except (ValueError, IndexError):
+            ok = False
+    if ok:
         # --prune --dry-run reports counts without rewriting; --prune applies
         rc, out = _run(
             [

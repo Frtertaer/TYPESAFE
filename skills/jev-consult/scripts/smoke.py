@@ -1544,6 +1544,69 @@ def step_trace(tmp: Path) -> dict:
         else:
             ok = False
     if ok:
+        # bump/set/show/stats mutate and report the same trace
+        rc, out = _run(
+            [str(SCRIPTS / "trace.py"), "--file", str(trace_file), "bump"]
+        )
+        ok = rc == 0
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "set",
+                    "--step",
+                    "smoke-step",
+                    "--kv",
+                    "mood=green",
+                ]
+            )
+            ok = rc == 0
+        if ok:
+            rc, out = _run(
+                [str(SCRIPTS / "trace.py"), "--file", str(trace_file), "show"]
+            )
+            try:
+                # show filters to known keys; --kv lands on the raw file
+                trace = json.loads(out).get("trace", {})
+                raw = json.loads(trace_file.read_text(encoding="utf-8"))
+                ok = (
+                    rc == 0
+                    and trace.get("current_step") == "smoke-step"
+                    and trace.get("attempt_count") == 1
+                    and raw.get("mood") == "green"
+                )
+            except (ValueError, AttributeError, OSError):
+                ok = False
+        if ok:
+            rc, out = _run(
+                [str(SCRIPTS / "trace.py"), "--file", str(trace_file), "stats"]
+            )
+            try:
+                stats = json.loads(out)
+                ok = (
+                    rc == 0
+                    and stats.get("attempt_count") == 1
+                    and stats.get("history") == 2
+                    and stats.get("exists") is True
+                )
+            except (ValueError, AttributeError):
+                ok = False
+        if ok:
+            # notes --limit 1 tails the note list
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "notes",
+                    "--limit",
+                    "1",
+                ]
+            )
+            ok = rc == 0 and "second note" in out
+    if ok:
         # prune removes a trace file whose mtime is older than the TTL
         os.utime(trace_file, (time.time() - 4000,) * 2)
         rc, out = _run(

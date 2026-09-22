@@ -2176,6 +2176,41 @@ class PruneTest(unittest.TestCase):
             self.assertTrue(all(isinstance(t["elapsed_s"], float) for t in lines))
             self.assertGreaterEqual(lines[1]["elapsed_s"], lines[0]["elapsed_s"])
 
+    def test_watch_fail_fast_breaks_on_removal(self):
+        import io
+        import os as _os
+        from unittest.mock import patch
+
+        results = [
+            ([{"sha": "a"}], 0),
+            ([{"sha": "a"}, {"sha": "b"}], 0),
+            ([{"sha": "b"}], 0),
+            ([{"sha": "b"}], 0),
+        ]
+
+        def fake_load(p):
+            return results.pop(0) if results else ([{"sha": "b"}], 0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text('{"sha":"a"}\n', encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(_os.environ, {"JEV_DECISIONS_WATCH_MAX": "9"}):
+                with patch.object(decisions, "load_entries", side_effect=fake_load):
+                    with patch.object(sys, "stdout", buf):
+                        rc = decisions.main(
+                            ["--file", str(path), "--watch", "0.001",
+                             "--fail-fast"]
+                        )
+            self.assertEqual(rc, 1)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 3)
+            self.assertEqual(ticks[-1]["removed"], 1)
+
     def test_nonwatch_verdict_ok_with_entries(self):
         import io
         from unittest.mock import patch

@@ -251,6 +251,36 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertIn("margin", out, argv)
             self.assertIsInstance(out["margin"], float)
 
+    def test_jq_prints_one_json_field(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--coverage", "--json", "--jq", "coverage"])
+        self.assertEqual(rc, 0)
+        self.assertAlmostEqual(json.loads(buf.getvalue()), 0.92)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--json", "--jq", "worst_positive"])
+        self.assertEqual(rc, 0)
+        self.assertIsInstance(json.loads(buf.getvalue()), float)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--prompts", "--json", "--jq", "pos-approach"])
+        self.assertEqual(rc, 0)
+        self.assertIsInstance(json.loads(buf.getvalue()), str)
+        buf = io.StringIO()
+        err = io.StringIO()
+        with redirect_stdout(buf):
+            with patch.object(sys, "stderr", err):
+                rc = te.main(["--coverage", "--json", "--jq", "nope"])
+        self.assertEqual(rc, 2)
+        self.assertIn("bad --jq key", err.getvalue())
+        buf = io.StringIO()
+        err = io.StringIO()
+        with redirect_stdout(buf):
+            with patch.object(sys, "stderr", err):
+                rc = te.main(["--json", "--jq", "cases.0"])
+        self.assertEqual(rc, 2)
+
     def test_min_coverage_gates_hit_rate(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

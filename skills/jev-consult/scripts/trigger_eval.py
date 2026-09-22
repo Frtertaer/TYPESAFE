@@ -122,6 +122,17 @@ def evaluate(
     }
 
 
+def jq_lookup(obj, path: str):
+    """Dotted-path lookup; (value, True) or (None, False) when any part misses."""
+    cur = obj
+    for part in path.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            return None, False
+    return cur, True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Score jev-consult trigger cases lexically (per-case rows)."
@@ -270,7 +281,7 @@ def main(argv: list[str] | None = None) -> int:
         "--jq",
         metavar="KEY",
         default="",
-        help="With --env: print only that field's value as JSON (rc 2 on bad key).",
+        help="With --env: print only that field's value as JSON (rc 2 on bad key); with --json: print one dotted-path field of the payload.",
     )
     parser.add_argument(
         "--watch",
@@ -482,6 +493,17 @@ def main(argv: list[str] | None = None) -> int:
         if extra:
             payload.update(extra)
         return _watch.write_verdict(args.verdict, payload)
+
+    def _emit_json(payload) -> int | None:
+        """--jq short-circuit for --json payloads: returns rc when handled."""
+        if not args.jq:
+            return None
+        value, found = jq_lookup(payload, args.jq)
+        if not found:
+            sys.stderr.write("bad --jq key %r\n" % args.jq)
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+        return 0
 
     if args.watch and args.watch > 0:
         import time as _time
@@ -771,6 +793,9 @@ def main(argv: list[str] | None = None) -> int:
                 payload["below"] = [
                     t for t in sorted(counts) if counts[t] < args.min_covers
                 ]
+            jq_rc = _emit_json(payload)
+            if jq_rc is not None:
+                return jq_rc
             sys.stdout.write(json.dumps(payload) + "\n")
         else:
             for tag in sorted(counts):
@@ -793,20 +818,19 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             buckets[int(row["score"] / 0.25)] = buckets.get(int(row["score"] / 0.25), 0) + 1
         if args.json:
-            sys.stdout.write(
-                json.dumps(
-                    {
-                        "buckets": {
-                            "%.2f-%.2f" % (b * 0.25, (b + 1) * 0.25): buckets[b]
-                            for b in sorted(buckets)
-                        },
-                        "unscored": unscored,
-                        "ok": result["ok"],
-                        "margin": result["margin"],
-                    }
-                )
-                + "\n"
-            )
+            payload = {
+                "buckets": {
+                    "%.2f-%.2f" % (b * 0.25, (b + 1) * 0.25): buckets[b]
+                    for b in sorted(buckets)
+                },
+                "unscored": unscored,
+                "ok": result["ok"],
+                "margin": result["margin"],
+            }
+            jq_rc = _emit_json(payload)
+            if jq_rc is not None:
+                return jq_rc
+            sys.stdout.write(json.dumps(payload) + "\n")
         else:
             for b in sorted(buckets):
                 sys.stdout.write(
@@ -817,12 +841,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result["ok"] else 1
     if args.uncovered:
         if args.json:
-            sys.stdout.write(
-                json.dumps(
-                    {"uncovered": _uncovered(), "margin": result["margin"]}
-                )
-                + "\n"
-            )
+            payload = {"uncovered": _uncovered(), "margin": result["margin"]}
+            jq_rc = _emit_json(payload)
+            if jq_rc is not None:
+                return jq_rc
+            sys.stdout.write(json.dumps(payload) + "\n")
         else:
             for cid in _uncovered():
                 sys.stdout.write("%s\n" % cid)
@@ -835,19 +858,18 @@ def main(argv: list[str] | None = None) -> int:
             strict_cov_ok = not args.strict or result["coverage"] >= 1.0
             return 0 if (result["ok"] and _coverage_ok() and strict_cov_ok) else 1
         if args.json:
-            sys.stdout.write(
-                json.dumps(
-                    {
-                        "hits": result["hits"],
-                        "total": len(result["cases"]),
-                        "coverage": result["coverage"],
-                        "uncovered": _uncovered(),
-                        "ok": result["ok"] and _coverage_ok(),
-                        "margin": result["margin"],
-                    }
-                )
-                + "\n"
-            )
+            payload = {
+                "hits": result["hits"],
+                "total": len(result["cases"]),
+                "coverage": result["coverage"],
+                "uncovered": _uncovered(),
+                "ok": result["ok"] and _coverage_ok(),
+                "margin": result["margin"],
+            }
+            jq_rc = _emit_json(payload)
+            if jq_rc is not None:
+                return jq_rc
+            sys.stdout.write(json.dumps(payload) + "\n")
         else:
             sys.stdout.write(
                 "coverage: %d/%d (%.0f%%)\n"
@@ -861,12 +883,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result["ok"] else 1
     if args.prompts:
         if args.json:
-            sys.stdout.write(
-                json.dumps(
-                    {row["id"]: row["prompt"] for row in _rows()}, indent=2
-                )
-                + "\n"
-            )
+            payload = {row["id"]: row["prompt"] for row in _rows()}
+            jq_rc = _emit_json(payload)
+            if jq_rc is not None:
+                return jq_rc
+            sys.stdout.write(json.dumps(payload, indent=2) + "\n")
         else:
             for row in _rows():
                 sys.stdout.write("%s: %s\n" % (row["id"], row["prompt"]))
@@ -905,6 +926,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             payload = dict(result)
             payload["cases"] = _rows()
+        jq_rc = _emit_json(payload)
+        if jq_rc is not None:
+            return jq_rc
         sys.stdout.write(json.dumps(payload, indent=2) + "\n")
     else:
         if not args.quiet and not args.summary:

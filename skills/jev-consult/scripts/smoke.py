@@ -2973,6 +2973,23 @@ def step_question_lint(tmp: Path) -> dict:
                 )
             except (OSError, ValueError):
                 ok = False
+    if ok:
+        # --watch-max bounds the loop: a watch interval longer than the
+        # budget still emits the first tick, then stops
+        rc, out = _run(
+            [
+                str(SCRIPTS / "question_lint.py"),
+                str(req),
+                "--watch",
+                "0.2",
+                "--watch-max",
+                "0.05",
+                "--max-ticks",
+                "20",
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"findings"' in ln]
+        ok = rc == 0 and len(ticks) == 1
     return _step("question_lint", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

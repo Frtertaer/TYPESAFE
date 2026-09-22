@@ -315,10 +315,23 @@ def step_inventory(tmp: Path) -> dict:
         )
         ok = rc == 0 and "fresh" in out
     if ok:
+        # backdating written_at flips the sidecar to stale
+        try:
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))
+            payload["written_at"] = time.time() - 10 * 365 * 86400
+            sidecar.write_text(json.dumps(payload), encoding="utf-8")
+        except (OSError, ValueError):
+            ok = False
+    if ok:
+        rc, out = _run(
+            [str(SCRIPTS / "inventory.py"), "--check-sidecar", str(sidecar)]
+        )
+        ok = rc == 0 and "stale" in out
+    if ok:
         rc, out = _run([str(SCRIPTS / "inventory.py"), "--show", str(sidecar)])
         if rc == 0:
             try:
-                ok = json.loads(out).get("status") == "fresh"
+                ok = json.loads(out).get("status") == "stale"
             except ValueError:
                 ok = False
         else:

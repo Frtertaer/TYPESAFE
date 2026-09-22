@@ -355,6 +355,9 @@ def cmd_history(args: argparse.Namespace) -> int:
             }
             _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_TRACE_WATCH_QUIET", getattr(args, "quiet", False)), bad=bool(tick["picks"]))
             ticks += 1
+            sys.stderr.write(
+                "watch tick=%d picks=%s\n" % (ticks, tick["picks"])
+            )
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
             if getattr(args, "fail_fast", False) and not tick["picks"]:
@@ -533,6 +536,9 @@ def cmd_notes(args: argparse.Namespace) -> int:
             }
             _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_TRACE_WATCH_QUIET", getattr(args, "quiet", False)), bad=bool(tick["notes"]))
             ticks += 1
+            sys.stderr.write(
+                "watch tick=%d notes=%s\n" % (ticks, tick["notes"])
+            )
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
             if getattr(args, "fail_fast", False) and not tick["notes"]:
@@ -614,6 +620,10 @@ def cmd_stats(args: argparse.Namespace) -> int:
             }
             _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_TRACE_WATCH_QUIET", getattr(args, "quiet", False)), bad=not tick["exists"])
             ticks += 1
+            sys.stderr.write(
+                "watch tick=%d exists=%s attempt_count=%d\n"
+                % (ticks, tick["exists"], tick["attempt_count"])
+            )
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
             if getattr(args, "fail_fast", False) and not tick["exists"]:
@@ -703,6 +713,10 @@ def cmd_state(args: argparse.Namespace) -> int:
             )
             prev_attempt = cur_attempt
             ticks += 1
+            sys.stderr.write(
+                "watch tick=%d state_keys=%d attempt_count=%d\n"
+                % (ticks, len(state), cur_attempt)
+            )
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
             if getattr(args, "fail_fast", False) and not any(

@@ -1291,6 +1291,30 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(len(ticks), 1)
             self.assertEqual(ticks[0]["picks"], 0)
 
+    def test_state_watch_writes_stderr_tick_summary(self) -> None:
+        import io
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps({"plan": "x", "attempt_count": 2}),
+                encoding="utf-8",
+            )
+            err = io.StringIO()
+            with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", io.StringIO()):
+                    with patch.object(sys, "stderr", err):
+                        rc = tr.main(
+                            ["--file", str(path), "state", "--watch", "0.01"]
+                        )
+            self.assertEqual(rc, 0)
+            lines = [
+                l for l in err.getvalue().splitlines() if l.startswith("watch tick=")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertIn("attempt_count=2", lines[0])
+
     def test_notes_watch_fail_fast_stops_on_empty(self) -> None:
         import io
         import os as _os

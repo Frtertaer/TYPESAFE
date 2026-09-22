@@ -669,6 +669,33 @@ def step_hook(tmp: Path) -> dict:
                 ok = want in first
             if not ok:
                 break
+    if ok:
+        # --events --json emits the allowed event names as an array
+        rc, out = _run(
+            [str(SCRIPTS / "inventory_hook.py"), "--events", "--json"],
+            cwd=tmp,
+            env=env,
+        )
+        if rc == 0:
+            try:
+                ok = "UserPromptSubmit" in json.loads(out.strip().splitlines()[0])
+            except (ValueError, TypeError, IndexError):
+                ok = False
+        else:
+            ok = False
+    if ok:
+        # --env reports the resolved config (presence flags, never secrets)
+        rc, out = _run(
+            [str(SCRIPTS / "inventory_hook.py"), "--env"], cwd=tmp, env=env
+        )
+        if rc == 0:
+            try:
+                report = json.loads(out.strip())
+                ok = "events" in report and "limit" in report
+            except (ValueError, AttributeError):
+                ok = False
+        else:
+            ok = False
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

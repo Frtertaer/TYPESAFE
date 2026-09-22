@@ -1210,6 +1210,43 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(payload["ticks"], 2)
             self.assertEqual(payload["notes"], 2)
 
+    def test_export_dumps_bundle(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "history": [{"ts": 1, "kind": "skill", "pick": "a"}],
+                        "notes": [{"ts": 1, "text": "n"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "export"])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["history"][0]["pick"], "a")
+            self.assertEqual(out["notes"][0]["text"], "n")
+            self.assertEqual(out["file"], str(path))
+
+    def test_export_out_writes_file(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(json.dumps({"history": []}), encoding="utf-8")
+            out_path = Path(tmp) / "bundle.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                rc = tr.main(
+                    ["--file", str(path), "export", "--out", str(out_path)]
+                )
+            self.assertEqual(rc, 0)
+            self.assertIn("history", json.loads(out_path.read_text(encoding="utf-8")))
+
     def test_history_watch_verdict_writes_pick_count(self) -> None:
         import io
         import os as _os

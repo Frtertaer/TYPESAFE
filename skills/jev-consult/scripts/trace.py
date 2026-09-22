@@ -414,6 +414,25 @@ def cmd_prune(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export(args: argparse.Namespace) -> int:
+    """Dump the whole trace bundle (state, history, notes, counts) as JSON."""
+    path = Path(args.file) if args.file else default_path()
+    data = load(path)
+    data["file"] = str(path)
+    out_text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    out_path = getattr(args, "out", "") or ""
+    if out_path:
+        try:
+            Path(out_path).write_text(out_text, encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+        sys.stderr.write("wrote trace export to %s\n" % out_path)
+        return 0
+    sys.stdout.write(out_text)
+    return 0
+
+
 def cmd_notes(args: argparse.Namespace) -> int:
     path = Path(args.file) if args.file else default_path()
     data = load(path)
@@ -819,6 +838,13 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: picks|empty, ticks, picks} JSON to PATH, refreshed every tick")
     hist_cmd.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick with zero picks")
     hist_cmd.set_defaults(func=cmd_history)
+    export_cmd = sub.add_parser(
+        "export", help="Dump the whole trace bundle as JSON"
+    )
+    export_cmd.add_argument(
+        "--out", default="", help="Write the export JSON to PATH instead of stdout"
+    )
+    export_cmd.set_defaults(func=cmd_export)
     return parser
 
 

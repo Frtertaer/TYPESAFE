@@ -363,6 +363,11 @@ def main() -> int:
         default=0.0,
         help="Re-scan the cwd for miss/ask files every S seconds, printing {ts,miss,ask} ticks (read-only; JEV_APPLY_WATCH_MAX caps ticks).",
     )
+    parser.add_argument(
+        "--out",
+        default="",
+        help="With --watch, append each tick line to PATH (fail-open).",
+    )
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     if args.watch and args.watch > 0:
@@ -382,6 +387,12 @@ def main() -> int:
             }
             sys.stdout.write(json.dumps(tick) + "\n")
             sys.stdout.flush()
+            if args.out:
+                try:
+                    with Path(args.out).open("a", encoding="utf-8") as fh:
+                        fh.write(json.dumps(tick) + "\n")
+                except OSError:
+                    pass
             ticks += 1
             time.sleep(args.watch)
         return 0

@@ -122,6 +122,35 @@ class ApplyFillTests(unittest.TestCase):
             self.assertTrue(all(t["miss"] is True for t in ticks))
             self.assertTrue(all(t["ask"] is False for t in ticks))
 
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            out = cwd / "ticks.jsonl"
+            env = dict(os.environ, JEV_APPLY_WATCH_MAX="2")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--watch", "0.01",
+                    "--cwd", str(cwd),
+                    "--out", str(out),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("miss" in t and "ask" in t for t in lines))
+
     def test_other_harness_stays_human(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)

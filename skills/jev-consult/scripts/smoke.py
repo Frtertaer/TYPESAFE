@@ -2807,6 +2807,26 @@ def step_skill_lint(tmp: Path) -> dict:
                 ln for ln in out.splitlines() if '"findings"' in ln
             ]
             ok = rc == 0 and len(ticks) == 1
+    if ok:
+        # --jq FIELD inside --watch prints bare field values per tick;
+        # --help prints the usage header
+        rc, out = _run(
+            [
+                str(SCRIPTS / "skill_lint.py"),
+                str(skill),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--jq",
+                "errors",
+            ]
+        )
+        lines = [ln for ln in out.splitlines() if ln.strip().isdigit()]
+        ok = rc == 0 and len(lines) == 2 and '"findings"' not in out
+        if ok:
+            rc, out = _run([str(SCRIPTS / "skill_lint.py"), "--help"])
+            ok = rc == 0 and "Usage:" in out
     return _step("skill_lint", ok, out.strip()[:160] or "rc=%d" % rc)
 
 

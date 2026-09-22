@@ -691,6 +691,23 @@ class InventoryHookTests(unittest.TestCase):
             self.assertTrue(report["sidecar_present"])
             self.assertFalse(report["miss_present"])
 
+    def test_env_report_shows_policy_source(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_POLICY": ""}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--env"])
+        self.assertEqual(rc, 0)
+        report = json.loads(buf.getvalue())
+        self.assertEqual(report["policy"], "default")
+
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_POLICY": "C:/x/policy-copy.json"}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--env"])
+        self.assertEqual(rc, 0)
+        report = json.loads(buf.getvalue())
+        self.assertEqual(report["policy"], "C:/x/policy-copy.json")
+
     def test_env_out_writes_report_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "env.json"

@@ -1872,6 +1872,32 @@ def step_apply_fill(tmp: Path) -> dict:
                 env=env,
             )
             ok = rc == 2
+    if ok:
+        # --watch re-scans for miss/ask markers each tick; --verdict
+        # writes the slim {verdict: clean|pending} probe
+        verdict = tmp / "apply-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "apply_fill.py"),
+                "--cwd",
+                str(tmp / "cwd"),
+                "--watch",
+                "0.05",
+                "--max-ticks",
+                "2",
+                "--verdict",
+                str(verdict),
+            ],
+            env=env,
+        )
+        ticks = [ln for ln in out.splitlines() if '"miss"' in ln]
+        ok = rc in (0, 1) and len(ticks) == 2
+        try:
+            ok = ok and "verdict" in json.loads(
+                verdict.read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            ok = False
     return _step("apply_fill", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

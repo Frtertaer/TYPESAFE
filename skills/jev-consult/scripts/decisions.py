@@ -309,6 +309,80 @@ def group_by(entries: list[dict], field: str) -> dict[str, int]:
     return counts
 
 
+MISS_STATUSES = {"none", "idf", "empty", "error"}
+
+
+def _entry_ts(item: dict) -> float | None:
+    ts = item.get("ts")
+    if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+        return float(ts)
+    return None
+
+
+def is_miss_entry(item: dict) -> bool:
+    if str(item.get("jev_status") or "") not in MISS_STATUSES:
+        return False
+    if item.get("jev_pick") or item.get("winner"):
+        return False
+    return True
+
+
+def fill_gaps(entries: list[dict]) -> list[dict]:
+    """Per-harness miss events (no winner) with no later same-prompt fill."""
+    fills = [
+        item
+        for item in entries
+        if str(item.get("jev_status") or "") == "fill"
+    ]
+    groups: dict[str, dict] = {}
+    for item in entries:
+        if not is_miss_entry(item):
+            continue
+        harness = str(item.get("harness") or "unknown")
+        group = groups.setdefault(
+            harness,
+            {"harness": harness, "misses": 0, "filled": 0, "open": 0, "examples": []},
+        )
+        group["misses"] += 1
+        head = str(item.get("prompt_head") or "")[:120]
+        ts = _entry_ts(item)
+        hit = False
+        for fill in fills:
+            if str(fill.get("harness") or "unknown") != harness:
+                continue
+            if str(fill.get("prompt_head") or "")[:120] != head:
+                continue
+            fts = _entry_ts(fill)
+            if ts is None or fts is None or fts >= ts:
+                hit = True
+                break
+        if hit:
+            group["filled"] += 1
+        else:
+            group["open"] += 1
+            if head and len(group["examples"]) < 3:
+                group["examples"].append(head[:60])
+    return sorted(groups.values(), key=lambda g: (-g["open"], g["harness"]))
+
+
+def format_fill_gaps(rows: list[dict]) -> str:
+    if not rows:
+        return "no miss entries"
+    lines = ["harness        misses  filled  open   examples"]
+    for row in rows:
+        lines.append(
+            "%-14s %-7d %-7d %-6d %s"
+            % (
+                row["harness"],
+                row["misses"],
+                row["filled"],
+                row["open"],
+                "; ".join(row["examples"]),
+            )
+        )
+    return "\n".join(lines)
+
+
 def _ts_arg(raw: str) -> float | None:
     """Parse an epoch-seconds or ISO8601 timestamp argument. Empty -> None."""
     text = (raw or "").strip()
@@ -605,6 +679,11 @@ def main(argv: list[str] | None = None) -> int:
         "--validate",
         action="store_true",
         help="Print parseable entries missing a numeric ts or a non-empty jev_status (index + reason)",
+    )
+    parser.add_argument(
+        "--fill-gaps",
+        action="store_true",
+        help="Per-harness report of miss entries (no winner) never followed by a fill for the same prompt",
     )
     parser.add_argument(
         "--prune",
@@ -941,6 +1020,13 @@ def main(argv: list[str] | None = None) -> int:
             items = items[skip:]
         return items
     entries = _filtered(entries)
+    if getattr(args, "fill_gaps", False):
+        rows = fill_gaps(entries)
+        if args.json:
+            sys.stdout.write(json.dumps({"fill_gaps": rows}, indent=2) + "\n")
+        else:
+            sys.stdout.write(format_fill_gaps(rows) + "\n")
+        return 0
     if getattr(args, "watch", 0) > 0:
         max_ticks = _watch.cap("JEV_DECISIONS_WATCH_MAX", args.max_ticks)
         ticks = 0

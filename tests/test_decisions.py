@@ -2811,5 +2811,61 @@ class Utf8RoundtripTests(unittest.TestCase):
             self.assertIn('"filtered": 1', proc.stdout)
 
 
+class FillGapsTest(unittest.TestCase):
+    def _log(self, tmp: str) -> Path:
+        path = Path(tmp) / "decisions.jsonl"
+        write_log(
+            path,
+            [
+                {"ts": 100, "harness": "hermes", "jev_status": "none", "prompt_head": "fix the flaky parser test"},
+                {"ts": 200, "harness": "hermes", "jev_status": "fill", "fill": "apply", "prompt_head": "fix the flaky parser test"},
+                {"ts": 300, "harness": "claude-code", "jev_status": "none", "prompt_head": "write a sql migration"},
+                {"ts": 400, "harness": "claude-code", "jev_status": "winner", "prompt_head": "other prompt"},
+                {"ts": 50, "harness": "hermes", "jev_status": "none", "prompt_head": "old miss"},
+            ],
+        )
+        return path
+
+    def test_fill_gaps_json_counts_filled_and_open(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._log(tmp)
+            proc = run_cli("--file", str(path), "--fill-gaps", "--json")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = {r["harness"]: r for r in json.loads(proc.stdout)["fill_gaps"]}
+            self.assertEqual(rows["hermes"]["misses"], 2)
+            self.assertEqual(rows["hermes"]["filled"], 1)
+            self.assertEqual(rows["hermes"]["open"], 1)
+            self.assertEqual(rows["claude-code"]["misses"], 1)
+            self.assertEqual(rows["claude-code"]["open"], 1)
+            self.assertEqual(rows["claude-code"]["examples"], ["write a sql migration"])
+
+    def test_fill_gaps_table_sorted_by_open_desc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._log(tmp)
+            proc = run_cli("--file", str(path), "--fill-gaps")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = proc.stdout.splitlines()
+            self.assertIn("harness", lines[0])
+            bodies = lines[1:]
+            self.assertEqual(len(bodies), 2)
+            self.assertTrue(bodies[0].startswith("claude-code") or bodies[0].startswith("hermes"))
+
+    def test_fill_gaps_empty_when_no_misses(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1, "harness": "codex", "jev_status": "winner"}])
+            proc = run_cli("--file", str(path), "--fill-gaps")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("no miss entries", proc.stdout)
+
+    def test_fill_gaps_unit_ignores_winner_and_dedupe(self) -> None:
+        entries = [
+            {"harness": "h", "jev_status": "winner", "winner": {"name": "x"}},
+            {"harness": "h", "jev_status": "dedupe", "prompt_head": "p"},
+            {"harness": "h", "jev_status": "none", "prompt_head": "p", "winner": {"name": "x"}},
+        ]
+        self.assertEqual(decisions.fill_gaps(entries), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -226,5 +226,6 @@
       "url": "https://smithery.ai"
     }
   ],
-  "catalog_cache_seconds": 900
+  "catalog_cache_seconds": 900,
+  "smoke_perf_budget_seconds": 30
 }

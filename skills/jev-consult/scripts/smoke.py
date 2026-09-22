@@ -6782,6 +6782,56 @@ def step_catalog_fill(tmp: Path) -> dict:
         server.server_close()
 
 
+def step_perf(tmp: Path) -> dict:
+    """Scan a synthetic 200-skill catalog; fails over smoke_perf_budget_seconds."""
+    home = tmp / "perf-home"
+    skills = home / ".claude" / "skills"
+    for i in range(200):
+        d = skills / ("skill-%03d" % i)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(
+            "---\nname: skill-%03d\ndescription: fixture number %d\n---\n" % (i, i),
+            encoding="utf-8",
+        )
+    try:
+        budget = float(
+            json.loads((SKILL_DIR / "policy.json").read_text(encoding="utf-8")).get(
+                "smoke_perf_budget_seconds"
+            )
+            or 30
+        )
+    except (OSError, ValueError, TypeError):
+        budget = 30.0
+    t0 = time.monotonic()
+    rc, out = _run(
+        [
+            str(SCRIPTS / "inventory.py"),
+            "--task",
+            "jwt tokens",
+            "--harness",
+            "claude-code",
+            "--home",
+            str(home),
+            "--jq",
+            "counts.skill",
+        ],
+        cwd=tmp,
+    )
+    elapsed = time.monotonic() - t0
+    scanned = 0
+    if rc == 0:
+        try:
+            scanned = int(out.strip().splitlines()[0])
+        except (ValueError, IndexError):
+            pass
+    ok = rc == 0 and scanned == 200 and elapsed <= budget
+    return _step(
+        "perf",
+        ok,
+        "scanned %d skills in %.1fs (budget %.0fs)" % (scanned, elapsed, budget),
+    )
+
+
 STEPS = (
     ("policy", "step_policy"),
     ("policy_lint", "step_policy_lint"),
@@ -6804,6 +6854,7 @@ STEPS = (
     ("peer_fill_status", "step_peer_fill_status"),
     ("catalog_fill", "step_catalog_fill"),
     ("ask_verdict", "step_ask_verdict"),
+    ("perf", "step_perf"),
 )
 
 

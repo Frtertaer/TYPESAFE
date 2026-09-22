@@ -1,0 +1,18 @@
+{
+  "state": {},
+  "questions": {
+    "approach": {
+      "type": "choice",
+      "instructions": "Which approach should the coder take?",
+      "criteria": {
+        "none": "stop",
+        "perf_smoke": "smoke step timing inventory scan over a synthetic 200-skill catalog",
+        "decisions_note_filter": "decisions.py --note SUBSTR filters entries by the note tag",
+        "compact_hook_events": "compact_hook gains --events listing allowed hook events",
+        "skill_lint_heading": "skill_lint checks SKILL.md has an H1",
+        "trace_note_note_field": "trace record gains --tag grouping notes",
+        "inventory_explain_json": "inventory --explain output also under --json items"
+      }
+    }
+  }
+}

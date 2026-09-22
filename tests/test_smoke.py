@@ -29,7 +29,7 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         out = json.loads(proc.stdout)
         self.assertTrue(out["ok"])
-        self.assertEqual(len(out["steps"]), 21)
+        self.assertEqual(len(out["steps"]), 22)
         names = {s["name"] for s in out["steps"]}
         self.assertEqual(
             names,
@@ -53,6 +53,7 @@ class SmokeTests(unittest.TestCase):
                 "jev_decide",
                 "peer_fill_status",
                 "catalog_fill",
+                "perf",
                 "ask_verdict",
                 "install",
             },
@@ -244,9 +245,10 @@ class SmokeTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0)
         names = set(proc.stdout.strip().splitlines())
-        self.assertEqual(len(names), 21)
+        self.assertEqual(len(names), 22)
         self.assertIn("doctor_json", names)
         self.assertIn("hook", names)
+        self.assertIn("perf", names)
 
     def test_list_json_emits_array(self) -> None:
         proc = subprocess.run(
@@ -257,8 +259,9 @@ class SmokeTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0)
         names = json.loads(proc.stdout.strip())
-        self.assertEqual(len(names), 21)
+        self.assertEqual(len(names), 22)
         self.assertIn("doctor_json", names)
+        self.assertIn("perf", names)
         self.assertEqual(names, sorted(names))
 
     def test_fail_fast_stops_after_first_failure(self) -> None:

@@ -73,6 +73,7 @@ NONNEG_NUM_FIELDS = (
     "hook_max_prompt_chars",
     "hook_payload_max_bytes",
     "sidecar_ttl_seconds",
+    "smoke_perf_budget_seconds",
 )
 NONEMPTY_STR_FIELDS = ("model", "endpoint", "default", "role", "coder_role")
 ESCALATE_BOOL_FIELDS = ("irreversible",)
@@ -87,6 +88,7 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "hook_jev_timeout_seconds",
     "hook_max_prompt_chars",
     "hook_payload_max_bytes",
+    "smoke_perf_budget_seconds",
     "stop_words",
 )
 

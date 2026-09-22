@@ -1242,12 +1242,58 @@ class PruneTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"
             write_log(path, [{"a": 1}, {"b": "x"}])
-            decisions.prune_entries(path, [{"b": "x"}])
+            result = decisions.prune_entries(path, lambda items: [{"b": "x"}])
+            self.assertIsNotNone(result)
             lines = path.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(lines), 1)
             self.assertEqual(json.loads(lines[0]), {"b": "x"})
             leftovers = [p for p in Path(tmp).iterdir() if p.name != "decisions.jsonl"]
             self.assertEqual(leftovers, [])
+
+    def test_prune_preserves_concurrent_append(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"harness": "codex"}, {"harness": "grok"}])
+            appended = False
+
+            def keep_codex(items):
+                nonlocal appended
+                if not appended:
+                    appended = True
+                    with path.open("a", encoding="utf-8") as fh:
+                        fh.write(json.dumps({"harness": "codex"}) + "\n")
+                return [item for item in items if item.get("harness") == "codex"]
+
+            result = decisions.prune_entries(path, keep_codex)
+            self.assertIsNotNone(result)
+            entries = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(entries), 2)
+            self.assertTrue(all(item.get("harness") == "codex" for item in entries))
+
+    def test_prune_busy_log_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"a": 1}])
+
+            def keep_appending(items):
+                with path.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"more": len(items)}) + "\n")
+                return items
+
+            result = decisions.prune_entries(path, keep_appending, retries=3)
+            self.assertIsNone(result)
+            # the log was never truncated, every appended line survives
+            entries = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(entries[0], {"a": 1})
+            self.assertEqual(len(entries), 4)
+
+    def test_prune_unterminated_file_is_busy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text(json.dumps({"a": 1}), encoding="utf-8")  # no trailing newline
+            result = decisions.prune_entries(path, lambda items: items, retries=3)
+            self.assertIsNone(result)
+            self.assertEqual(path.read_text(encoding="utf-8"), json.dumps({"a": 1}))
 
 
 if __name__ == "__main__":

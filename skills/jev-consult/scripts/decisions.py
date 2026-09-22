@@ -21,14 +21,10 @@ if str(_SCRIPTS) not in sys.path:
 import inventory
 
 
-def load_entries(path: Path) -> tuple[list[dict], int]:
+def _parse_jsonl(text: str) -> tuple[list[dict], int]:
     entries: list[dict] = []
     bad = 0
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return entries, bad
-    for line in lines:
+    for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -42,6 +38,14 @@ def load_entries(path: Path) -> tuple[list[dict], int]:
         else:
             bad += 1
     return entries, bad
+
+
+def load_entries(path: Path) -> tuple[list[dict], int]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return [], 0
+    return _parse_jsonl(text)
 
 
 def load_bad_lines(path: Path) -> list[tuple[int, str]]:
@@ -349,21 +353,47 @@ def filter_until(entries: list[dict], until: float | None) -> list[dict]:
     return out
 
 
-def prune_entries(path: Path, entries: list[dict]) -> None:
-    fd, tmp = tempfile.mkstemp(
-        prefix=path.name + ".", dir=str(path.parent), suffix=".tmp"
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as out:
-            for item in entries:
-                out.write(json.dumps(item, sort_keys=True) + "\n")
-        os.replace(tmp, str(path))
-    except OSError:
+def prune_entries(path: Path, apply_filters, retries: int = 8) -> dict | None:
+    """Rewrite `path` keeping entries that pass `apply_filters`.
+
+    Snapshot-checked: the log is append-only, so the rewrite happens only
+    when the file is byte-identical to the snapshot the kept list was
+    filtered from; an appended or rewritten file retries with a fresh
+    snapshot. A file that does not end in a newline may have a line being
+    appended right now and is treated as busy. Returns a stats dict or
+    None when the log kept changing underneath us.
+    """
+    for _ in range(retries):
+        snap = path.read_bytes()
+        if not snap.endswith(b"\n"):
+            time.sleep(0.05)
+            continue
+        entries, bad = _parse_jsonl(snap.decode("utf-8", errors="replace"))
+        kept = apply_filters(entries)
+        fd, tmp = tempfile.mkstemp(
+            prefix=path.name + ".", dir=str(path.parent), suffix=".tmp"
+        )
         try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as out:
+                for item in kept:
+                    out.write(json.dumps(item, sort_keys=True) + "\n")
+            if path.read_bytes() == snap:
+                os.replace(tmp, str(path))
+                return {
+                    "total": len(entries),
+                    "kept": len(kept),
+                    "dropped": len(entries) - len(kept),
+                    "bad": bad,
+                }
             os.unlink(tmp)
         except OSError:
-            pass
-        raise
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        time.sleep(0.05)
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -489,7 +519,7 @@ def main(argv: list[str] | None = None) -> int:
     if not path.is_file():
         sys.stderr.write("no decisions log at %s\n" % path)
         return 1
-    entries, bad = load_entries(path)
+    all_entries, bad = load_entries(path)
     try:
         since = _ts_arg(args.since)
         until = _ts_arg(args.until)
@@ -499,20 +529,26 @@ def main(argv: list[str] | None = None) -> int:
     days = args.days if args.days > 0 else (7.0 if args.week else 0.0)
     if days > 0:
         since = time.time() - days * 86400
-    if since is not None:
-        entries = filter_since(entries, since)
-    if until is not None:
-        entries = filter_until(entries, until)
-    if args.harness:
-        entries = filter_harness(entries, args.harness)
-    if args.status:
-        entries = filter_status(entries, args.status)
-    if args.outcome:
-        entries = filter_outcome(entries, args.outcome)
-    if args.fill:
-        entries = filter_fill(entries, args.fill)
-    if args.field:
-        entries = filter_field(entries, args.field)
+
+    def apply_filters(items: list[dict]) -> list[dict]:
+        out = items
+        if since is not None:
+            out = filter_since(out, since)
+        if until is not None:
+            out = filter_until(out, until)
+        if args.harness:
+            out = filter_harness(out, args.harness)
+        if args.status:
+            out = filter_status(out, args.status)
+        if args.outcome:
+            out = filter_outcome(out, args.outcome)
+        if args.fill:
+            out = filter_fill(out, args.fill)
+        if args.field:
+            out = filter_field(out, args.field)
+        return out
+
+    entries = apply_filters(all_entries)
     if args.prune:
         if since is None and until is None and not (
             args.harness or args.status or args.outcome or args.fill or args.field
@@ -523,19 +559,25 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         total, total_bad = load_entries(path)
         if getattr(args, "dry_run", False):
+            kept_now = apply_filters(total)
             sys.stderr.write(
                 "dry-run: would prune %d of %d entries (kept %d, dropped %d bad line(s))\n"
-                % (len(total) - len(entries), len(total), len(entries), total_bad)
+                % (len(total) - len(kept_now), len(total), len(kept_now), total_bad)
             )
         else:
             try:
-                prune_entries(path, entries)
+                result = prune_entries(path, apply_filters)
             except OSError as exc:
                 sys.stderr.write("prune failed: %s\n" % exc)
                 return 1
+            if result is None:
+                sys.stderr.write(
+                    "prune failed: decisions log kept changing (appends in flight); retry shortly\n"
+                )
+                return 1
             sys.stderr.write(
                 "pruned %d of %d entries (kept %d, dropped %d bad line(s))\n"
-                % (len(total) - len(entries), len(total), len(entries), total_bad)
+                % (result["dropped"], result["total"], result["kept"], result["bad"])
             )
     if args.errors:
         for lineno, raw in load_bad_lines(path):

@@ -262,6 +262,69 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(ticks[1]["added"], [])
         self.assertEqual(ticks[1]["removed"], ["b", "c"])
 
+    def test_watch_verdict_writes_stable_when_unchanged(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            buf = StringIO()
+            with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "1"}):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness", "hermes",
+                            "--hermes-home", str(FIXTURE),
+                            "--watch", "0.01",
+                            "--verdict", str(verdict),
+                        ]
+                    )
+            self.assertEqual(code, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "stable")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertEqual(payload["added"], [])
+            self.assertEqual(payload["removed"], [])
+            self.assertIn("skill", payload["counts"])
+
+    def test_watch_verdict_reports_changed_ids(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        results = [
+            [{"id": "a", "kind": "skill", "name": "a"}],
+            [{"id": "a", "kind": "skill", "name": "a"}],
+            [{"id": "b", "kind": "skill", "name": "b"}],
+        ]
+
+        def fake_scan(harness, home=None, hermes=None):
+            if results:
+                return results.pop(0)
+            return []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            buf = StringIO()
+            with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+                with patch.object(inv, "scan", side_effect=fake_scan):
+                    with redirect_stdout(buf):
+                        code = inv.main(
+                            [
+                                "--harness", "hermes",
+                                "--hermes-home", str(FIXTURE),
+                                "--watch", "0.01",
+                                "--verdict", str(verdict),
+                            ]
+                        )
+            self.assertEqual(code, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "changed")
+            self.assertEqual(payload["ticks"], 2)
+            self.assertEqual(payload["added"], ["b"])
+            self.assertEqual(payload["removed"], ["a"])
+
     def test_diff_reports_added_removed_names(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

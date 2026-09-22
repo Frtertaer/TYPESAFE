@@ -3286,5 +3286,35 @@ class EnvOnMatrixTests(unittest.TestCase):
         with patch.dict(os.environ, {"JEV_HOOK_DEBUG": "on"}):
             self.assertTrue(HOOK._debug_enabled([]))
 
+
+class WrongTypedFieldTests(unittest.TestCase):
+    BAD = [
+        {"hook_event_name": 123, "prompt": "jwt"},
+        {"hook_event_name": "UserPromptSubmit", "prompt": ["list"]},
+        {"hook_event_name": "UserPromptSubmit", "prompt": 0},
+        {"hook_event_name": "UserPromptSubmit", "prompt": {"x": 1}},
+        {"hook_event_name": "UserPromptSubmit", "prompt": "jwt", "cwd": {"x": 1}},
+        {"hook_event_name": "UserPromptSubmit", "prompt": "jwt", "cwd": ["/tmp"]},
+        {"hook_event_name": "UserPromptSubmit", "prompt": "jwt", "timestamp": "not-a-number"},
+        {"hook_event_name": None, "prompt": "jwt"},
+        {},
+    ]
+
+    def test_wrong_typed_fields_never_raise(self) -> None:
+        for payload in self.BAD:
+            with self.subTest(payload=payload):
+                try:
+                    out = HOOK.handle(payload, items=[], harness="claude-code")
+                except Exception as err:
+                    self.fail("handle raised %r on %r" % (err, payload))
+                self.assertIsInstance(out, dict)
+
+    def test_wrong_typed_fields_write_nothing_to_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for payload in self.BAD:
+                HOOK.handle(payload, items=[], harness="claude-code")
+            leaked = [x.name for x in Path(tmp).iterdir()]
+            self.assertEqual(leaked, [], "handle wrote into cwd: %s" % leaked)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

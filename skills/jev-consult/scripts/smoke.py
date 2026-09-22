@@ -735,6 +735,90 @@ def step_inventory(tmp: Path) -> dict:
             proc.communicate()
             wout = ""
         ok = proc.returncode == 0 and '"added"' in wout and "beta" in wout
+    if ok:
+        # --catalogs prints marketplace name/url rows; --show-policy
+        # dumps the effective policy dict
+        rc, out = _run([str(SCRIPTS / "inventory.py"), "--catalogs"])
+        ok = rc == 0 and "\t" in out and "http" in out
+        if ok:
+            rc, out = _run(
+                [str(SCRIPTS / "inventory.py"), "--show-policy"]
+            )
+            try:
+                ok = rc == 0 and isinstance(
+                    json.loads(out).get("endpoint"), str
+                )
+            except (ValueError, AttributeError):
+                ok = False
+    if ok:
+        # --prune-sidecars unlinks stale .jev-tools*.json under DIR;
+        # --dry-run lists without unlinking
+        prune_dir = tmp / "inv-prune"
+        prune_dir.mkdir(parents=True, exist_ok=True)
+        stale_sc = prune_dir / ".jev-tools.json"
+        stale_sc.write_text(
+            json.dumps({"written_at": 1}), encoding="utf-8"
+        )
+        fresh_sc = prune_dir / ".jev-tools-miss.json"
+        fresh_sc.write_text(
+            json.dumps({"written_at": int(time.time())}),
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "inventory.py"),
+                "--prune-sidecars",
+                str(prune_dir),
+                "--dry-run",
+            ]
+        )
+        ok = rc == 0 and stale_sc.is_file()
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "inventory.py"),
+                    "--prune-sidecars",
+                    str(prune_dir),
+                ]
+            )
+            ok = (
+                rc == 0
+                and not stale_sc.is_file()
+                and fresh_sc.is_file()
+            )
+    if ok:
+        # --kind filters the emitted rows to the named kind
+        kind_home = tmp / "inv-kind-home"
+        (kind_home / ".codex" / "skills" / "a").mkdir(parents=True)
+        (kind_home / ".codex" / "skills" / "a" / "SKILL.md").write_text(
+            "---\nname: alpha-kind\n---\n", encoding="utf-8"
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "inventory.py"),
+                "--harness",
+                "codex",
+                "--home",
+                str(kind_home),
+                "--hermes-home",
+                str(tmp / "inv-kind-hermes"),
+                "--task",
+                "alpha",
+                "--kind",
+                "skill",
+            ]
+        )
+        try:
+            payload = json.loads(out)
+            items = payload.get("shortlist", [])
+            ok = (
+                rc == 0
+                and items
+                and all(r.get("kind") == "skill" for r in items)
+                and payload.get("counts", {}).get("skill") == 1
+            )
+        except (ValueError, AttributeError, TypeError):
+            ok = False
     return _step("inventory", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 
@@ -3054,6 +3138,99 @@ def step_trace(tmp: Path) -> dict:
             )
         except ValueError:
             ok = False
+    if ok:
+        # set --kv/--attempt/--error/--unknown write fields; show --key
+        # prints one value, show --pretty prints text lines; record --kind
+        # tags the history entry
+        _run(
+            [
+                str(SCRIPTS / "trace.py"),
+                "--file",
+                str(trace_file),
+                "init",
+                "--plan",
+                "smoke2",
+            ]
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trace.py"),
+                "--file",
+                str(trace_file),
+                "set",
+                "--kv",
+                "smoke_k=smoke_v",
+                "--attempt",
+                "3",
+                "--error",
+                "smoke-err",
+                "--unknown",
+                "smoke-unknown",
+            ]
+        )
+        # --kv fields ride the emitted trace blob but load() whitelists
+        # the schema — assert they appear in the set response, not on disk
+        try:
+            ok = rc == 0 and json.loads(out).get("trace", {}).get(
+                "smoke_k"
+            ) == "smoke_v"
+        except (ValueError, AttributeError):
+            ok = False
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "show",
+                    "--key",
+                    "last_error",
+                ]
+            )
+            ok = rc == 0 and "smoke-err" in out
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "show",
+                    "--pretty",
+                ]
+            )
+            ok = rc == 0 and "smoke-err" in out and "3" in out
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "record",
+                    "--pick",
+                    "smoke-pick2",
+                    "--kind",
+                    "smoke-kind",
+                ]
+            )
+            ok = rc == 0
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "history",
+                    "--json",
+                ]
+            )
+            try:
+                ok = rc == 0 and any(
+                    h.get("kind") == "smoke-kind"
+                    and "smoke-pick2" in str(h.get("pick", ""))
+                    for h in json.loads(out)
+                )
+            except (ValueError, AttributeError, TypeError):
+                ok = False
     return _step("trace", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

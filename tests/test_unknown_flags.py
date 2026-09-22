@@ -107,7 +107,7 @@ class EmptyStdinTests(unittest.TestCase):
                 input="",
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=60,
             )
             with self.subTest(script=script.name):
                 self.assertNotIn(

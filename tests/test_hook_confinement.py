@@ -222,5 +222,50 @@ class ConcurrentHookTests(unittest.TestCase):
                     else:
                         json.loads(f.read_text(encoding="utf-8"))
 
+
+class DecisionsRowSchemaTests(unittest.TestCase):
+    REQUIRED = {
+        "ts": (int, float),
+        "harness": str,
+        "prompt_sha": str,
+        "jev_status": str,
+        "question": (str, type(None)),
+        "winner": (dict, type(None)),
+        "shortlist": list,
+    }
+
+    def _run(self, cwd: Path, prompt: str) -> None:
+        payload = {
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": prompt,
+            "cwd": str(cwd),
+        }
+        proc = run_hook(cwd, cwd / "decisions.jsonl", payload)
+        self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+
+    def test_every_hook_row_has_required_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            log = cwd / "decisions.jsonl"
+            # two distinct prompts -> normal path rows; repeat -> dedupe row
+            self._run(cwd, "jwt auth question")
+            self._run(cwd, "jwt auth question")
+            self._run(cwd, "database migration")
+            self.assertTrue(log.is_file(), "hook wrote no decisions log")
+            rows = [
+                json.loads(line)
+                for line in log.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertGreaterEqual(len(rows), 2)
+            for row in rows:
+                for key, types in self.REQUIRED.items():
+                    self.assertIn(key, row, "row missing %r: %s" % (key, row))
+                    self.assertIsInstance(row[key], types, "bad %r" % key)
+                self.assertEqual(len(row["prompt_sha"]), 12)
+                # the API key must never land in a log row
+                blob = json.dumps(row)
+                self.assertNotIn(os.environ.get("TYPESAFE_API_KEY", "unset-x"), blob)
+
 if __name__ == "__main__":
     unittest.main()

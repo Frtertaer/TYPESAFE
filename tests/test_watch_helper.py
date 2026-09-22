@@ -88,6 +88,25 @@ class EmitTests(unittest.TestCase):
             watch.emit({"a": 1}, Path("nul\\bad") / "nope" / "x.jsonl")
         self.assertIn('"a": 1', buf.getvalue())
 
+    def test_quiet_suppresses_clean_but_not_bad(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "ticks.jsonl"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                watch.emit({"ok": True}, out, quiet=True, bad=False)
+                watch.emit({"ok": False}, out, quiet=True, bad=True)
+            lines = buf.getvalue().splitlines()
+            self.assertEqual(len(lines), 1)
+            self.assertIn('"ok": false', lines[0])
+            # --out still receives every tick
+            self.assertEqual(len(out.read_text(encoding="utf-8").splitlines()), 2)
+
+    def test_quiet_off_prints_everything(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            watch.emit({"ok": True}, None, quiet=False, bad=False)
+        self.assertEqual(len(buf.getvalue().splitlines()), 1)
+
     def test_no_out_path_skips_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             buf = io.StringIO()

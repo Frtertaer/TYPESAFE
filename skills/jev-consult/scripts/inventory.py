@@ -1105,6 +1105,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--id", metavar="NAME", default="", help="Print the single matching item's JSON (matches id or name).")
     parser.add_argument(
         "--explain",
@@ -1338,7 +1339,7 @@ def main(argv: list[str] | None = None) -> int:
             tick["added"] = sorted(cur_ids - prev_ids)
             tick["removed"] = sorted(prev_ids - cur_ids)
         prev_ids = cur_ids
-        _watch.emit(tick, args.out)
+        _watch.emit(tick, args.out, quiet=args.quiet, bad=ticks == 0 or bool(tick.get("added") or tick.get("removed")))
         ticks += 1
     return 0
 

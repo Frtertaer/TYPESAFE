@@ -445,7 +445,7 @@ def main(argv: list[str] | None = None) -> int:
                 "coverage_ok": coverage_ok,
                 "failed_gates": failed,
             }
-            _watch.emit(tick, args.out)
+            _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(failed))
             ticks += 1
             _time.sleep(args.watch)
             try:

@@ -333,7 +333,7 @@ def cmd_history(args: argparse.Namespace) -> int:
             )
             filtered = _filtered(fresh)
             tick = {"ts": int(_time.time()), "picks": len(filtered) if filtered is not None else None}
-            _watch.emit(tick, getattr(args, "out", "") or None)
+            _watch.emit(tick, getattr(args, "out", "") or None, quiet=getattr(args, "quiet", False), bad=bool(tick["picks"]))
             ticks += 1
             _time.sleep(args.watch)
         return 0
@@ -466,7 +466,7 @@ def cmd_notes(args: argparse.Namespace) -> int:
             fresh = fresh if isinstance(fresh, list) else []
             filtered = _filtered(fresh)
             tick = {"ts": int(_time.time()), "notes": len(filtered) if filtered is not None else None}
-            _watch.emit(tick, getattr(args, "out", "") or None)
+            _watch.emit(tick, getattr(args, "out", "") or None, quiet=getattr(args, "quiet", False), bad=bool(tick["notes"]))
             ticks += 1
             _time.sleep(args.watch)
         return 0
@@ -523,7 +523,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 "history": len(cur.get("history") or []),
                 "inspected": len(cur.get("inspected") or []),
             }
-            _watch.emit(tick, getattr(args, "out", "") or None)
+            _watch.emit(tick, getattr(args, "out", "") or None, quiet=getattr(args, "quiet", False), bad=not tick["exists"])
             ticks += 1
             _time.sleep(args.watch)
         return 0 if tick["exists"] else 1
@@ -578,6 +578,8 @@ def cmd_state(args: argparse.Namespace) -> int:
                     "inspected": len(data.get("inspected") or []),
                 },
                 getattr(args, "out", "") or None,
+                quiet=getattr(args, "quiet", False),
+                bad=bool(state),
             )
             ticks += 1
             _time.sleep(args.watch)
@@ -659,12 +661,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     state_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
     state_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    state_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     state_cmd.set_defaults(func=cmd_state)
     stats_cmd = sub.add_parser("stats", help="Summary: counts, last pick, file age")
     stats_cmd.add_argument("--out", default="", help="Write the stats JSON to PATH instead of stdout")
     stats_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,exists,attempt_count,history,inspected} tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     stats_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
     stats_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    stats_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     stats_cmd.set_defaults(func=cmd_stats)
     notes_cmd = sub.add_parser("notes", help="List recorded notes (iso + text)")
     notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")
@@ -681,6 +685,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,notes} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     notes_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
     notes_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    notes_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     notes_cmd.set_defaults(func=cmd_notes)
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")
@@ -693,6 +698,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,picks} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     hist_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
     hist_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    hist_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     hist_cmd.add_argument("--out", default="", help="With --watch: append each tick line to PATH (fail-open)")
     hist_cmd.set_defaults(func=cmd_history)
     return parser

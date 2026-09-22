@@ -421,7 +421,7 @@ def main(argv: list[str] | None = None) -> int:
                 "warnings": sum(1 for f in current if f["severity"] == "warn"),
                 "infos": sum(1 for f in current if f["severity"] == "info"),
             }
-            _watch.emit(tick, out_path)
+            _watch.emit(tick, out_path, quiet=quiet, bad=tick["errors"] or (strict and tick["findings"]))
             ticks += 1
             _time.sleep(watch_seconds)
             try:

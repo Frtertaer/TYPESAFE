@@ -581,6 +581,7 @@ def main(argv: list[str] | None = None) -> int:
                 except ValueError:
                     max_ticks_arg = 0
         max_ticks = _watch.cap("JEV_HOOK_WATCH_MAX", max_ticks_arg)
+        quiet = "--quiet" in argv
         watch_max_arg = 0.0
         if "--watch-max" in argv:
             idx = argv.index("--watch-max")
@@ -606,7 +607,7 @@ def main(argv: list[str] | None = None) -> int:
             tick["winner"] = (
                 ((LAST_DECISION or {}).get("winner") or {}).get("name") or None
             )
-            _watch.emit(tick, watch_out)
+            _watch.emit(tick, watch_out, quiet=quiet, bad=not tick["winner"])
             ticks += 1
             time.sleep(watch_seconds)
         return 0 if tick["winner"] else 1

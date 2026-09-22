@@ -1258,7 +1258,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
                 "reduction": stats.get("reduction"),
                 "fallback": bool(stats.get("fallback")),
             }
-            _watch.emit(tick, getattr(args, "out", "") or None)
+            _watch.emit(tick, getattr(args, "out", "") or None, quiet=args.quiet, bad=tick["fallback"])
             ticks += 1
             _time.sleep(args.watch)
         return 1 if cur.get("stats", {}).get("fallback") else 0
@@ -1437,6 +1437,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument(
         "--prune-spill",
         type=float,

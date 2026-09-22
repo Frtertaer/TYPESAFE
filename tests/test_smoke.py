@@ -314,6 +314,38 @@ class SmokeTests(unittest.TestCase):
         ]
         self.assertTrue(len(ticks) >= 1)
 
+    def test_watch_quiet_suppresses_ok_ticks(self) -> None:
+        def ok_step(tmp):
+            return {"name": "policy", "ok": True, "detail": "fake"}
+
+        import io
+
+        with patch.dict(os.environ, {"JEV_SMOKE_WATCH_MAX": "3"}):
+            with patch.object(MOD, "step_policy", side_effect=ok_step):
+                buf = io.StringIO()
+                with patch.object(sys, "stdout", buf):
+                    rc = MOD.main(
+                        ["--watch", "0.001", "--only", "policy", "--quiet"]
+                    )
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue(), "")
+
+        def bad_step(tmp):
+            return {"name": "policy", "ok": False, "detail": "boom"}
+
+        with patch.dict(os.environ, {"JEV_SMOKE_WATCH_MAX": "2"}):
+            with patch.object(MOD, "step_policy", side_effect=bad_step):
+                buf = io.StringIO()
+                with patch.object(sys, "stdout", buf):
+                    rc = MOD.main(
+                        ["--watch", "0.001", "--only", "policy", "--quiet"]
+                    )
+        self.assertEqual(rc, 1)
+        ticks = [
+            json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 2)
+
     def test_policy_step_real(self) -> None:
         from pathlib import Path as P
         import tempfile

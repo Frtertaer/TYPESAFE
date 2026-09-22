@@ -283,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
                 "failed": failed,
                 "ok": failed == 0,
             }
-            _watch.emit(last, args.out)
+            _watch.emit(last, args.out, quiet=args.quiet, bad=not last["ok"])
             count += 1
             if max_ticks and count >= max_ticks:
                 break

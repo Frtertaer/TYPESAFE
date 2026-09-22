@@ -795,7 +795,7 @@ class TriggerEvalTests(unittest.TestCase):
         buf = io.StringIO()
         with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "2"}):
             with redirect_stdout(buf):
-                rc = te.main(["--watch", "0.01", "--quiet"])
+                rc = te.main(["--watch", "0.01"])
         self.assertEqual(rc, 0)
         ticks = [
             json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
@@ -811,7 +811,7 @@ class TriggerEvalTests(unittest.TestCase):
         with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
             with redirect_stdout(buf):
                 rc = te.main(
-                    ["--watch", "0.01", "--quiet", "--min-coverage", "0.99"]
+                    ["--watch", "0.01", "--min-coverage", "0.99"]
                 )
         self.assertEqual(rc, 1)
         tick = json.loads(
@@ -825,7 +825,7 @@ class TriggerEvalTests(unittest.TestCase):
         with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
             with redirect_stdout(buf):
                 rc = te.main(
-                    ["--watch", "0.01", "--quiet", "--min-coverage", "0.99"]
+                    ["--watch", "0.01", "--min-coverage", "0.99"]
                 )
         self.assertEqual(rc, 1)
         tick = json.loads(
@@ -835,7 +835,7 @@ class TriggerEvalTests(unittest.TestCase):
         buf = io.StringIO()
         with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "1"}):
             with redirect_stdout(buf):
-                te.main(["--watch", "0.01", "--quiet"])
+                te.main(["--watch", "0.01"])
         tick = json.loads(
             next(l for l in buf.getvalue().splitlines() if l.startswith("{"))
         )
@@ -848,7 +848,7 @@ class TriggerEvalTests(unittest.TestCase):
             with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "2"}):
                 with redirect_stdout(buf):
                     rc = te.main(
-                        ["--watch", "0.01", "--quiet", "--out", str(target)]
+                        ["--watch", "0.01", "--out", str(target)]
                     )
             self.assertEqual(rc, 0)
             lines = [

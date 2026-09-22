@@ -659,6 +659,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     args = parser.parse_args(argv)
     file_arg = args.file or os.environ.get("JEV_DECISIONS", "").strip()
     path = Path(file_arg) if file_arg else inventory.decisions_log_path()
@@ -900,7 +901,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 else:
                     tick["delta_pct"] = None
-            _watch.emit(tick, getattr(args, "out", "") or None)
+            _watch.emit(tick, getattr(args, "out", "") or None, quiet=args.quiet, bad=bool(tick.get("added") or tick.get("removed")))
             prev_keys = cur_keys
             ticks += 1
             time.sleep(args.watch)

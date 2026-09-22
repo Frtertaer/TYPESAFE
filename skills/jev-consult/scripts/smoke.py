@@ -334,6 +334,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     args = parser.parse_args(argv)
     names = {name for name, _ in STEPS}
     if args.list:
@@ -389,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
                 "ok": all(s["ok"] for s in steps),
                 "failed": [s["name"] for s in steps if not s["ok"]],
             }
-            _watch.emit(tick, args.out)
+            _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["failed"]))
             ticks += 1
             _time.sleep(args.watch)
         return 0 if tick["ok"] else 1

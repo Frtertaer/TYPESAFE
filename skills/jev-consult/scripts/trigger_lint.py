@@ -304,7 +304,7 @@ def main(argv: list[str] | None = None) -> int:
                 "warnings": sum(1 for r in rows if r["severity"] == "warn"),
                 "infos": sum(1 for r in rows if r["severity"] == "info"),
             }
-            _watch.emit(tick, out_path)
+            _watch.emit(tick, out_path, quiet=quiet, bad=tick["errors"] or (strict and tick["findings"]))
             ticks += 1
             _time.sleep(watch_seconds)
         return 1 if (tick["errors"] or (strict and tick["findings"])) else 0

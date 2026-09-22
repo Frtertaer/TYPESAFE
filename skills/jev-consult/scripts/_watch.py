@@ -37,10 +37,15 @@ def deadline(seconds) -> float:
     return time.time() + s if s > 0 else 0.0
 
 
-def emit(tick: dict, out_path=None) -> None:
+def emit(tick: dict, out_path=None, quiet: bool = False, bad=None) -> None:
+    """Print one JSONL tick (and append to out_path, fail-open).
+
+    quiet suppresses stdout for clean ticks: with quiet=True a tick reaches
+    stdout only when `bad` is truthy; --out always gets every tick."""
     line = json.dumps(tick) + "\n"
-    sys.stdout.write(line)
-    sys.stdout.flush()
+    if not (quiet and not bad):
+        sys.stdout.write(line)
+        sys.stdout.flush()
     if out_path:
         try:
             with Path(out_path).open("a", encoding="utf-8") as fh:

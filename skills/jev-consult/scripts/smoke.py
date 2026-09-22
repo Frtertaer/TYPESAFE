@@ -1562,6 +1562,33 @@ def step_apply_fill(tmp: Path) -> dict:
                 ok = False
         else:
             ok = False
+    if ok:
+        # --status --jq digs one dotted field; a bad key exits 2
+        rc, out = _run(
+            [
+                str(SCRIPTS / "apply_fill.py"),
+                "--status",
+                "--cwd",
+                str(tmp / "cwd"),
+                "--jq",
+                "miss",
+            ],
+            env=env,
+        )
+        ok = rc == 0 and out.strip() in ("true", "false")
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--status",
+                    "--cwd",
+                    str(tmp / "cwd"),
+                    "--jq",
+                    "nope.nope",
+                ],
+                env=env,
+            )
+            ok = rc == 2
     return _step("apply_fill", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

@@ -863,11 +863,16 @@ def cmd_stats(args: argparse.Namespace) -> int:
         return 0 if tick["exists"] else 1
     # stats/notes/history watch loops emit ticks through _watch.emit below
     data = load(path)
+    history_list = data.get("history") or []
+    notes_list = data.get("notes") or []
     out: dict[str, Any] = {
         "exists": path.is_file(),
         "attempt_count": int(data.get("attempt_count") or 0),
-        "history": len(data.get("history") or []),
+        "history": len(history_list),
         "inspected": len(data.get("inspected") or []),
+        "notes": len(notes_list),
+        "notes_bytes": sum(len(json.dumps(n, ensure_ascii=False).encode("utf-8")) for n in notes_list if isinstance(n, dict)),
+        "history_bytes": sum(len(json.dumps(h, ensure_ascii=False).encode("utf-8")) for h in history_list if isinstance(h, dict)),
         "last_pick": data.get("last_pick") or "",
         "has_error": bool(data.get("last_error")),
         "has_unknown": bool(data.get("unknown")),

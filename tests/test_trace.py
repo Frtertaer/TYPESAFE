@@ -112,6 +112,34 @@ class TraceTests(unittest.TestCase):
             self.assertTrue(out["has_unknown"])
             self.assertGreaterEqual(out["age_seconds"], 0)
 
+    def test_stats_reports_entry_bytes(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.save(
+                {
+                    "history": [{"pick": "a", "ts": 1, "kind": "idf"}],
+                    "notes": [{"ts": 1, "text": "héllo"}],
+                },
+                path,
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "stats"])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["notes"], 1)
+            self.assertEqual(
+                out["notes_bytes"],
+                len(json.dumps({"ts": 1, "text": "héllo"}, ensure_ascii=False).encode("utf-8")),
+            )
+            self.assertEqual(
+                out["history_bytes"],
+                len(json.dumps({"pick": "a", "ts": 1, "kind": "idf"}, ensure_ascii=False).encode("utf-8")),
+            )
+
     def test_stats_jq_prints_one_field(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout, redirect_stderr

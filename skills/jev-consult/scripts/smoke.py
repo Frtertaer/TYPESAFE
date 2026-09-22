@@ -413,6 +413,59 @@ def step_inventory(tmp: Path) -> dict:
             ok = rc == 0 and payload.get("verdict") == "empty"
         except (OSError, ValueError):
             ok = False
+    if ok:
+        # row-shaping flags on the scanned skill: --names, --count, --csv,
+        # --jsonl, --kinds, --paths, --grep, --limit, --id, --out
+        base = [
+            str(SCRIPTS / "inventory.py"),
+            "--harness",
+            "codex",
+            "--home",
+            str(home),
+            "--hermes-home",
+            str(hermes),
+            "--task",
+            "smoke",
+        ]
+        rc, out = _run(base + ["--names"])
+        ok = rc == 0 and "skill_smoke_skill" in out
+        if ok:
+            rc, out = _run(base + ["--count"])
+            ok = rc == 0 and out.strip() == "1/1"
+        if ok:
+            rc, out = _run(base + ["--csv"])
+            ok = rc == 0 and "skill_smoke_skill,skill,smoke-skill" in out
+        if ok:
+            rc, out = _run(base + ["--jsonl"])
+            try:
+                ok = (
+                    rc == 0
+                    and json.loads(out.strip()).get("id") == "skill_smoke_skill"
+                )
+            except (ValueError, AttributeError):
+                ok = False
+        if ok:
+            rc, out = _run(base + ["--kinds"])
+            ok = rc == 0 and "skill 1" in out
+        if ok:
+            rc, out = _run(base + ["--paths"])
+            ok = rc == 0 and "skills" in out
+        if ok:
+            rc, out = _run(base + ["--grep", "smoke-skill"])
+            ok = rc == 0 and "smoke-skill" in out
+        if ok:
+            rc, out = _run(base + ["--grep", "zzz-nope"])
+            ok = rc == 0 and "smoke-skill" not in out
+        if ok:
+            rc, out = _run(base + ["--id", "skill_smoke_skill"])
+            ok = rc == 0 and "smoke-skill" in out
+        if ok:
+            rc, out = _run(base + ["--id", "nope"])
+            ok = rc in (0, 1) and "smoke-skill" not in out
+        if ok:
+            out_file = tmp / "inv-out.json"
+            rc, out = _run(base + ["--out", str(out_file)])
+            ok = rc == 0 and out_file.is_file()
     return _step("inventory", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

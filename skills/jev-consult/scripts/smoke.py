@@ -825,6 +825,20 @@ def step_decisions(tmp: Path) -> dict:
         except ValueError:
             ok = False
     if ok:
+        # --jq KEY --jq-where-contains SUB keeps only matching values
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(winner_log),
+                "--jq",
+                "winner.name",
+                "--jq-where-contains",
+                "alp",
+            ]
+        )
+        ok = rc == 0 and out.strip() == "alpha"
+    if ok:
         # --csv emits a header plus one row per entry, no stats
         rc, out = _run(
             [

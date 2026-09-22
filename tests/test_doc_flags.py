@@ -1,75 +1,110 @@
-"""Doc-listed `--flag` tokens must exist in the referenced script's source.
-
-Every docs line shaped like `python <script>.py --flag ...` promises a flag
-the script accepts. If a flag is renamed or dropped the docs go stale
-silently — this test greps each script's source for each doc'd flag.
-"""
-
+"""Doc-to-parser parity: every --flag shown in docs next to a script
+must be a real option that script's --help lists (or that its source
+handles for manual-argv scripts)."""
 import re
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "skills" / "jev-consult" / "scripts"
 DOCS = [
+    ROOT / "skills" / "jev-consult" / "SKILL.md",
     ROOT / "README.md",
     ROOT / "AGENTS.md",
     ROOT / "CLAUDE.md",
     ROOT / ".hermes.md",
     ROOT / "docs" / "for-agents.md",
-    ROOT / "skills" / "jev-consult" / "SKILL.md",
 ]
 
-# `python <path/to/script.py> [--flag ...]` — only .py invocations.
-CMD = re.compile(r"python(?:3)?\s+((?:[\w./-]+)\.py)\b")
-FLAG = re.compile(r"(?<!\w)--([a-zA-Z][\w-]*)")
-# ignore values glued on like `--flag=<x>` placeholders after the flag itself
+SCRIPT_RE = re.compile(r"\b([a-z][a-z0-9_/-]*)\.py\b")
+FLAG_RE = re.compile(r"--[a-z][a-z0-9-]+")
+
+# Flags the doc deliberately names but the script must NOT accept (policy
+# prohibitions like "Never --force") or attributes to a different tool
+# (hermes install --yes) — excluded from the parity check.
+EXCLUDE = {
+    "apply_fill": {"--force", "--no-enable"},
+    "catalog_fill": {"--severity", "--yes", "--force", "--no-enable"},
+}
 
 
-class DocFlagParityTests(unittest.TestCase):
-    def _lines(self):
-        for doc in DOCS:
-            if not doc.exists():
+def doc_flags() -> dict:
+    """{script_name: {flags}} collected line-by-line from every doc."""
+    table: dict = {}
+    for doc in DOCS:
+        if not doc.exists():
+            continue
+        for line in doc.read_text(encoding="utf-8").splitlines():
+            marks = [m for m in SCRIPT_RE.finditer(line)]
+            if not marks:
                 continue
-            base = doc.parent
-            for ln, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
-                yield doc, base, ln, line
+            # split the line into spans: flags between script[i] and
+            # script[i+1] belong to script[i]; a tail after the last
+            # belongs to the last.
+            spans = []
+            for i, mark in enumerate(marks):
+                end = marks[i + 1].start() if i + 1 < len(marks) else len(line)
+                spans.append((mark.group(1), line[mark.start() : end]))
+            head = line[: marks[0].start()]
+            for name, span in spans:
+                seg = head + span if name == marks[0].group(1) else span
+                flags = set(FLAG_RE.findall(seg))
+                name = name.rsplit("/", 1)[-1]
+                table.setdefault(name, set()).update(flags)
+    return table
 
-    def test_doc_flags_exist_in_script_source(self) -> None:
-        # a prose line may name several scripts (e.g. lint tools are
-        # described together); each flag must exist in at least one of
-        # the scripts referenced on that line.
+
+def script_path(name: str) -> Path | None:
+    for cand in (SCRIPTS / (name + ".py"), ROOT / "scripts" / (name + ".py")):
+        if cand.is_file():
+            return cand
+    return None
+
+
+class DocFlagsTest(unittest.TestCase):
+    def test_every_documented_flag_parses(self) -> None:
+        table = doc_flags()
+        self.assertTrue(table, "no script lines found in docs")
         missing = []
-        seen = set()
-        srcs = {}
-        for doc, base, ln, line in self._lines():
-            line = line.split("#", 1)[0]  # trailing comments describe other tools
-            scripts = []
-            for m in CMD.finditer(line):
-                script = (base / m.group(1)).resolve()
-                if not script.exists():
-                    script = (ROOT / m.group(1)).resolve()
-                if not script.exists() or script.suffix != ".py":
-                    continue  # path existence itself is test_doc_paths' job
-                if script not in srcs:
-                    try:
-                        srcs[script] = script.read_text(encoding="utf-8")
-                    except OSError:
-                        srcs[script] = ""
-                scripts.append(script)
-            if not scripts:
-                continue
-            for flag in FLAG.findall(line):
-                token = "--" + flag
-                key = (doc.name, ln, token)
-                if key in seen:
+        for name, flags in sorted(table.items()):
+            script = script_path(name)
+            if script is None:
+                continue  # e.g. run_trigger_evals.py lives in vendor
+            proc = subprocess.run(
+                [sys.executable, str(script), "--help"],
+                capture_output=True,
+                text=True,
+            )
+            help_text = proc.stdout + proc.stderr
+            if "usage:" in help_text or "Usage:" in help_text:
+                subs = re.search(r"\{([a-z0-9_,-]+)\}", help_text)
+                if subs:
+                    for sub in subs.group(1).split(","):
+                        sub = sub.strip()
+                        if not sub or sub.startswith("-"):
+                            continue
+                        p2 = subprocess.run(
+                            [sys.executable, str(script), sub, "--help"],
+                            capture_output=True,
+                            text=True,
+                        )
+                        help_text += "\n" + p2.stdout + p2.stderr
+            else:
+                # manual-argv scripts (hooks): the source itself must
+                # mention the flag string
+                try:
+                    help_text = script.read_text(encoding="utf-8")
+                except OSError:
                     continue
-                seen.add(key)
-                if not any(token in srcs[s] for s in scripts):
-                    missing.append(
-                        "%s:%d: documents %s not handled by %s"
-                        % (doc.name, ln, token, ", ".join(s.name for s in scripts))
-                    )
-        self.assertEqual([], missing)
+            flags -= EXCLUDE.get(name, set())
+            for flag in sorted(flags):
+                if flag not in help_text:
+                    missing.append("%s %s" % (name, flag))
+        self.assertEqual(
+            missing, [], "doc flags missing from parser/source: %s" % missing
+        )
 
 
 if __name__ == "__main__":

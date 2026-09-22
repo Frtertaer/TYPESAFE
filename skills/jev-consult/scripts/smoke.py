@@ -606,6 +606,19 @@ def step_decisions(tmp: Path) -> dict:
         except (OSError, ValueError):
             ok = False
     if ok:
+        # --report writes a markdown stats report to PATH
+        report = tmp / "report.md"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--report",
+                str(report),
+            ]
+        )
+        ok = rc == 0 and report.is_file() and "winner" in report.read_text(encoding="utf-8")
+    if ok:
         rc, out = _run(
             [
                 str(SCRIPTS / "decisions.py"),

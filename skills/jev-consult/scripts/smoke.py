@@ -1811,6 +1811,49 @@ def step_hook(tmp: Path) -> dict:
 def step_compare(tmp: Path) -> dict:
     rc, out = _run([str(SCRIPTS / "compare.py"), "--strict"])
     ok = rc == 0 and "after_jev" in out
+    if ok:
+        # --json emits the machine-readable payload with per-case rows
+        rc, out = _run([str(SCRIPTS / "compare.py"), "--json"])
+        try:
+            payload = json.loads(out)
+            ok = (
+                rc == 0
+                and isinstance(payload, dict)
+                and payload.get("rows")
+                and all("after" in c and "before" in c for c in payload["rows"])
+            )
+        except (ValueError, AttributeError, TypeError):
+            ok = False
+    if ok:
+        # --only runs a single case id
+        case_id = payload["rows"][0].get("id", "")
+        rc, out = _run(
+            [str(SCRIPTS / "compare.py"), "--json", "--only", case_id]
+        )
+        try:
+            ok = rc == 0 and len(json.loads(out).get("rows", [])) == 1
+        except ValueError:
+            ok = False
+    if ok:
+        # --md prints a markdown table, --verdict writes the slim probe
+        verdict = tmp / "compare-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compare.py"),
+                "--md",
+                "--verdict",
+                str(verdict),
+            ]
+        )
+        ok = rc == 0 and "|" in out
+        try:
+            ok = ok and "verdict" in json.loads(verdict.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            ok = False
+    if ok:
+        # a bad --jq key exits 2
+        rc, out = _run([str(SCRIPTS / "compare.py"), "--json", "--jq", "nope"])
+        ok = rc == 2
     return _step("compare", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

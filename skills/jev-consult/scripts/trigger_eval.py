@@ -516,6 +516,7 @@ def main(argv: list[str] | None = None) -> int:
                 "ts": int(_time.time()),
                 "verdict": "PASS" if not failed else "FAIL",
                 "ok": cur["ok"],
+                "margin": cur["margin"],
                 "worst_positive": cur["worst_positive"],
                 "best_negative": cur["best_negative"],
                 "coverage": cur["coverage"],

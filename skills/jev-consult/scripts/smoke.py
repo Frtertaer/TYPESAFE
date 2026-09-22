@@ -503,6 +503,65 @@ def step_inventory(tmp: Path) -> dict:
         ticks = [ln for ln in out.splitlines() if '"added"' in ln]
         ok = rc == 0 and len(ticks) == 1 and "watch tick=2" in out
     if ok:
+        # --limit caps the shortlist; --scores adds an IDF score to each
+        rc, out = _run(base + ["--limit", "1"])
+        try:
+            ok = rc == 0 and len(json.loads(out).get("shortlist", [])) <= 1
+        except ValueError:
+            ok = False
+        if ok:
+            rc, out = _run(base + ["--scores"])
+            try:
+                ok = rc == 0 and "score" in json.dumps(
+                    json.loads(out).get("shortlist", [])
+                )
+            except ValueError:
+                ok = False
+        if ok:
+            rc, out = _run(base + ["--all-names"])
+            ok = rc == 0 and "smoke-skill" in out
+    if ok:
+        # --check-miss prints fresh/stale/missing for the miss marker;
+        # --ttl 0 flips a fresh one to stale
+        miss = tmp / ".jev-tools-miss.json"
+        miss.write_text(
+            json.dumps({"task": "smoke", "written_at": time.time()}),
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [str(SCRIPTS / "inventory.py"), "--check-miss", str(miss)]
+        )
+        ok = rc == 0 and out.startswith("fresh")
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "inventory.py"),
+                    "--check-miss",
+                    str(miss),
+                    "--ttl",
+                    "0",
+                ]
+            )
+            ok = rc == 0 and out.startswith("stale")
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "inventory.py"),
+                    "--check-miss",
+                    str(tmp / "no-such-miss.json"),
+                ]
+            )
+            ok = rc == 0 and out.startswith("missing")
+    if ok:
+        # --write-ask PATH writes a picker request with installed_enough
+        ask_file = tmp / "inv-ask.json"
+        rc, _ = _run(base + ["--write-ask", str(ask_file)])
+        try:
+            ask = json.loads(ask_file.read_text(encoding="utf-8"))
+            ok = rc == 0 and "installed_enough" in ask.get("questions", {})
+        except (OSError, ValueError, AttributeError):
+            ok = False
+    if ok:
         # --fail-fast stops the watch when a new skill appears mid-run
         ff_home = tmp / "inv-ff-home"
         (ff_home / ".codex" / "skills" / "a").mkdir(parents=True)

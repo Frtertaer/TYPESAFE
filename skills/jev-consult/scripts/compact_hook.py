@@ -103,7 +103,10 @@ def main() -> int:
     if not isinstance(payload, dict):
         sys.stdout.write("{}\n")
         return 0
-    sys.stdout.write(json.dumps(handle(payload), ensure_ascii=False) + "\n")
+    try:
+        sys.stdout.write(json.dumps(handle(payload), ensure_ascii=False) + "\n")
+    except Exception:
+        sys.stdout.write("{}\n")
     return 0
 
 

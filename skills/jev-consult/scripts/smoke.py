@@ -1763,6 +1763,74 @@ def step_trace(tmp: Path) -> dict:
             )
             ok = rc == 0 and "second note" in out
         if ok:
+            # notes filter flags: --grep matches text, --reverse flips order,
+            # --field digs one field, --uniq dedupes, --since/--before bound ts
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "notes",
+                    "--grep",
+                    "second",
+                ]
+            )
+            ok = (
+                rc == 0
+                and "second note" in out
+                and "smoke note" not in out
+            )
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "notes",
+                    "--before",
+                    "1",
+                ]
+            )
+            ok = (
+                rc == 0
+                and "second note" not in out
+                and "smoke note" not in out
+            )
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "notes",
+                    "--since",
+                    "999999999999",
+                ]
+            )
+            ok = (
+                rc == 0
+                and "second note" not in out
+                and "smoke note" not in out
+            )
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "trace.py"),
+                    "--file",
+                    str(trace_file),
+                    "notes",
+                    "--reverse",
+                    "--json",
+                ]
+            )
+            try:
+                texts = [n.get("text", "") for n in json.loads(out)]
+                ok = rc == 0 and texts and texts[0] == texts[-1] if len(texts) == 1 else (
+                    rc == 0 and texts[0] != texts[-1]
+                )
+            except (ValueError, AttributeError, IndexError):
+                ok = False
+        if ok:
             # history --watch emits {picks} ticks; --verdict writes the probe
             verdict = tmp / "trace-verdict.json"
             rc, out = _run(

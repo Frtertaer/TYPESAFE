@@ -238,10 +238,11 @@ def main(argv: list[str] | None = None) -> int:
     strict = "--strict" in argv
     do_fix = "--fix" in argv
     dry_run = "--dry-run" in argv
+    fail_fast = "--fail-fast" in argv
     argv = [
         a
         for a in argv
-        if a not in ("--json", "--quiet", "--strict", "--fix", "--dry-run")
+        if a not in ("--json", "--quiet", "--strict", "--fix", "--dry-run", "--fail-fast")
     ]
     if len(argv) > 1:
         if watch_seconds > 0 or do_fix:
@@ -334,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
                 rc_now = 1 if (tick["errors"] or (strict and tick["findings"])) else 0
                 if not _write_verdict(rc_now):
                     verdict_ok = False  # warn once, stop retrying
+            if fail_fast and (tick["errors"] or (strict and tick["findings"])):
+                break
             _time.sleep(watch_seconds)
         rc = 1 if (tick.get("errors", 0) or (strict and tick.get("findings", 0))) else 0
         if verdict_path and verdict_ok and not _write_verdict(rc):

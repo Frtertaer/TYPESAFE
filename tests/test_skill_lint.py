@@ -378,6 +378,28 @@ class CliTests(unittest.TestCase):
         self.assertTrue(all("findings" in t and "errors" in t for t in ticks))
         self.assertTrue(all("warnings" in t and "infos" in t for t in ticks))
 
+    def test_watch_fail_fast_breaks_on_error_tick(self):
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_skill(tmp, "bad", "# nope\n")
+            env = dict(_os.environ, JEV_SLINT_WATCH_MAX="5")
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPT), str(bad), "--watch", "0.01",
+                 "--fail-fast"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+        self.assertEqual(proc.returncode, 1)
+        ticks = [
+            json.loads(l)
+            for l in proc.stdout.splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 1)
+
     def test_watch_rc_reflects_last_lint(self):
         import os as _os
 

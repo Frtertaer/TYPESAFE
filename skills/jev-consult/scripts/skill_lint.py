@@ -169,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     as_json = "--json" in argv
     strict = "--strict" in argv
     quiet = "--quiet" in argv
+    fail_fast = "--fail-fast" in argv
     severity = ""
     if "--severity" in argv:
         idx = argv.index("--severity")
@@ -236,7 +237,11 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         verdict_path = argv[idx + 1]
         argv = argv[:idx] + argv[idx + 2 :]
-    argv = [a for a in argv if a not in ("--fix", "--json", "--strict", "--quiet")]
+    argv = [
+        a
+        for a in argv
+        if a not in ("--fix", "--json", "--strict", "--quiet", "--fail-fast")
+    ]
     if not argv:
         sys.stderr.write(
             "usage: skill_lint.py SKILL.md [more.md ...] [--fix] [--strict]\n"
@@ -287,6 +292,8 @@ def main(argv: list[str] | None = None) -> int:
                 rc_now = 1 if (tick["errors"] or (strict and tick["findings"])) else 0
                 if not _write_verdict(rc_now):
                     verdict_ok = False  # warn once, stop retrying
+            if fail_fast and (tick["errors"] or (strict and tick["findings"])):
+                break
             _time.sleep(watch_seconds)
         rc = 1 if (tick.get("errors", 0) or (strict and tick.get("findings", 0))) else 0
         if verdict_path and verdict_ok and not _write_verdict(rc):

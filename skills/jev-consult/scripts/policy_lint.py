@@ -387,6 +387,7 @@ def main(argv: list[str] | None = None) -> int:
     show = "--show" in argv
     quiet = "--quiet" in argv
     as_json = "--json" in argv
+    fail_fast = "--fail-fast" in argv
     severity = ""
     if "--severity" in argv:
         i = argv.index("--severity")
@@ -462,7 +463,11 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         verdict_path = argv[idx + 1]
         del argv[idx : idx + 2]
-    argv = [a for a in argv if a not in {"--strict", "--show", "--quiet", "--json"}]
+    argv = [
+        a
+        for a in argv
+        if a not in {"--strict", "--show", "--quiet", "--json", "--fail-fast"}
+    ]
     if len(argv) > 1:
         results = []
         for arg in argv:
@@ -571,6 +576,8 @@ def main(argv: list[str] | None = None) -> int:
                 rc_now = 1 if (tick["errors"] or (strict and tick["findings"])) else 0
                 if not _write_verdict(rc_now):
                     verdict_ok = False  # warn once, stop retrying
+            if fail_fast and (tick["errors"] or (strict and tick["findings"])):
+                break
             _time.sleep(watch_seconds)
             try:
                 policy = json.loads(path.read_text(encoding="utf-8"))

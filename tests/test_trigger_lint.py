@@ -390,6 +390,23 @@ class CliTests(unittest.TestCase):
                     rc = trigger_lint.main([str(bad), "--watch", "0.01"])
             self.assertEqual(rc, 1)
 
+    def test_watch_fail_fast_breaks_on_error_tick(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_cases(tmp, [{"id": "pos-x", "should_trigger": True}])
+            with mock.patch.dict(os.environ, {"JEV_TLINT_WATCH_MAX": "5"}):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = trigger_lint.main(
+                        [str(bad), "--watch", "0.01", "--fail-fast"]
+                    )
+            self.assertEqual(rc, 1)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 1)
+
     def test_max_ticks_flag_overrides_env_cap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = write_cases(tmp, [dict(GOOD_CASE)])

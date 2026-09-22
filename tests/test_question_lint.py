@@ -747,6 +747,39 @@ class StandaloneCliTests(unittest.TestCase):
         self.assertTrue(all("errors" in t for t in ticks))
         self.assertTrue(all("warnings" in t and "infos" in t for t in ticks))
 
+    def test_watch_fail_fast_breaks_on_error_tick(self) -> None:
+        import os as _os
+
+        bad = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Is it not true? Isn't it wrong?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            badp = Path(tmp) / "bad.json"
+            badp.write_text(json.dumps(bad), encoding="utf-8")
+            env = dict(_os.environ, JEV_QLINT_WATCH_MAX="5")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(self.QLINT_PATH),
+                    str(badp),
+                    "--watch",
+                    "0.01",
+                    "--fail-fast",
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+        self.assertEqual(proc.returncode, 1)
+        ticks = [
+            json.loads(l)
+            for l in proc.stdout.splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 1)
+
     def test_watch_rc_reflects_last_lint(self) -> None:
         import os as _os
 

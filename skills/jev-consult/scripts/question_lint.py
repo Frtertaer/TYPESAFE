@@ -282,6 +282,7 @@ def main(argv: list[str] | None = None) -> int:
     do_fix = "--fix" in argv
     strict = "--strict" in argv
     quiet = "--quiet" in argv
+    fail_fast = "--fail-fast" in argv
     severity = ""
     if "--severity" in argv:
         idx = argv.index("--severity")
@@ -349,7 +350,11 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         verdict_path = argv[idx + 1]
         argv = argv[:idx] + argv[idx + 2 :]
-    argv = [a for a in argv if a not in ("--json", "--fix", "--strict", "--quiet")]
+    argv = [
+        a
+        for a in argv
+        if a not in ("--json", "--fix", "--strict", "--quiet", "--fail-fast")
+    ]
     if not argv:
         sys.stderr.write("usage: question_lint.py FILE... [--json] [--fix] [--strict]\n")
         return 2
@@ -451,6 +456,8 @@ def main(argv: list[str] | None = None) -> int:
                 rc_now = 1 if (tick["errors"] or (strict and tick["findings"])) else 0
                 if not _write_verdict(rc_now):
                     verdict_ok = False  # warn once, stop retrying
+            if fail_fast and (tick["errors"] or (strict and tick["findings"])):
+                break
             _time.sleep(watch_seconds)
             try:
                 fresh = json.loads(Path(argv[0]).read_text(encoding="utf-8"))

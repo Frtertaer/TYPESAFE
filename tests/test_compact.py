@@ -1315,6 +1315,38 @@ class CompactCliTests(unittest.TestCase):
             self.assertEqual(payload["verdict"], "fallback")
             self.assertTrue(payload["fallback"])
 
+    def test_nonwatch_verdict_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            verdict = Path(tmp) / "v.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0",
+                     "--verdict", str(verdict)]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "ok")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertFalse(payload["fallback"])
+            self.assertIn("reduction", payload)
+
+    def test_nonwatch_verdict_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            verdict = Path(tmp) / "v.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0.99",
+                     "--verdict", str(verdict)]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "fallback")
+            self.assertTrue(payload["fallback"])
+
     def test_check_exits_1_below_gate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

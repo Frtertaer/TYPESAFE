@@ -1289,6 +1289,19 @@ def cmd_compact(args: argparse.Namespace) -> int:
             return 1
         return 1 if cur.get("stats", {}).get("fallback") else 0
     result = compact_or_keep(messages, asker, options)
+    if getattr(args, "verdict", ""):
+        stats = result.get("stats") if isinstance(result, dict) else {}
+        stats = stats if isinstance(stats, dict) else {}
+        if not _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "fallback" if stats.get("fallback") else "ok",
+                "ticks": 1,
+                "reduction": stats.get("reduction"),
+                "fallback": bool(stats.get("fallback")),
+            },
+        ):
+            return 1
     if getattr(args, "check", False):
         stats = result.get("stats") or {}
         ratio = stats.get("reduction", reduction_ratio(result))
@@ -1472,7 +1485,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
-    parser.add_argument("--verdict", default="", metavar="PATH", help="With --watch: write a slim {verdict: ok|fallback, ticks, reduction, fallback} JSON when the loop ends.")
+    parser.add_argument("--verdict", default="", metavar="PATH", help="Write a slim {verdict: ok|fallback, ticks, reduction, fallback} JSON to PATH — refreshed every --watch tick; without --watch a one-shot probe after the run.")
     parser.add_argument(
         "--prune-spill",
         type=float,

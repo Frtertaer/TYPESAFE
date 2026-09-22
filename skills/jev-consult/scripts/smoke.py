@@ -1312,6 +1312,83 @@ def step_decisions(tmp: Path) -> dict:
         )
         ok = rc == 0 and '"count": 1' in out and "watch tick=2" in out
     if ok:
+        # --quiet keeps passing ticks off stdout (stderr still logs them)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--quiet",
+            ]
+        )
+        stdout_ticks = [ln for ln in out.splitlines() if '"count"' in ln]
+        ok = rc == 0 and not stdout_ticks and "watch tick=2" in out
+    if ok:
+        # --watch-max S bounds the loop by elapsed seconds
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--watch",
+                "0.02",
+                "--watch-max",
+                "0.05",
+            ]
+        )
+        ok = rc == 0 and "watch tick=" in out
+    if ok:
+        # --fail-fast breaks on the first tick with removals: shrink the
+        # log mid-watch and the run exits 1 with verdict "removed"
+        shrink_log = tmp / "decisions-shrink.jsonl"
+        shrink_log.write_text(
+            '\n'.join(
+                json.dumps({"ts": t, "jev_status": "winner"})
+                for t in (1, 2)
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        wv = tmp / "decisions-watch-verdict.json"
+        wout = ""
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(shrink_log),
+                "--watch",
+                "0.15",
+                "--fail-fast",
+                "--verdict",
+                str(wv),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            time.sleep(0.4)  # let the first tick sample the full log
+            shrink_log.write_text(
+                json.dumps({"ts": 1, "jev_status": "winner"}) + "\n",
+                encoding="utf-8",
+            )
+            wout, _ = proc.communicate(timeout=30)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+        ok = proc.returncode == 1 and '"removed": 1' in wout
+        try:
+            ok = ok and json.loads(wv.read_text(encoding="utf-8")).get(
+                "verdict"
+            ) == "removed"
+        except (OSError, ValueError):
+            ok = False
+    if ok:
         # --verdict on an empty log writes {verdict: empty}
         empty_log = tmp / "decisions-empty.jsonl"
         empty_log.write_text("", encoding="utf-8")

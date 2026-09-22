@@ -285,6 +285,7 @@ def main(argv: list[str] | None = None) -> int:
         dead = _watch.deadline("JEV_COMPARE_WATCH_SECS", getattr(args, "watch_max", 0.0))
         verdict_ok = True
         prev_failures: set[str] = set()
+        watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             cur = run(
                 live=args.live,
@@ -300,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
                 "cases": len(cur["rows"]),
                 "failures": len(failing),
                 "new_failures": new_failures,
+                "elapsed_s": round(_time.time() - watch_t0, 2),
             }
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["failures"]))
             ticks += 1

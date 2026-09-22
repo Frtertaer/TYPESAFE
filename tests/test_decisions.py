@@ -2874,6 +2874,36 @@ class FillGapsTest(unittest.TestCase):
             self.assertIn("strict:", proc.stderr)
             self.assertIn("2 open", proc.stderr)
 
+    def test_fill_gaps_oldest_open_ts_and_age(self) -> None:
+        entries = [
+            {"ts": 100, "harness": "h", "jev_status": "none", "prompt_head": "a"},
+            {"ts": 40, "harness": "h", "jev_status": "empty", "prompt_head": "b"},
+            {"ts": 200, "harness": "h", "jev_status": "none", "prompt_head": "c"},
+        ]
+        rows = decisions.fill_gaps(entries, now=240.0)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["open"], 3)
+        self.assertEqual(row["oldest_open_ts"], 40)
+        self.assertEqual(row["age_s"], 200.0)
+
+    def test_fill_gaps_age_none_when_all_filled(self) -> None:
+        entries = [
+            {"ts": 10, "harness": "h", "jev_status": "none", "prompt_head": "a"},
+            {"ts": 20, "harness": "h", "jev_status": "fill", "prompt_head": "a"},
+        ]
+        row = decisions.fill_gaps(entries, now=100.0)[0]
+        self.assertIsNone(row["oldest_open_ts"])
+        self.assertIsNone(row["age_s"])
+
+    def test_fill_gaps_table_shows_age_column(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._log(tmp)
+            proc = run_cli("--file", str(path), "--fill-gaps")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("age_s", proc.stdout.splitlines()[0])
+            self.assertRegex(proc.stdout, r"claude-code\s+1\s+0\s+1\s+\d")
+
     def test_fill_gaps_strict_passes_when_all_filled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

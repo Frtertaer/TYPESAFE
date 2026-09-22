@@ -327,8 +327,13 @@ def is_miss_entry(item: dict) -> bool:
     return True
 
 
-def fill_gaps(entries: list[dict]) -> list[dict]:
-    """Per-harness miss events (no winner) with no later same-prompt fill."""
+def fill_gaps(entries: list[dict], now: float | None = None) -> list[dict]:
+    """Per-harness miss events (no winner) with no later same-prompt fill.
+
+    Rows gain ``oldest_open_ts`` (earliest ts among still-open misses, or
+    None) and ``age_s`` (``now`` minus that ts) so triage can sort by
+    staleness; ``now`` is injectable for deterministic tests.
+    """
     fills = [
         item
         for item in entries
@@ -341,7 +346,14 @@ def fill_gaps(entries: list[dict]) -> list[dict]:
         harness = str(item.get("harness") or "unknown")
         group = groups.setdefault(
             harness,
-            {"harness": harness, "misses": 0, "filled": 0, "open": 0, "examples": []},
+            {
+                "harness": harness,
+                "misses": 0,
+                "filled": 0,
+                "open": 0,
+                "examples": [],
+                "oldest_open_ts": None,
+            },
         )
         group["misses"] += 1
         head = str(item.get("prompt_head") or "")[:120]
@@ -360,23 +372,35 @@ def fill_gaps(entries: list[dict]) -> list[dict]:
             group["filled"] += 1
         else:
             group["open"] += 1
+            if ts is not None and (
+                group["oldest_open_ts"] is None or ts < group["oldest_open_ts"]
+            ):
+                group["oldest_open_ts"] = ts
             if head and len(group["examples"]) < 3:
                 group["examples"].append(head[:60])
-    return sorted(groups.values(), key=lambda g: (-g["open"], g["harness"]))
+    if now is None:
+        now = time.time()
+    rows = list(groups.values())
+    for row in rows:
+        oldest = row["oldest_open_ts"]
+        row["age_s"] = round(now - oldest, 1) if oldest is not None else None
+    return sorted(rows, key=lambda g: (-g["open"], g["harness"]))
 
 
 def format_fill_gaps(rows: list[dict]) -> str:
     if not rows:
         return "no miss entries"
-    lines = ["harness        misses  filled  open   examples"]
+    lines = ["harness        misses  filled  open   age_s      examples"]
     for row in rows:
+        age = row.get("age_s")
         lines.append(
-            "%-14s %-7d %-7d %-6d %s"
+            "%-14s %-7d %-7d %-6d %-10s %s"
             % (
                 row["harness"],
                 row["misses"],
                 row["filled"],
                 row["open"],
+                "-" if age is None else "%.1f" % age,
                 "; ".join(row["examples"]),
             )
         )

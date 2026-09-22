@@ -531,6 +531,23 @@ def step_decisions(tmp: Path) -> dict:
             and lines[2].split(",")[2] == "none"
         )
     if ok:
+        # --md emits a Markdown table (header, separator, rows)
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--md",
+            ]
+        )
+        lines = out.strip().splitlines()
+        ok = (
+            rc == 0
+            and len(lines) == 4
+            and lines[0].startswith("| ts")
+            and "| none |" in lines[3]
+        )
+    if ok:
         rc, out = _run(
             [
                 str(SCRIPTS / "decisions.py"),

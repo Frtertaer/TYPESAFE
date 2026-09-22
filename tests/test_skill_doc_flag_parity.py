@@ -48,6 +48,16 @@ class SkillDocFlagParityTests(unittest.TestCase):
                     problems.append("%s: %s" % (name, flag))
         self.assertEqual(problems, [])
 
+    def test_every_nonvendored_script_is_named_in_skill_md(self) -> None:
+        doc = SKILL_MD.read_text(encoding="utf-8")
+        undocumented = []
+        for script in sorted(SCRIPTS.glob("*.py")):
+            if "[vendored]" in script.read_text(encoding="utf-8")[:600]:
+                continue
+            if script.name not in doc:
+                undocumented.append(script.name)
+        self.assertEqual(undocumented, [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

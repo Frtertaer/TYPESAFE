@@ -103,7 +103,7 @@ python skills/jev-consult/scripts/compare.py --live
 
 ## Compact
 
-Default is **LIVE_FAT only**: truncate the current fat tool result (>32k chars) as it arrives. Hermes `transform_tool_result`, Claude and Grok `PostToolUse` `updatedToolOutput`. Errors and small reads stay. The omitted middle is saved whole to `~/.cache/jev-consult/spill/<sha>.txt` and the marker names the file (cap 200, `JEV_CONSULT_SPILL=0` disables). Not a watchdog. No second-LLM summary. No post-compact resync.
+Default is **LIVE_FAT only** via `scripts/compact_hook.py`: it truncates the current fat tool result (>32k chars) as it arrives. Hermes `transform_tool_result`, Claude and Grok `PostToolUse` `updatedToolOutput`. Errors and small reads stay. The omitted middle is saved whole to `~/.cache/jev-consult/spill/<sha>.txt` and the marker names the file (cap 200, `JEV_CONSULT_SPILL=0` disables). Not a watchdog. No second-LLM summary. No post-compact resync.
 
 Do **not** run session-history drop as the default. Hermes eval (Teknium, 2026-09-20) did not adopt Tamara retention: it deletes old tool calls, breaks the prompt cache, and loses to production summary. Codex has no mutate hook — that is not a reason to rewrite dumps.
 

@@ -857,6 +857,26 @@ def step_hook(tmp: Path) -> dict:
                 ok = False
         else:
             ok = False
+    if ok:
+        # JEV_HOOK_MAX_PROMPT truncates the prompt; --json reports it
+        env.pop("JEV_HOOK_HARNESS", None)
+        env["JEV_HOOK_MAX_PROMPT"] = "10"
+        cwd2 = tmp / "cwd2"
+        cwd2.mkdir(exist_ok=True)
+        rc, out = _run(
+            [str(SCRIPTS / "inventory_hook.py"), "--json"],
+            cwd=tmp,
+            env=env,
+            inp=json.dumps(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "a prompt much longer than ten characters",
+                    "cwd": str(cwd2),
+                }
+            ),
+        )
+        env.pop("JEV_HOOK_MAX_PROMPT", None)
+        ok = rc == 0 and '"prompt_truncated": true' in out
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

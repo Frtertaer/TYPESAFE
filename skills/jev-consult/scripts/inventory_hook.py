@@ -631,6 +631,7 @@ def main(argv: list[str] | None = None) -> int:
                 except ValueError:
                     watch_max_arg = 0.0
         dead = _watch.deadline("JEV_HOOK_WATCH_SECS", watch_max_arg)
+        fail_fast = "--fail-fast" in argv
         verdict_path = ""
         if "--verdict" in argv:
             idx = argv.index("--verdict")
@@ -677,6 +678,8 @@ def main(argv: list[str] | None = None) -> int:
             ticks += 1
             if verdict_path and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
+            if fail_fast and not tick["winner"]:
+                break
             time.sleep(watch_seconds)
         if verdict_path and verdict_ok and not _write_verdict():
             return 1

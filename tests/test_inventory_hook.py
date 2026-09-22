@@ -344,6 +344,29 @@ class InventoryHookTests(unittest.TestCase):
             self.assertTrue(all(t["keys"] == [] for t in ticks))
             self.assertTrue(all(t["winner"] is None for t in ticks))
 
+    def test_watch_fail_fast_breaks_on_winnerless_tick(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload.json"
+            payload.write_text(
+                '{"event": "UserPromptSubmit", "prompt": "p"}', encoding="utf-8"
+            )
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ, {"JEV_HOOK_WATCH_MAX": "9", "JEV_HOOK_OFF": "1"}
+            ):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(
+                        ["--file", str(payload), "--watch", "0.01", "--fail-fast"]
+                    )
+            self.assertEqual(rc, 1)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 1)
+            self.assertIsNone(ticks[0]["winner"])
+
     def test_watch_tick_reports_winner_changed(self) -> None:
         calls = []
 

@@ -1,5 +1,3 @@
-
-
 <!-- jev-consult:start -->
 # jev-consult
 

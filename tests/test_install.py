@@ -335,5 +335,50 @@ def sys_exe_slash() -> str:
     return sys.executable.replace("\\", "/")
 
 
+class IdempotentInstallTests(unittest.TestCase):
+    def _snapshot(self, base: Path) -> dict:
+        return {
+            str(p.relative_to(base)): p.read_bytes()
+            for p in sorted(base.rglob("*"))
+            if p.is_file()
+        }
+
+    def test_second_install_is_byte_identical_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            env = {
+                "USERPROFILE": tmp,
+                "HOME": tmp,
+                "HERMES_HOME": str(base / "hermes"),
+            }
+            repo_before = {
+                n: (ROOT / n).read_bytes()
+                for n in ("AGENTS.md", "CLAUDE.md", ".hermes.md")
+            }
+            with patch.dict(os.environ, env, clear=False):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    install.install(["claude-code"], False)
+                first = self._snapshot(base)
+                self.assertTrue(first, "install wrote nothing")
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    install.install(["claude-code"], False)
+                second = self._snapshot(base)
+            self.assertEqual(first, second)
+            for name, blob in repo_before.items():
+                self.assertEqual((ROOT / name).read_bytes(), blob)
+
+    def test_dry_run_writes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            env = {"USERPROFILE": tmp, "HOME": tmp, "HERMES_HOME": str(base / "h")}
+            with patch.dict(os.environ, env, clear=False):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    install.install(["claude-code"], True)
+            self.assertEqual(self._snapshot(base), {})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

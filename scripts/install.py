@@ -180,7 +180,8 @@ def upsert_snippet(path: Path, dry_run: bool, snippet: str | None = None) -> str
     if MARKER_START in text and MARKER_END in text:
         pre = text.split(MARKER_START)[0]
         post = text.split(MARKER_END, 1)[1]
-        text = pre.rstrip() + "\n\n" + block + post.lstrip("\n")
+        head = pre.rstrip() + "\n\n" if pre.strip() else ""
+        text = head + block + post.lstrip("\n")
     else:
         if text and not text.endswith("\n"):
             text += "\n"

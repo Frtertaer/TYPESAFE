@@ -404,6 +404,37 @@ class IdempotentInstallTests(unittest.TestCase):
                 self.assertTrue(doc.is_file(), "missing %s" % doc)
                 self.assertIn("jev-consult", doc.read_text(encoding="utf-8"))
 
+    def test_uninstall_all_four_leaves_tmp_home_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            env = {
+                "USERPROFILE": tmp,
+                "HOME": tmp,
+                "HERMES_HOME": str(base / "hermes"),
+                "TYPESAFE_API_KEY": "",
+            }
+            agents = ["hermes", "claude-code", "codex", "grok"]
+            with patch.dict(os.environ, env, clear=False):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    install.install(agents, False)
+                with redirect_stdout(io.StringIO()):
+                    rc = install.uninstall(agents, False)
+            self.assertEqual(rc, 0)
+            for path in sorted(base.rglob("*")):
+                if path.is_dir() and path.name == "jev-consult":
+                    self.fail("leftover skill dir: %s" % path)
+            for doc in (
+                base / ".claude" / "CLAUDE.md",
+                base / ".codex" / "AGENTS.md",
+                base / ".grok" / "AGENTS.md",
+            ):
+                if doc.is_file():
+                    self.assertNotIn(
+                        "jev-consult", doc.read_text(encoding="utf-8"),
+                        "snippet left in %s" % doc,
+                    )
+
     def test_dry_run_writes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

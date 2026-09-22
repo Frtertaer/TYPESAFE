@@ -1122,6 +1122,57 @@ def step_decisions(tmp: Path) -> dict:
         )
         ok = rc == 0 and out.strip() == "none"
     if ok:
+        # numeric-field threshold filters keep only the high row
+        num_log = tmp / "decisions-num.jsonl"
+        num_log.write_text(
+            '\n'.join(
+                [
+                    json.dumps({"ts": 1, "jev_status": "winner", "fill": "peer", "prompt_len": 100, "shortlist_n": 5, "shortlist_score_avg": 0.9, "n_catalog": 4, "latency_ms": 500}),
+                    json.dumps({"ts": 2, "jev_status": "winner", "prompt_len": 1, "shortlist_n": 1, "shortlist_score_avg": 0.1, "n_catalog": 0, "latency_ms": 9000}),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        num_ok = True
+        for flag, val in (
+            ("--fill", "peer"),
+            ("--min-prompt-len", "50"),
+            ("--min-shortlist", "3"),
+            ("--min-score", "0.5"),
+            ("--min-catalog", "2"),
+            ("--max-latency", "1000"),
+            ("--min-latency", "1000"),
+        ):
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "decisions.py"),
+                    "--file",
+                    str(num_log),
+                    flag,
+                    val,
+                    "--json",
+                ]
+            )
+            try:
+                if not (rc == 0 and json.loads(out).get("total") == 1):
+                    num_ok = False
+            except ValueError:
+                num_ok = False
+        ok = num_ok
+    if ok:
+        # --sample N emits N matching entries as JSON lines
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--sample",
+                "1",
+            ]
+        )
+        ok = rc == 0 and len([ln for ln in out.splitlines() if ln.strip()]) >= 1
+    if ok:
         # --csv emits a header plus one row per entry, no stats
         rc, out = _run(
             [

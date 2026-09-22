@@ -39,6 +39,13 @@ class PolicyLintTests(unittest.TestCase):
         findings = policy_lint.lint_policy(base_policy())
         self.assertEqual(errors(findings), [])
 
+    def test_real_policy_has_no_warnings(self) -> None:
+        findings = policy_lint.lint_policy(base_policy())
+        warns = [f for f in findings if f["severity"] == "warn"]
+        self.assertEqual(warns, [])
+        # info-level reminders (P013) are fine; anything else must not drift in
+        self.assertEqual(rule_ids(findings), {"P013"})
+
     def test_non_object_policy(self) -> None:
         findings = policy_lint.lint_policy([1, 2, 3])
         self.assertIn("P000", rule_ids(findings))

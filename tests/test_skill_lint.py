@@ -566,6 +566,16 @@ class WatchSecsEnvTests(unittest.TestCase):
             self.assertGreaterEqual(len(ticks), 1)
 
 
+class ShippedSkillLintTests(unittest.TestCase):
+    """The pack's own skills/jev-consult/SKILL.md must stay lint-clean."""
+
+    def test_shipped_skill_lints_clean(self) -> None:
+        rc = skill_lint.main(
+            [str(ROOT / "skills" / "jev-consult" / "SKILL.md"), "--severity", "warn"]
+        )
+        self.assertEqual(rc, 0)
+
+
 class FixtureSkillLintTests(unittest.TestCase):
     """Every tests/fixtures SKILL.md must stay lint-clean — the fixtures
     stand in for real installed skills across the suite."""

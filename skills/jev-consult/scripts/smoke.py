@@ -611,6 +611,25 @@ def step_compact_fake(tmp: Path) -> dict:
         # exits 1 when the last tick fell back (already-compact transcript)
         ok = rc in (0, 1) and out.count("watch tick=") == 2
     if ok:
+        # --quiet keeps non-fallback ticks off stdout; stderr still logs
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compact.py"),
+                str(transcript),
+                "--history",
+                "--fake",
+                "--min-reduction",
+                "0",
+                "--watch",
+                "0.05",
+                "--max-ticks",
+                "2",
+                "--quiet",
+            ]
+        )
+        stdout_ticks = [ln for ln in out.splitlines() if '"fallback"' in ln]
+        ok = rc == 0 and not stdout_ticks and "watch tick=2" in out
+    if ok:
         # --stats prints a one-line summary; --stats-json the stats dict
         # (both on stderr, after the result JSON)
         rc, out = _run(

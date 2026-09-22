@@ -1120,5 +1120,57 @@ class JevInternalsTests(unittest.TestCase):
             self.assertEqual(rc, 0)
 
 
+class AskTimeoutTests(unittest.TestCase):
+    REQ = {
+        "state": {"task": "t"},
+        "questions": {
+            "q": {
+                "type": "choice",
+                "instructions": "pick one",
+                "criteria": {"a": "x", "b": "y"},
+            }
+        },
+    }
+    FAKE = {
+        "model": "m1",
+        "answers": {"q": {"type": "choice", "choice": "a", "confidence": 0.9}},
+    }
+
+    def _ask_with_timeout(self, argv_extra: list, env: dict) -> list:
+        calls = []
+
+        def fake_post(state, questions, policy, model=None, timeout=60, retries=1):
+            calls.append(timeout)
+            return dict(self.FAKE)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "req.json"
+            req.write_text(json.dumps(self.REQ), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(jev, "post_systemone", side_effect=fake_post), patch.object(
+                sys, "stdout", buf
+            ), patch.dict(os.environ, env):
+                rc = jev.main(["ask", str(req)] + argv_extra)
+        self.assertEqual(rc, 0, buf.getvalue())
+        return calls
+
+    def test_ask_timeout_env(self) -> None:
+        self.assertEqual(
+            self._ask_with_timeout([], {"JEV_TIMEOUT": "9.5"}), [9.5]
+        )
+
+    def test_ask_timeout_flag_wins_over_env(self) -> None:
+        self.assertEqual(
+            self._ask_with_timeout(["--timeout", "2"], {"JEV_TIMEOUT": "9.5"}),
+            [2],
+        )
+
+    def test_ask_timeout_defaults_60(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("JEV_TIMEOUT", None)
+            calls = self._ask_with_timeout([], {})
+        self.assertEqual(calls, [60])
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

@@ -252,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--live", action="store_true", help="Call Jev Noul for each side")
     parser.add_argument("--failing", action="store_true", help="Show only cases whose guarded (after) side fails the strict gate")
     parser.add_argument("--json", action="store_true", dest="as_json")
+    parser.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the result payload (e.g. failures); unknown key exits 2")
     parser.add_argument("--md", action="store_true", help="Print rows as a Markdown table")
     parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH")
     parser.add_argument("--report", metavar="PATH", default="", help="Write a markdown compare report (verdict + per-case table) to PATH; with --json writes the report object instead")
@@ -381,7 +382,23 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
             return 1
         sys.stderr.write("wrote %s\n" % args.report)
-    if args.as_json:
+    if getattr(args, "jq", ""):
+        node = result
+        found = True
+        for part in args.jq.split("."):
+            if isinstance(node, dict) and part in node:
+                node = node[part]
+            else:
+                found = False
+                break
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (args.jq, ", ".join(sorted(result)) if isinstance(result, dict) else "")
+            )
+            return 2
+        sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+    elif args.as_json:
         json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
         sys.stdout.write("\n")
     elif args.md:

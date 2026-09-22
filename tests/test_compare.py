@@ -492,6 +492,24 @@ class StrictGateTest(unittest.TestCase):
             self.assertEqual(len(out["rows"]), 1)
             self.assertFalse(out["rows"][0]["after"]["called_jev"])
 
+    def test_jq_prints_one_field_of_result(self) -> None:
+        import io as _io
+        from contextlib import redirect_stdout, redirect_stderr
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            buf = _io.StringIO()
+            with redirect_stdout(buf):
+                rc = compare.main(["--cases", str(path), "--jq", "rows"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(json.loads(buf.getvalue())), 2)
+            err = _io.StringIO()
+            with redirect_stderr(err):
+                rc = compare.main(["--cases", str(path), "--jq", "nope.x"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --jq key", err.getvalue())
+
     def test_watch_rc_1_when_last_tick_has_failures(self) -> None:
         import os as _os
 

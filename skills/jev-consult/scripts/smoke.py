@@ -1034,6 +1034,94 @@ def step_decisions(tmp: Path) -> dict:
         except ValueError:
             ok = False
     if ok:
+        # --week (--days 7) keeps only recent entries; old rows drop out
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--week",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 0
+        except ValueError:
+            ok = False
+    if ok:
+        # --since-last STATUS keeps entries after the newest row of that status
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(winner_log),
+                "--since-last",
+                "winner",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 1
+        except ValueError:
+            ok = False
+    if ok:
+        # --where-not KEY=VAL drops matching rows
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--where-not",
+                "jev_status=winner",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 1
+        except ValueError:
+            ok = False
+    if ok:
+        # --max-need filters on the numeric need ceiling
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(need_log),
+                "--max-need",
+                "0.5",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 1
+        except ValueError:
+            ok = False
+    if ok:
+        # --jq-first/--jq-last pick the first/last extracted value
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--jq",
+                "jev_status",
+                "--jq-first",
+            ]
+        )
+        ok = rc == 0 and out.strip() == "winner"
+    if ok:
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(log),
+                "--jq",
+                "jev_status",
+                "--jq-last",
+            ]
+        )
+        ok = rc == 0 and out.strip() == "none"
+    if ok:
         # --csv emits a header plus one row per entry, no stats
         rc, out = _run(
             [

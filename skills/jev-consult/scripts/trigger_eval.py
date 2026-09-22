@@ -434,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         ]
 
-    def _write_verdict(res: dict) -> bool:
+    def _write_verdict(res: dict, extra: dict | None = None) -> bool:
         """Write the slim verdict JSON to --verdict PATH; True on success."""
         if not args.verdict or not res:
             return True
@@ -479,6 +479,8 @@ def main(argv: list[str] | None = None) -> int:
             "best_negative": res["best_negative"],
             "margin": res["margin"],
         }
+        if extra:
+            payload.update(extra)
         return _watch.write_verdict(args.verdict, payload)
 
     if args.watch and args.watch > 0:
@@ -491,6 +493,7 @@ def main(argv: list[str] | None = None) -> int:
         prev_gates: list[str] | None = None
         prev_tick: dict | None = None
         watch_t0 = _time.time()
+        error_ticks = 0
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             coverage_ok = (
                 args.min_coverage is None
@@ -561,7 +564,7 @@ def main(argv: list[str] | None = None) -> int:
             prev_gates = list(failed)
             prev_tick = tick
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(failed))
-            if not _write_verdict(cur):
+            if not _write_verdict(cur, {"error_ticks": error_ticks}):
                 args.verdict = ""  # warn once, stop retrying
             ticks += 1
             sys.stderr.write(
@@ -582,12 +585,13 @@ def main(argv: list[str] | None = None) -> int:
             except (OSError, ValueError, KeyError):
                 cur = None
             if cur is None:
+                error_ticks += 1
                 _watch.emit({"ts": int(_time.time()), "ok": None}, args.out)
                 ticks += 1
                 sys.stderr.write("watch tick=%d ok=None\n" % ticks)
                 cur = result
         if cur is not None:
-            _write_verdict(cur)
+            _write_verdict(cur, {"error_ticks": error_ticks})
         if cur is None or not cur["ok"]:
             return 1
         if args.min_coverage is not None and cur["coverage"] < args.min_coverage:

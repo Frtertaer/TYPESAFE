@@ -1262,6 +1262,43 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(len(ticks), 3)
         self.assertEqual(rc, 0)
 
+    def test_watch_verdict_counts_error_ticks(self) -> None:
+        def res():
+            return {
+                "ok": True,
+                "coverage": 1.0,
+                "hits": 1,
+                "cases": [
+                    {
+                        "id": "x",
+                        "covers": [],
+                        "ok": True,
+                        "should_trigger": True,
+                        "score": 1.0,
+                        "lexical": True,
+                    }
+                ],
+                "worst_positive": 1.0,
+                "best_negative": 0.0,
+                "margin": 1.15,
+                "n_positives": 1,
+                "n_negatives": 0,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            buf = io.StringIO()
+            with patch.object(
+                te, "evaluate", side_effect=[res(), OSError("boom"), res()]
+            ):
+                with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "2"}):
+                    with redirect_stdout(buf):
+                        rc = te.main(["--watch", "0.001", "--verdict", str(verdict)])
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["error_ticks"], 1)
+            self.assertEqual(payload["verdict"], "PASS")
+
     def test_watch_rc_reflects_last_verdict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cases = write_cases(

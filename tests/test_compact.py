@@ -1299,6 +1299,24 @@ class CompactCliTests(unittest.TestCase):
             ]
             self.assertEqual(len(ticks), 2)
 
+    def test_watch_tick_reports_elapsed_s(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "1"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0",
+                         "--watch", "0.01"]
+                    )
+            self.assertEqual(rc, 0)
+            tick = json.loads(
+                next(l for l in buf.getvalue().splitlines() if l.startswith("{"))
+            )
+            self.assertIsInstance(tick["elapsed_s"], float)
+            self.assertGreaterEqual(tick["elapsed_s"], 0.0)
+
     def test_watch_appends_ticks_to_out_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

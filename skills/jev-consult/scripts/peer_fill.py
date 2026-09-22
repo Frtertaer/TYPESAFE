@@ -396,9 +396,11 @@ def main() -> int:
                     "miss": bool(miss),
                     "miss_task": str(miss.get("task") or "") if miss else "",
                     "ask": ask_path.is_file(),
+                    "elapsed_s": round(time.time() - watch_t0, 2),
                 }
             except Exception:
-                tick = {"ts": int(time.time()), "miss": None, "ask": None}
+                tick = {"ts": int(time.time()), "miss": None, "ask": None,
+                        "elapsed_s": round(time.time() - watch_t0, 2)}
             _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_PEER_WATCH_QUIET", args.quiet), bad=bool(tick.get("miss") or tick.get("ask")))
             ticks += 1
             if args.verdict and verdict_ok and not _write_verdict():

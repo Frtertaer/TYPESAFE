@@ -413,6 +413,7 @@ def main() -> int:
                 "miss": bool(miss),
                 "miss_age_s": round(now - miss_ts, 1) if miss_ts is not None else None,
                 "ask": ask_path.is_file(),
+                "elapsed_s": round(now - watch_t0, 2),
             }
             _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_APPLY_WATCH_QUIET", args.quiet), bad=bool(tick["miss"] or tick["ask"]))
             ticks += 1

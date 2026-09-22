@@ -1275,6 +1275,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
             stats = cur.get("stats") or {}
             tick = {
                 "ts": int(_time.time()),
+                "elapsed_s": round(_time.time() - watch_t0, 2),
                 "messagesBefore": stats.get("messagesBefore"),
                 "messagesAfter": stats.get("messagesAfter"),
                 "charsBefore": stats.get("charsBefore"),

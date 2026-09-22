@@ -1375,6 +1375,7 @@ def main(argv: list[str] | None = None) -> int:
             "found_delta": (
                 len(cur_ids) - len(prev_ids) if prev_ids is not None else None
             ),
+            "elapsed_s": round(time.time() - watch_t0, 2),
         }
         if prev_ids is not None:
             all_added.update(cur_ids - prev_ids)

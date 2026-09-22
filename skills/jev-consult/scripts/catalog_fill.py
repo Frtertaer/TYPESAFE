@@ -501,6 +501,7 @@ def main() -> int:
                 tick["hits"] = 0
                 tick["cached"] = False
                 tick["cache_age_s"] = None
+            tick["elapsed_s"] = round(time.time() - watch_t0, 2)
             _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_CATALOG_WATCH_QUIET", args.quiet), bad=bool(tick["hits"]))
             ticks += 1
             if args.verdict and verdict_ok and not _write_verdict():

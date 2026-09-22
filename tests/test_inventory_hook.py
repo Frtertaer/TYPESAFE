@@ -3158,5 +3158,43 @@ class MaxPayloadBytesTests(unittest.TestCase):
         self.assertEqual(report["max_payload_bytes"], 77)
 
 
+class EnvReportMatrixTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+
+    EXPECTED_KEYS = {
+        "budget_seconds", "dedupe_ttl_seconds", "events", "jev_hook_cwd",
+        "jev_hook_debug", "jev_hook_debug_file", "jev_hook_event",
+        "jev_hook_events", "jev_hook_harness", "jev_hook_nomiss",
+        "jev_hook_nosidecar", "jev_hook_off", "jev_hook_prompt",
+        "jev_hook_skip_events", "jev_hook_winner", "jev_retries",
+        "jev_timeout_seconds", "limit", "max_age_seconds", "max_payload_bytes",
+        "max_prompt_chars", "miss_present", "note_limit", "sidecar_present",
+        "ttl_seconds", "watch_max", "watch_secs", "watch_quiet",
+    }
+
+    def test_report_covers_every_knob(self) -> None:
+        report = HOOK.env_report()
+        self.assertTrue(self.EXPECTED_KEYS <= set(report.keys()))
+
+    def test_ttl_seconds_honors_env(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_TTL": "9"}):
+            self.assertEqual(HOOK.env_report()["ttl_seconds"], 9.0)
+
+    def test_watch_knobs_honor_env(self) -> None:
+        env = {
+            "JEV_HOOK_WATCH_MAX": "3",
+            "JEV_HOOK_WATCH_SECS": "7.5",
+            "JEV_HOOK_WATCH_QUIET": "1",
+        }
+        with patch.dict(os.environ, env):
+            report = HOOK.env_report()
+        self.assertEqual(report["watch_max"], 3)
+        self.assertEqual(report["watch_secs"], 7.5)
+        self.assertTrue(report["watch_quiet"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -50,6 +50,7 @@ from inventory import (  # noqa: E402
     sidecar_age_seconds,
     sidecar_fresh,
     sidecar_items,
+    sidecar_ttl_seconds,
     tokens,
     write_miss,
     write_sidecar,
@@ -513,6 +514,13 @@ def allowed_events() -> set[str]:
     return allowed
 
 
+def _float_or_zero(env_name: str) -> float:
+    try:
+        return max(float(os.environ.get(env_name, "") or 0), 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def env_report() -> dict:
     """Resolved hook configuration: effective values for every JEV_HOOK_* knob.
     Values only — never secrets."""
@@ -538,6 +546,10 @@ def env_report() -> dict:
         "max_prompt_chars": hook_max_prompt_chars(),
         "max_payload_bytes": hook_max_payload_bytes(),
         "dedupe_ttl_seconds": hook_dedupe_ttl_seconds(),
+        "ttl_seconds": sidecar_ttl_seconds(),
+        "watch_max": _watch.cap("JEV_HOOK_WATCH_MAX", None),
+        "watch_secs": _float_or_zero("JEV_HOOK_WATCH_SECS"),
+        "watch_quiet": _watch.quiet("JEV_HOOK_WATCH_QUIET", False),
     }
     for name in onoff:
         report[name.lower()] = os.environ.get(name, "").strip().lower() in {

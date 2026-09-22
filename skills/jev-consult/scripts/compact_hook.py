@@ -90,7 +90,13 @@ def handle(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+USAGE = 'Usage: python compact_hook.py [--help]\n\nReads one PostToolUse JSON event from stdin. When the tool result is longer\nthan the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n'
+
+
 def main() -> int:
+    if "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:
+        sys.stdout.write(USAGE)
+        return 0
     raw = sys.stdin.read()
     if not raw.strip():
         sys.stdout.write("{}\n")

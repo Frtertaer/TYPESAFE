@@ -857,6 +857,53 @@ class CliTest(unittest.TestCase):
             )
             self.assertIn("entries: 3", proc.stdout)
 
+    def test_env_presets_last_oldest_uniq_groupby_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 100, "jev_status": "winner", "harness": "codex"},
+                    {"ts": 200, "jev_status": "winner", "harness": "codex"},
+                    {"ts": 300, "jev_status": "none"},
+                ],
+            )
+            # JEV_DECISIONS supplies the log path when --file is absent
+            proc = self.run_cli(env={"JEV_DECISIONS": str(path)})
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("entries: 3", proc.stdout)
+            # LAST / OLDEST preset the one-entry printers
+            proc = self.run_cli(
+                "--file", str(path), env={"JEV_DECISIONS_LAST": "1"}
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout)["ts"], 300)
+            proc = self.run_cli(
+                "--file", str(path), env={"JEV_DECISIONS_OLDEST": "1"}
+            )
+            self.assertEqual(json.loads(proc.stdout)["ts"], 100)
+            # UNIQ presets --jq dedupe (first occurrence wins)
+            proc = self.run_cli(
+                "--file", str(path), "--jq", "jev_status",
+                env={"JEV_DECISIONS_UNIQ": "1"},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(
+                proc.stdout.strip().splitlines(), ["winner", "none"]
+            )
+            # GROUP_BY presets the per-field count table
+            proc = self.run_cli(
+                "--file", str(path),
+                env={"JEV_DECISIONS_GROUP_BY": "jev_status"},
+            )
+            self.assertIn("winner 2", proc.stdout)
+            self.assertIn("none 1", proc.stdout)
+            # MISSING presets the lacking-field filter
+            proc = self.run_cli(
+                "--file", str(path), env={"JEV_DECISIONS_MISSING": "harness"}
+            )
+            self.assertIn("entries: 1", proc.stdout)
+
     def test_stats_iso_fields(self):
         entries = [{"ts": 1700000000}, {"ts": 1700086400}]
         stats = decisions.summarize(entries)

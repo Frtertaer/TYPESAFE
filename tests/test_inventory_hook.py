@@ -3196,5 +3196,46 @@ class EnvReportMatrixTests(unittest.TestCase):
         self.assertTrue(report["watch_quiet"])
 
 
+class StdinGuardTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+
+    def _stdin(self, raw: str) -> tuple:
+        import io
+
+        buf = io.StringIO()
+        with patch.object(sys, "stdin", io.StringIO(raw)):
+            with patch.object(sys, "stdout", buf):
+                rc = HOOK.main([])
+        return rc, buf.getvalue()
+
+    def test_empty_stdin_emits_empty_object(self) -> None:
+        rc, out = self._stdin("")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "{}")
+
+    def test_garbage_stdin_emits_empty_object(self) -> None:
+        rc, out = self._stdin("not json at all")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "{}")
+
+    def test_whitespace_stdin_emits_empty_object(self) -> None:
+        rc, out = self._stdin("   \n\t  ")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "{}")
+
+    def test_null_bytes_stdin_fail_open(self) -> None:
+        rc, out = self._stdin("\x00\x01\x02")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "{}")
+
+    def test_array_stdin_emits_empty_object(self) -> None:
+        rc, out = self._stdin("[1,2,3]")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "{}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

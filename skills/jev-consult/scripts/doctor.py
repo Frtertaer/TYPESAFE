@@ -241,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Re-run the checks every S seconds, emitting a status tick per pass (JEV_DOCTOR_WATCH_MAX caps ticks).",
     )
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
+    parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     args = parser.parse_args(argv)
     agents = [a.strip() for a in args.agents.split(",") if a.strip()]
     bad = [a for a in agents if a not in ALLOWED]
@@ -270,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
         from datetime import datetime, timezone
 
         max_ticks = _watch.cap("JEV_DOCTOR_WATCH_MAX", args.max_ticks)
+        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
         count = 0
         last: dict = {}
         while True:
@@ -284,6 +286,8 @@ def main(argv: list[str] | None = None) -> int:
             _watch.emit(last, args.out)
             count += 1
             if max_ticks and count >= max_ticks:
+                break
+            if dead and _time.time() >= dead:
                 break
             _time.sleep(args.watch)
         return 0 if last["ok"] else 1

@@ -581,8 +581,17 @@ def main(argv: list[str] | None = None) -> int:
                 except ValueError:
                     max_ticks_arg = 0
         max_ticks = _watch.cap("JEV_HOOK_WATCH_MAX", max_ticks_arg)
+        watch_max_arg = 0.0
+        if "--watch-max" in argv:
+            idx = argv.index("--watch-max")
+            if idx + 1 < len(argv):
+                try:
+                    watch_max_arg = float(argv[idx + 1])
+                except ValueError:
+                    watch_max_arg = 0.0
+        dead = _watch.deadline(watch_max_arg)
         ticks = 0
-        while max_ticks <= 0 or ticks < max_ticks:
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             tick: dict = {"ts": int(time.time())}
             try:
                 if file_path:

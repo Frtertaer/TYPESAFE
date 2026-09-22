@@ -392,6 +392,37 @@ class CliTests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("max-ticks", err.getvalue())
 
+    def test_watch_max_bad_value_is_usage_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(tmp, [dict(GOOD_CASE)])
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = trigger_lint.main(
+                    [str(path), "--watch", "0.01", "--watch-max", "junk"]
+                )
+            self.assertEqual(rc, 2)
+            self.assertIn("watch-max", err.getvalue())
+
+    def test_watch_max_seconds_bounds_loop(self) -> None:
+        import time as t
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(tmp, [dict(GOOD_CASE)])
+            buf = io.StringIO()
+            start = t.time()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main(
+                    [str(path), "--watch", "0.02", "--watch-max", "0.05"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertLess(t.time() - start, 2.0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertTrue(1 <= len(ticks) <= 5)
+
 
 if __name__ == "__main__":
     unittest.main()

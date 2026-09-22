@@ -323,7 +323,8 @@ def cmd_history(args: argparse.Namespace) -> int:
 
         max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX", getattr(args, "max_ticks", 0))
         ticks = 0
-        while max_ticks <= 0 or ticks < max_ticks:
+        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             fresh = load(path).get("history")
             fresh = (
                 [h for h in fresh if isinstance(h, dict)]
@@ -459,7 +460,8 @@ def cmd_notes(args: argparse.Namespace) -> int:
 
         max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX", getattr(args, "max_ticks", 0))
         ticks = 0
-        while max_ticks <= 0 or ticks < max_ticks:
+        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             fresh = load(path).get("notes")
             fresh = fresh if isinstance(fresh, list) else []
             filtered = _filtered(fresh)
@@ -511,7 +513,8 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
         max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX", getattr(args, "max_ticks", 0))
         ticks = 0
-        while max_ticks <= 0 or ticks < max_ticks:
+        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             cur = load(path)
             tick = {
                 "ts": int(_time.time()),
@@ -562,7 +565,8 @@ def cmd_state(args: argparse.Namespace) -> int:
 
         max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX", getattr(args, "max_ticks", 0))
         ticks = 0
-        while max_ticks <= 0 or ticks < max_ticks:
+        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             data = load(path)
             state = {key: value for key, value in data.items() if _present(value)}
             _watch.emit(
@@ -654,11 +658,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Re-read the trace every S seconds and print a {ts,state,attempt_count,history,inspected} JSON tick",
     )
     state_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
+    state_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     state_cmd.set_defaults(func=cmd_state)
     stats_cmd = sub.add_parser("stats", help="Summary: counts, last pick, file age")
     stats_cmd.add_argument("--out", default="", help="Write the stats JSON to PATH instead of stdout")
     stats_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,exists,attempt_count,history,inspected} tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     stats_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
+    stats_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     stats_cmd.set_defaults(func=cmd_stats)
     notes_cmd = sub.add_parser("notes", help="List recorded notes (iso + text)")
     notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")
@@ -674,6 +680,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--uniq", action="store_true", help="Dedupe notes by sha/text (first occurrence wins)")
     notes_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,notes} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     notes_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
+    notes_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     notes_cmd.set_defaults(func=cmd_notes)
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")
@@ -685,6 +692,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--before", default=None, help="Only picks with ts <= epoch seconds or ISO8601")
     hist_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,picks} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     hist_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
+    hist_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     hist_cmd.add_argument("--out", default="", help="With --watch: append each tick line to PATH (fail-open)")
     hist_cmd.set_defaults(func=cmd_history)
     return parser

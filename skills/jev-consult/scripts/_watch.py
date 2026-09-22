@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 
@@ -25,6 +26,15 @@ def cap(env_name: str, override=None) -> int:
         return max(int(os.environ.get(env_name, "0") or 0), 0)
     except ValueError:
         return 0
+
+
+def deadline(seconds) -> float:
+    """Epoch deadline for --watch-max S (0/invalid/missing = no deadline)."""
+    try:
+        s = float(seconds or 0)
+    except (TypeError, ValueError):
+        s = 0.0
+    return time.time() + s if s > 0 else 0.0
 
 
 def emit(tick: dict, out_path=None) -> None:

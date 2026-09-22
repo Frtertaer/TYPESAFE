@@ -47,6 +47,22 @@ class CapTests(unittest.TestCase):
             self.assertEqual(watch.cap("JEV_X_WATCH_MAX", 0), 9)
 
 
+class DeadlineTests(unittest.TestCase):
+    def test_deadline_zero_means_unbounded(self) -> None:
+        self.assertEqual(watch.deadline(0), 0.0)
+        self.assertEqual(watch.deadline(None), 0.0)
+        self.assertEqual(watch.deadline("junk"), 0.0)
+        self.assertEqual(watch.deadline(-2), 0.0)
+
+    def test_deadline_is_now_plus_seconds(self) -> None:
+        import time
+
+        before = time.time()
+        d = watch.deadline(10)
+        self.assertTrue(before + 9.9 < d < before + 10.1)
+        self.assertTrue(watch.deadline("5") > time.time())
+
+
 class EmitTests(unittest.TestCase):
     def test_prints_json_line(self) -> None:
         buf = io.StringIO()

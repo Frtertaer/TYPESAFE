@@ -290,6 +290,30 @@ class SmokeTests(unittest.TestCase):
         ]
         self.assertEqual(len(ticks), 3)
 
+    def test_watch_max_seconds_bounds_loop(self) -> None:
+        import io
+        import time
+
+        def ok_step(tmp):
+            return {"name": "policy", "ok": True, "detail": "fake"}
+
+        with patch.dict(os.environ, {"JEV_SMOKE_WATCH_MAX": "0"}):
+            with patch.object(MOD, "step_policy", side_effect=ok_step):
+                with patch("time.sleep"):
+                    buf = io.StringIO()
+                    start = time.time()
+                    with patch.object(sys, "stdout", buf):
+                        rc = MOD.main(
+                            ["--watch", "0.02", "--only", "policy",
+                             "--watch-max", "0.06"]
+                        )
+        self.assertEqual(rc, 0)
+        self.assertLess(time.time() - start, 2.0)
+        ticks = [
+            json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+        ]
+        self.assertTrue(len(ticks) >= 1)
+
     def test_policy_step_real(self) -> None:
         from pathlib import Path as P
         import tempfile

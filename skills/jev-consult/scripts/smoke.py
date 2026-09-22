@@ -333,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Re-run the steps every S seconds, printing a {ts,ok,failed} JSON tick.",
     )
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
+    parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     args = parser.parse_args(argv)
     names = {name for name, _ in STEPS}
     if args.list:
@@ -380,7 +381,8 @@ def main(argv: list[str] | None = None) -> int:
 
         max_ticks = _watch.cap("JEV_SMOKE_WATCH_MAX", args.max_ticks)
         ticks = 0
-        while max_ticks <= 0 or ticks < max_ticks:
+        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             steps = _run_steps()
             tick = {
                 "ts": int(_time.time()),

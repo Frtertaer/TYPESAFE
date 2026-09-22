@@ -329,6 +329,18 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("bad --max-ticks %r (integer)\n" % argv[idx + 1])
             return 2
         argv = argv[:idx] + argv[idx + 2 :]
+    watch_max_arg = 0.0
+    if "--watch-max" in argv:
+        idx = argv.index("--watch-max")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--watch-max needs a SECONDS value\n")
+            return 2
+        try:
+            watch_max_arg = float(argv[idx + 1])
+        except ValueError:
+            sys.stderr.write("bad --watch-max %r (seconds)\n" % argv[idx + 1])
+            return 2
+        argv = argv[:idx] + argv[idx + 2 :]
     argv = [a for a in argv if a not in ("--json", "--fix", "--strict", "--quiet")]
     if not argv:
         sys.stderr.write("usage: question_lint.py FILE... [--json] [--fix] [--strict]\n")
@@ -399,7 +411,8 @@ def main(argv: list[str] | None = None) -> int:
 
         max_ticks = _watch.cap("JEV_QLINT_WATCH_MAX", max_ticks_arg)
         ticks = 0
-        while max_ticks <= 0 or ticks < max_ticks:
+        dead = _watch.deadline(watch_max_arg)
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             current = lint_request(request)
             tick = {
                 "ts": int(_time.time()),

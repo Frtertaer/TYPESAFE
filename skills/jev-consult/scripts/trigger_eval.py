@@ -266,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Re-evaluate every S seconds, printing one verdict tick per pass.",
     )
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
+    parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument(
         "--strict",
         action="store_true",
@@ -404,8 +405,9 @@ def main(argv: list[str] | None = None) -> int:
 
         max_ticks = _watch.cap("JEV_TRIGGER_WATCH_MAX", args.max_ticks)
         ticks = 0
+        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
         cur = result
-        while max_ticks <= 0 or ticks < max_ticks:
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             coverage_ok = (
                 args.min_coverage is None
                 or cur["coverage"] >= args.min_coverage

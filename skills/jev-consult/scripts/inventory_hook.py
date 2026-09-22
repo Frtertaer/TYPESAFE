@@ -640,6 +640,7 @@ def main(argv: list[str] | None = None) -> int:
         tick: dict = {}
         verdict_ok = True
         prev_winner: str | None = None
+        watch_t0 = time.time()
 
         def _write_verdict() -> bool:
             return _watch.write_verdict(
@@ -671,6 +672,7 @@ def main(argv: list[str] | None = None) -> int:
                 prev_winner is not None and tick["winner"] != prev_winner
             )
             prev_winner = tick["winner"]
+            tick["elapsed_s"] = round(time.time() - watch_t0, 2)
             _watch.emit(tick, watch_out, quiet=quiet, bad=not tick["winner"])
             ticks += 1
             if verdict_path and verdict_ok and not _write_verdict():

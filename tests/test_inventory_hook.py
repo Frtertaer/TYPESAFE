@@ -392,6 +392,8 @@ class InventoryHookTests(unittest.TestCase):
                 if l.startswith("{")
             ]
             self.assertEqual([t["winner_changed"] for t in ticks], [False, False])
+            self.assertTrue(all(isinstance(t["elapsed_s"], float) for t in ticks))
+            self.assertGreaterEqual(ticks[1]["elapsed_s"], ticks[0]["elapsed_s"])
 
     def test_watch_rc_0_when_last_tick_has_winner(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)

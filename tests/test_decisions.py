@@ -242,6 +242,29 @@ class CliTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("1", proc.stdout)
 
+    def test_grep_filters_across_string_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "prompt_head": "fix tests", "winner": "alpha"},
+                    {"ts": 2, "prompt_head": "fix tests", "winner": "beta"},
+                    {"ts": 3, "prompt_head": "docs", "nested": {"note": "alpha here"}},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--grep", "ALPHA", "--count")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("2", proc.stdout)
+            proc = self.run_cli("--file", str(path), "--grep", "zzz", "--count")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("0", proc.stdout)
+            proc = self.run_cli(
+                "--file", str(path), "--count", env={"JEV_DECISIONS_GREP": "beta"}
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("1", proc.stdout)
+
     def test_drop_bad_rewrites_log(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

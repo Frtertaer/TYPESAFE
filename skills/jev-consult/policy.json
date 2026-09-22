@@ -100,6 +100,10 @@
       "type": "noul",
       "instructions": "Is this good enough to stop?"
     },
+    "risky": {
+      "type": "noul",
+      "instructions": "How likely is the proposed action in state to be destructive, irreversible, or visibly breaking for the user?"
+    },
     "on_track": {
       "type": "noul",
       "instructions": "Given the human plan and the coder's current step in state, is the coder still on the requested path?"

@@ -324,6 +324,16 @@ class PolicyTests(unittest.TestCase):
             self.assertIn(key, policy.get("must_ask", []))
         self.assertIn("on_track", policy.get("templates", {}))
         self.assertIn("load_tools", policy.get("templates", {}))
+        self.assertIn("risky", policy.get("templates", {}))
+
+    def test_scaffold_risky_builds_noul_question(self) -> None:
+        import jev
+
+        policy = jev.load_policy()
+        req = jev.scaffold_request(policy, ["risky"], {"note": "x"})
+        q = req["questions"]["risky"]
+        self.assertEqual(q["type"], "noul")
+        self.assertTrue(q["instructions"].rstrip().endswith("?"))
 
     def test_skill_says_jev_decides(self) -> None:
         text = (ROOT / "skills" / "jev-consult" / "SKILL.md").read_text(encoding="utf-8")

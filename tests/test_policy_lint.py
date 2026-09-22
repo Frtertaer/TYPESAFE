@@ -710,5 +710,30 @@ class WatchJqTests(unittest.TestCase):
             rc = policy_lint.main(["--watch", "0.01", "--jq"])
         self.assertEqual(rc, 2)
 
+class WatchQuietEnvTests(unittest.TestCase):
+    def test_watch_quiet_env_suppresses_clean_ticks_but_out_logs(self) -> None:
+        import os
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "ticks.jsonl"
+            buf = io.StringIO()
+            err = io.StringIO()
+            with mock.patch.dict(
+                os.environ,
+                {"JEV_PLINT_WATCH_MAX": "2", "JEV_PLINT_WATCH_QUIET": "1"},
+            ):
+                with redirect_stdout(buf), redirect_stderr(err):
+                    rc = policy_lint.main(
+                        ["--watch", "0.01", "--out", str(out)]
+                    )
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue(), "")
+            self.assertEqual(len(out.read_text(encoding="utf-8").splitlines()), 2)
+            stderr_lines = [
+                l for l in err.getvalue().splitlines() if l.startswith("watch tick=")
+            ]
+            self.assertEqual(len(stderr_lines), 2)
+
 if __name__ == "__main__":
     unittest.main()

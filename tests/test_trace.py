@@ -1575,5 +1575,29 @@ class WatchJqTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(lines, ["true", "true"])
 
+class WatchQuietEnvTests(unittest.TestCase):
+    def test_stats_watch_quiet_env_suppresses_clean_ticks(self) -> None:
+        import io
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            path.write_text(json.dumps({"attempt_count": 1}), encoding="utf-8")
+            buf = io.StringIO()
+            err = io.StringIO()
+            with patch.dict(
+                _os.environ,
+                {"JEV_TRACE_WATCH_MAX": "2", "JEV_TRACE_WATCH_QUIET": "1"},
+            ):
+                with patch.object(sys, "stdout", buf), patch.object(
+                    sys, "stderr", err
+                ):
+                    rc = tr.main(
+                        ["--file", str(path), "stats", "--watch", "0.01"]
+                    )
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue(), "")
+            self.assertIn("watch tick=1", err.getvalue())
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

@@ -564,5 +564,23 @@ class SmokeTests(unittest.TestCase):
         self.assertTrue(step["ok"], step)
 
 
+class WatchQuietEnvTests(unittest.TestCase):
+    def test_watch_quiet_env_presets_quiet(self) -> None:
+        import io
+
+        def ok_step(tmp):
+            return {"name": "policy", "ok": True, "detail": "fake"}
+
+        with patch.dict(
+            os.environ,
+            {"JEV_SMOKE_WATCH_MAX": "2", "JEV_SMOKE_WATCH_QUIET": "1"},
+        ):
+            with patch.object(MOD, "step_policy", side_effect=ok_step):
+                buf = io.StringIO()
+                with patch.object(sys, "stdout", buf):
+                    rc = MOD.main(["--watch", "0.001", "--only", "policy"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue(), "")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

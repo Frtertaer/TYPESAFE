@@ -524,6 +524,22 @@ def step_jev_decide(tmp: Path) -> dict:
         ]
     )
     ok = rc == 0 and out.strip() == '"proceed"'
+    if ok:
+        verdict = tmp / "decide-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "jev.py"),
+                "decide",
+                str(answers),
+                "--verdict",
+                str(verdict),
+            ]
+        )
+        try:
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            ok = rc == 0 and payload.get("verdict") == "proceed"
+        except (OSError, ValueError):
+            ok = False
     return _step("jev_decide", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

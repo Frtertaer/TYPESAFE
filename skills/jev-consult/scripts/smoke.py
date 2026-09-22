@@ -412,7 +412,7 @@ def step_doctor(tmp: Path) -> dict:
         [
             str(SCRIPTS / "doctor.py"),
             "--agents",
-            "hermes",
+            "hermes,claude-code,codex,grok",
             "--home",
             str(tmp / "home"),
             "--hermes-home",
@@ -420,7 +420,16 @@ def step_doctor(tmp: Path) -> dict:
         ]
     )
     try:
-        ok_json = isinstance(json.loads(out), dict)
+        payload = json.loads(out)
+        agents_seen = {
+            c.get("agent") for c in payload.get("checks", []) if c.get("agent")
+        }
+        ok_json = isinstance(payload, dict) and {
+            "hermes",
+            "claude-code",
+            "codex",
+            "grok",
+        } <= agents_seen
     except ValueError:
         ok_json = False
     return _step("doctor_json", ok_json and rc in (0, 1), "rc=%d json=%s" % (rc, ok_json))

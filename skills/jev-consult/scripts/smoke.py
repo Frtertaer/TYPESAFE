@@ -413,6 +413,22 @@ def step_compact_fake(tmp: Path) -> dict:
             ok = rc == 0 and isinstance(stats, dict) and bool(stats)
         except (OSError, ValueError):
             ok = False
+    if ok:
+        # --watch S --max-ticks N re-scores the transcript each tick
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compact.py"),
+                str(transcript),
+                "--history",
+                "--fake",
+                "--watch",
+                "0.05",
+                "--max-ticks",
+                "2",
+            ]
+        )
+        # exits 1 when the last tick fell back (already-compact transcript)
+        ok = rc in (0, 1) and out.count("watch tick=") == 2
     return _step("compact_fake", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

@@ -466,6 +466,8 @@ def step_compact_hook(tmp: Path) -> dict:
     env.pop("TYPESAFE_API_KEY", None)
     env["USERPROFILE"] = str(tmp / "home")
     env["HOME"] = str(tmp / "home")
+    spill = tmp / "spill"
+    env["JEV_CONSULT_SPILL"] = str(spill)
     payload = json.dumps(
         {"hook_event_name": "PostToolUse", "tool_result": "x" * 90000}
     )
@@ -475,6 +477,12 @@ def step_compact_hook(tmp: Path) -> dict:
         try:
             ok = isinstance(json.loads(out.strip().splitlines()[0]), dict)
         except (ValueError, IndexError):
+            ok = False
+    if ok:
+        # lossless spill: the 90k result leaves a full copy on disk
+        try:
+            ok = any(spill.iterdir())
+        except OSError:
             ok = False
     return _step("compact_hook", ok, out.strip()[:120] or "rc=%d" % rc)
 

@@ -2465,6 +2465,29 @@ def step_trigger_eval(tmp: Path) -> dict:
         # a bad --jq key exits 2
         rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--json", "--jq", "nope"])
         ok = rc == 2
+    if ok:
+        # --watch emits {verdict,ok,coverage} ticks; --verdict writes the
+        # slim eval probe
+        verdict = tmp / "teval-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "trigger_eval.py"),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "2",
+                "--verdict",
+                str(verdict),
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"verdict"' in ln]
+        ok = rc == 0 and len(ticks) == 2
+        try:
+            ok = ok and json.loads(verdict.read_text(encoding="utf-8")).get(
+                "verdict"
+            ) == "PASS"
+        except (OSError, ValueError):
+            ok = False
     return _step("trigger_eval", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

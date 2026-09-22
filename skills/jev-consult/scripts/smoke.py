@@ -1345,10 +1345,21 @@ def step_compact_hook(tmp: Path) -> dict:
         except (ValueError, IndexError):
             ok = False
     if ok:
-        # lossless spill: the 90k result leaves a full copy on disk
+        # lossless spill: the full 90k result lands on disk while the
+        # emitted tool output is abridged
         try:
-            ok = any(spill.iterdir())
+            files = list(spill.iterdir())
+            ok = files and files[0].stat().st_size >= 90000
         except OSError:
+            ok = False
+    if ok:
+        try:
+            emitted = json.loads(out.strip().splitlines()[0])
+            abridged = emitted.get("hookSpecificOutput", {}).get(
+                "updatedToolOutput", ""
+            )
+            ok = 0 < len(abridged) < 90000
+        except (ValueError, AttributeError):
             ok = False
     return _step("compact_hook", ok, out.strip()[:120] or "rc=%d" % rc)
 

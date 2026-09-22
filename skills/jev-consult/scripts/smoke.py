@@ -196,6 +196,35 @@ def step_inventory(tmp: Path) -> dict:
     )
     ok = rc == 0 and "smoke-skill" in out
     if ok:
+        # --diff OLD.json compares the current scan against a saved payload
+        old_payload = tmp / "inv-old.json"
+        old_payload.write_text(out, encoding="utf-8")
+        rc, out = _run(
+            [
+                str(SCRIPTS / "inventory.py"),
+                "--harness",
+                "codex",
+                "--home",
+                str(home),
+                "--hermes-home",
+                str(hermes),
+                "--task",
+                "smoke",
+                "--include",
+                "smoke-skill",
+                "--diff",
+                str(old_payload),
+            ]
+        )
+        if rc == 0:
+            try:
+                diff = json.loads(out)
+                ok = diff.get("added") == [] and diff.get("removed") == []
+            except (ValueError, AttributeError):
+                ok = False
+        else:
+            ok = False
+    if ok:
         sidecar = tmp / "sc.json"
         rc, out = _run(
             [

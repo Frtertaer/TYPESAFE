@@ -184,6 +184,24 @@ def write_catalog_cache(query: str, hits: list[dict], path: Path | None = None) 
         pass
 
 
+def clear_catalog_cache(query: str, path: Path | None = None) -> bool:
+    """Drop the cached hits entry for query. True when an entry was removed."""
+    target = path or catalog_cache_path()
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(raw, dict) or query not in raw:
+        return False
+    del raw[query]
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
 def parse_search(raw: str) -> list[dict]:
     try:
         data = json.loads(raw)
@@ -194,8 +212,13 @@ def parse_search(raw: str) -> list[dict]:
     return []
 
 
+def cache_query(task: str) -> str:
+    """Cache key search_hits writes under for a task string."""
+    return " ".join(sorted(tokens(task))[:8]) or task[:80]
+
+
 def search_hits(task: str, cache: bool = True) -> list[dict] | None:
-    query = " ".join(sorted(tokens(task))[:8]) or task[:80]
+    query = cache_query(task)
     if not query.strip():
         return []
     if cache:
@@ -436,6 +459,11 @@ def main() -> int:
         help="Print one catalog hit's full JSON record by name and exit.",
     )
     parser.add_argument(
+        "--clear",
+        action="store_true",
+        help="Drop the cached catalog hits for --task and exit.",
+    )
+    parser.add_argument(
         "--watch",
         metavar="S",
         type=float,
@@ -469,6 +497,15 @@ def main() -> int:
         return 0
     home = Path(args.home) if args.home else user_home()
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home()
+    if args.clear:
+        removed = clear_catalog_cache(cache_query(task))
+        if args.json:
+            sys.stdout.write(
+                json.dumps({"cleared": bool(removed), "task": task}) + "\n"
+            )
+        else:
+            sys.stdout.write("cleared\n" if removed else "no_cache\n")
+        return 0
     if args.watch and args.watch > 0:
         max_ticks = _watch.cap("JEV_CATALOG_WATCH_MAX", args.max_ticks)
         ticks = 0
@@ -491,11 +528,12 @@ def main() -> int:
         watch_t0 = time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             tick = {"ts": int(time.time())}
+            cquery = cache_query(task)
             try:
                 hits = search_hits(task) or []
                 tick["hits"] = len(hits)
-                tick["cached"] = read_catalog_cache(task) is not None
-                age = catalog_cache_age(task)
+                tick["cached"] = read_catalog_cache(cquery) is not None
+                age = catalog_cache_age(cquery)
                 tick["cache_age_s"] = round(age, 1) if age is not None else None
             except Exception:
                 tick["hits"] = 0

@@ -859,6 +859,40 @@ class CatalogCacheTests(unittest.TestCase):
             self.assertEqual(len(data), FILL.CACHE_MAX_QUERIES)
             self.assertNotIn("q0", data)
 
+    def test_clear_cache_removes_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cache.json"
+            FILL.write_catalog_cache("jwt", [{"name": "x"}], path=path)
+            self.assertTrue(FILL.clear_catalog_cache("jwt", path=path))
+            self.assertIsNone(FILL.read_catalog_cache("jwt", path=path))
+            self.assertFalse(FILL.clear_catalog_cache("jwt", path=path))
+            self.assertFalse(FILL.clear_catalog_cache("jwt", path=Path(tmp) / "missing.json"))
+
+    def test_clear_flag_uses_normalized_query(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache.json"
+            task = "JWT auth Tokens"
+            FILL.write_catalog_cache(FILL.cache_query(task), [{"name": "x"}], path=cache)
+            buf = io.StringIO()
+            with patch.object(FILL, "catalog_cache_path", return_value=cache), patch.object(
+                sys, "argv", ["catalog_fill.py", "--task", task, "--clear"]
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "cleared")
+            self.assertEqual(json.loads(cache.read_text(encoding="utf-8")), {})
+
+    def test_clear_flag_reports_no_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache.json"
+            buf = io.StringIO()
+            with patch.object(FILL, "catalog_cache_path", return_value=cache), patch.object(
+                sys, "argv", ["catalog_fill.py", "--task", "jwt", "--clear", "--json"]
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue())["cleared"], False)
+
 
 class CatalogFillE2ETests(unittest.TestCase):
     """Subprocess: fail-open tags, no network."""

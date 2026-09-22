@@ -345,6 +345,93 @@ class DoctorTests(unittest.TestCase):
             if c["ok"]:
                 self.assertNotIn("hint", c)
 
+    def _full_home(self, tmp: str):
+        home = Path(tmp) / "home"
+        hermes = Path(tmp) / "hermes"
+        make_hermes(hermes)
+        make_skill(home / ".claude" / "skills")
+        make_claude_hooks(home)
+        make_skill(home / ".grok" / "skills")
+        hooks_dir = home / ".grok" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        for name, event, mark in (
+            ("jev-compact.json", "PostToolUse", "compact_hook.py"),
+            ("jev-tools.json", "UserPromptSubmit", "inventory_hook.py"),
+        ):
+            (hooks_dir / name).write_text(
+                json.dumps({"hooks": {event: [{"hooks": [{"command": "x " + mark}]}]}}),
+                encoding="utf-8",
+            )
+        make_skill(home / ".codex" / "skills")
+        (home / ".codex").mkdir(parents=True, exist_ok=True)
+        (home / ".codex" / "hooks.json").write_text(
+            json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [{"command": "x inventory_hook.py"}]}]}}),
+            encoding="utf-8",
+        )
+        (home / ".env").write_text("TYPESAFE_API_KEY=x\n", encoding="utf-8")
+        return home, hermes
+
+    def test_watch_emits_ticks_rc_reflects_last(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(
+                [
+                    "--agents", "claude-code",
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--watch", "0.01",
+                ],
+                env_extra={"JEV_DOCTOR_WATCH_MAX": "2"},
+                cwd=tmp,
+            )
+            ticks = [
+                json.loads(l) for l in text.splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(rc, 1)
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(t["failed"] > 0 and not t["ok"] for t in ticks))
+
+    def test_watch_rc_0_when_all_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hermes = self._full_home(tmp)
+            rc, _, text = run_main(
+                [
+                    "--home", str(home),
+                    "--hermes-home", str(hermes),
+                    "--watch", "0.01",
+                ],
+                env_extra={"JEV_DOCTOR_WATCH_MAX": "1"},
+                cwd=tmp,
+            )
+            ticks = [
+                json.loads(l) for l in text.splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(ticks), 1)
+            self.assertTrue(ticks[0]["ok"])
+
+    def test_watch_appends_ticks_to_out(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hermes = self._full_home(tmp)
+            out = Path(tmp) / "ticks.jsonl"
+            rc, _, _ = run_main(
+                [
+                    "--home", str(home),
+                    "--hermes-home", str(hermes),
+                    "--watch", "0.01",
+                    "--out", str(out),
+                ],
+                env_extra={"JEV_DOCTOR_WATCH_MAX": "2"},
+                cwd=tmp,
+            )
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("checks" in t and "ok" in t for t in lines))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

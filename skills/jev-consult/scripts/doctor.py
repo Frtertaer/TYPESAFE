@@ -227,7 +227,13 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="Comma-separated check names to run (e.g. skills,hooks_json); default: all.",
     )
-    parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH")
+    parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH (with --watch: append each tick line)")
+    parser.add_argument(
+        "--watch",
+        type=float,
+        metavar="SECONDS",
+        help="Re-run the checks every S seconds, emitting a status tick per pass (JEV_DOCTOR_WATCH_MAX caps ticks).",
+    )
     args = parser.parse_args(argv)
     agents = [a.strip() for a in args.agents.split(",") if a.strip()]
     bad = [a for a in agents if a not in ALLOWED]
@@ -236,18 +242,56 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     home = Path(args.home) if args.home else user_home()
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home(home)
-    checks: list[dict] = check_common(home, hermes)
-    if "hermes" in agents:
-        checks += check_hermes(home, hermes)
-    if "claude-code" in agents:
-        checks += check_claude(home)
-    if "grok" in agents:
-        checks += check_grok(home)
-    if "codex" in agents:
-        checks += check_codex(home)
     only = {n.strip() for n in args.only.split(",") if n.strip()}
-    if only:
-        checks = [c for c in checks if c["check"] in only]
+
+    def collect() -> list[dict]:
+        checks: list[dict] = check_common(home, hermes)
+        if "hermes" in agents:
+            checks += check_hermes(home, hermes)
+        if "claude-code" in agents:
+            checks += check_claude(home)
+        if "grok" in agents:
+            checks += check_grok(home)
+        if "codex" in agents:
+            checks += check_codex(home)
+        if only:
+            checks = [c for c in checks if c["check"] in only]
+        return checks
+
+    if args.watch:
+        import time as _time
+        from datetime import datetime, timezone
+
+        try:
+            max_ticks = max(int(os.environ.get("JEV_DOCTOR_WATCH_MAX", "0")), 0)
+        except ValueError:
+            max_ticks = 0
+        count = 0
+        last: dict = {}
+        while True:
+            cur = collect()
+            failed = sum(1 for c in cur if not c["ok"])
+            last = {
+                "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "checks": len(cur),
+                "failed": failed,
+                "ok": failed == 0,
+            }
+            line = json.dumps(last) + "\n"
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            if args.out:
+                try:
+                    with Path(args.out).open("a", encoding="utf-8") as fh:
+                        fh.write(line)
+                except OSError:
+                    pass
+            count += 1
+            if max_ticks and count >= max_ticks:
+                break
+            _time.sleep(args.watch)
+        return 0 if last["ok"] else 1
+    checks = collect()
     ok = all(c["ok"] for c in checks)
     for check in checks:
         if not check["ok"]:

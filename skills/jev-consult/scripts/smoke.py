@@ -290,6 +290,58 @@ def step_jev_scaffold_lint(tmp: Path) -> dict:
                 ok = False
         else:
             ok = False
+    if ok:
+        # lint --json/--jq report the findings payload; --strict turns a
+        # warning-only request into rc 1
+        rc, out = _run(
+            [str(SCRIPTS / "jev.py"), "lint", str(req), "--json"]
+        )
+        try:
+            ok = rc == 0 and isinstance(
+                json.loads(out).get("findings"), list
+            )
+        except (ValueError, AttributeError):
+            ok = False
+        if ok:
+            rc, out = _run(
+                [str(SCRIPTS / "jev.py"), "lint", str(req), "--jq", "errors"]
+            )
+            ok = rc == 0 and out.strip() == "0"
+        if ok:
+            # ~10k tokens of state hits J021 (warn) but not J020 (error)
+            warn_req = tmp / "smoke-warn.request.json"
+            warn_req.write_text(
+                json.dumps(
+                    {
+                        "state": "padding " * 5000,
+                        "questions": {
+                            "q": {
+                                "type": "noul",
+                                "instructions": "Is the padding acceptable for this lint request?",
+                                "criteria": {
+                                    "true": "The padding is acceptable",
+                                    "false": "The padding is not acceptable",
+                                },
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            rc, out = _run(
+                [str(SCRIPTS / "jev.py"), "lint", str(warn_req)]
+            )
+            ok = rc == 0 and "warning(s)" in out
+            if ok:
+                rc, out = _run(
+                    [
+                        str(SCRIPTS / "jev.py"),
+                        "lint",
+                        str(warn_req),
+                        "--strict",
+                    ]
+                )
+                ok = rc == 1
     return _step("jev_scaffold_lint", ok, out.strip()[:160] or "clean")
 
 

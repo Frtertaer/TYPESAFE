@@ -156,6 +156,21 @@ def fix_cases(data: dict) -> list[str]:
     return applied
 
 
+RULES = {
+    "T001": "cases file cannot be parsed or is not a JSON object",
+    "T002": "missing 'cases' list",
+    "T003": "case is not an object or is missing id/prompt/should_trigger",
+    "T004": "duplicate case id",
+    "T005": "id is not pos-/neg- prefixed lowercase-hyphen",
+    "T006": "prompt is missing or shorter than 8 chars",
+    "T007": "field has the wrong type (should_trigger/lexical must be bool, covers a list of strings)",
+    "T008": "covers kind is not in policy must_ask",
+    "T009": "positive case declares no covers kind",
+    "T010": "no positive cases; the margin eval cannot pass",
+    "T011": "a must_ask kind has no positive coverage case",
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     as_json = "--json" in argv
@@ -175,6 +190,19 @@ def main(argv: list[str] | None = None) -> int:
         env_sev = os.environ.get("JEV_TLINT_SEVERITY", "").strip().lower()
         if env_sev in SEVERITIES:
             severity = env_sev
+    if "--explain" in argv:
+        idx = argv.index("--explain")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--explain needs a RULE value\n")
+            return 2
+        rule = argv[idx + 1].strip().upper()
+        if rule not in RULES:
+            sys.stderr.write(
+                "unknown rule %r (rules: %s)\n" % (rule, ", ".join(sorted(RULES)))
+            )
+            return 2
+        sys.stdout.write("%s: %s\n" % (rule, RULES[rule]))
+        return 0
     out_path = ""
     if "--out" in argv:
         idx = argv.index("--out")

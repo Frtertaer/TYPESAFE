@@ -475,5 +475,20 @@ class CliTests(unittest.TestCase):
             self.assertTrue(1 <= len(ticks) <= 5)
 
 
+
+    def test_explain_prints_rule_description(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = trigger_lint.main(["--explain", "T011"])
+        self.assertEqual(rc, 0)
+        self.assertIn("T011:", buf.getvalue())
+        self.assertIn("must_ask", buf.getvalue())
+
+    def test_explain_unknown_rule_rc2(self) -> None:
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            rc = trigger_lint.main(["--explain", "T999"])
+        self.assertEqual(rc, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

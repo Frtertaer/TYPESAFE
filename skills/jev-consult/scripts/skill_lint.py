@@ -163,6 +163,18 @@ def fix_case(path: Path) -> bool:
     return True
 
 
+RULES = {
+    "S001": "SKILL.md file not found or unreadable",
+    "S002": "no YAML frontmatter block",
+    "S003": "frontmatter has no name",
+    "S004": "frontmatter has no description",
+    "S005": "name does not match the directory name",
+    "S006": "description is over 1024 chars",
+    "S007": "cited policy.json key does not exist in the sibling policy.json",
+    "S008": "name is not lowercase-hyphenated",
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     do_fix = "--fix" in argv
@@ -185,6 +197,19 @@ def main(argv: list[str] | None = None) -> int:
         env_sev = os.environ.get("JEV_SLINT_SEVERITY", "").strip().lower()
         if env_sev in ("error", "warn", "info"):
             severity = env_sev
+    if "--explain" in argv:
+        idx = argv.index("--explain")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--explain needs a RULE value\n")
+            return 2
+        rule = argv[idx + 1].strip().upper()
+        if rule not in RULES:
+            sys.stderr.write(
+                "unknown rule %r (rules: %s)\n" % (rule, ", ".join(sorted(RULES)))
+            )
+            return 2
+        sys.stdout.write("%s: %s\n" % (rule, RULES[rule]))
+        return 0
     out_path = ""
     if "--out" in argv:
         idx = argv.index("--out")

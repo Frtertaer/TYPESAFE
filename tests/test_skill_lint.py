@@ -494,5 +494,20 @@ class CliTests(unittest.TestCase):
             self.assertTrue(all("findings" in t for t in lines))
 
 
+
+    def test_explain_prints_rule_description(self) -> None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = skill_lint.main(["--explain", "S007"])
+        self.assertEqual(rc, 0)
+        self.assertIn("S007:", buf.getvalue())
+        self.assertIn("policy.json", buf.getvalue())
+
+    def test_explain_unknown_rule_rc2(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = skill_lint.main(["--explain", "S999"])
+        self.assertEqual(rc, 2)
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

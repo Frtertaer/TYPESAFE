@@ -6295,6 +6295,117 @@ def step_catalog_fill(tmp: Path) -> dict:
                 sidecar_ok = False
             ok = copied and sidecar_ok
         if ok:
+            # --list prints cached hits; --show dumps one record
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "catalog_fill.py"),
+                    "--task",
+                    "smoke",
+                    "--list",
+                    "--home",
+                    str(home),
+                    "--cwd",
+                    str(cwd),
+                ],
+                cwd=cwd,
+                env=env,
+            )
+            ok = rc == 0 and "smoke-thing" in out
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "catalog_fill.py"),
+                    "--task",
+                    "smoke",
+                    "--show",
+                    "smoke-thing",
+                    "--home",
+                    str(home),
+                    "--cwd",
+                    str(cwd),
+                ],
+                cwd=cwd,
+                env=env,
+            )
+            ok = rc == 0 and "smoke" in out
+        if ok:
+            # --watch emits {ts,hits,cached,cache_age_s} ticks; --jq digs
+            # one field; --verdict writes the slim probe
+            verdict = tmp / "cat-verdict.json"
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "catalog_fill.py"),
+                    "--task",
+                    "smoke",
+                    "--watch",
+                    "0.03",
+                    "--max-ticks",
+                    "2",
+                    "--verdict",
+                    str(verdict),
+                    "--home",
+                    str(home),
+                    "--cwd",
+                    str(cwd),
+                ],
+                cwd=cwd,
+                env=env,
+            )
+            ticks = [ln for ln in out.splitlines() if '"hits"' in ln]
+            ok = rc == 0 and len(ticks) == 2
+            try:
+                ok = ok and json.loads(
+                    verdict.read_text(encoding="utf-8")
+                ).get("verdict") in ("hits", "none")
+            except (OSError, ValueError, AttributeError):
+                ok = False
+            if ok:
+                rc, out = _run(
+                    [
+                        str(SCRIPTS / "catalog_fill.py"),
+                        "--task",
+                        "smoke",
+                        "--watch",
+                        "0.03",
+                        "--max-ticks",
+                        "1",
+                        "--jq",
+                        "hits",
+                        "--home",
+                        str(home),
+                        "--cwd",
+                        str(cwd),
+                    ],
+                    cwd=cwd,
+                    env=env,
+                )
+                lines = out.strip().splitlines()
+                ok = (
+                    rc == 0
+                    and lines
+                    and lines[0].strip().lstrip("-").isdigit()
+                )
+        if ok:
+            # --pick --dry-run reports the would-install without running
+            # the fake installer
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "catalog_fill.py"),
+                    "--task",
+                    "smoke",
+                    "--pick",
+                    "acme/smoke-thing",
+                    "--dry-run",
+                    "--home",
+                    str(home),
+                    "--cwd",
+                    str(cwd),
+                ],
+                cwd=cwd,
+                env=env,
+            )
+            ok = rc == 0 and "would" in out.lower()
+        if ok:
             # --clear drops the cached catalog hits for the task; a
             # second call reports no_cache
             rc, out = _run(

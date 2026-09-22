@@ -182,6 +182,23 @@ def step_policy_lint(tmp: Path) -> dict:
             )
         except (OSError, ValueError):
             ok = False
+    if ok:
+        # --fail-fast stops the watch on the first erroring tick
+        empty_policy = tmp / "policy-empty.json"
+        empty_policy.write_text("{}", encoding="utf-8")
+        rc, out = _run(
+            [
+                str(SCRIPTS / "policy_lint.py"),
+                str(empty_policy),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "5",
+                "--fail-fast",
+            ]
+        )
+        ticks = [ln for ln in out.splitlines() if '"findings"' in ln]
+        ok = len(ticks) == 1 and "watch tick=2" not in out
     return _step("policy_lint", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

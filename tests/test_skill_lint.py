@@ -633,5 +633,24 @@ class FixtureSkillLintTests(unittest.TestCase):
                 rc = skill_lint.main([str(path), "--severity", "warn"])
                 self.assertEqual(rc, 0, "%s has lint errors" % path)
 
+class RulesCatalogTest(unittest.TestCase):
+    def test_rules_lists_every_rule_sorted(self) -> None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = skill_lint.main(["--rules"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), len(skill_lint.RULES))
+        self.assertIn("S001:", lines[0])
+
+    def test_rules_json_shape(self) -> None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = skill_lint.main(["--rules", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertEqual(sorted(r["rule"] for r in rows), sorted(skill_lint.RULES))
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

@@ -697,6 +697,29 @@ class WatchFlagTests(unittest.TestCase):
         self.assertEqual(rc, 2)
 
 
+class RulesCatalogTest(unittest.TestCase):
+    def test_rules_lists_every_rule_sorted(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = policy_lint.main(["--rules"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), len(policy_lint.RULES))
+        self.assertIn("P001:", lines[1])
+        self.assertIn("missing required key", buf.getvalue())
+
+    def test_rules_json_shape(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = policy_lint.main(["--rules", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertEqual(
+            sorted(r["rule"] for r in rows), sorted(policy_lint.RULES)
+        )
+        self.assertTrue(all(r["description"] for r in rows))
+
+
 class WatchJqTests(unittest.TestCase):
     def test_watch_jq_prints_only_named_tick_field(self) -> None:
         import os

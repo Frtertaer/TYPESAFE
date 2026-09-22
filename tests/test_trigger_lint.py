@@ -548,5 +548,26 @@ class WatchSecsEnvTests(unittest.TestCase):
             self.assertLessEqual(len(ticks), 10)
             self.assertGreaterEqual(len(ticks), 1)
 
+class RulesCatalogTest(unittest.TestCase):
+    def test_rules_lists_every_rule_sorted(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = trigger_lint.main(["--rules"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), len(trigger_lint.RULES))
+        self.assertIn("T001:", lines[0])
+
+    def test_rules_json_shape(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = trigger_lint.main(["--rules", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertEqual(
+            sorted(r["rule"] for r in rows), sorted(trigger_lint.RULES)
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

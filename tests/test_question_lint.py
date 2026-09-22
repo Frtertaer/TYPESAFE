@@ -966,6 +966,26 @@ class ApplyFixesTests(unittest.TestCase):
             rc = question_lint.main(["--explain"])
         self.assertEqual(rc, 2)
 
+    def test_rules_lists_every_rule_sorted(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = question_lint.main(["--rules"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), len(question_lint.RULES))
+        self.assertIn("J001:", lines[0])
+
+    def test_rules_json_shape(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = question_lint.main(["--rules", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertEqual(
+            sorted(r["rule"] for r in rows), sorted(question_lint.RULES)
+        )
+        self.assertTrue(all(r["description"] for r in rows))
+
 
 class WatchJqTests(unittest.TestCase):
     def test_watch_jq_prints_only_named_tick_field(self) -> None:

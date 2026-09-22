@@ -603,6 +603,31 @@ def step_decisions(tmp: Path) -> dict:
         except ValueError:
             ok = False
     if ok:
+        # --outcome filters on the fill outcome field
+        outcome_log = tmp / "decisions-outcome.jsonl"
+        outcome_log.write_text(
+            '\n'.join(
+                json.dumps({"ts": 1, "jev_status": "fill", "outcome": s})
+                for s in ("human", "blocked")
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(outcome_log),
+                "--outcome",
+                "human",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 1
+        except ValueError:
+            ok = False
+    if ok:
         # --csv emits a header plus one row per entry, no stats
         rc, out = _run(
             [

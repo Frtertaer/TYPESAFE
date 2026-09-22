@@ -3306,6 +3306,38 @@ def step_compare(tmp: Path) -> dict:
         )
         stdout_ticks = [ln for ln in out.splitlines() if '"failures"' in ln]
         ok = rc == 0 and not stdout_ticks and "watch tick=2" in out
+    if ok:
+        # --fail-fast breaks the watch on the first tick with failures;
+        # the run exits 1 since the last tick failed
+        bad_cases = tmp / "compare-bad.json"
+        bad_cases.write_text(
+            json.dumps(
+                {
+                    "cases": [
+                        {
+                            "id": "bad1",
+                            "defect": "x",
+                            "prompt": "p",
+                            "after": {"called_jev": False},
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "compare.py"),
+                "--cases",
+                str(bad_cases),
+                "--watch",
+                "0.03",
+                "--max-ticks",
+                "5",
+                "--fail-fast",
+            ]
+        )
+        ok = rc == 1 and "watch tick=2" not in out
     return _step("compare", ok, out.strip().splitlines()[-1][:120] if out.strip() else "rc=%d" % rc)
 
 

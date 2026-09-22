@@ -370,6 +370,41 @@ class CatalogFillTests(unittest.TestCase):
             )
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
 
+    def test_watch_fail_fast_breaks_on_first_hit(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hits = [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                FILL, "read_catalog_cache", return_value=hits
+            ), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--cwd",
+                    str(base),
+                    "--watch",
+                    "0.01",
+                    "--fail-fast",
+                ],
+            ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "5"}), patch(
+                "sys.stdout", buf
+            ):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 1)
+            self.assertEqual(ticks[0]["hits"], 1)
+
     def test_watch_emits_hits_ticks(self) -> None:
         import io
 

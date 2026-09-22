@@ -105,7 +105,7 @@ class InstallHookTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            script = Path(tmp) / "compact_hook.py"
+            script = Path(tmp) / "jev-consult" / "scripts" / "compact_hook.py"
             INSTALL.upsert_claude_hook(settings, script, dry_run=False)
             INSTALL.upsert_claude_hook(settings, script, dry_run=False)
             data = json.loads(settings.read_text(encoding="utf-8"))

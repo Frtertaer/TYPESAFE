@@ -171,16 +171,33 @@ def copy_skill(src: Path, dest_parent: Path, dry_run: bool) -> Path:
     return dest
 
 
+def _remove_blocks(text: str) -> tuple[str, int]:
+    """Remove every complete jev-consult marker block.
+
+    Returns (cleaned text, index of the first removed block or -1).
+    """
+    first = -1
+    pos = text.find(MARKER_START)
+    while pos >= 0:
+        end = text.find(MARKER_END, pos)
+        if end < 0:
+            break
+        if first < 0:
+            first = pos
+        text = text[:pos] + text[end + len(MARKER_END):]
+        pos = text.find(MARKER_START, pos)
+    return text, first
+
+
 def upsert_snippet(path: Path, dry_run: bool, snippet: str | None = None) -> str:
     if dry_run:
         return "upsert " + str(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     block = (snippet or SNIPPET).strip() + "\n"
-    if MARKER_START in text and MARKER_END in text:
-        pre = text.split(MARKER_START)[0]
-        post = text.split(MARKER_END, 1)[1]
-        text = pre.rstrip() + "\n\n" + block + post.lstrip("\n")
+    cleaned, first = _remove_blocks(text)
+    if first >= 0:
+        text = cleaned[:first].rstrip() + "\n\n" + block + cleaned[first:].lstrip("\n")
     else:
         if text and not text.endswith("\n"):
             text += "\n"
@@ -197,11 +214,10 @@ def strip_snippet(path: Path, dry_run: bool) -> str:
     if dry_run:
         return "strip " + str(path)
     text = path.read_text(encoding="utf-8")
-    if MARKER_START not in text or MARKER_END not in text:
+    cleaned, first = _remove_blocks(text)
+    if first < 0:
         return "no marker " + str(path)
-    pre = text.split(MARKER_START)[0]
-    post = text.split(MARKER_END, 1)[1]
-    text = (pre.rstrip() + "\n" + post.lstrip("\n")).strip() + "\n"
+    text = (cleaned[:first].rstrip() + "\n" + cleaned[first:].lstrip("\n")).strip() + "\n"
     path.write_text(text, encoding="utf-8")
     return "stripped " + str(path)
 
@@ -214,6 +230,11 @@ def grok_hook_command(script: Path) -> str:
     exe = sys.executable.replace("\\", "/")
     path = str(script).replace("\\", "/")
     return '"%s" "%s"' % (exe, path)
+
+
+def _entry_is_ours(entry, marker: str) -> bool:
+    blob = json.dumps(entry)
+    return marker in blob and "jev-consult" in blob
 
 
 def upsert_codex_event(
@@ -238,7 +259,7 @@ def upsert_codex_event(
     if not isinstance(entries, list):
         entries = []
         hooks[event] = entries
-    entries[:] = [entry for entry in entries if marker not in json.dumps(entry)]
+    entries[:] = [entry for entry in entries if not _entry_is_ours(entry, marker)]
     cmd = grok_hook_command(script)
     entries.append(
         {
@@ -274,7 +295,7 @@ def strip_codex_event(path: Path, event: str, marker: str, dry_run: bool) -> str
     entries = hooks.get(event)
     if not isinstance(entries, list):
         return "no %s %s" % (event, path)
-    kept = [entry for entry in entries if marker not in json.dumps(entry)]
+    kept = [entry for entry in entries if not _entry_is_ours(entry, marker)]
     if len(kept) == len(entries):
         return "no marker " + str(path)
     if kept:
@@ -294,8 +315,14 @@ def upsert_claude_event(
     if dry_run:
         return "upsert hook %s %s" % (event, settings)
     settings.parent.mkdir(parents=True, exist_ok=True)
-    data = json.loads(settings.read_text(encoding="utf-8")) if settings.exists() else {}
-    if not isinstance(data, dict):
+    if settings.exists():
+        try:
+            data = json.loads(settings.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return "invalid json " + str(settings)
+        if not isinstance(data, dict):
+            return "invalid json " + str(settings)
+    else:
         data = {}
     hooks = data.setdefault("hooks", {})
     if not isinstance(hooks, dict):
@@ -305,7 +332,7 @@ def upsert_claude_event(
     if not isinstance(entries, list):
         entries = []
         hooks[event] = entries
-    entries[:] = [entry for entry in entries if marker not in json.dumps(entry)]
+    entries[:] = [entry for entry in entries if not _entry_is_ours(entry, marker)]
     entries.append(
         {
             "hooks": [
@@ -331,14 +358,17 @@ def strip_claude_event(settings: Path, event: str, marker: str, dry_run: bool) -
         return "missing " + str(settings)
     if dry_run:
         return "strip hook %s %s" % (event, settings)
-    data = json.loads(settings.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(settings.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return "invalid json " + str(settings)
     hooks = data.get("hooks") if isinstance(data, dict) else None
     if not isinstance(hooks, dict):
         return "no hooks " + str(settings)
     entries = hooks.get(event)
     if not isinstance(entries, list):
         return "no %s %s" % (event, settings)
-    kept = [entry for entry in entries if marker not in json.dumps(entry)]
+    kept = [entry for entry in entries if not _entry_is_ours(entry, marker)]
     if len(kept) == len(entries):
         return "no marker " + str(settings)
     hooks[event] = kept

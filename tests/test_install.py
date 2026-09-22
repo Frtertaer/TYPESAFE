@@ -124,8 +124,10 @@ class ClaudeHookTests(unittest.TestCase):
     def test_user_prompt_strip_keeps_other_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             settings = Path(tmp) / "settings.json"
-            script = Path(tmp) / "inventory_hook.py"
-            other = Path(tmp) / "compact_hook.py"
+            skill = Path(tmp) / "jev-consult"
+            script = skill / "scripts" / "inventory_hook.py"
+            other = skill / "scripts" / "compact_hook.py"
+            script.parent.mkdir(parents=True)
             script.write_text("# hook\n", encoding="utf-8")
             other.write_text("# hook\n", encoding="utf-8")
             install.upsert_claude_hook(settings, other, False)
@@ -165,6 +167,67 @@ class CopyAndSnippetTests(unittest.TestCase):
             stripped = path.read_text(encoding="utf-8")
             self.assertNotIn(install.MARKER_START, stripped)
             self.assertIn("# keep", stripped)
+
+    def test_upsert_collapses_duplicate_marker_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "AGENTS.md"
+            path.write_text(
+                "pre\n" + install.REPO_SNIPPET + "mid\n" + install.REPO_SNIPPET + "post\n",
+                encoding="utf-8",
+            )
+            install.upsert_snippet(path, False, install.REPO_SNIPPET)
+            text = path.read_text(encoding="utf-8")
+            self.assertEqual(text.count(install.MARKER_START), 1)
+            self.assertIn("pre", text)
+            self.assertIn("mid", text)
+            self.assertIn("post", text)
+            install.strip_snippet(path, False)
+            stripped = path.read_text(encoding="utf-8")
+            self.assertNotIn(install.MARKER_START, stripped)
+            self.assertIn("pre", stripped)
+            self.assertIn("mid", stripped)
+            self.assertIn("post", stripped)
+
+    def test_claude_hook_dedup_keeps_foreign_same_named_hooks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = Path(tmp) / "settings.json"
+            script = Path(tmp) / "jev-consult" / "scripts" / "inventory_hook.py"
+            foreign = {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "/other/pack/inventory_hook.py",
+                    }
+                ]
+            }
+            settings.write_text(
+                json.dumps({"hooks": {"UserPromptSubmit": [foreign]}}),
+                encoding="utf-8",
+            )
+            install.upsert_claude_event(
+                settings, "UserPromptSubmit", script, "inventory_hook.py", 20, False
+            )
+            entries = json.loads(settings.read_text(encoding="utf-8"))["hooks"]["UserPromptSubmit"]
+            self.assertEqual(len(entries), 2)
+            self.assertIn("/other/pack/inventory_hook.py", json.dumps(entries))
+            install.strip_claude_event(settings, "UserPromptSubmit", "inventory_hook.py", False)
+            entries = json.loads(settings.read_text(encoding="utf-8"))["hooks"]["UserPromptSubmit"]
+            self.assertEqual(entries, [foreign])
+
+    def test_claude_hook_invalid_json_untouched(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = Path(tmp) / "settings.json"
+            script = Path(tmp) / "jev-consult" / "scripts" / "compact_hook.py"
+            settings.write_text("not json {", encoding="utf-8")
+            out = install.upsert_claude_hook(settings, script, False)
+            self.assertTrue(out.startswith("invalid json"))
+            self.assertEqual(settings.read_text(encoding="utf-8"), "not json {")
+            out = install.strip_claude_hook(settings, False)
+            self.assertTrue(out.startswith("invalid json"))
+            settings.write_text("[1, 2]", encoding="utf-8")
+            out = install.upsert_claude_hook(settings, script, False)
+            self.assertTrue(out.startswith("invalid json"))
+            self.assertEqual(settings.read_text(encoding="utf-8"), "[1, 2]")
 
 
 class InstallCoverageTests(unittest.TestCase):
@@ -263,8 +326,11 @@ class InstallCoverageTests(unittest.TestCase):
             path.write_text('{"hooks": {"UserPromptSubmit": [{"hooks": [{"command": "other.py"}]}]}}', encoding="utf-8")
             self.assertIn("no marker", install.strip_codex_event(path, "UserPromptSubmit", "inventory_hook.py", False))
             # only our entry -> whole file removed
+            ours = "/u/.codex/skills/jev-consult/scripts/inventory_hook.py"
             path.write_text(
-                '{"hooks": {"UserPromptSubmit": [{"hooks": [{"command": "x inventory_hook.py"}]}]}}',
+                json.dumps(
+                    {"hooks": {"UserPromptSubmit": [{"hooks": [{"command": ours}]}]}}
+                ),
                 encoding="utf-8",
             )
             self.assertIn("removed hook file", install.strip_codex_event(path, "UserPromptSubmit", "inventory_hook.py", False))
@@ -275,7 +341,7 @@ class InstallCoverageTests(unittest.TestCase):
                     {
                         "hooks": {
                             "UserPromptSubmit": [
-                                {"hooks": [{"command": "x inventory_hook.py"}]},
+                                {"hooks": [{"command": ours}]},
                                 {"hooks": [{"command": "keep.py"}]},
                             ]
                         }

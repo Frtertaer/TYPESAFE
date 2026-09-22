@@ -619,7 +619,8 @@ class InstallToolsHookTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             settings = Path(tmp) / "settings.json"
             settings.write_text("{}", encoding="utf-8")
-            script = Path(tmp) / "inventory_hook.py"
+            script = Path(tmp) / "jev-consult" / "scripts" / "inventory_hook.py"
+            script.parent.mkdir(parents=True, exist_ok=True)
             script.write_text("# hook\n", encoding="utf-8")
             INSTALL.upsert_claude_event(settings, "UserPromptSubmit", script, "inventory_hook.py", 20, False)
             INSTALL.upsert_claude_event(settings, "UserPromptSubmit", script, "inventory_hook.py", 20, False)
@@ -643,7 +644,8 @@ class InstallToolsHookTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            script = Path(tmp) / "inventory_hook.py"
+            script = Path(tmp) / "jev-consult" / "scripts" / "inventory_hook.py"
+            script.parent.mkdir(parents=True, exist_ok=True)
             script.write_text("# hook\n", encoding="utf-8")
             INSTALL.upsert_codex_event(hooks, "UserPromptSubmit", script, "inventory_hook.py", 20, False)
             INSTALL.upsert_codex_event(hooks, "UserPromptSubmit", script, "inventory_hook.py", 20, False)
@@ -671,7 +673,8 @@ class InstallToolsHookTests(unittest.TestCase):
     def test_codex_strip_removes_file_when_empty(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             hooks = Path(tmp) / "hooks.json"
-            script = Path(tmp) / "inventory_hook.py"
+            script = Path(tmp) / "jev-consult" / "scripts" / "inventory_hook.py"
+            script.parent.mkdir(parents=True, exist_ok=True)
             script.write_text("# hook\n", encoding="utf-8")
             INSTALL.upsert_codex_event(hooks, "UserPromptSubmit", script, "inventory_hook.py", 20, False)
             self.assertTrue(hooks.is_file())

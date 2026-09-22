@@ -1103,6 +1103,47 @@ class TriggerEvalTests(unittest.TestCase):
         ]
         self.assertEqual(ticks[0]["margin"], 1.15)
 
+    def test_watch_tick_reports_score_deltas(self) -> None:
+        def res(worst, best):
+            return {
+                "ok": True,
+                "coverage": 1.0,
+                "hits": 1,
+                "cases": [
+                    {
+                        "id": "x",
+                        "covers": [],
+                        "ok": True,
+                        "should_trigger": True,
+                        "score": 1.0,
+                        "lexical": True,
+                    }
+                ],
+                "worst_positive": worst,
+                "best_negative": best,
+                "margin": 1.15,
+                "n_positives": 1,
+                "n_negatives": 0,
+            }
+
+        buf = io.StringIO()
+        with patch.object(
+            te, "evaluate", side_effect=[res(1.0, 0.1), res(0.8, 0.2), res(0.8, 0.2)]
+        ):
+            with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "2"}):
+                with redirect_stdout(buf):
+                    te.main(["--watch", "0.01"])
+        ticks = [
+            json.loads(l)
+            for l in buf.getvalue().splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertIsNone(ticks[0]["worst_positive_delta"])
+        self.assertIsNone(ticks[0]["best_negative_delta"])
+        self.assertEqual(ticks[1]["worst_positive_delta"], -0.2)
+        self.assertEqual(ticks[1]["best_negative_delta"], 0.1)
+
     def test_watch_rc_reflects_last_verdict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cases = write_cases(

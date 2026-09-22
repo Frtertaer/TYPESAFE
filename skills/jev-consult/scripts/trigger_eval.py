@@ -484,6 +484,7 @@ def main(argv: list[str] | None = None) -> int:
         dead = _watch.deadline("JEV_TRIGGER_WATCH_SECS", getattr(args, "watch_max", 0.0))
         cur = result
         prev_gates: list[str] | None = None
+        prev_tick: dict | None = None
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             coverage_ok = (
                 args.min_coverage is None
@@ -512,6 +513,7 @@ def main(argv: list[str] | None = None) -> int:
                 failed.append("covers")
             if strict_bad:
                 failed.append("strict")
+            prev_scores = prev_gates is not None and prev_tick is not None
             tick = {
                 "ts": int(_time.time()),
                 "verdict": "PASS" if not failed else "FAIL",
@@ -519,6 +521,20 @@ def main(argv: list[str] | None = None) -> int:
                 "margin": cur["margin"],
                 "worst_positive": cur["worst_positive"],
                 "best_negative": cur["best_negative"],
+                "worst_positive_delta": (
+                    round(cur["worst_positive"] - prev_tick["worst_positive"], 4)
+                    if prev_scores
+                    and isinstance(cur.get("worst_positive"), (int, float))
+                    and isinstance(prev_tick.get("worst_positive"), (int, float))
+                    else None
+                ),
+                "best_negative_delta": (
+                    round(cur["best_negative"] - prev_tick["best_negative"], 4)
+                    if prev_scores
+                    and isinstance(cur.get("best_negative"), (int, float))
+                    and isinstance(prev_tick.get("best_negative"), (int, float))
+                    else None
+                ),
                 "coverage": cur["coverage"],
                 "min_coverage": args.min_coverage,
                 "coverage_ok": coverage_ok,
@@ -526,6 +542,7 @@ def main(argv: list[str] | None = None) -> int:
                 "gates_changed": prev_gates is not None and failed != prev_gates,
             }
             prev_gates = list(failed)
+            prev_tick = tick
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(failed))
             if not _write_verdict(cur):
                 args.verdict = ""  # warn once, stop retrying

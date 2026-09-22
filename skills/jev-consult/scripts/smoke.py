@@ -3263,6 +3263,59 @@ def step_hook(tmp: Path) -> dict:
         )
         ticks = [ln for ln in out.splitlines() if '"winner_changed"' in ln]
         ok = len(ticks) == 1 and 'watch tick=2' not in out
+    if ok:
+        # --verdict writes {verdict,ticks,winner,keys} — per tick in watch
+        # mode, one-shot otherwise; the miss is a "fail" verdict
+        verdict = tmp / "hook-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "inventory_hook.py"),
+                "--file",
+                str(event_file),
+                "--watch",
+                "0.05",
+                "--max-ticks",
+                "2",
+                "--watch-max",
+                "30",
+                "--verdict",
+                str(verdict),
+            ],
+            cwd=tmp,
+            env=env,
+        )
+        try:
+            ok = (
+                rc == 1
+                and json.loads(verdict.read_text(encoding="utf-8")).get(
+                    "verdict"
+                )
+                == "fail"
+            )
+        except (OSError, ValueError):
+            ok = False
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "inventory_hook.py"),
+                    "--file",
+                    str(event_file),
+                    "--verdict",
+                    str(verdict),
+                ],
+                cwd=tmp,
+                env=env,
+            )
+            try:
+                ok = (
+                    rc == 0
+                    and json.loads(verdict.read_text(encoding="utf-8")).get(
+                        "verdict"
+                    )
+                    == "fail"
+                )
+            except (OSError, ValueError):
+                ok = False
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

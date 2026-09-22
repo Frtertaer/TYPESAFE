@@ -3831,6 +3831,48 @@ def step_doctor(tmp: Path) -> dict:
             ) > 0
         except OSError:
             ok = False
+    if ok:
+        # --out writes the checks payload; --quiet still prints failing
+        # watch ticks (it only suppresses clean ones)
+        dout = tmp / "doctor-out.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "doctor.py"),
+                "--agents",
+                "codex",
+                "--home",
+                str(tmp / "home"),
+                "--hermes-home",
+                str(tmp / "hermes"),
+                "--out",
+                str(dout),
+            ]
+        )
+        try:
+            ok = rc in (0, 1) and isinstance(
+                json.loads(dout.read_text(encoding="utf-8")), dict
+            )
+        except (OSError, ValueError):
+            ok = False
+        if ok:
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "doctor.py"),
+                    "--agents",
+                    "codex",
+                    "--home",
+                    str(tmp / "home"),
+                    "--hermes-home",
+                    str(tmp / "hermes"),
+                    "--watch",
+                    "0.03",
+                    "--max-ticks",
+                    "2",
+                    "--quiet",
+                ]
+            )
+            ticks = [ln for ln in out.splitlines() if '"failed"' in ln]
+            ok = len(ticks) == 2
     return _step("doctor_json", ok, "rc=%d" % rc)
 
 

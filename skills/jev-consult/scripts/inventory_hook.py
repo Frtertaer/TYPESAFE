@@ -526,7 +526,10 @@ def main(argv: list[str] | None = None) -> int:
         argv = [a for a in argv if a != "--dry-run"]
     if "--events" in argv:
         names = sorted(allowed_events())
-        if "--json" in argv:
+        if "--jsonl" in argv:
+            for name in names:
+                sys.stdout.write(json.dumps({"event": name}) + "\n")
+        elif "--json" in argv:
             sys.stdout.write(json.dumps(names) + "\n")
         else:
             for name in names:

@@ -1,0 +1,17 @@
+{
+  "state": {},
+  "questions": {
+    "approach": {
+      "type": "choice",
+      "instructions": "Which approach should the coder take?",
+      "criteria": {
+        "none": "stop for this stretch",
+        "compare_junit": "--junit PATH writes JUnit XML like smoke",
+        "decisions_timeline": "--histogram buckets entries over time",
+        "hook_dry_contract": "e2e asserting --dry-run writes no sidecar or miss",
+        "watch_rc_audit": "audit every capped --watch exits 1 on last bad tick",
+        "question_lint_fixes": "--fix support for auto-fixable findings"
+      }
+    }
+  }
+}

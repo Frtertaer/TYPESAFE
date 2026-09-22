@@ -3991,6 +3991,28 @@ def step_hook(tmp: Path) -> dict:
             except ValueError:
                 ok = False
     if ok:
+        # --dry-run resolves but must not write sidecar or miss files
+        dry_cwd = tmp / "hook-dry-cwd"
+        dry_cwd.mkdir(parents=True, exist_ok=True)
+        dry_payload = json.dumps(
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "smoke test task",
+                "cwd": str(dry_cwd),
+            }
+        )
+        rc, out = _run(
+            [str(SCRIPTS / "inventory_hook.py"), "--dry-run"],
+            cwd=dry_cwd,
+            env=env,
+            inp=dry_payload,
+        )
+        ok = (
+            rc == 0
+            and not (dry_cwd / ".jev-tools-miss.json").exists()
+            and not (dry_cwd / ".jev-tools.json").exists()
+        )
+    if ok:
         # repeat of the same prompt over a fresh sidecar hits the dedupe path
         env["JEV_HOOK_DEBUG"] = "1"
         rc, out = _run(

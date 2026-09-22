@@ -382,7 +382,7 @@ def main(argv: list[str] | None = None) -> int:
 
         max_ticks = _watch.cap("JEV_SMOKE_WATCH_MAX", args.max_ticks)
         ticks = 0
-        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        dead = _watch.deadline("JEV_SMOKE_WATCH_SECS", getattr(args, "watch_max", 0.0))
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             steps = _run_steps()
             tick = {

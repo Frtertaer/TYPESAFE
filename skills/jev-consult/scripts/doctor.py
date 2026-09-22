@@ -271,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
         from datetime import datetime, timezone
 
         max_ticks = _watch.cap("JEV_DOCTOR_WATCH_MAX", args.max_ticks)
-        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        dead = _watch.deadline("JEV_DOCTOR_WATCH_SECS", getattr(args, "watch_max", 0.0))
         count = 0
         last: dict = {}
         while True:

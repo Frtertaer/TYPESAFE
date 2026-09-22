@@ -49,18 +49,38 @@ class CapTests(unittest.TestCase):
 
 class DeadlineTests(unittest.TestCase):
     def test_deadline_zero_means_unbounded(self) -> None:
-        self.assertEqual(watch.deadline(0), 0.0)
-        self.assertEqual(watch.deadline(None), 0.0)
-        self.assertEqual(watch.deadline("junk"), 0.0)
-        self.assertEqual(watch.deadline(-2), 0.0)
+        import os
+
+        os.environ.pop("JEV_X_WATCH_SECS", None)
+        self.assertEqual(watch.deadline("JEV_X_WATCH_SECS"), 0.0)
+        self.assertEqual(watch.deadline("JEV_X_WATCH_SECS", None), 0.0)
+        self.assertEqual(watch.deadline("JEV_X_WATCH_SECS", 0), 0.0)
+        self.assertEqual(watch.deadline("JEV_X_WATCH_SECS", "junk"), 0.0)
+        self.assertEqual(watch.deadline("JEV_X_WATCH_SECS", -2), 0.0)
 
     def test_deadline_is_now_plus_seconds(self) -> None:
         import time
 
         before = time.time()
-        d = watch.deadline(10)
+        d = watch.deadline("JEV_X_WATCH_SECS", 10)
         self.assertTrue(before + 9.9 < d < before + 10.1)
-        self.assertTrue(watch.deadline("5") > time.time())
+        self.assertTrue(watch.deadline("JEV_X_WATCH_SECS", "5") > time.time())
+
+    def test_deadline_reads_env_when_no_override(self) -> None:
+        import os
+        import time
+
+        os.environ.pop("JEV_X_WATCH_SECS", None)
+        self.assertEqual(watch.deadline("JEV_X_WATCH_SECS"), 0.0)
+        with patch.dict("os.environ", {"JEV_X_WATCH_SECS": "10"}):
+            self.assertTrue(watch.deadline("JEV_X_WATCH_SECS") > time.time())
+            # override 0 means unset, so the env still applies
+            self.assertTrue(watch.deadline("JEV_X_WATCH_SECS", 0) > time.time())
+            # a positive flag value wins over the env
+            d = watch.deadline("JEV_X_WATCH_SECS", 3)
+            self.assertTrue(d < time.time() + 4)
+        with patch.dict("os.environ", {"JEV_X_WATCH_SECS": "junk"}):
+            self.assertEqual(watch.deadline("JEV_X_WATCH_SECS"), 0.0)
 
 
 class EmitTests(unittest.TestCase):

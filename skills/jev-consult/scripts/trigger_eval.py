@@ -405,7 +405,7 @@ def main(argv: list[str] | None = None) -> int:
 
         max_ticks = _watch.cap("JEV_TRIGGER_WATCH_MAX", args.max_ticks)
         ticks = 0
-        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        dead = _watch.deadline("JEV_TRIGGER_WATCH_SECS", getattr(args, "watch_max", 0.0))
         cur = result
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             coverage_ok = (

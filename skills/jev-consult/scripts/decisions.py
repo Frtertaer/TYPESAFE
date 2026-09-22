@@ -882,7 +882,7 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "watch", 0) > 0:
         max_ticks = _watch.cap("JEV_DECISIONS_WATCH_MAX", args.max_ticks)
         ticks = 0
-        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        dead = _watch.deadline("JEV_DECISIONS_WATCH_SECS", getattr(args, "watch_max", 0.0))
         prev_keys: set | None = None
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             cur_keys = {

@@ -590,7 +590,7 @@ def main(argv: list[str] | None = None) -> int:
                     watch_max_arg = float(argv[idx + 1])
                 except ValueError:
                     watch_max_arg = 0.0
-        dead = _watch.deadline(watch_max_arg)
+        dead = _watch.deadline("JEV_HOOK_WATCH_SECS", watch_max_arg)
         ticks = 0
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             tick: dict = {"ts": int(time.time())}

@@ -323,7 +323,7 @@ def cmd_history(args: argparse.Namespace) -> int:
 
         max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX", getattr(args, "max_ticks", 0))
         ticks = 0
-        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        dead = _watch.deadline("JEV_TRACE_WATCH_SECS", getattr(args, "watch_max", 0.0))
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             fresh = load(path).get("history")
             fresh = (
@@ -460,7 +460,7 @@ def cmd_notes(args: argparse.Namespace) -> int:
 
         max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX", getattr(args, "max_ticks", 0))
         ticks = 0
-        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        dead = _watch.deadline("JEV_TRACE_WATCH_SECS", getattr(args, "watch_max", 0.0))
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             fresh = load(path).get("notes")
             fresh = fresh if isinstance(fresh, list) else []
@@ -513,7 +513,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
 
         max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX", getattr(args, "max_ticks", 0))
         ticks = 0
-        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        dead = _watch.deadline("JEV_TRACE_WATCH_SECS", getattr(args, "watch_max", 0.0))
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             cur = load(path)
             tick = {
@@ -565,7 +565,7 @@ def cmd_state(args: argparse.Namespace) -> int:
 
         max_ticks = _watch.cap("JEV_TRACE_WATCH_MAX", getattr(args, "max_ticks", 0))
         ticks = 0
-        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        dead = _watch.deadline("JEV_TRACE_WATCH_SECS", getattr(args, "watch_max", 0.0))
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             data = load(path)
             state = {key: value for key, value in data.items() if _present(value)}

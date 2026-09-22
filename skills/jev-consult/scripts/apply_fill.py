@@ -377,7 +377,7 @@ def main() -> int:
     if args.watch and args.watch > 0:
         max_ticks = _watch.cap("JEV_APPLY_WATCH_MAX", args.max_ticks)
         ticks = 0
-        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        dead = _watch.deadline("JEV_APPLY_WATCH_SECS", getattr(args, "watch_max", 0.0))
         ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
         miss_path = cwd / MISS_NAME
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):

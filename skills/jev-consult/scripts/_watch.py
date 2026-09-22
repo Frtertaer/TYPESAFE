@@ -28,10 +28,12 @@ def cap(env_name: str, override=None) -> int:
         return 0
 
 
-def deadline(seconds) -> float:
-    """Epoch deadline for --watch-max S (0/invalid/missing = no deadline)."""
+def deadline(env_name: str, override=None) -> float:
+    """Epoch deadline: --watch-max S wins, else the JEV_*_WATCH_SECS env
+    (0/invalid/missing = no deadline)."""
+    src = override if override else os.environ.get(env_name, "0")
     try:
-        s = float(seconds or 0)
+        s = float(src or 0)
     except (TypeError, ValueError):
         s = 0.0
     return time.time() + s if s > 0 else 0.0

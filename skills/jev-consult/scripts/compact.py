@@ -1239,7 +1239,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
 
         max_ticks = _watch.cap("JEV_COMPACT_WATCH_MAX", args.max_ticks)
         ticks = 0
-        dead = _watch.deadline(getattr(args, "watch_max", 0.0))
+        dead = _watch.deadline("JEV_COMPACT_WATCH_SECS", getattr(args, "watch_max", 0.0))
         cur: dict[str, Any] = {}
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             if args.file != "-":

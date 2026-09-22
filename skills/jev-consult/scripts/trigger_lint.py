@@ -294,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
 
         max_ticks = _watch.cap("JEV_TLINT_WATCH_MAX", max_ticks_arg)
         ticks = 0
-        dead = _watch.deadline(watch_max_arg)
+        dead = _watch.deadline("JEV_TLINT_WATCH_SECS", watch_max_arg)
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             rows = lint_cases(path, policy_path=policy_path)
             tick = {

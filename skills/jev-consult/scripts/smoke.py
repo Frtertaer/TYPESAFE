@@ -841,6 +841,38 @@ def step_jev_decide(tmp: Path) -> dict:
             ok = rc == 0 and payload.get("verdict") == "proceed"
         except (OSError, ValueError):
             ok = False
+    if ok:
+        # tight top-two gap on an irreversible question escalates
+        tight = tmp / "answers-tight.json"
+        tight.write_text(
+            json.dumps(
+                {
+                    "irreversible": True,
+                    "answers": {
+                        "where": {
+                            "type": "choice",
+                            "choice": "refactor",
+                            "confidence": 0.9,
+                            "probabilities": {
+                                "refactor": 0.53,
+                                "rewrite": 0.47,
+                            },
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "jev.py"),
+                "decide",
+                str(tight),
+                "--jq",
+                "decision.action",
+            ]
+        )
+        ok = rc == 2 and out.strip() == '"escalate"'
     return _step("jev_decide", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

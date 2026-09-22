@@ -596,6 +596,25 @@ def step_decisions(tmp: Path) -> dict:
             ]
         )
         ok = rc == 0 and '"count": 1' in out and "watch tick=2" in out
+    if ok:
+        # --verdict on an empty log writes {verdict: empty}
+        empty_log = tmp / "decisions-empty.jsonl"
+        empty_log.write_text("", encoding="utf-8")
+        verdict = tmp / "decisions-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(empty_log),
+                "--verdict",
+                str(verdict),
+            ]
+        )
+        try:
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            ok = rc == 0 and payload.get("verdict") == "empty"
+        except (OSError, ValueError):
+            ok = False
     return _step("decisions", ok, "rc=%d" % rc if ok else out.strip()[:160])
 
 

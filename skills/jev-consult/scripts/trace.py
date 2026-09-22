@@ -353,7 +353,7 @@ def cmd_history(args: argparse.Namespace) -> int:
                 "picks": len(filtered) if filtered is not None else None,
                 "elapsed_s": round(_time.time() - watch_t0, 2),
             }
-            _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_TRACE_WATCH_QUIET", getattr(args, "quiet", False)), bad=bool(tick["picks"]))
+            _watch.emit_or_jq(tick, getattr(args, "jq", ""), getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_TRACE_WATCH_QUIET", getattr(args, "quiet", False)), bad=bool(tick["picks"]))
             ticks += 1
             sys.stderr.write(
                 "watch tick=%d picks=%s\n" % (ticks, tick["picks"])
@@ -563,7 +563,7 @@ def cmd_notes(args: argparse.Namespace) -> int:
                 "notes": len(filtered) if filtered is not None else None,
                 "elapsed_s": round(_time.time() - watch_t0, 2),
             }
-            _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_TRACE_WATCH_QUIET", getattr(args, "quiet", False)), bad=bool(tick["notes"]))
+            _watch.emit_or_jq(tick, getattr(args, "jq", ""), getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_TRACE_WATCH_QUIET", getattr(args, "quiet", False)), bad=bool(tick["notes"]))
             ticks += 1
             sys.stderr.write(
                 "watch tick=%d notes=%s\n" % (ticks, tick["notes"])
@@ -647,7 +647,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 "inspected": len(cur.get("inspected") or []),
                 "elapsed_s": round(_time.time() - watch_t0, 2),
             }
-            _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_TRACE_WATCH_QUIET", getattr(args, "quiet", False)), bad=not tick["exists"])
+            _watch.emit_or_jq(tick, getattr(args, "jq", ""), getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_TRACE_WATCH_QUIET", getattr(args, "quiet", False)), bad=not tick["exists"])
             ticks += 1
             sys.stderr.write(
                 "watch tick=%d exists=%s attempt_count=%d\n"
@@ -725,7 +725,7 @@ def cmd_state(args: argparse.Namespace) -> int:
             data = load(path)
             state = {key: value for key, value in data.items() if _present(value)}
             cur_attempt = int(data.get("attempt_count") or 0)
-            _watch.emit(
+            _watch.emit_or_jq(
                 {
                     "ts": int(_time.time()),
                     "state": state,
@@ -739,6 +739,7 @@ def cmd_state(args: argparse.Namespace) -> int:
                     "inspected": len(data.get("inspected") or []),
                     "elapsed_s": round(_time.time() - watch_t0, 2),
                 },
+                getattr(args, "jq", ""),
                 getattr(args, "out", "") or None,
                 quiet=_watch.quiet("JEV_TRACE_WATCH_QUIET", getattr(args, "quiet", False)),
                 bad=bool(state),
@@ -837,6 +838,7 @@ def build_parser() -> argparse.ArgumentParser:
     state_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
     state_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     state_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    state_cmd.add_argument("--jq", metavar="KEY", default="", help="With --watch: print just the named tick field(s) per pass, comma list")
     state_cmd.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick whose state is empty")
     state_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: ok|empty, ticks, attempt_count, state} JSON to PATH, refreshed every tick")
     state_cmd.set_defaults(func=cmd_state)
@@ -863,6 +865,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--grep", default="", help="Only notes whose text contains SUBSTR (case-insensitive; default JEV_TRACE_GREP)")
     notes_cmd.add_argument("--uniq", action="store_true", help="Dedupe notes by sha/text (first occurrence wins)")
     notes_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,notes} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
+    notes_cmd.add_argument("--jq", metavar="KEY", default="", help="With --watch: print just the named tick field(s) per pass, comma list")
     notes_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
     notes_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     notes_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
@@ -878,6 +881,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--grep", default="", help="Only picks whose pick/kind contains SUBSTR (case-insensitive; default JEV_TRACE_HISTORY_GREP)")
     hist_cmd.add_argument("--before", default=None, help="Only picks with ts <= epoch seconds or ISO8601")
     hist_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,picks} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
+    hist_cmd.add_argument("--jq", metavar="KEY", default="", help="With --watch: print just the named tick field(s) per pass, comma list")
     hist_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
     hist_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     hist_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")

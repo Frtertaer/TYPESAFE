@@ -317,7 +317,7 @@ def main(argv: list[str] | None = None) -> int:
                 "elapsed_s": round(_time.time() - watch_t0, 2),
             }
             prev_ok = ok
-            _watch.emit(last, args.out, quiet=_watch.quiet("JEV_DOCTOR_WATCH_QUIET", args.quiet), bad=not last["ok"])
+            _watch.emit_or_jq(last, getattr(args, "jq", ""), args.out, quiet=_watch.quiet("JEV_DOCTOR_WATCH_QUIET", args.quiet), bad=not last["ok"])
             last_checks = cur
             count += 1
             sys.stderr.write(

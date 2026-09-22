@@ -1283,14 +1283,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
                 "reduction": stats.get("reduction"),
                 "fallback": bool(stats.get("fallback")),
             }
-            if getattr(args, "jq", ""):
-                for field in [f.strip() for f in args.jq.split(",") if f.strip()]:
-                    node = tick
-                    for part in field.split("."):
-                        node = node.get(part) if isinstance(node, dict) else None
-                    sys.stdout.write(json.dumps(node) + "\n")
-            else:
-                _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_COMPACT_WATCH_QUIET", args.quiet), bad=tick["fallback"])
+            _watch.emit_or_jq(tick, getattr(args, "jq", ""), getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_COMPACT_WATCH_QUIET", args.quiet), bad=tick["fallback"])
             ticks += 1
             sys.stderr.write(
                 "watch tick=%d reduction=%s fallback=%s\n"

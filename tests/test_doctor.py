@@ -630,5 +630,24 @@ class DoctorTests(unittest.TestCase):
             self.assertTrue(all("checks" in t and "ok" in t for t in lines))
 
 
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(
+                [
+                    "--agents", "claude-code",
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--watch", "0.01",
+                    "--jq", "failed",
+                ],
+                env_extra={"JEV_DOCTOR_WATCH_MAX": "2"},
+                cwd=tmp,
+            )
+            lines = text.splitlines()
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all(l.lstrip("-").isdigit() for l in lines))
+            self.assertTrue(all(int(l) > 0 for l in lines))
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

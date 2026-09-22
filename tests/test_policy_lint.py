@@ -690,5 +690,25 @@ class WatchFlagTests(unittest.TestCase):
         self.assertEqual(rc, 2)
 
 
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        import os
+        from unittest import mock
+
+        buf = io.StringIO()
+        err = io.StringIO()
+        with mock.patch.dict(os.environ, {"JEV_PLINT_WATCH_MAX": "2"}):
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = policy_lint.main(["--watch", "0.01", "--jq", "errors"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(all(l.isdigit() for l in lines))
+
+    def test_watch_jq_missing_value_rc2(self) -> None:
+        with redirect_stderr(io.StringIO()):
+            rc = policy_lint.main(["--watch", "0.01", "--jq"])
+        self.assertEqual(rc, 2)
+
 if __name__ == "__main__":
     unittest.main()

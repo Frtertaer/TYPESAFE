@@ -967,5 +967,35 @@ class CatalogFillE2ETests(unittest.TestCase):
             self.assertEqual(entries[0]["outcome"], "blocked")
 
 
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(
+                os.environ,
+                JEV_CATALOG_WATCH_MAX="2",
+                JEV_CONSULT_LOG="0",
+                USERPROFILE=str(tmp),
+                HOME=str(tmp),
+            )
+            env.pop("TYPESAFE_API_KEY", None)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "catalog_fill.py"),
+                    "--task", "x",
+                    "--cwd", str(tmp),
+                    "--watch", "0.01",
+                    "--jq", "hits",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.splitlines(), ["0", "0"])
+
 if __name__ == "__main__":
     unittest.main()

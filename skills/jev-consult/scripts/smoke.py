@@ -477,12 +477,7 @@ def main(argv: list[str] | None = None) -> int:
                 "failed": [s["name"] for s in steps if not s["ok"]],
                 "elapsed_s": round(_time.time() - watch_t0, 2),
             }
-            if args.jq:
-                for field in [f.strip() for f in args.jq.split(",") if f.strip()]:
-                    value, _found = jq_lookup(tick, field)
-                    sys.stdout.write(json.dumps(value) + "\n")
-            else:
-                _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_SMOKE_WATCH_QUIET", args.quiet), bad=bool(tick["failed"]))
+            _watch.emit_or_jq(tick, args.jq, args.out, quiet=_watch.quiet("JEV_SMOKE_WATCH_QUIET", args.quiet), bad=bool(tick["failed"]))
             last_steps = steps
             ticks += 1
             sys.stderr.write(

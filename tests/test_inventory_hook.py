@@ -2977,5 +2977,31 @@ class DebugFlagTests(unittest.TestCase):
         self.assertIn("jev_status=", err)
 
 
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {
+                        "event": "UserPromptSubmit",
+                        "prompt": "jwt",
+                        "cwd": str(cwd),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ, {"JEV_HOOK_WATCH_MAX": "2", "JEV_HOOK_OFF": "1"}
+            ):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(
+                        ["--file", str(payload), "--watch", "0.01", "--jq", "winner"]
+                    )
+            self.assertEqual(rc, 1)
+            self.assertEqual(buf.getvalue().splitlines(), ["null", "null"])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

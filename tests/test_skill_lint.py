@@ -509,5 +509,22 @@ class CliTests(unittest.TestCase):
         self.assertEqual(rc, 2)
 
 
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp) / "SKILL.md"
+            skill.write_text(
+                "---" + chr(10) + "name: x" + chr(10) + "description: y" + chr(10) + "---" + chr(10) + "body" + chr(10),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with mock.patch.dict(os.environ, {"JEV_SLINT_WATCH_MAX": "2"}):
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+                    rc = skill_lint.main(
+                        [str(skill), "--watch", "0.01", "--jq", "errors"]
+                    )
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().splitlines(), ["0", "0"])
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

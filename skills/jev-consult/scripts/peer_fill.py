@@ -319,7 +319,7 @@ def main() -> int:
         default=0.0,
         help="Re-print the fill state as a {ts,miss,ask} JSON tick every S seconds (JEV_PEER_WATCH_MAX caps ticks).",
     )
-    parser.add_argument("--jq", metavar="KEY", default="", help="With --status: print just one dotted-path field of the report (e.g. miss); unknown key exits 2.")
+    parser.add_argument("--jq", metavar="KEY", default="", help="With --status: print just one dotted-path field of the report (e.g. miss); unknown key exits 2. With --watch: print just the named tick field(s) per pass, comma list.")
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
@@ -419,7 +419,7 @@ def main() -> int:
             except Exception:
                 tick = {"ts": int(time.time()), "miss": None, "ask": None,
                         "elapsed_s": round(time.time() - watch_t0, 2)}
-            _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_PEER_WATCH_QUIET", args.quiet), bad=bool(tick.get("miss") or tick.get("ask")))
+            _watch.emit_or_jq(tick, getattr(args, "jq", ""), args.out, quiet=_watch.quiet("JEV_PEER_WATCH_QUIET", args.quiet), bad=bool(tick.get("miss") or tick.get("ask")))
             ticks += 1
             sys.stderr.write(
                 "watch tick=%d miss=%s ask=%s\n"

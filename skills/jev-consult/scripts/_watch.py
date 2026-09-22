@@ -73,6 +73,23 @@ def emit(tick: dict, out_path=None, quiet: bool = False, bad=None) -> None:
             pass
 
 
+def emit_or_jq(tick: dict, jq: str, out_path=None, quiet: bool = False, bad=None) -> None:
+    """Emit a tick, or print just the named field(s) when jq is set.
+
+    jq is a comma list of dotted paths; each prints one JSON line (null on a
+    miss). In jq mode the tick JSON is not emitted and out_path is not written,
+    matching decisions.py's --jq watch behavior."""
+    if jq:
+        for field in [f.strip() for f in jq.split(",") if f.strip()]:
+            cur = tick
+            for part in field.split("."):
+                cur = cur.get(part) if isinstance(cur, dict) else None
+            sys.stdout.write(json.dumps(cur) + "\n")
+        sys.stdout.flush()
+        return
+    emit(tick, out_path, quiet=quiet, bad=bad)
+
+
 def write_verdict(path: str, payload: dict) -> bool:
     """Write a slim verdict JSON to path; False (with stderr note) on failure.
 

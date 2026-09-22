@@ -470,6 +470,7 @@ def main() -> int:
         default=0.0,
         help="Re-run the catalog search for --task every S seconds, printing {ts,hits,cached,cache_age_s} ticks (read-only; JEV_CATALOG_WATCH_MAX caps ticks).",
     )
+    parser.add_argument("--jq", metavar="KEY", default="", help="With --watch: print just the named tick field(s) per pass, comma list (e.g. hits); null on a miss.")
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
@@ -540,7 +541,7 @@ def main() -> int:
                 tick["cached"] = False
                 tick["cache_age_s"] = None
             tick["elapsed_s"] = round(time.time() - watch_t0, 2)
-            _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_CATALOG_WATCH_QUIET", args.quiet), bad=bool(tick["hits"]))
+            _watch.emit_or_jq(tick, getattr(args, "jq", ""), args.out, quiet=_watch.quiet("JEV_CATALOG_WATCH_QUIET", args.quiet), bad=bool(tick["hits"]))
             ticks += 1
             sys.stderr.write(
                 "watch tick=%d hits=%d cached=%s\n"

@@ -1094,7 +1094,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scores", action="store_true", help="Add IDF score to each shortlist item.")
     parser.add_argument("--csv", action="store_true", help="Emit the shortlist as CSV rows instead of JSON.")
     parser.add_argument("--jsonl", action="store_true", help="Emit the shortlist as JSON lines, one item per row (for piping).")
-    parser.add_argument("--jq", metavar="KEY", default="", help="Print just one dotted-path field of the JSON payload (e.g. counts.skill); unknown key exits 2")
+    parser.add_argument("--jq", metavar="KEY", default="", help="Print just one dotted-path field of the JSON payload (e.g. counts.skill); unknown key exits 2. With --watch: print just the named tick field(s) per pass, comma list")
     parser.add_argument("--out", metavar="PATH", default="", help="Write the payload JSON to PATH instead of stdout.")
     parser.add_argument("--names", action="store_true", help="Print bare shortlist ids, one per line (for piping).")
     parser.add_argument("--paths", action="store_true", help="Print bare shortlist item paths, one per line (for piping).")
@@ -1303,7 +1303,8 @@ def main(argv: list[str] | None = None) -> int:
                 row.append("%.4f" % (item.get("score") or 0))
             writer.writerow(row)
     else:
-        if getattr(args, "jq", ""):
+        watching_jq = bool(getattr(args, "watch", 0.0)) and getattr(args, "jq", "")
+        if getattr(args, "jq", "") and not watching_jq:
             cur = payload
             found = True
             for part in args.jq.split("."):
@@ -1320,17 +1321,18 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             sys.stdout.write(json.dumps(cur) + "\n")
             return 0
-        text = json.dumps(payload, indent=2) + "\n"
-        if getattr(args, "out", ""):
-            out_path = Path(args.out)
-            try:
-                out_path.write_text(text, encoding="utf-8")
-            except OSError as exc:
-                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
-                return 1
-            sys.stderr.write("wrote %s\n" % out_path)
-        else:
-            sys.stdout.write(text)
+        if not watching_jq:
+            text = json.dumps(payload, indent=2) + "\n"
+            if getattr(args, "out", ""):
+                out_path = Path(args.out)
+                try:
+                    out_path.write_text(text, encoding="utf-8")
+                except OSError as exc:
+                    sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                    return 1
+                sys.stderr.write("wrote %s\n" % out_path)
+            else:
+                sys.stdout.write(text)
     if args.write_ask:
         write_ask(Path(args.write_ask), args.task, harness, picked)
     if args.sidecar:
@@ -1400,7 +1402,7 @@ def main(argv: list[str] | None = None) -> int:
             all_removed.update(prev_ids - cur_ids)
         prev_ids = cur_ids
         last_tick = tick
-        _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_INV_WATCH_QUIET", args.quiet), bad=ticks == 0 or bool(tick.get("added") or tick.get("removed")))
+        _watch.emit_or_jq(tick, getattr(args, "jq", ""), args.out, quiet=_watch.quiet("JEV_INV_WATCH_QUIET", args.quiet), bad=ticks == 0 or bool(tick.get("added") or tick.get("removed")))
         ticks += 1
         sys.stderr.write(
             "watch tick=%d shortlist=%d added=%d removed=%d\n"

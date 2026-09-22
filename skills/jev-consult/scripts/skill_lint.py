@@ -230,6 +230,14 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("bad --watch %r (seconds)\n" % argv[idx + 1])
             return 2
         argv = argv[:idx] + argv[idx + 2 :]
+    jq_value = ""
+    if "--jq" in argv:
+        i = argv.index("--jq")
+        if i + 1 >= len(argv):
+            sys.stderr.write("--jq needs a KEY value\n")
+            return 2
+        jq_value = argv[i + 1]
+        argv = argv[:i] + argv[i + 2 :]
     max_ticks_arg = 0
     if "--max-ticks" in argv:
         idx = argv.index("--max-ticks")
@@ -313,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
                 "warnings": sum(1 for r in rows if r["severity"] == "warn"),
                 "infos": sum(1 for r in rows if r["severity"] == "info"),
             }
-            _watch.emit(tick, out_path, quiet=_watch.quiet("JEV_SLINT_WATCH_QUIET", quiet), bad=tick["errors"] or (strict and tick["findings"]))
+            _watch.emit_or_jq(tick, jq_value, out_path, quiet=_watch.quiet("JEV_SLINT_WATCH_QUIET", quiet), bad=tick["errors"] or (strict and tick["findings"]))
             ticks += 1
             sys.stderr.write(
                 "watch tick=%d findings=%d errors=%d\n"

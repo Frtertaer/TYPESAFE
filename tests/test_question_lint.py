@@ -967,5 +967,25 @@ class ApplyFixesTests(unittest.TestCase):
         self.assertEqual(rc, 2)
 
 
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        import os as _os
+
+        request = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Should the coder proceed with the plan?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(_os.environ, {"JEV_QLINT_WATCH_MAX": "2"}):
+                with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+                    rc = question_lint.main(
+                        [str(path), "--watch", "0.01", "--jq", "errors"]
+                    )
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().splitlines(), ["0", "0"])
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

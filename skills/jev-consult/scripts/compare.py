@@ -307,14 +307,7 @@ def main(argv: list[str] | None = None) -> int:
                 "new_failures": new_failures,
                 "elapsed_s": round(_time.time() - watch_t0, 2),
             }
-            if getattr(args, "jq", ""):
-                for field in [f.strip() for f in args.jq.split(",") if f.strip()]:
-                    node = tick
-                    for part in field.split("."):
-                        node = node.get(part) if isinstance(node, dict) else None
-                    sys.stdout.write(json.dumps(node) + "\n")
-            else:
-                _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_COMPARE_WATCH_QUIET", args.quiet), bad=bool(tick["failures"]))
+            _watch.emit_or_jq(tick, getattr(args, "jq", ""), args.out, quiet=_watch.quiet("JEV_COMPARE_WATCH_QUIET", args.quiet), bad=bool(tick["failures"]))
             ticks += 1
             sys.stderr.write(
                 "watch tick=%d cases=%d failures=%d\n"

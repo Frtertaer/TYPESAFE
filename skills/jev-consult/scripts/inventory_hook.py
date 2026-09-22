@@ -632,6 +632,11 @@ def main(argv: list[str] | None = None) -> int:
                     watch_max_arg = 0.0
         dead = _watch.deadline("JEV_HOOK_WATCH_SECS", watch_max_arg)
         fail_fast = "--fail-fast" in argv
+        hook_jq = ""
+        if "--jq" in argv:
+            idx = argv.index("--jq")
+            if idx + 1 < len(argv):
+                hook_jq = argv[idx + 1]
         verdict_path = ""
         if "--verdict" in argv:
             idx = argv.index("--verdict")
@@ -676,7 +681,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             prev_winner = tick["winner"]
             tick["elapsed_s"] = round(time.time() - watch_t0, 2)
-            _watch.emit(tick, watch_out, quiet=_watch.quiet("JEV_HOOK_WATCH_QUIET", quiet), bad=not tick["winner"])
+            _watch.emit_or_jq(tick, hook_jq, watch_out, quiet=_watch.quiet("JEV_HOOK_WATCH_QUIET", quiet), bad=not tick["winner"])
             ticks += 1
             sys.stderr.write(
                 "watch tick=%d winner=%s keys=%s\n"

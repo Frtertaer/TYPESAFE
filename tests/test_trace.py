@@ -1522,5 +1522,58 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(merged["unknown"], "next file")
 
 
+class WatchJqTests(unittest.TestCase):
+    def _trace(self, tmp: str) -> Path:
+        path = Path(tmp) / "trace.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "plan": "P",
+                    "attempt_count": 2,
+                    "history": [{"ts": 1, "pick": "a"}],
+                    "inspected": [{"name": "x"}],
+                    "notes": [{"ts": 1, "text": "n"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def _watch_jq(self, path: Path, cmd: str, key: str):
+        import io
+        import os as _os
+
+        buf = io.StringIO()
+        with patch.dict(_os.environ, {"JEV_TRACE_WATCH_MAX": "2"}):
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(
+                    ["--file", str(path), cmd, "--watch", "0.01", "--jq", key]
+                )
+        return rc, buf.getvalue().splitlines()
+
+    def test_state_watch_jq_prints_only_named_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, lines = self._watch_jq(self._trace(tmp), "state", "attempt_count")
+        self.assertEqual(rc, 0)
+        self.assertEqual(lines, ["2", "2"])
+
+    def test_history_watch_jq_prints_only_named_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, lines = self._watch_jq(self._trace(tmp), "history", "picks")
+        self.assertEqual(rc, 0)
+        self.assertEqual(lines, ["1", "1"])
+
+    def test_notes_watch_jq_prints_only_named_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, lines = self._watch_jq(self._trace(tmp), "notes", "notes")
+        self.assertEqual(rc, 0)
+        self.assertEqual(lines, ["1", "1"])
+
+    def test_stats_watch_jq_prints_only_named_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, lines = self._watch_jq(self._trace(tmp), "stats", "exists")
+        self.assertEqual(rc, 0)
+        self.assertEqual(lines, ["true", "true"])
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

@@ -490,5 +490,21 @@ class CliTests(unittest.TestCase):
         self.assertEqual(rc, 2)
 
 
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        import io as _io
+        import os as _os
+
+        buf = _io.StringIO()
+        with mock.patch.dict(_os.environ, {"JEV_TLINT_WATCH_MAX": "2"}):
+            with redirect_stdout(buf), redirect_stderr(_io.StringIO()):
+                rc = trigger_lint.main(
+                    [str(FIXTURE), "--watch", "0.01", "--jq", "findings"]
+                )
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(all(l.isdigit() for l in lines))
+
 if __name__ == "__main__":
     unittest.main()

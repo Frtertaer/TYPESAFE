@@ -946,5 +946,36 @@ class PeerFillE2ETests(unittest.TestCase):
             self.assertIn("bad --jq key", proc.stderr)
 
 
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        import os
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            env = dict(
+                os.environ,
+                JEV_PEER_WATCH_MAX="2",
+                JEV_CONSULT_LOG="0",
+                USERPROFILE=str(cwd),
+                HOME=str(cwd),
+            )
+            env.pop("TYPESAFE_API_KEY", None)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--watch", "0.01",
+                    "--cwd", str(cwd),
+                    "--jq", "miss",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.splitlines(), ["false", "false"])
+
 if __name__ == "__main__":
     unittest.main()

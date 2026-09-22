@@ -369,7 +369,7 @@ def main() -> int:
         action="store_true",
         help="Print the cwd fill state (miss present/age, ask file) as JSON and exit; --jq KEY prints one dotted-path field.",
     )
-    parser.add_argument("--jq", metavar="KEY", default="", help="With --status: print just one dotted-path field of the report (e.g. miss_age_s); unknown key exits 2.")
+    parser.add_argument("--jq", metavar="KEY", default="", help="With --status: print just one dotted-path field of the report (e.g. miss_age_s); unknown key exits 2. With --watch: print just the named tick field(s) per pass, comma list.")
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
@@ -456,7 +456,7 @@ def main() -> int:
                 "ask": ask_path.is_file(),
                 "elapsed_s": round(now - watch_t0, 2),
             }
-            _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_APPLY_WATCH_QUIET", args.quiet), bad=bool(tick["miss"] or tick["ask"]))
+            _watch.emit_or_jq(tick, getattr(args, "jq", ""), args.out, quiet=_watch.quiet("JEV_APPLY_WATCH_QUIET", args.quiet), bad=bool(tick["miss"] or tick["ask"]))
             ticks += 1
             sys.stderr.write(
                 "watch tick=%d miss=%s ask=%s\n" % (ticks, tick["miss"], tick["ask"])

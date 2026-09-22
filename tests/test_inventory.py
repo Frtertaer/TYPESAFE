@@ -1519,5 +1519,34 @@ class HookRetriesEnvTests(unittest.TestCase):
         self.assertEqual(buf.getvalue().strip(), "1/6")
 
 
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+        from unittest.mock import patch
+
+        buf = StringIO()
+        err = StringIO()
+        with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+            with redirect_stdout(buf), redirect_stderr(err):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(FIXTURE),
+                        "--watch",
+                        "0.01",
+                        "--jq",
+                        "counts",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        lines = buf.getvalue().splitlines()
+        dicts = [json.loads(l) for l in lines if l.startswith("{")]
+        self.assertEqual(len(dicts), 2)
+        self.assertTrue(all("ts" not in d for d in dicts))
+        self.assertTrue(all("skill" in d for d in dicts))
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

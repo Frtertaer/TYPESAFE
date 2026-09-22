@@ -3884,6 +3884,46 @@ def step_apply_fill(tmp: Path) -> dict:
                     and rc == 0
                     and "would_install plugin smoke-thing" in out
                 )
+            if ok:
+                # --from-miss loop: the hook's miss marker carries
+                # task+harness; the fill installs via the fake hermes
+                miss_cwd = tmp / "apply-miss-cwd"
+                miss_cwd.mkdir(parents=True, exist_ok=True)
+                (miss_cwd / ".jev-tools-miss.json").write_text(
+                    json.dumps(
+                        {
+                            "task": "smoke",
+                            "harness": "hermes",
+                            "written_at": int(time.time()),
+                            "empty": True,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                threading.Thread(
+                    target=server.handle_request, daemon=True
+                ).start()
+                rc, out = _run(
+                    [
+                        str(SCRIPTS / "apply_fill.py"),
+                        "--from-miss",
+                        "--cwd",
+                        str(miss_cwd),
+                        "--home",
+                        str(tmp / "home"),
+                        "--ask-file",
+                        str(tmp / "apply-miss-ask.json"),
+                    ],
+                    cwd=miss_cwd,
+                    env=env2,
+                )
+                ok = (
+                    rc == 0
+                    and "installed plugin smoke-thing" in out
+                    and not (
+                        miss_cwd / ".jev-tools-miss.json"
+                    ).is_file()
+                )
         finally:
             server.server_close()
     return _step("apply_fill", ok, out.strip()[:120] or "rc=%d" % rc)
@@ -6209,6 +6249,71 @@ def step_peer_fill_status(tmp: Path) -> dict:
                     ).is_file()
                     and not (miss_cwd2 / ".jev-tools-miss.json").is_file()
                 )
+            if ok:
+                # --list prints the peer rows; --show dumps one record;
+                # --pick NAME skips Jev and --dry-run emits "dry copied"
+                rc, out = _run(
+                    [
+                        str(SCRIPTS / "peer_fill.py"),
+                        "--task",
+                        "smoke",
+                        "--harness",
+                        "hermes",
+                        "--home",
+                        str(peer_home),
+                        "--hermes-home",
+                        str(tmp / "peer-hermes"),
+                        "--cwd",
+                        str(peer_cwd),
+                        "--list",
+                    ],
+                    cwd=peer_cwd,
+                    env=env2,
+                )
+                ok = rc == 0 and "smoke-thing" in out
+            if ok:
+                rc, out = _run(
+                    [
+                        str(SCRIPTS / "peer_fill.py"),
+                        "--task",
+                        "smoke",
+                        "--harness",
+                        "hermes",
+                        "--home",
+                        str(peer_home),
+                        "--hermes-home",
+                        str(tmp / "peer-hermes"),
+                        "--cwd",
+                        str(peer_cwd),
+                        "--show",
+                        "smoke-thing",
+                    ],
+                    cwd=peer_cwd,
+                    env=env2,
+                )
+                ok = rc == 0 and "smoke-thing" in out
+            if ok:
+                rc, out = _run(
+                    [
+                        str(SCRIPTS / "peer_fill.py"),
+                        "--task",
+                        "smoke",
+                        "--harness",
+                        "hermes",
+                        "--home",
+                        str(peer_home),
+                        "--hermes-home",
+                        str(tmp / "peer-hermes"),
+                        "--cwd",
+                        str(peer_cwd),
+                        "--pick",
+                        "smoke-thing",
+                        "--dry-run",
+                    ],
+                    cwd=peer_cwd,
+                    env=env2,
+                )
+                ok = rc == 0 and "dry copied" in out
         finally:
             server.server_close()
     return _step("peer_fill_status", ok, out.strip()[:120] or "rc=%d" % rc)

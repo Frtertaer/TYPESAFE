@@ -1133,6 +1133,24 @@ def step_hook(tmp: Path) -> dict:
         )
         env.pop("JEV_HOOK_EVENTS", None)
         ok = rc == 0 and "{}" in out
+    if ok:
+        # a payload timestamp older than JEV_HOOK_MAX_AGE is dropped
+        env["JEV_HOOK_MAX_AGE"] = "60"
+        rc, out = _run(
+            [str(SCRIPTS / "inventory_hook.py"), "--verbose"],
+            cwd=tmp,
+            env=env,
+            inp=json.dumps(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "stale prompt smoke",
+                    "cwd": str(cwd2),
+                    "timestamp": 1000000,
+                }
+            ),
+        )
+        env.pop("JEV_HOOK_MAX_AGE", None)
+        ok = rc == 0 and "{}" in out
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

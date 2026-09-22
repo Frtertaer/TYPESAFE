@@ -757,6 +757,58 @@ def step_decisions(tmp: Path) -> dict:
         except ValueError:
             ok = False
     if ok:
+        # --winner/--winners/--explicit filter on winner name + explicit flag
+        winner_log = tmp / "decisions-winners.jsonl"
+        winner_log.write_text(
+            '\n'.join(
+                [
+                    json.dumps({"ts": 1, "jev_status": "winner", "winner": {"kind": "skill", "name": "alpha"}, "explicit": True}),
+                    json.dumps({"ts": 2, "jev_status": "winner", "winner": {"kind": "skill", "name": "beta"}}),
+                    json.dumps({"ts": 3, "jev_status": "none"}),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(winner_log),
+                "--winner",
+                "alpha",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 1
+        except ValueError:
+            ok = False
+    if ok:
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(winner_log),
+                "--explicit",
+                "--json",
+            ]
+        )
+        try:
+            ok = rc == 0 and json.loads(out).get("total") == 1
+        except ValueError:
+            ok = False
+    if ok:
+        rc, out = _run(
+            [
+                str(SCRIPTS / "decisions.py"),
+                "--file",
+                str(winner_log),
+                "--winners",
+            ]
+        )
+        ok = rc == 0 and "skill:alpha" in out and "skill:beta" in out
+    if ok:
         # --csv emits a header plus one row per entry, no stats
         rc, out = _run(
             [

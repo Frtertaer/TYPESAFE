@@ -1146,6 +1146,28 @@ class JevTimeoutEnvTests(unittest.TestCase):
                 inv._policy_float_key("hook_jev_timeout_seconds", 8.0),
             )
 
+    def test_env_invalid_warns_on_stderr(self) -> None:
+        import io
+        import os
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_TIMEOUT": "bogus"}):
+            with patch("sys.stderr", buf):
+                inv.hook_jev_timeout_seconds()
+        self.assertIn("bad JEV_HOOK_TIMEOUT", buf.getvalue())
+
+    def test_env_valid_no_warning(self) -> None:
+        import io
+        import os
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_TIMEOUT": "3"}):
+            with patch("sys.stderr", buf):
+                inv.hook_jev_timeout_seconds()
+        self.assertNotIn("JEV_HOOK_TIMEOUT", buf.getvalue())
+
     def test_env_negative_ignored(self) -> None:
         import os
         from unittest.mock import patch

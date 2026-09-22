@@ -900,6 +900,35 @@ class JevInternalsTests(unittest.TestCase):
         self.assertEqual(out["noul"], 0.9)
         self.assertIsInstance(out["ms"], int)
 
+    def test_malformed_policy_is_clean_systemexit(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad.json"
+            bad.write_text("{bad json", encoding="utf-8")
+            with self.assertRaises(SystemExit) as ctx:
+                jev.load_policy(str(bad))
+            self.assertIn("not JSON", str(ctx.exception))
+            arr = Path(tmp) / "arr.json"
+            arr.write_text("[]", encoding="utf-8")
+            with self.assertRaises(SystemExit) as ctx:
+                jev.load_policy(str(arr))
+            self.assertIn("must be an object", str(ctx.exception))
+            with self.assertRaises(SystemExit) as ctx:
+                jev.load_policy(str(Path(tmp) / "nope.json"))
+            self.assertIn("unreadable", str(ctx.exception))
+
+    def test_jev_policy_env_overrides_path(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = Path(tmp) / "policy.json"
+            custom.write_text(json.dumps({"version": 999}), encoding="utf-8")
+            with patch.dict(os.environ, {"JEV_POLICY": str(custom)}):
+                self.assertEqual(jev.load_policy()["version"], 999)
+            with patch.dict(os.environ, {"JEV_POLICY": ""}):
+                self.assertNotEqual(jev.load_policy().get("version"), 999)
+
     def test_env_timeout_helper(self) -> None:
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("JEV_TIMEOUT", None)

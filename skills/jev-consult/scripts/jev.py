@@ -70,10 +70,15 @@ def load_policy(path: str | None = None) -> dict[str, Any]:
     policy_path = (
         Path(path) if path else Path(env_path) if env_path else skill_root() / "policy.json"
     )
-    with policy_path.open(encoding="utf-8") as handle:
-        data = json.load(handle)
+    try:
+        with policy_path.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+    except OSError as exc:
+        raise SystemExit("policy.json unreadable: %s" % exc) from None
+    except json.JSONDecodeError as exc:
+        raise SystemExit("policy.json is not JSON: %s" % exc) from None
     if not isinstance(data, dict):
-        raise ValueError("policy.json must be an object")
+        raise SystemExit("policy.json must be an object")
     return data
 
 

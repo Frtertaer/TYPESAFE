@@ -432,14 +432,7 @@ def main(argv: list[str] | None = None) -> int:
                 if row
                 else {"verdict": "FAIL", "id": args.id, "missing": True}
             )
-            try:
-                Path(args.verdict).write_text(
-                    json.dumps(case_payload, indent=2) + "\n", encoding="utf-8"
-                )
-            except OSError as exc:
-                sys.stderr.write("--verdict failed: %s\n" % exc)
-                return False
-            return True
+            return _watch.write_verdict(args.verdict, case_payload)
         failed = []
         if not res["ok"]:
             failed.append("margin")
@@ -463,14 +456,7 @@ def main(argv: list[str] | None = None) -> int:
             "best_negative": res["best_negative"],
             "margin": res["margin"],
         }
-        try:
-            Path(args.verdict).write_text(
-                json.dumps(payload, indent=2) + "\n", encoding="utf-8"
-            )
-        except OSError as exc:
-            sys.stderr.write("--verdict failed: %s\n" % exc)
-            return False
-        return True
+        return _watch.write_verdict(args.verdict, payload)
 
     if args.watch and args.watch > 0:
         import time as _time

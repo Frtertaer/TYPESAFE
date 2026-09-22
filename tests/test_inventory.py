@@ -352,7 +352,7 @@ class InventoryTests(unittest.TestCase):
                             ]
                         )
             self.assertEqual(code, 0)
-            verdict_writes = [c for c in calls if c == str(verdict)]
+            verdict_writes = [c for c in calls if c == str(verdict) + ".tmp"]
             self.assertGreaterEqual(len(verdict_writes), 2)
 
     def test_diff_reports_added_removed_names(self) -> None:

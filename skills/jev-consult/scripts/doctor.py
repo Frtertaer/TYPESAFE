@@ -281,15 +281,7 @@ def main(argv: list[str] | None = None) -> int:
     def _write_verdict(checks_now: list[dict]) -> bool:
         if not args.verdict:
             return True
-        try:
-            Path(args.verdict).write_text(
-                json.dumps(_verdict_payload(checks_now), indent=2) + "\n",
-                encoding="utf-8",
-            )
-        except OSError as exc:
-            sys.stderr.write("--verdict failed: %s\n" % exc)
-            return False
-        return True
+        return _watch.write_verdict(args.verdict, _verdict_payload(checks_now))
 
     if args.watch:
         import time as _time

@@ -137,5 +137,30 @@ class EmitTests(unittest.TestCase):
             self.assertEqual(len(buf.getvalue().splitlines()), 2)
 
 
+class WriteVerdictTests(unittest.TestCase):
+    def test_writes_payload_and_leaves_no_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v.json"
+            self.assertTrue(watch.write_verdict(str(path), {"verdict": "ok", "n": 1}))
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["verdict"], "ok")
+            self.assertFalse((Path(tmp) / "v.json.tmp").exists())
+            self.assertEqual([p.name for p in Path(tmp).iterdir()], ["v.json"])
+
+    def test_atomic_overwrite_replaces_existing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "v.json"
+            watch.write_verdict(str(path), {"verdict": "one"})
+            watch.write_verdict(str(path), {"verdict": "two"})
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["verdict"], "two")
+
+    def test_bad_path_returns_false_and_warns(self) -> None:
+        buf_err = io.StringIO()
+        missing_dir = Path("nul\\bad") / "nope"
+        with patch.object(sys, "stderr", buf_err):
+            ok = watch.write_verdict(str(missing_dir / "v.json"), {"a": 1})
+        self.assertFalse(ok)
+        self.assertIn("--verdict failed", buf_err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

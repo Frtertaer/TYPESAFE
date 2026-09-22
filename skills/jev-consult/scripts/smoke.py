@@ -387,23 +387,14 @@ def main(argv: list[str] | None = None) -> int:
     def _write_verdict(steps_now: list[dict]) -> bool:
         if not args.verdict:
             return True
-        try:
-            Path(args.verdict).write_text(
-                json.dumps(
-                    {
-                        "verdict": "PASS" if all(s["ok"] for s in steps_now) else "FAIL",
-                        "steps": len(steps_now),
-                        "failed": [s["name"] for s in steps_now if not s["ok"]],
-                    },
-                    indent=2,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-        except OSError as exc:
-            sys.stderr.write("--verdict failed: %s\n" % exc)
-            return False
-        return True
+        return _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "PASS" if all(s["ok"] for s in steps_now) else "FAIL",
+                "steps": len(steps_now),
+                "failed": [s["name"] for s in steps_now if not s["ok"]],
+            },
+        )
 
     if args.watch and args.watch > 0:
         import time as _time

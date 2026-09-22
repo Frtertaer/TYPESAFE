@@ -57,12 +57,20 @@ def emit(tick: dict, out_path=None, quiet: bool = False, bad=None) -> None:
 
 
 def write_verdict(path: str, payload: dict) -> bool:
-    """Write a slim verdict JSON to path; False (with stderr note) on failure."""
+    """Write a slim verdict JSON to path; False (with stderr note) on failure.
+
+    Writes a sibling ``<name>.tmp`` file first and ``os.replace``s it over the
+    target so readers never see a half-written payload."""
+    target = Path(path)
+    tmp = target.with_name(target.name + ".tmp")
     try:
-        Path(path).write_text(
-            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
-        )
+        tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, target)
     except OSError as exc:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
         sys.stderr.write("--verdict failed: %s\n" % exc)
         return False
     return True

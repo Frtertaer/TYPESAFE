@@ -814,7 +814,7 @@ class TriggerEvalTests(unittest.TestCase):
                             ["--watch", "0.01", "--verdict", str(path), "--quiet"]
                         )
             self.assertIn(rc, (0, 1))
-            verdict_writes = [c for c in calls if c == str(path)]
+            verdict_writes = [c for c in calls if c == str(path) + ".tmp"]
             self.assertGreaterEqual(len(verdict_writes), 2)
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertIn(payload["verdict"], ("PASS", "FAIL"))

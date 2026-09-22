@@ -307,6 +307,10 @@ def main(argv: list[str] | None = None) -> int:
             }
             _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_COMPARE_WATCH_QUIET", args.quiet), bad=bool(tick["failures"]))
             ticks += 1
+            sys.stderr.write(
+                "watch tick=%d cases=%d failures=%d\n"
+                % (ticks, tick["cases"], tick["failures"])
+            )
             if args.verdict and verdict_ok and not _write_verdict(args.verdict, tick):
                 verdict_ok = False  # warn once, stop retrying
             if args.fail_fast and failing:

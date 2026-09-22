@@ -450,6 +450,31 @@ class StrictGateTest(unittest.TestCase):
             self.assertTrue(all(isinstance(t["elapsed_s"], float) for t in ticks))
             self.assertGreaterEqual(ticks[1]["elapsed_s"], ticks[0]["elapsed_s"])
 
+    def test_watch_writes_stderr_tick_summary(self) -> None:
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            env = dict(_os.environ, JEV_COMPARE_WATCH_MAX="2")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "skills" / "jev-consult" / "scripts" / "compare.py"),
+                    "--watch", "0.01", "--cases", str(path),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = [
+                l for l in proc.stderr.splitlines() if l.startswith("watch tick=")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertIn("cases=2", lines[0])
+            self.assertIn("failures=0", lines[0])
+
     def test_watch_rc_1_when_last_tick_has_failures(self) -> None:
         import os as _os
 

@@ -367,6 +367,7 @@ def main() -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that finds a pending miss or ask.")
     parser.add_argument(
         "--out",
         default="",
@@ -415,6 +416,8 @@ def main() -> int:
             ticks += 1
             if args.verdict and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
+            if args.fail_fast and (tick["miss"] or tick["ask"]):
+                break
             time.sleep(args.watch)
         if args.verdict and verdict_ok and not _write_verdict():
             return 1

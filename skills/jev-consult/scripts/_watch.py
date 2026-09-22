@@ -45,6 +45,14 @@ def deadline(env_name: str, override=None) -> float:
     return time.time() + s if s > 0 else 0.0
 
 
+def quiet(env_name: str, flag: bool = False) -> bool:
+    """Effective --quiet: the flag wins, else the JEV_*_WATCH_QUIET env
+    (1/true/yes/on count as set). Lets CI preset quiet ticks globally."""
+    if flag:
+        return True
+    return os.environ.get(env_name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def emit(tick: dict, out_path=None, quiet: bool = False, bad=None) -> None:
     """Print one JSONL tick (and append to out_path, fail-open).
 

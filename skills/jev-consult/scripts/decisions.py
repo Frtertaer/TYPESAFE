@@ -966,7 +966,7 @@ def main(argv: list[str] | None = None) -> int:
                     tick["delta_pct"] = None
             total_added += int(tick.get("added", 0))
             total_removed += int(tick.get("removed", 0))
-            _watch.emit(tick, getattr(args, "out", "") or None, quiet=args.quiet, bad=bool(tick.get("added") or tick.get("removed")))
+            _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_DECISIONS_WATCH_QUIET", args.quiet), bad=bool(tick.get("added") or tick.get("removed")))
             prev_keys = cur_keys
             ticks += 1
             if args.verdict and verdict_ok and not _write_verdict():

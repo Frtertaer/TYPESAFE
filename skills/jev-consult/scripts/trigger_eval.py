@@ -565,7 +565,7 @@ def main(argv: list[str] | None = None) -> int:
             prev_gates = list(failed)
             prev_tick = tick
             gates_seen.update(failed)
-            _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(failed))
+            _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_TRIGGER_WATCH_QUIET", args.quiet), bad=bool(failed))
             if not _write_verdict(
                 cur,
                 {"error_ticks": error_ticks, "gates_seen": sorted(gates_seen)},

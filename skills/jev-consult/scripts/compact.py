@@ -1280,7 +1280,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
                 "reduction": stats.get("reduction"),
                 "fallback": bool(stats.get("fallback")),
             }
-            _watch.emit(tick, getattr(args, "out", "") or None, quiet=args.quiet, bad=tick["fallback"])
+            _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_COMPACT_WATCH_QUIET", args.quiet), bad=tick["fallback"])
             ticks += 1
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying

@@ -434,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
                 "failed": [s["name"] for s in steps if not s["ok"]],
                 "elapsed_s": round(_time.time() - watch_t0, 2),
             }
-            _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["failed"]))
+            _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_SMOKE_WATCH_QUIET", args.quiet), bad=bool(tick["failed"]))
             last_steps = steps
             ticks += 1
             if verdict_ok and not _write_verdict(last_steps):

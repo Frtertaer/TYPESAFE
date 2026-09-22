@@ -303,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
                 "new_failures": new_failures,
                 "elapsed_s": round(_time.time() - watch_t0, 2),
             }
-            _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["failures"]))
+            _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_COMPARE_WATCH_QUIET", args.quiet), bad=bool(tick["failures"]))
             ticks += 1
             if args.verdict and verdict_ok and not _write_verdict(args.verdict, tick):
                 verdict_ok = False  # warn once, stop retrying

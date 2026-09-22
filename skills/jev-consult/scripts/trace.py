@@ -352,7 +352,7 @@ def cmd_history(args: argparse.Namespace) -> int:
                 "picks": len(filtered) if filtered is not None else None,
                 "elapsed_s": round(_time.time() - watch_t0, 2),
             }
-            _watch.emit(tick, getattr(args, "out", "") or None, quiet=getattr(args, "quiet", False), bad=bool(tick["picks"]))
+            _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_TRACE_WATCH_QUIET", getattr(args, "quiet", False)), bad=bool(tick["picks"]))
             ticks += 1
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
@@ -508,7 +508,7 @@ def cmd_notes(args: argparse.Namespace) -> int:
                 "notes": len(filtered) if filtered is not None else None,
                 "elapsed_s": round(_time.time() - watch_t0, 2),
             }
-            _watch.emit(tick, getattr(args, "out", "") or None, quiet=getattr(args, "quiet", False), bad=bool(tick["notes"]))
+            _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_TRACE_WATCH_QUIET", getattr(args, "quiet", False)), bad=bool(tick["notes"]))
             ticks += 1
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
@@ -586,7 +586,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 "inspected": len(cur.get("inspected") or []),
                 "elapsed_s": round(_time.time() - watch_t0, 2),
             }
-            _watch.emit(tick, getattr(args, "out", "") or None, quiet=getattr(args, "quiet", False), bad=not tick["exists"])
+            _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_TRACE_WATCH_QUIET", getattr(args, "quiet", False)), bad=not tick["exists"])
             ticks += 1
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
@@ -671,7 +671,7 @@ def cmd_state(args: argparse.Namespace) -> int:
                     "elapsed_s": round(_time.time() - watch_t0, 2),
                 },
                 getattr(args, "out", "") or None,
-                quiet=getattr(args, "quiet", False),
+                quiet=_watch.quiet("JEV_TRACE_WATCH_QUIET", getattr(args, "quiet", False)),
                 bad=bool(state),
             )
             prev_attempt = cur_attempt

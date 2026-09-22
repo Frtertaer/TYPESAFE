@@ -397,7 +397,7 @@ def main() -> int:
                 }
             except Exception:
                 tick = {"ts": int(time.time()), "miss": None, "ask": None}
-            _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick.get("miss") or tick.get("ask")))
+            _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_PEER_WATCH_QUIET", args.quiet), bad=bool(tick.get("miss") or tick.get("ask")))
             ticks += 1
             if args.verdict and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying

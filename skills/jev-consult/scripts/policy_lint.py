@@ -570,7 +570,7 @@ def main(argv: list[str] | None = None) -> int:
                 "warnings": sum(1 for r in rows if r["severity"] == "warn"),
                 "infos": sum(1 for r in rows if r["severity"] == "info"),
             }
-            _watch.emit(tick, out_path, quiet=quiet, bad=tick["errors"] or (strict and tick["findings"]))
+            _watch.emit(tick, out_path, quiet=_watch.quiet("JEV_PLINT_WATCH_QUIET", quiet), bad=tick["errors"] or (strict and tick["findings"]))
             ticks += 1
             if verdict_path and verdict_ok:
                 rc_now = 1 if (tick["errors"] or (strict and tick["findings"])) else 0

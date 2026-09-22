@@ -1379,7 +1379,7 @@ def main(argv: list[str] | None = None) -> int:
             all_removed.update(prev_ids - cur_ids)
         prev_ids = cur_ids
         last_tick = tick
-        _watch.emit(tick, args.out, quiet=args.quiet, bad=ticks == 0 or bool(tick.get("added") or tick.get("removed")))
+        _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_INV_WATCH_QUIET", args.quiet), bad=ticks == 0 or bool(tick.get("added") or tick.get("removed")))
         ticks += 1
         if verdict_ok and not _write_verdict(ticks):
             verdict_ok = False  # warn once, stop retrying

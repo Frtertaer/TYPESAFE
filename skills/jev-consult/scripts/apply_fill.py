@@ -412,7 +412,7 @@ def main() -> int:
                 "miss_age_s": round(now - miss_ts, 1) if miss_ts is not None else None,
                 "ask": ask_path.is_file(),
             }
-            _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(tick["miss"] or tick["ask"]))
+            _watch.emit(tick, args.out, quiet=_watch.quiet("JEV_APPLY_WATCH_QUIET", args.quiet), bad=bool(tick["miss"] or tick["ask"]))
             ticks += 1
             if args.verdict and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying

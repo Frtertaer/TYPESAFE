@@ -674,7 +674,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             prev_winner = tick["winner"]
             tick["elapsed_s"] = round(time.time() - watch_t0, 2)
-            _watch.emit(tick, watch_out, quiet=quiet, bad=not tick["winner"])
+            _watch.emit(tick, watch_out, quiet=_watch.quiet("JEV_HOOK_WATCH_QUIET", quiet), bad=not tick["winner"])
             ticks += 1
             if verdict_path and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying

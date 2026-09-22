@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -160,6 +161,44 @@ class EmitTests(unittest.TestCase):
             self.assertEqual(len(lines), 1)
             self.assertIn('"ok": false', lines[0])
             # --out still receives every tick
+            self.assertEqual(len(out.read_text(encoding="utf-8").splitlines()), 2)
+
+    def test_quiet_helper_flag_wins(self) -> None:
+        self.assertTrue(watch.quiet("JEV_X_WATCH_QUIET", True))
+        self.assertTrue(watch.quiet("JEV_X_WATCH_QUIET", flag=True))
+        self.assertFalse(watch.quiet("JEV_X_WATCH_QUIET", False))
+
+    def test_quiet_helper_reads_env(self) -> None:
+        for val, want in (
+            ("1", True),
+            ("true", True),
+            ("yes", True),
+            ("on", True),
+            ("0", False),
+            ("no", False),
+            ("", False),
+            ("garbage", False),
+        ):
+            with patch.dict(os.environ, {"JEV_X_WATCH_QUIET": val}):
+                self.assertIs(
+                    watch.quiet("JEV_X_WATCH_QUIET", False), want, val
+                )
+
+    def test_quiet_env_suppresses_clean_ticks_via_emit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "t.jsonl"
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_X_WATCH_QUIET": "1"}):
+                with redirect_stdout(buf):
+                    watch.emit(
+                        {"ok": True}, out,
+                        quiet=watch.quiet("JEV_X_WATCH_QUIET", False), bad=False,
+                    )
+                    watch.emit(
+                        {"ok": False}, out,
+                        quiet=watch.quiet("JEV_X_WATCH_QUIET", False), bad=True,
+                    )
+            self.assertEqual(len(buf.getvalue().splitlines()), 1)
             self.assertEqual(len(out.read_text(encoding="utf-8").splitlines()), 2)
 
     def test_quiet_off_prints_everything(self) -> None:

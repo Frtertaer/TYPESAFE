@@ -260,6 +260,54 @@ class BomPayloadTests(unittest.TestCase):
             self.assertTrue((cwd / ".jev-tools-miss.json").exists())
 
 
+class UnicodeTaskTests(unittest.TestCase):
+    """Non-ASCII prompts must round-trip: sidecars are utf-8, stdout payload
+    escapes non-ASCII so it survives any console codepage."""
+
+    TASK = "：JWT ？ Naïve façade — é "
+
+    def test_cjk_prompt_writes_utf8_miss_and_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            log = cwd / "decisions.jsonl"
+            payload = {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": self.TASK,
+                "cwd": str(cwd),
+            }
+            env = dict(os.environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env.update(
+                {
+                    "JEV_CONSULT_LOG": str(log),
+                    "JEV_HOOK_CWD": str(cwd),
+                    "JEV_HOOK_TIMEOUT": "0.01",
+                    "PYTHONIOENCODING": "cp1252",
+                }
+            )
+            proc = subprocess.run(
+                [sys.executable, str(HOOK)],
+                input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                capture_output=True,
+                env=env,
+                cwd=str(cwd),
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+            # stdout parses even though PYTHONIOENCODING=cp1252
+            json.loads(proc.stdout.decode("utf-8", "replace"))
+            miss = cwd / ".jev-tools-miss.json"
+            self.assertTrue(miss.exists())
+            data = json.loads(miss.read_text(encoding="utf-8"))
+            self.assertEqual(data["task"], self.TASK.strip()[:500])
+            rows = [
+                json.loads(line)
+                for line in log.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertTrue(rows)
+
+
 class ConcurrentHookTests(unittest.TestCase):
     def test_racing_hooks_leave_parseable_sidecars(self) -> None:
         """Two+ hooks writing the same cwd must not interleave bytes —

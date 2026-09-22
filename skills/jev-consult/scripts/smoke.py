@@ -4932,6 +4932,49 @@ def step_peer_fill_status(tmp: Path) -> dict:
         )
         ticks = [ln for ln in out.splitlines() if '"miss"' in ln]
         ok = len(ticks) == 1 and "watch tick=2" not in out
+    if ok:
+        # one-shot --verdict (no --watch) reports pending|clean
+        clean_v = tmp / "peer-clean-verdict.json"
+        rc, out = _run(
+            [
+                str(SCRIPTS / "peer_fill.py"),
+                "--cwd",
+                str(clean_cwd),
+                "--verdict",
+                str(clean_v),
+            ]
+        )
+        try:
+            ok = (
+                rc == 0
+                and json.loads(clean_v.read_text(encoding="utf-8")).get(
+                    "verdict"
+                )
+                == "clean"
+            )
+        except (OSError, ValueError):
+            ok = False
+        if ok:
+            miss_v = tmp / "peer-miss-verdict.json"
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--cwd",
+                    str(miss_cwd),
+                    "--verdict",
+                    str(miss_v),
+                ]
+            )
+            try:
+                ok = (
+                    rc == 0
+                    and json.loads(miss_v.read_text(encoding="utf-8")).get(
+                        "verdict"
+                    )
+                    == "pending"
+                )
+            except (OSError, ValueError):
+                ok = False
     return _step("peer_fill_status", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

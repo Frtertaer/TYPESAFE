@@ -382,11 +382,13 @@ def step_hook(tmp: Path) -> dict:
     env.pop("TYPESAFE_API_KEY", None)
     env["USERPROFILE"] = str(tmp / "home")
     env["HOME"] = str(tmp / "home")
+    cwd = tmp / "cwd"
+    cwd.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(
         {
             "hook_event_name": "UserPromptSubmit",
             "prompt": "smoke test task",
-            "cwd": str(tmp / "cwd"),
+            "cwd": str(cwd),
         }
     )
     rc, out = _run(
@@ -398,6 +400,9 @@ def step_hook(tmp: Path) -> dict:
             ok = isinstance(json.loads(out.strip().splitlines()[0]), dict)
         except (ValueError, IndexError):
             ok = False
+    if ok:
+        # no Jev key + prompt tokens => the hook records a miss marker
+        ok = (cwd / ".jev-tools-miss.json").is_file()
     return _step("hook", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

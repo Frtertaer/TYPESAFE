@@ -446,6 +446,38 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(len(ticks), 2)
             self.assertTrue(all(t["failed"] > 0 and not t["ok"] for t in ticks))
 
+    def test_watch_tick_reports_ok_changed(self) -> None:
+        seq = [
+            [{"agent": "claude-code", "check": "c", "ok": False, "detail": "d"}],
+            [{"agent": "claude-code", "check": "c", "ok": True, "detail": "d"}],
+            [{"agent": "claude-code", "check": "c", "ok": True, "detail": "d"}],
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {"TYPESAFE_API_KEY": "", "JEV_DOCTOR_WATCH_MAX": "3"},
+            ):
+                with patch.object(DOC, "check_claude", side_effect=seq), patch.object(
+                    DOC, "check_common", side_effect=lambda h, hh: []
+                ):
+                    old = os.getcwd()
+                    os.chdir(tmp)
+                    try:
+                        with patch.object(sys, "stdout", buf):
+                            rc = DOC.main(["--agents", "claude-code", "--watch", "0.01"])
+                    finally:
+                        os.chdir(old)
+            ticks = [
+                json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(ticks), 3)
+            self.assertEqual(
+                [t["ok_changed"] for t in ticks], [False, True, False]
+            )
+
     def test_watch_rc_0_when_all_pass(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home, hermes = self._full_home(tmp)

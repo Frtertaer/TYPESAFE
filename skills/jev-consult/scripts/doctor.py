@@ -296,15 +296,19 @@ def main(argv: list[str] | None = None) -> int:
         last: dict = {}
         last_checks: list[dict] = []
         verdict_ok = True
+        prev_ok: bool | None = None
         while True:
             cur = collect()
             failed = sum(1 for c in cur if not c["ok"])
+            ok = failed == 0
             last = {
                 "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "checks": len(cur),
                 "failed": failed,
-                "ok": failed == 0,
+                "ok": ok,
+                "ok_changed": prev_ok is not None and ok != prev_ok,
             }
+            prev_ok = ok
             _watch.emit(last, args.out, quiet=args.quiet, bad=not last["ok"])
             last_checks = cur
             count += 1

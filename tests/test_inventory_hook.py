@@ -344,6 +344,55 @@ class InventoryHookTests(unittest.TestCase):
             self.assertTrue(all(t["keys"] == [] for t in ticks))
             self.assertTrue(all(t["winner"] is None for t in ticks))
 
+    def test_watch_tick_reports_winner_changed(self) -> None:
+        calls = []
+
+        def fake_handle(payload):
+            calls.append(1)
+            HOOK.LAST_DECISION = {"winner": {"name": "w%d" % len(calls)}}
+            return {"note": "x"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload.json"
+            payload.write_text('{"event": "UserPromptSubmit", "prompt": "p"}',
+                               encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_HOOK_WATCH_MAX": "2"}):
+                with patch.object(HOOK, "handle", side_effect=fake_handle):
+                    with patch("sys.stdout", buf):
+                        rc = HOOK.main(["--file", str(payload), "--watch", "0.01"])
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertFalse(ticks[0]["winner_changed"])
+            self.assertTrue(ticks[1]["winner_changed"])
+
+    def test_watch_tick_winner_changed_false_when_stable(self) -> None:
+        def fake_handle(payload):
+            HOOK.LAST_DECISION = {"winner": {"name": "same"}}
+            return {"note": "x"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload.json"
+            payload.write_text('{"event": "UserPromptSubmit", "prompt": "p"}',
+                               encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_HOOK_WATCH_MAX": "2"}):
+                with patch.object(HOOK, "handle", side_effect=fake_handle):
+                    with patch("sys.stdout", buf):
+                        rc = HOOK.main(["--file", str(payload), "--watch", "0.01"])
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual([t["winner_changed"] for t in ticks], [False, False])
+
     def test_watch_rc_0_when_last_tick_has_winner(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:

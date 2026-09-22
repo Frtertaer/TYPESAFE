@@ -639,6 +639,7 @@ def main(argv: list[str] | None = None) -> int:
         ticks = 0
         tick: dict = {}
         verdict_ok = True
+        prev_winner: str | None = None
 
         def _write_verdict() -> bool:
             return _watch.write_verdict(
@@ -666,6 +667,10 @@ def main(argv: list[str] | None = None) -> int:
             tick["winner"] = (
                 ((LAST_DECISION or {}).get("winner") or {}).get("name") or None
             )
+            tick["winner_changed"] = (
+                prev_winner is not None and tick["winner"] != prev_winner
+            )
+            prev_winner = tick["winner"]
             _watch.emit(tick, watch_out, quiet=quiet, bad=not tick["winner"])
             ticks += 1
             if verdict_path and verdict_ok and not _write_verdict():

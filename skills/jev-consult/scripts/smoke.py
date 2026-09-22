@@ -623,7 +623,18 @@ def step_hook(tmp: Path) -> dict:
             ok = False
     if ok:
         # no Jev key + prompt tokens => the hook records a miss marker
-        ok = (cwd / ".jev-tools-miss.json").is_file()
+        miss = cwd / ".jev-tools-miss.json"
+        ok = miss.is_file()
+        if ok:
+            try:
+                marker = json.loads(miss.read_text(encoding="utf-8"))
+                ok = (
+                    marker.get("task") == "smoke test task"
+                    and isinstance(marker.get("written_at"), int)
+                    and marker.get("empty") is True
+                )
+            except ValueError:
+                ok = False
     if ok:
         # repeat of the same prompt over a fresh sidecar hits the dedupe path
         env["JEV_HOOK_DEBUG"] = "1"
@@ -850,11 +861,30 @@ def step_ask_verdict(tmp: Path) -> dict:
 
     class Stub(http.server.BaseHTTPRequestHandler):
         def do_POST(self) -> None:
+            # answer the request's own question names so response
+            # validation passes for both ask (choice q) and ping (noul ok)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                request = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, TypeError):
+                request = {}
+            questions = request.get("questions") or {}
+            if "ok" in questions:
+                reply = json.dumps(
+                    {
+                        "answers": {
+                            "ok": {"type": "noul", "noul": 0.99}
+                        },
+                        "model": "smoke-stub",
+                    }
+                ).encode("utf-8")
+            else:
+                reply = body
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Length", str(len(reply)))
             self.end_headers()
-            self.wfile.write(body)
+            self.wfile.write(reply)
 
         def log_message(self, *args) -> None:
             pass
@@ -905,6 +935,22 @@ def step_ask_verdict(tmp: Path) -> dict:
                     "verdict"
                 ) == "proceed"
             except ValueError:
+                ok = False
+        if ok:
+            # ping --json hits the same stub: {ok, model, noul, ms}
+            thread = threading.Thread(
+                target=server.handle_request, daemon=True
+            )
+            thread.start()
+            rc, out = _run(
+                [str(SCRIPTS / "jev.py"), "ping", "--json"], env=env
+            )
+            if rc == 0:
+                try:
+                    ok = json.loads(out.strip()).get("ok") is True
+                except ValueError:
+                    ok = False
+            else:
                 ok = False
         return _step("ask_verdict", ok, out.strip()[:120] or "rc=%d" % rc)
     finally:

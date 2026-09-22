@@ -355,6 +355,24 @@ def step_apply_fill(tmp: Path) -> dict:
         env=env,
     )
     ok = rc == 0 and "human" in out
+    if ok:
+        rc, out = _run(
+            [
+                str(SCRIPTS / "apply_fill.py"),
+                "--status",
+                "--cwd",
+                str(tmp / "cwd"),
+            ],
+            env=env,
+        )
+        if rc == 0:
+            try:
+                report = json.loads(out)
+                ok = "miss" in report and "ask" in report
+            except (ValueError, AttributeError):
+                ok = False
+        else:
+            ok = False
     return _step("apply_fill", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

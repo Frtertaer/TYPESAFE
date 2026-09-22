@@ -494,6 +494,7 @@ def main(argv: list[str] | None = None) -> int:
         prev_tick: dict | None = None
         watch_t0 = _time.time()
         error_ticks = 0
+        gates_seen: set[str] = set()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             coverage_ok = (
                 args.min_coverage is None
@@ -563,8 +564,12 @@ def main(argv: list[str] | None = None) -> int:
             }
             prev_gates = list(failed)
             prev_tick = tick
+            gates_seen.update(failed)
             _watch.emit(tick, args.out, quiet=args.quiet, bad=bool(failed))
-            if not _write_verdict(cur, {"error_ticks": error_ticks}):
+            if not _write_verdict(
+                cur,
+                {"error_ticks": error_ticks, "gates_seen": sorted(gates_seen)},
+            ):
                 args.verdict = ""  # warn once, stop retrying
             ticks += 1
             sys.stderr.write(
@@ -591,7 +596,9 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write("watch tick=%d ok=None\n" % ticks)
                 cur = result
         if cur is not None:
-            _write_verdict(cur, {"error_ticks": error_ticks})
+            _write_verdict(
+                cur, {"error_ticks": error_ticks, "gates_seen": sorted(gates_seen)}
+            )
         if cur is None or not cur["ok"]:
             return 1
         if args.min_coverage is not None and cur["coverage"] < args.min_coverage:

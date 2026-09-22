@@ -6294,6 +6294,40 @@ def step_catalog_fill(tmp: Path) -> dict:
             except (OSError, ValueError):
                 sidecar_ok = False
             ok = copied and sidecar_ok
+        if ok:
+            # --clear drops the cached catalog hits for the task; a
+            # second call reports no_cache
+            rc, out = _run(
+                [
+                    str(SCRIPTS / "catalog_fill.py"),
+                    "--task",
+                    "smoke",
+                    "--clear",
+                    "--home",
+                    str(home),
+                    "--cwd",
+                    str(cwd),
+                ],
+                cwd=cwd,
+                env=env,
+            )
+            ok = rc == 0 and out.strip() in ("cleared", "no_cache")
+            if ok and "cleared" in out:
+                rc, out = _run(
+                    [
+                        str(SCRIPTS / "catalog_fill.py"),
+                        "--task",
+                        "smoke",
+                        "--clear",
+                        "--home",
+                        str(home),
+                        "--cwd",
+                        str(cwd),
+                    ],
+                    cwd=cwd,
+                    env=env,
+                )
+                ok = rc == 0 and "no_cache" in out
         return _step("catalog_fill", ok, out.strip()[:120] or "rc=%d" % rc)
     finally:
         server.server_close()

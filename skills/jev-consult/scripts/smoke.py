@@ -2823,6 +2823,46 @@ def step_trigger_eval(tmp: Path) -> dict:
             ) == "PASS"
         except (OSError, ValueError):
             ok = False
+    if ok:
+        # row-shaping flags: --ids lists case ids, --id filters to one,
+        # --csv emits comma rows, --summary collapses to the stats line
+        rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--ids"])
+        ids = [ln.strip() for ln in out.splitlines() if ln.strip()]
+        ok = rc == 0 and len(ids) >= 2
+        if ok:
+            rc, out = _run(
+                [str(SCRIPTS / "trigger_eval.py"), "--id", ids[0], "--quiet"]
+            )
+            ok = rc == 0 and "PASS" in out
+        if ok:
+            rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--csv"])
+            ok = rc == 0 and any(
+                ln.split(",")[0] == ids[0] for ln in out.splitlines()
+            )
+        if ok:
+            rc, out = _run([str(SCRIPTS / "trigger_eval.py"), "--summary"])
+            ok = rc == 0 and "PASS" in out
+        if ok:
+            # --top N keeps only the N weakest rows
+            rc, out = _run(
+                [str(SCRIPTS / "trigger_eval.py"), "--top", "2", "--ids"]
+            )
+            ok = rc == 0 and len(
+                [ln for ln in out.splitlines() if ln.strip()]
+            ) == 2
+        if ok:
+            # --min-coverage gates the hit rate: 0 passes, >1 fails
+            rc, _ = _run(
+                [str(SCRIPTS / "trigger_eval.py"), "--min-coverage", "0"]
+            )
+            ok = rc == 0
+            rc, _ = _run(
+                [str(SCRIPTS / "trigger_eval.py"), "--min-coverage", "1.1"]
+            )
+            ok = ok and rc == 1
+        if ok:
+            rc, _ = _run([str(SCRIPTS / "trigger_eval.py"), "--uncovered"])
+            ok = rc == 0
     return _step("trigger_eval", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

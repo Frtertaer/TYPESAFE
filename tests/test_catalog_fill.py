@@ -589,6 +589,13 @@ class CatalogFillE2ETests(unittest.TestCase):
             )
             self.assertEqual(out, "blocked")
 
+    def test_dash_pick_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(
+                ["--task", "x", "--pick=-x"], tmp, tmp
+            )
+            self.assertEqual(out, "blocked")
+
     def test_no_hermes_when_binary_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = self._run(["--task", "jwt tokens"], tmp, tmp)

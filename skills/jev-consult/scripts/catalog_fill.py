@@ -357,7 +357,7 @@ def fill(
         emit("none")
         return 0
     ident = str(chosen.get("identifier") or "").strip()
-    if not ident or blocked_text(ident, str(chosen.get("name") or "")):
+    if not ident or ident.startswith("-") or blocked_text(ident, str(chosen.get("name") or "")):
         emit("blocked")
         return 0
     if not inspect_ok(ident):

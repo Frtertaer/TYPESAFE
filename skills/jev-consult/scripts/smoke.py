@@ -110,8 +110,14 @@ def step_policy(tmp: Path) -> dict:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return _step("policy", False, "policy.json unreadable: %s" % exc)
-    ok = isinstance(data, dict) and bool(data.get("question_soft_max"))
-    return _step("policy", ok, "keys=%d" % len(data) if ok else "missing question_soft_max")
+    ok = (
+        isinstance(data, dict)
+        and bool(data.get("question_soft_max"))
+        and isinstance(data.get("endpoint"), str)
+        and data.get("endpoint", "").startswith("http")
+        and bool(data.get("version"))
+    )
+    return _step("policy", ok, "keys=%d" % len(data) if ok else "missing question_soft_max/endpoint/version")
 
 
 def step_policy_lint(tmp: Path) -> dict:

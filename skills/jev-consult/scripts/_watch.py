@@ -142,3 +142,93 @@ def write_verdict(path: str, payload: dict) -> bool:
         sys.stderr.write("--verdict failed: %s\n" % exc)
         return False
     return True
+
+
+def _self_test() -> int:
+    """Exercise cap/deadline/quiet/emit/verdict helpers offline (no Jev);
+    print self-test ok|FAIL per check, rc 0/1."""
+    import contextlib
+    import io
+    import tempfile
+
+    checks = {}
+    saved = {}
+    sentinel = "JEV_SELFTEST_WATCH_X"
+
+    def set_env(name, value):
+        if name not in saved:
+            saved[name] = os.environ.get(name)
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+    try:
+        checks["cap_override"] = cap(sentinel, 5) == 5
+        set_env(sentinel, "7")
+        checks["cap_env"] = cap(sentinel) == 7
+        set_env(sentinel, "bogus")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            checks["cap_bad_warns"] = cap(sentinel) == 0 and "bad" in err.getvalue()
+        checks["deadline_future"] = deadline(sentinel, 60) > time.time()
+        set_env(sentinel, "")
+        checks["quiet_env"] = quiet(sentinel) is False
+        set_env(sentinel, "on")
+        checks["quiet_env_on"] = quiet(sentinel) is True
+        buf = io.StringIO()
+        tick = {"kind": "probe"}
+        with contextlib.redirect_stdout(buf):
+            emit(tick)
+        got = json.loads(buf.getvalue())
+        checks["emit_ts"] = got.get("kind") == "probe" and isinstance(
+            got.get("ts"), int
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "ticks.jsonl"
+            verdict_path = Path(tmp) / "verdict.json"
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                emit({"kind": "p2"}, out_path=out_path, quiet=True, bad=False)
+            checks["quiet_suppresses"] = buf.getvalue() == ""
+            checks["out_logged"] = "p2" in out_path.read_text(encoding="utf-8")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                emit_or_jq({"a": {"b": 3}, "z": 1}, "a.b,missing")
+            checks["jq_fields"] = buf.getvalue().splitlines() == ["3", "null"]
+            checks["verdict_atomic"] = write_verdict(
+                str(verdict_path), {"verdict": "ok"}
+            ) and json.loads(
+                verdict_path.read_text(encoding="utf-8")
+            ).get("verdict") == "ok" and not verdict_path.with_name(
+                verdict_path.name + ".tmp"
+            ).exists()
+            buf = io.StringIO()
+            checks["maybe_version"] = maybe_version(["--version"], out=buf) and (
+                "policy v" in buf.getvalue()
+            )
+            checks["no_version"] = maybe_version(["--other"], out=buf) is False
+    finally:
+        for name, val in saved.items():
+            if val is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = val
+    ok = all(checks.values())
+    sys.stdout.write(
+        "self-test: %s %s\n"
+        % (
+            "ok" if ok else "FAIL",
+            " ".join(
+                "%s=%s" % (k, "ok" if v else "FAIL")
+                for k, v in sorted(checks.items())
+            ),
+        )
+    )
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    if "--self-test" in sys.argv[1:]:
+        sys.exit(_self_test())
+    sys.stdout.write("_watch.py is a helper module; pass --self-test to self-check\n")

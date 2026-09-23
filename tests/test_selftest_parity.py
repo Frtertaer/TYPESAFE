@@ -8,8 +8,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = ROOT / "skills" / "jev-consult" / "scripts"
 
-# Vendored or helper modules without a self-testable CLI surface.
-EXCLUDED = {"_watch.py", "skill_scanner.py"}
+# Vendored module without a self-testable CLI surface.
+EXCLUDED = {"skill_scanner.py"}
 
 # Scripts whose self-test is a subcommand rather than the --self-test flag.
 SUBCOMMAND = {"jev.py": "self-test", "trace.py": "self-test"}

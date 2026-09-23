@@ -179,6 +179,38 @@ class HookE2ETests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return proc.stdout.strip()
 
+    def _run_full(self, stdin_text: str, argv: list | None = None):
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        proc = subprocess.run(
+            [sys.executable, str(HOOK_PATH), *(argv or [])],
+            input=stdin_text,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc
+
+    def test_verbose_prints_skip_reason(self) -> None:
+        proc = self._run_full(
+            json.dumps({"hook_event_name": "UserPromptSubmit", "toolResult": "x"}),
+            argv=["--verbose"],
+        )
+        self.assertEqual(json.loads(proc.stdout.strip()), {})
+        self.assertIn("not a PostToolUse event", proc.stderr)
+
+    def test_no_verbose_stderr_quiet(self) -> None:
+        proc = self._run_full(
+            json.dumps({"hook_event_name": "UserPromptSubmit", "toolResult": "x"}),
+        )
+        self.assertEqual(json.loads(proc.stdout.strip()), {})
+        self.assertEqual(proc.stderr, "")
+
     def test_empty_and_bad_stdin(self) -> None:
         self.assertEqual(json.loads(self._run("")), {})
         self.assertEqual(json.loads(self._run("[1,2]")), {})

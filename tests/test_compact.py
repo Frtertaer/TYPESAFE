@@ -1221,7 +1221,11 @@ class CompactCliTests(unittest.TestCase):
             with patch.object(sys, "stdout", buf2):
                 rc2 = C.main([str(f2), "--history", "--fake", "--min-reduction", "0"])
             self.assertEqual(rc2, 0)
-            self.assertEqual(json.loads(buf1.getvalue()), json.loads(buf2.getvalue()))
+            out1, out2 = json.loads(buf1.getvalue()), json.loads(buf2.getvalue())
+            # ms is wall-time and legitimately differs between runs
+            out1["stats"].pop("ms", None)
+            out2["stats"].pop("ms", None)
+            self.assertEqual(out1, out2)
 
     def test_jq_prints_one_field_of_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

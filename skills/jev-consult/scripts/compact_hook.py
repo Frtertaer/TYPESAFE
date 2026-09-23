@@ -75,13 +75,30 @@ def replace_payload(original: Any, abridged: str) -> Any:
     return abridged
 
 
+LAST_SKIP: str = ""
+
+
 def handle(payload: dict[str, Any]) -> dict[str, Any]:
+    global LAST_SKIP
+    LAST_SKIP = ""
     event = str(payload.get("hook_event_name") or payload.get("hookEventName") or "")
     if event and event not in ("PostToolUse", "post_tool_use"):
+        LAST_SKIP = "not a PostToolUse event"
         return {}
     text, is_error, original = extract_result(payload)
+    if not text:
+        LAST_SKIP = (
+            "toolResultTruncated"
+            if payload.get("toolResultTruncated")
+            else "no tool result text"
+        )
+        return {}
+    if is_error:
+        LAST_SKIP = "tool result is an error"
+        return {}
     abridged = C.abridge_live(text, is_error=is_error)
     if abridged is None:
+        LAST_SKIP = "below live-fat threshold"
         return {}
     return {
         "hookSpecificOutput": {
@@ -91,7 +108,7 @@ def handle(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-USAGE = 'Usage: python compact_hook.py [--help|--version]\n\nReads one PostToolUse JSON event from stdin. When the tool result is longer\nthan the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n'
+USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose]\n\nReads one PostToolUse JSON event from stdin. When the tool result is longer\nthan the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n'
 
 
 def _read_stdin() -> str:
@@ -113,19 +130,29 @@ def main() -> int:
     if "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:
         sys.stdout.write(USAGE)
         return 0
+    verbose = "--verbose" in sys.argv[1:]
     raw = _read_stdin()
     if not raw.strip():
+        if verbose:
+            sys.stderr.write("compact_hook: empty stdin\n")
         sys.stdout.write("{}\n")
         return 0
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
+        if verbose:
+            sys.stderr.write("compact_hook: invalid JSON\n")
         sys.stdout.write("{}\n")
         return 0
     if not isinstance(payload, dict):
+        if verbose:
+            sys.stderr.write("compact_hook: payload is not an object\n")
         sys.stdout.write("{}\n")
         return 0
-    sys.stdout.write(json.dumps(handle(payload), ensure_ascii=False) + "\n")
+    out = handle(payload)
+    if verbose and not out and LAST_SKIP:
+        sys.stderr.write("compact_hook: %s\n" % LAST_SKIP)
+    sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
     return 0
 
 

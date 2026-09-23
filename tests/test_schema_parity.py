@@ -78,6 +78,27 @@ class SchemaParityTests(unittest.TestCase):
         for name, sub in SUBCOMMAND_SCHEMA.items():
             self.assertIn('"%s": ("%s",)' % (name, sub), match.group(1))
 
+    def test_decisions_schema_required_matches_entry_rows(self) -> None:
+        """decisions.py --schema required set == ENTRY_SCHEMA_ROWS required set."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "decisions", SCRIPTS_DIR / "decisions.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        rows_required = {
+            key for key, meta in mod.ENTRY_SCHEMA_ROWS.items() if meta.get("required")
+        }
+        proc = self._run("decisions.py", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr[:200])
+        schema_required = {
+            key
+            for key, meta in json.loads(proc.stdout).items()
+            if meta.get("required")
+        }
+        self.assertEqual(schema_required, rows_required)
+
     def test_schema_text_marks_required(self) -> None:
         for name in sorted(FLAG_SCHEMA) + sorted(SUBCOMMAND_SCHEMA):
             with self.subTest(script=name):

@@ -959,6 +959,44 @@ def scaffold_request(
     return {"state": state, "questions": questions}
 
 
+def env_report(args: argparse.Namespace) -> dict:
+    """Resolved jev.py environment. Presence flags only — never the key."""
+    try:
+        watch_secs = float(os.environ.get("JEV_PING_WATCH_SECS", "") or 0)
+    except ValueError:
+        watch_secs = 0.0
+    policy = (getattr(args, "policy", "") or "").strip() or os.environ.get(
+        "JEV_POLICY", ""
+    ).strip()
+    return {
+        "api_key_set": bool(load_api_key()),
+        "policy": policy if policy else "default",
+        "timeout_seconds": env_timeout(),
+        "watch_max": _watch.cap("JEV_PING_WATCH_MAX", None) if _watch else None,
+        "watch_quiet": _watch.quiet("JEV_PING_WATCH_QUIET", False) if _watch else False,
+        "watch_secs": watch_secs,
+    }
+
+
+def cmd_env(args: argparse.Namespace) -> int:
+    report = env_report(args)
+    if args.jq:
+        if _watch is not None:
+            value, found = _watch.dig(report, args.jq)
+        else:
+            value, found = report.get(args.jq), args.jq in report
+        if found:
+            sys.stdout.write(json.dumps(value) + "\n")
+            return 0
+        sys.stderr.write(
+            "bad --jq key %r (env has: %s)\n"
+            % (args.jq, ", ".join(sorted(report)))
+        )
+        return 2
+    sys.stdout.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    return 0
+
+
 def cmd_self_test(args: argparse.Namespace) -> int:
     """Offline sanity: scaffold a request, round-trip it through disk, lint it."""
     checks: dict[str, bool] = {}
@@ -1262,6 +1300,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit the self-test payload as JSON.",
     )
     selftest.set_defaults(func=cmd_self_test)
+    env_cmd = sub.add_parser(
+        "env",
+        help="Print the resolved env config JSON and exit (--jq KEY prints one field, rc 2 on unknown)",
+    )
+    env_cmd.add_argument(
+        "--jq",
+        metavar="KEY",
+        default="",
+        help="Print just one field of the env report.",
+    )
+    env_cmd.set_defaults(func=cmd_env)
     return parser
 
 

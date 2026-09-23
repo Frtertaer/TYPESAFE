@@ -1619,6 +1619,52 @@ class SchemaTests(unittest.TestCase):
         rows = json.loads(buf.getvalue())
         self.assertIn("response.answers", rows)
 
+    def test_cmd_env_reports_presence_only(self) -> None:
+        buf = io.StringIO()
+        with patch.object(sys, "stdout", buf):
+            rc = jev.main(["env"])
+        self.assertEqual(rc, 0)
+        report = json.loads(buf.getvalue())
+        for key in ("api_key_set", "policy", "timeout_seconds", "watch_max", "watch_quiet", "watch_secs"):
+            self.assertIn(key, report)
+        self.assertIsInstance(report["api_key_set"], bool)
+        self.assertEqual(report["policy"], "default")
+        # never leaks the key value
+        with patch.dict(os.environ, {"TYPESAFE_API_KEY": "apikey_secret_jev_env_test"}):
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                jev.main(["env"])
+            self.assertNotIn("apikey_secret_jev_env_test", buf.getvalue())
+
+    def test_cmd_env_jq_and_bad_key(self) -> None:
+        buf = io.StringIO()
+        with patch.object(sys, "stdout", buf):
+            rc = jev.main(["env", "--jq", "policy"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(buf.getvalue()), "default")
+        err = io.StringIO()
+        with patch.object(sys, "stderr", err):
+            rc = jev.main(["env", "--jq", "nope"])
+        self.assertEqual(rc, 2)
+        self.assertIn("env has", err.getvalue())
+
+    def test_cmd_env_reflects_env_overrides(self) -> None:
+        env = {
+            "JEV_TIMEOUT": "15",
+            "JEV_POLICY": "/tmp/p.json",
+            "JEV_PING_WATCH_MAX": "4",
+            "JEV_PING_WATCH_QUIET": "1",
+        }
+        buf = io.StringIO()
+        with patch.dict(os.environ, env):
+            with patch.object(sys, "stdout", buf):
+                jev.main(["env"])
+        report = json.loads(buf.getvalue())
+        self.assertEqual(report["timeout_seconds"], 15.0)
+        self.assertEqual(report["policy"], "/tmp/p.json")
+        self.assertEqual(report["watch_max"], 4)
+        self.assertTrue(report["watch_quiet"])
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

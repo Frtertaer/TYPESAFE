@@ -31,7 +31,10 @@ def build_parser():
     for name in ("status", "history"):
         command = commands.add_parser(name)
         command.add_argument("stage")
-    for name in ("status", "history"):
+    report = commands.add_parser("report", help="Print a markdown summary of a stage (plan, credits, events); --out writes it to a file")
+    report.add_argument("stage")
+    report.add_argument("--out", metavar="PATH", default="", help="Write the markdown to PATH instead of stdout (prints {wrote, bytes} JSON); with --watch: append each tick line to PATH instead")
+    for name in ("status", "history", "report"):
         sub = commands.choices[name]
         sub.add_argument("--watch", metavar="S", type=float, default=0.0,
                          help="Re-read the stage every S seconds, printing one tick per pass (read-only; JEV_PROGRESS_WATCH_MAX caps ticks)")
@@ -42,9 +45,10 @@ def build_parser():
         sub.add_argument("--quiet", action="store_true",
                          help="With --watch: print only noteworthy ticks to stdout (--out still logs all; JEV_PROGRESS_WATCH_QUIET presets)")
         sub.add_argument("--fail-fast", action="store_true",
-                         help="With --watch: status stops on the first non-'continue' tick; history stops on the first count change")
-        sub.add_argument("--out", metavar="PATH", default="",
-                         help="With --watch: append each tick line to PATH (fail-open)")
+                         help="With --watch: status stops on the first non-'continue' tick; history/report stop on the first content change")
+        if name != "report":  # report --out doubles as markdown target / tick sink
+            sub.add_argument("--out", metavar="PATH", default="",
+                             help="With --watch: append each tick line to PATH (fail-open)")
         sub.add_argument("--verdict", metavar="PATH", default="",
                          help="With --watch: write a slim verdict JSON to PATH, refreshed every tick")
     replay = commands.add_parser("evidence", help="Rebuild the exact Jev input recorded for an assessment or review event")
@@ -72,9 +76,6 @@ def build_parser():
     commands.add_parser("self-test", help="Initialize a scratch ledger with a stub evidence collector and read it back")
     lint_p = commands.add_parser("lint", help="Dry-validate a plan against a policy with the same checks as init; writes nothing")
     lint_p.add_argument("plan", help="Stage-plan JSON file")
-    report = commands.add_parser("report", help="Print a markdown summary of a stage (plan, credits, events); --out writes it to a file")
-    report.add_argument("stage")
-    report.add_argument("--out", metavar="PATH", default="", help="Write the markdown to PATH instead of stdout (prints {wrote, bytes} JSON)")
     for name in commands.choices:
         commands.choices[name].add_argument(
             "--jq", metavar="KEY", default="",
@@ -244,6 +245,68 @@ def _history_watch(ledger, args):
     return 0 if tick.get("events") else 1
 
 
+def _report_tick(ledger, stage, t0, prev_sha):
+    try:
+        md = _report_md(ledger.status(stage), ledger.history(stage))
+        sha = hashlib.sha256(md.encode("utf-8")).hexdigest()[:12]
+        tick = {
+            "stage": stage,
+            "chars": len(md),
+            "sha": sha,
+            "delta": None if prev_sha is None else int(sha != prev_sha),
+        }
+    except ProgressError as exc:
+        tick = {"stage": stage, "chars": 0, "sha": None, "delta": None, "error": exc.code}
+    tick["elapsed_s"] = round(time.time() - t0, 2)
+    return tick
+
+
+def _report_watch(ledger, args):
+    """Poll the stage report on a loop; read-only. Exits 1 when the last tick
+    errored or produced an empty report."""
+    max_ticks = _watch.cap("JEV_PROGRESS_WATCH_MAX", args.max_ticks)
+    dead = _watch.deadline("JEV_PROGRESS_WATCH_SECS", args.watch_max)
+    quiet = _watch.quiet("JEV_PROGRESS_WATCH_QUIET", args.quiet)
+    ticks = 0
+    tick: dict = {}
+    prev_sha: str | None = None
+    verdict_ok = True
+    t0 = time.time()
+
+    def _write_verdict() -> bool:
+        return _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "changed" if tick.get("delta") else "steady",
+                "ticks": ticks,
+                "chars": tick.get("chars"),
+                "delta": tick.get("delta"),
+                "elapsed_s": round(time.time() - t0, 2),
+            },
+        )
+
+    while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
+        tick = _report_tick(ledger, args.stage, t0, prev_sha)
+        prev_sha = tick["sha"]
+        ticks += 1
+        _watch.emit_or_jq(
+            tick, args.jq, args.out, quiet=quiet,
+            bad=not tick["chars"] or bool(tick.get("delta")),
+        )
+        sys.stderr.write(
+            "watch tick=%d chars=%s delta=%s\n"
+            % (ticks, tick["chars"], tick.get("delta"))
+        )
+        if args.verdict and verdict_ok and not _write_verdict():
+            verdict_ok = False
+        if args.fail_fast and (tick.get("delta") or "error" in tick):
+            break
+        time.sleep(args.watch)
+    if args.verdict and verdict_ok and not _write_verdict():
+        return 1
+    return 0 if tick.get("chars") and "error" not in tick else 1
+
+
 def _emit_jq(payload, jq):
     """When --jq is set, print just that dotted field and return an rc; else None."""
     if not jq:
@@ -386,6 +449,8 @@ def main(argv=None):
         elif args.command == "self-test":
             result = _self_test(args)
         elif args.command == "report":
+            if getattr(args, "watch", 0) and args.watch > 0:
+                return _report_watch(ledger, args)
             summary = ledger.status(args.stage)
             hist = ledger.history(args.stage)
             md = _report_md(summary, hist)

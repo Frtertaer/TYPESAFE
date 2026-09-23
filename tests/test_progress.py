@@ -1275,5 +1275,77 @@ class HistoryWatchTests(unittest.TestCase):
         self.assertEqual(json.loads(out.strip().splitlines()[-1])["events"], 0)
 
 
+class ReportWatchTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.ledger = progress.Ledger(
+            self.root / "progress.sqlite3", self.root, evidence=FakeEvidence()
+        )
+        self.ledger.initialize(plan(), policy())
+
+    def _run(self, args):
+        out, err = StringIO(), StringIO()
+        with patch("sys.stdout", out), patch("sys.stderr", err):
+            rc = progress_cli._report_watch(self.ledger, args)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_report_watch_emits_sha_ticks(self):
+        args = _watch_args(max_ticks=2, verdict=str(self.root / "v.json"))
+        rc, out, err = self._run(args)
+        self.assertEqual(rc, 0)
+        lines = out.strip().splitlines()
+        self.assertEqual(len(lines), 2)
+        tick = json.loads(lines[0])
+        self.assertEqual(tick["stage"], "reliability")
+        self.assertGreater(tick["chars"], 0)
+        self.assertIsNone(tick["delta"])
+        self.assertEqual(json.loads(lines[1])["delta"], 0)
+        self.assertEqual(json.loads(lines[1])["sha"], tick["sha"])
+        self.assertIn("watch tick=1 chars=", err)
+        data = json.loads((self.root / "v.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["verdict"], "steady")
+
+    def test_report_watch_missing_stage_exits_one(self):
+        rc, out, _err = self._run(_watch_args(stage="nope", max_ticks=2))
+        self.assertEqual(rc, 1)
+        tick = json.loads(out.strip().splitlines()[0])
+        self.assertEqual(tick["chars"], 0)
+        self.assertIn("error", tick)
+
+    def test_report_watch_fail_fast_on_content_change(self):
+        original = self.ledger.status
+        calls = {"n": 0}
+
+        def shifting(stage):
+            result = original(stage)
+            calls["n"] += 1
+            if calls["n"] > 1:
+                result = dict(result)
+                result["points"] = result["points"] + calls["n"]
+            return result
+
+        with patch.object(self.ledger, "status", side_effect=shifting):
+            rc, out, _err = self._run(
+                _watch_args(fail_fast=True, verdict=str(self.root / "v.json"))
+            )
+        self.assertEqual(rc, 0)
+        lines = out.strip().splitlines()
+        self.assertEqual(len(lines), 2)  # tick1 baseline, tick2 sha changed -> stop
+        self.assertEqual(json.loads(lines[1])["delta"], 1)
+        data = json.loads((self.root / "v.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["verdict"], "changed")
+
+    def test_report_watch_quiet_mutes_steady_ticks(self):
+        with patch.dict(os.environ, {"JEV_PROGRESS_WATCH_QUIET": "1"}):
+            _rc, out, _err = self._run(_watch_args(max_ticks=2))
+        self.assertEqual(out.strip(), "")
+
+    def test_report_watch_jq_prints_named_field(self):
+        _rc, out, _err = self._run(_watch_args(max_ticks=1, jq="chars"))
+        self.assertGreater(json.loads(out.strip()), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

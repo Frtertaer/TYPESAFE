@@ -354,6 +354,37 @@ class EnvReportParityTests(unittest.TestCase):
                         "%s --out file != stdout" % name,
                     )
 
+    def test_jev_policy_override_reported_by_all_readers(self) -> None:
+        """Every JEV_POLICY-reading script's env dump reports the override path."""
+        import tempfile
+
+        # jev.py is excluded here (its env needs no key dance handled in its
+        # own tests); progress.py is policy-free.
+        readers = (
+            "apply_fill.py",
+            "catalog_fill.py",
+            "compact.py",
+            "compact_hook.py",
+            "compare.py",
+            "doctor.py",
+            "inventory.py",
+            "inventory_hook.py",
+            "peer_fill.py",
+            "smoke.py",
+            "trace.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = Path(tmp) / "mypolicy.json"
+            custom.write_text('{"version": 1}', encoding="utf-8")
+            for name in readers:
+                with self.subTest(script=name):
+                    proc = _run(
+                        name, _env_argv(name), extra_env={"JEV_POLICY": str(custom)}
+                    )
+                    self.assertEqual(proc.returncode, 0, "%s: %s" % (name, proc.stderr[:200]))
+                    payload = json.loads(proc.stdout)
+                    self.assertEqual(payload.get("policy"), str(custom), name)
+
     def test_env_jq_digs_nested_fields(self) -> None:
         """--env --jq honors dotted digs into nested objects and list indexes."""
         proc = _run("install.py", ["--env", "--jq", "targets.hermes.skills"])

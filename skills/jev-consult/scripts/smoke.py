@@ -7044,6 +7044,7 @@ def main(argv: list[str] | None = None) -> int:
         default=0.0,
         help="Re-run the steps every S seconds, printing a {ts,ok,failed} JSON tick.",
     )
+    parser.add_argument("--env", action="store_true", help="Print the resolved smoke config JSON (steps, only, repeat, jobs, timeout, watch_max, watch_secs, watch_quiet, policy) and exit; --jq KEY prints one field, --out PATH writes it")
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
@@ -7136,6 +7137,42 @@ def main(argv: list[str] | None = None) -> int:
             env_timeout = 0.0
         if env_timeout > 0:
             STEP_TIMEOUT = env_timeout
+    if getattr(args, "env", False):
+        raw_secs = os.environ.get("JEV_SMOKE_WATCH_SECS", "")
+        try:
+            watch_secs = float(args.watch_max or raw_secs or 0)
+        except ValueError:
+            watch_secs = 0.0
+        report = {
+            "steps": sorted(names),
+            "only": sorted(wanted),
+            "repeat": repeat,
+            "jobs": jobs,
+            "timeout": STEP_TIMEOUT,
+            "watch_max": _watch.cap("JEV_SMOKE_WATCH_MAX", args.max_ticks),
+            "watch_secs": watch_secs,
+            "watch_quiet": _watch.quiet("JEV_SMOKE_WATCH_QUIET", args.quiet),
+            "policy": os.environ.get("JEV_POLICY", "").strip() or "default",
+        }
+        text = json.dumps(report, indent=2, ensure_ascii=False) + "\n"
+        if args.out:
+            try:
+                _atomic_write(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("smoke.py env: --out %s failed: %s\n" % (args.out, exc))
+        if args.jq:
+            value, found = _watch.dig(report, args.jq)
+            if not found:
+                sys.stderr.write(
+                    "smoke.py env: unknown jq key %r; env has: %s\n"
+                    % (args.jq, ", ".join(sorted(report)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(value, ensure_ascii=False) + "\n")
+        else:
+            sys.stdout.write(text)
+        return 0
+
     def _attempt(fn, step_dir: Path) -> dict:
         row = _step(getattr(fn, "__name__", "step"), False, "not run")
         for attempt in range(repeat):

@@ -144,6 +144,17 @@ ENV_SCRIPTS = {
         "watch_quiet",
         "watch_secs",
     },
+    "smoke.py": {
+        "jobs",
+        "only",
+        "policy",
+        "repeat",
+        "steps",
+        "timeout",
+        "watch_max",
+        "watch_quiet",
+        "watch_secs",
+    },
 }
 
 # Subcommand CLIs expose `env` instead of a --env flag; jev.py keeps its own
@@ -261,7 +272,7 @@ class EnvReportParityTests(unittest.TestCase):
 
     def test_scripts_without_env_flag_fail_cleanly(self) -> None:
         for path in sorted(SCRIPTS.glob("*.py")):
-            if path.name in ENV_SCRIPTS or path.name in ("smoke.py", "_watch.py"):
+            if path.name in ENV_SCRIPTS or path.name == "_watch.py":
                 continue
             with self.subTest(script=path.name):
                 proc = _run(path.name, ["--env"])

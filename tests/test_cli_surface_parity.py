@@ -62,6 +62,27 @@ class CliSurfaceParityTests(unittest.TestCase):
                 )
                 self.assertIn(VERSION_TAG, proc.stdout, name)
 
+    def test_version_number_matches_policy_json(self) -> None:
+        """--version's vN must equal policy.json's version field."""
+        import json
+
+        policy = json.loads(
+            (ROOT / "skills" / "jev-consult" / "policy.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        want = "jev-consult (policy v%s)" % policy["version"]
+        for name in sorted(_cli_scripts() - NO_VERSION):
+            with self.subTest(script=name):
+                proc = _run(name, "--version")
+                self.assertEqual(proc.returncode, 0, name)
+                self.assertIn(
+                    want,
+                    proc.stdout,
+                    "%s printed %r, want %r"
+                    % (name, proc.stdout.strip(), want),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

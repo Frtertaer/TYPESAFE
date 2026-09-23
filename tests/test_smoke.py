@@ -29,7 +29,7 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         out = json.loads(proc.stdout)
         self.assertTrue(out["ok"])
-        self.assertEqual(len(out["steps"]), 25)
+        self.assertEqual(len(out["steps"]), 26)
         names = {s["name"] for s in out["steps"]}
         self.assertEqual(
             names,
@@ -56,6 +56,7 @@ class SmokeTests(unittest.TestCase):
                 "perf",
                 "ask_verdict",
                 "progress",
+                "schemas",
                 "install",
                 "self_test",
                 "coverage",
@@ -298,7 +299,7 @@ class SmokeTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0)
         names = set(proc.stdout.strip().splitlines())
-        self.assertEqual(len(names), 25)
+        self.assertEqual(len(names), 26)
         self.assertIn("doctor_json", names)
         self.assertIn("hook", names)
         self.assertIn("perf", names)
@@ -312,7 +313,7 @@ class SmokeTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0)
         names = json.loads(proc.stdout.strip())
-        self.assertEqual(len(names), 25)
+        self.assertEqual(len(names), 26)
         self.assertIn("doctor_json", names)
         self.assertIn("perf", names)
         self.assertEqual(names, sorted(names))
@@ -327,7 +328,7 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         payload = json.loads(proc.stdout)
         self.assertEqual(payload["uncovered"], [])
-        self.assertEqual(payload["steps"], 25)
+        self.assertEqual(payload["steps"], 26)
         self.assertIn("inventory_hook.py", payload["covered"])
         self.assertIn("smoke.py", payload["step_scripts"]["self_test"])
         proc = subprocess.run(

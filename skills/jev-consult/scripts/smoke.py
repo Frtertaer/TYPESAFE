@@ -6865,6 +6865,7 @@ STEPS = (
     ("catalog_fill", "step_catalog_fill"),
     ("ask_verdict", "step_ask_verdict"),
     ("progress", "step_progress"),
+    ("schemas", "step_schemas"),
     ("perf", "step_perf"),
     ("self_test", "step_self_test"),
     ("coverage", "step_coverage"),
@@ -6903,6 +6904,46 @@ def coverage_payload() -> dict:
         "uncovered": [s for s in scripts if s not in covered],
         "step_scripts": step_scripts,
     }
+
+
+# Scripts exposing a key-contract printout: flag form --schema, plus
+# trace.py's `schema` subcommand. The schema-parity test pins this map.
+SCHEMA_SCRIPTS = {
+    "apply_fill.py": ("--schema",),
+    "catalog_fill.py": ("--schema",),
+    "compare.py": ("--schema",),
+    "decisions.py": ("--schema",),
+    "inventory.py": ("--schema",),
+    "jev.py": ("--schema",),
+    "peer_fill.py": ("--schema",),
+    "policy_lint.py": ("--schema",),
+    "progress.py": ("--schema",),
+    "question_lint.py": ("--schema",),
+    "skill_lint.py": ("--schema",),
+    "trace.py": ("schema",),
+    "trigger_eval.py": ("--schema",),
+}
+
+
+def step_schemas(tmp: Path) -> dict:
+    """Run every key-contract printout with --json; fails on rc!=0 or bad JSON."""
+    bad = []
+    for name, args in SCHEMA_SCRIPTS.items():
+        rc, out = _run([str(SCRIPTS / name), *args, "--json"], cwd=tmp)
+        if rc != 0:
+            bad.append(name)
+            continue
+        try:
+            rows = json.loads(out)
+        except json.JSONDecodeError:
+            bad.append(name)
+            continue
+        if not isinstance(rows, dict) or not rows:
+            bad.append(name)
+    return _step(
+        "schemas", not bad,
+        "%d contracts ok" % len(SCHEMA_SCRIPTS) if not bad else "bad: %s" % ",".join(bad),
+    )
 
 
 def step_progress(tmp: Path) -> dict:

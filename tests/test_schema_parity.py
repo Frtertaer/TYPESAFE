@@ -66,6 +66,18 @@ class SchemaParityTests(unittest.TestCase):
                 declared = set(re.findall(r'"([a-z_]+)"', match.group(1)))
                 self.assertEqual(emitted - declared, set(), name)
 
+    def test_smoke_covers_every_schema_script(self) -> None:
+        """smoke.py's SCHEMA_SCRIPTS map must list every contract script."""
+        import re
+
+        source = (SCRIPTS_DIR / "smoke.py").read_text(encoding="utf-8")
+        match = re.search(r"SCHEMA_SCRIPTS = \{(.*?)\}", source, re.S)
+        self.assertIsNotNone(match, "smoke.py lacks SCHEMA_SCRIPTS")
+        declared = set(re.findall(r'"([a-z_]+\.py)":', match.group(1)))
+        self.assertEqual(declared, set(FLAG_SCHEMA) | set(SUBCOMMAND_SCHEMA))
+        for name, sub in SUBCOMMAND_SCHEMA.items():
+            self.assertIn('"%s": ("%s",)' % (name, sub), match.group(1))
+
     def test_schema_text_marks_required(self) -> None:
         for name in sorted(FLAG_SCHEMA) + sorted(SUBCOMMAND_SCHEMA):
             with self.subTest(script=name):

@@ -2985,5 +2985,57 @@ class NotesShasTests(unittest.TestCase):
             self.assertEqual(len(payload["shas"]), 2)
 
 
+class CountFlagTests(unittest.TestCase):
+    def _trace(self, tmp: str) -> Path:
+        import io
+        from contextlib import redirect_stdout
+
+        path = Path(tmp) / "trace.json"
+        with redirect_stdout(io.StringIO()):
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            tr.main(["--file", str(path), "record", "--pick", "a", "--kind", "k1", "--note", "n1", "--harness", "h1"])
+            tr.main(["--file", str(path), "record", "--pick", "b", "--note", "n2", "--harness", "h2"])
+            tr.main(["--file", str(path), "record", "--pick", "a", "--kind", "k1"])
+        return path
+
+    def test_history_count(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--count"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "3")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "history", "--count", "--uniq", "--json"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), {"count": 2})
+
+    def test_notes_count(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--count"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "2")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--count", "--harness", "h2"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "1")
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

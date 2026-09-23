@@ -526,6 +526,15 @@ def cmd_history(args: argparse.Namespace) -> int:
     if history is None:
         return 2
 
+    if getattr(args, "count", False):
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps({"count": len(history)}, ensure_ascii=False) + "\n"
+            )
+        else:
+            sys.stdout.write("%d\n" % len(history))
+        return 0
+
     if getattr(args, "kinds", False):
         counts: dict[str, int] = {}
         for entry in history:
@@ -1123,6 +1132,15 @@ def cmd_notes(args: argparse.Namespace) -> int:
     if notes is None:
         return 2
 
+    if getattr(args, "count", False):
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps({"count": len(notes)}, ensure_ascii=False) + "\n"
+            )
+        else:
+            sys.stdout.write("%d\n" % len(notes))
+        return 0
+
     if getattr(args, "by_harness", False):
         counts: dict[str, int] = {}
         for note in notes:
@@ -1696,6 +1714,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--uniq", action="store_true", help="Dedupe notes by sha/text (first occurrence wins)")
     notes_cmd.add_argument("--by-harness", action="store_true", help="Print distinct note harnesses with counts, sorted desc (empty harness shown as '-')")
     notes_cmd.add_argument("--shas", action="store_true", help="Print just the sha of each filtered note, one per line (--json emits {shas})")
+    notes_cmd.add_argument("--count", action="store_true", help="Print just the filtered note count (--json emits {count})")
     notes_cmd.add_argument("--rate", action="store_true", help="Print note-rate stats over the filtered notes: per-day UTC buckets plus notes_per_day")
     notes_cmd.add_argument("--gap", metavar="S", type=float, default=0.0, help="List consecutive-note gaps wider than S seconds ({index,gap_s,prev_text,text} rows; --json emits {gaps})")
     notes_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,notes} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
@@ -1713,6 +1732,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--field", default="", help="Print only this field per pick (a.b digs into nested objects)")
     hist_cmd.add_argument("--kinds", action="store_true", help="Print distinct history kinds with counts, sorted desc (empty kind shown as '-')")
     hist_cmd.add_argument("--uniq", action="store_true", help="Dedupe picks by pick+kind (first occurrence wins; applied before --limit)")
+    hist_cmd.add_argument("--count", action="store_true", help="Print just the filtered pick count (--json emits {count})")
     hist_cmd.add_argument("--rate", action="store_true", help="Print pick-rate stats over the filtered history: per-day UTC buckets plus picks_per_day")
     hist_cmd.add_argument("--since", default=None, help="Only picks with ts >= epoch seconds or ISO8601")
     hist_cmd.add_argument("--grep", default="", help="Only picks whose pick/kind contains SUBSTR (case-insensitive; default JEV_TRACE_HISTORY_GREP)")

@@ -235,6 +235,11 @@ class HookE2ETests(unittest.TestCase):
             self.assertEqual(json.loads(proc.stdout.strip()), {})
             self.assertIn("unreadable --file", proc.stderr)
 
+    def test_simulate_small_text_skips(self) -> None:
+        proc = self._run_full("", argv=["--simulate", "tiny", "--verbose"])
+        self.assertEqual(json.loads(proc.stdout.strip()), {})
+        self.assertIn("below live-fat threshold", proc.stderr)
+
     def test_empty_and_bad_stdin(self) -> None:
         self.assertEqual(json.loads(self._run("")), {})
         self.assertEqual(json.loads(self._run("[1,2]")), {})

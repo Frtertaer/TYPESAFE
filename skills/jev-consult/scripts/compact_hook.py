@@ -108,7 +108,7 @@ def handle(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose] [--file PATH]\n\nReads one PostToolUse JSON event from stdin (or --file). When the tool result\nis longer than the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n'
+USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose] [--file PATH] [--simulate TEXT]\n\nReads one PostToolUse JSON event from stdin (or --file). When the tool result\nis longer than the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n--simulate TEXT runs a synthetic PostToolUse event with TEXT as the tool\nresult — a quick probe of the live-fat decision without crafting JSON.\n'
 
 
 def _read_stdin() -> str:
@@ -131,6 +131,14 @@ def main() -> int:
         sys.stdout.write(USAGE)
         return 0
     verbose = "--verbose" in sys.argv[1:]
+    if "--simulate" in sys.argv[1:]:
+        idx = sys.argv[1:].index("--simulate")
+        text = sys.argv[1:][idx + 1] if idx + 1 < len(sys.argv[1:]) else ""
+        out = handle({"hook_event_name": "PostToolUse", "toolResult": text})
+        if verbose and not out and LAST_SKIP:
+            sys.stderr.write("compact_hook: %s\n" % LAST_SKIP)
+        sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
+        return 0
     raw = ""
     if "--file" in sys.argv[1:]:
         idx = sys.argv[1:].index("--file")

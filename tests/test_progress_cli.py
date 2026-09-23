@@ -226,6 +226,75 @@ class OneshotVerdictTests(unittest.TestCase):
         self.assertIsNone(doc["delta"])
 
 
+class OneshotOutTests(unittest.TestCase):
+    def _ledger(self):
+        ledger = Mock()
+        ledger.status.return_value = {
+            "stage_id": "s",
+            "action": "continue",
+            "reason": "open",
+            "points": 3,
+            "review_at": 10,
+            "assessment_count": 0,
+            "assessment_limit": 5,
+            "model_attempts": 0,
+            "model_attempt_limit": 10,
+            "awarded_items": [],
+            "blocked_items": [],
+        }
+        ledger.history.return_value = {
+            "stage": {"plan": {"goal": "g", "items": []}},
+            "events": [{"kind": "init"}, {"kind": "note"}],
+        }
+        return ledger
+
+    def test_status_out_writes_payload(self) -> None:
+        ledger = self._ledger()
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "status.json"
+            with patch.object(progress, "Ledger", return_value=ledger):
+                code, out = run_cli(["status", "s", "--out", str(target)])
+            self.assertEqual(code, 0)
+            receipt = json.loads(out)
+            self.assertEqual(receipt["wrote"], str(target))
+            saved = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(saved, ledger.status.return_value)
+
+    def test_history_out_writes_payload(self) -> None:
+        ledger = self._ledger()
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "history.json"
+            with patch.object(progress, "Ledger", return_value=ledger):
+                code, out = run_cli(["history", "s", "--out", str(target)])
+            self.assertEqual(code, 0)
+            receipt = json.loads(out)
+            self.assertEqual(receipt["wrote"], str(target))
+            saved = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(saved, ledger.history.return_value)
+
+    def test_out_receipt_jq_digs_wrapper(self) -> None:
+        ledger = self._ledger()
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "status.json"
+            with patch.object(progress, "Ledger", return_value=ledger):
+                code, out = run_cli(
+                    ["status", "s", "--out", str(target), "--jq", "wrote"]
+                )
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(out), str(target))
+
+    def test_out_unwritable_path_rc1(self) -> None:
+        ledger = self._ledger()
+        with tempfile.TemporaryDirectory() as tmp:
+            missing_dir = Path(tmp) / "gone" / "status.json"
+            with patch.object(progress, "Ledger", return_value=ledger):
+                buf_err = io.StringIO()
+                with redirect_stderr(buf_err):
+                    code, _out = run_cli(["status", "s", "--out", str(missing_dir)])
+            self.assertEqual(code, 1)
+            self.assertIn("cannot write", buf_err.getvalue())
+
+
 class OutputTests(unittest.TestCase):
     def test_status_result_is_frozen_json(self) -> None:
         frozen = {"stage_id": "sample", "points": 2, "action": "review_required"}

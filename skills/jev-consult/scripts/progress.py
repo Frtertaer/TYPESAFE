@@ -49,7 +49,7 @@ def build_parser():
                          help="With --watch: status stops on the first non-'continue' tick; history/report stop on the first content change")
         if name != "report":  # report --out doubles as markdown target / tick sink
             sub.add_argument("--out", metavar="PATH", default="",
-                             help="With --watch: append each tick line to PATH (fail-open)")
+                             help="With --watch: append each tick line to PATH (fail-open); without --watch: write the result JSON to PATH instead of stdout")
         sub.add_argument("--verdict", metavar="PATH", default="",
                          help="Write a slim verdict JSON to PATH (with --watch: refreshed every tick)")
     replay = commands.add_parser("evidence", help="Rebuild the exact Jev input recorded for an assessment or review event")
@@ -540,6 +540,14 @@ def main(argv=None):
     except ProgressError as exc:
         sys.stdout.write(json.dumps({"error": {"code": exc.code, "message": str(exc)}}) + "\n")
         return 2
+    if args.command in ("status", "history") and getattr(args, "out", ""):
+        text = json.dumps(result, indent=2) + "\n"
+        try:
+            atomic_write_text(Path(args.out), text)
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+            return 1
+        result = {"wrote": args.out, "bytes": len(text.encode("utf-8"))}
     rc = _emit_jq(result, getattr(args, "jq", ""))
     if rc is not None:
         return rc

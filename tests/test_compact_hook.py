@@ -211,6 +211,30 @@ class HookE2ETests(unittest.TestCase):
         self.assertEqual(json.loads(proc.stdout.strip()), {})
         self.assertEqual(proc.stderr, "")
 
+    def test_file_flag_reads_event_from_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "event.json"
+            f.write_text(
+                json.dumps(
+                    {
+                        "hook_event_name": "PostToolUse",
+                        "toolResult": "A" * 40000,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            proc = self._run_full("", argv=["--file", str(f)])
+            out = json.loads(proc.stdout.strip())
+            self.assertIn("hookSpecificOutput", out)
+
+    def test_file_missing_prints_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = self._run_full(
+                "", argv=["--file", str(Path(tmp) / "nope.json"), "--verbose"]
+            )
+            self.assertEqual(json.loads(proc.stdout.strip()), {})
+            self.assertIn("unreadable --file", proc.stderr)
+
     def test_empty_and_bad_stdin(self) -> None:
         self.assertEqual(json.loads(self._run("")), {})
         self.assertEqual(json.loads(self._run("[1,2]")), {})

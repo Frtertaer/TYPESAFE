@@ -108,7 +108,7 @@ def handle(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose]\n\nReads one PostToolUse JSON event from stdin. When the tool result is longer\nthan the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n'
+USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose] [--file PATH]\n\nReads one PostToolUse JSON event from stdin (or --file). When the tool result\nis longer than the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n'
 
 
 def _read_stdin() -> str:
@@ -131,7 +131,20 @@ def main() -> int:
         sys.stdout.write(USAGE)
         return 0
     verbose = "--verbose" in sys.argv[1:]
-    raw = _read_stdin()
+    raw = ""
+    if "--file" in sys.argv[1:]:
+        idx = sys.argv[1:].index("--file")
+        file_arg = sys.argv[1:][idx + 1] if idx + 1 < len(sys.argv[1:]) else ""
+        if file_arg:
+            try:
+                raw = Path(file_arg).read_text(encoding="utf-8-sig", errors="replace")
+            except OSError:
+                if verbose:
+                    sys.stderr.write("compact_hook: unreadable --file %s\n" % file_arg)
+                sys.stdout.write("{}\n")
+                return 0
+    else:
+        raw = _read_stdin()
     if not raw.strip():
         if verbose:
             sys.stderr.write("compact_hook: empty stdin\n")

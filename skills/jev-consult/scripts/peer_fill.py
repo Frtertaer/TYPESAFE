@@ -373,6 +373,7 @@ def main() -> int:
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick where a miss or pending ask is present")
+    parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     parser.add_argument(
         "--out",
         default="",
@@ -566,6 +567,8 @@ def main() -> int:
             )
 
         watch_t0 = time.time()
+        prev_tick: dict | None = None
+        unchanged = 0
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             try:
                 miss = read_miss(cwd / MISS_NAME)
@@ -588,6 +591,14 @@ def main() -> int:
             if args.verdict and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
             if args.fail_fast and (tick.get("miss") or tick.get("ask")):
+                break
+            if _watch.same_tick(prev_tick, tick):
+                unchanged += 1
+            else:
+                unchanged = 0
+            prev_tick = dict(tick)
+            if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+                sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
             time.sleep(args.watch)
         if args.verdict and verdict_ok and not _write_verdict():

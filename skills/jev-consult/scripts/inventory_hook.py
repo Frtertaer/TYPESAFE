@@ -627,7 +627,7 @@ def env_report() -> dict:
     return report
 
 
-USAGE = 'Usage: python inventory_hook.py [--env|--events|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet] [--dedupe]\n       [--verdict PATH]] [--self-test]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n             (limit/ttl/dedupe/budget/payload caps/events/policy source,\n             sidecar+miss presence; --jq KEY prints one value, rc 2 unknown)\n  --events   print allowed hook event names and exit\n  --dry-run  resolve the pick writing sidecar/miss as .jev-tools.dry.json /\n             .jev-tools-miss.dry.json instead of the live names\n  --simulate TEXT  run the hook on a synthetic UserPromptSubmit event with TEXT as the prompt and the process cwd (implies --dry-run; no stdin)\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --version  print the pack policy version and exit\n  --self-test  run the emit machinery on synthetic payloads in a temp dir\n             (no Jev); prints self-test ok|FAIL per check, rc 0/1\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --dedupe   with --watch: skip emitting a tick identical to the previous\n             (ts/elapsed_s ignored; JEV_HOOK_WATCH_DEDUPE presets)\n  --verdict P  write a slim {verdict, ticks, winner, winner_stability, keys} JSON\n  --schema   print the emitted payload key contract and exit (--json emits\n             the object); empty payload {} when the hook has nothing to add\n'
+USAGE = 'Usage: python inventory_hook.py [--env|--events|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet] [--dedupe]\n       [--verdict PATH]] [--self-test]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n             (limit/ttl/dedupe/budget/payload caps/events/policy source,\n             sidecar+miss presence; --jq KEY prints one value, rc 2 unknown)\n  --events   print allowed hook event names and exit\n  --dry-run  resolve the pick writing sidecar/miss as .jev-tools.dry.json /\n             .jev-tools-miss.dry.json instead of the live names\n  --simulate TEXT  run the hook on a synthetic UserPromptSubmit event with TEXT as the prompt and the process cwd (implies --dry-run; no stdin)\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --version  print the pack policy version and exit\n  --self-test  run the emit machinery on synthetic payloads in a temp dir\n             (no Jev); prints self-test ok|FAIL per check, rc 0/1\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --dedupe   with --watch: skip emitting a tick identical to the previous\n             (ts/elapsed_s ignored; JEV_HOOK_WATCH_DEDUPE presets)\n  --unchanged-max N  with --watch: stop after N consecutive identical ticks\n  --verdict P  write a slim {verdict, ticks, winner, winner_stability, keys} JSON\n  --schema   print the emitted payload key contract and exit (--json emits\n             the object); empty payload {} when the hook has nothing to add\n'
 
 
 def _self_test() -> int:
@@ -847,8 +847,17 @@ def main(argv: list[str] | None = None) -> int:
             if idx + 1 < len(argv):
                 verdict_path = argv[idx + 1]
         dedupe = "--dedupe" in argv or _env_on("JEV_HOOK_WATCH_DEDUPE")
+        unchanged_max = 0
+        if "--unchanged-max" in argv:
+            idx = argv.index("--unchanged-max")
+            if idx + 1 < len(argv):
+                try:
+                    unchanged_max = int(argv[idx + 1])
+                except ValueError:
+                    unchanged_max = 0
         ticks = 0
         dupes = 0
+        unchanged = 0
         prev_tick: dict | None = None
         tick: dict = {}
         verdict_ok = True
@@ -910,7 +919,12 @@ def main(argv: list[str] | None = None) -> int:
             if tick["winner"]:
                 winners_seen.add(tick["winner"])
             tick["elapsed_s"] = round(time.time() - watch_t0, 2)
-            if dedupe and _watch.same_tick(prev_tick, tick):
+            same = _watch.same_tick(prev_tick, tick)
+            if same:
+                unchanged += 1
+            else:
+                unchanged = 0
+            if dedupe and same:
                 dupes += 1
             else:
                 _watch.emit_or_jq(tick, hook_jq, watch_out, quiet=_watch.quiet("JEV_HOOK_WATCH_QUIET", quiet), bad=not tick["winner"])
@@ -923,6 +937,9 @@ def main(argv: list[str] | None = None) -> int:
             if verdict_path and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
             if fail_fast and not tick["winner"]:
+                break
+            if unchanged_max and unchanged >= unchanged_max:
+                sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
             time.sleep(watch_seconds)
         if verdict_path and verdict_ok and not _write_verdict():

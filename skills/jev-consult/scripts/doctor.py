@@ -344,6 +344,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first failing tick.")
     parser.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the {ok,checks} payload (e.g. ok); unknown key exits 2")
     parser.add_argument("--env", action="store_true", help="Print the resolved env config JSON: {env: {JEV_*/TYPESAFE_* masked dump}, count, watch_max, watch_secs, watch_quiet, policy} (secret-looking names/values masked to <set>)")
@@ -561,6 +562,8 @@ def main(argv: list[str] | None = None) -> int:
         last_checks: list[dict] = []
         verdict_ok = True
         prev_ok: bool | None = None
+        prev_tick: dict | None = None
+        unchanged = 0
         watch_t0 = _time.time()
         while True:
             cur = collect()
@@ -588,6 +591,14 @@ def main(argv: list[str] | None = None) -> int:
             ):
                 verdict_ok = False  # warn once, stop retrying
             if args.fail_fast and not ok:
+                break
+            if _watch.same_tick(prev_tick, last):
+                unchanged += 1
+            else:
+                unchanged = 0
+            prev_tick = dict(last)
+            if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+                sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
             if max_ticks and count >= max_ticks:
                 break

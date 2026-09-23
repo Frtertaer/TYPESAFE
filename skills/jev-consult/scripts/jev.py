@@ -797,6 +797,8 @@ def cmd_ping(args: argparse.Namespace) -> int:
         ticks = 0
         last_ok = True
         verdict_ok = True
+        prev_tick: dict | None = None
+        unchanged = 0
         watch_t0 = time.time()
 
         def _write_verdict() -> bool:
@@ -844,6 +846,14 @@ def cmd_ping(args: argparse.Namespace) -> int:
             if verdict_path and verdict_ok and not _write_verdict():
                 verdict_ok = False
             if getattr(args, "fail_fast", False) and not last_ok:
+                break
+            if _watch.same_tick(prev_tick, tick, ignore=("ts", "elapsed_s", "ms")):
+                unchanged += 1
+            else:
+                unchanged = 0
+            prev_tick = dict(tick)
+            if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+                sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
             time.sleep(watch)
         if verdict_path and verdict_ok and not _write_verdict():
@@ -1276,6 +1286,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--fail-fast",
         action="store_true",
         help="With --watch: stop after the first failed ping tick",
+    )
+    ping.add_argument(
+        "--unchanged-max",
+        metavar="N",
+        type=int,
+        default=0,
+        help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s/ms ignored)",
     )
     ping.set_defaults(func=cmd_ping)
     scaffold = sub.add_parser(

@@ -442,6 +442,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="With --watch: stop after the first tick that fails any gate (rc still reflects the last tick).",
     )
+    parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     args = parser.parse_args(argv)
     if getattr(args, "schema", False):
         rows = {
@@ -720,6 +721,7 @@ def main(argv: list[str] | None = None) -> int:
         prev_tick: dict | None = None
         watch_t0 = _time.time()
         error_ticks = 0
+        unchanged = 0
         gates_seen: set[str] = set()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             coverage_ok = (
@@ -791,6 +793,10 @@ def main(argv: list[str] | None = None) -> int:
                 "elapsed_s": round(_time.time() - watch_t0, 2),
             }
             prev_gates = list(failed)
+            if _watch.same_tick(prev_tick, tick):
+                unchanged += 1
+            else:
+                unchanged = 0
             prev_tick = tick
             gates_seen.update(failed)
             _watch.emit_or_jq(tick, getattr(args, "jq", ""), args.out, quiet=_watch.quiet("JEV_TRIGGER_WATCH_QUIET", args.quiet), bad=bool(failed))
@@ -810,6 +816,9 @@ def main(argv: list[str] | None = None) -> int:
                 % (ticks, cur["ok"], cur["coverage"], ",".join(failed) or "-")
             )
             if args.fail_fast and failed:
+                break
+            if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+                sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
             _time.sleep(args.watch)
             try:

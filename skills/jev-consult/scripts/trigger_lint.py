@@ -223,7 +223,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]\nLint a trigger-cases fixture file for schema sanity.\nFlags:\n  --policy PATH     lint cases against a specific policy.json\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the cases-file key contract (--json emits the object)\n  --severity S      preset severity floor (error|warn|info; JEV_TLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad cases file; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args or unreadable file.\n'
+USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]\nLint a trigger-cases fixture file for schema sanity.\nFlags:\n  --policy PATH     lint cases against a specific policy.json\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the cases-file key contract (--json emits the object)\n  --severity S      preset severity floor (error|warn|info; JEV_TLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad cases file; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args or unreadable file.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -251,6 +251,18 @@ def main(argv: list[str] | None = None) -> int:
         env_sev = os.environ.get("JEV_TLINT_SEVERITY", "").strip().lower()
         if env_sev in SEVERITIES:
             severity = env_sev
+    unchanged_max = 0
+    if "--unchanged-max" in argv:
+        idx = argv.index("--unchanged-max")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--unchanged-max needs a value (int ticks)\n")
+            return 2
+        try:
+            unchanged_max = int(argv[idx + 1])
+        except ValueError:
+            sys.stderr.write("bad --unchanged-max %r\n" % argv[idx + 1])
+            return 2
+        argv = argv[:idx] + argv[idx + 2 :]
     if "--explain" in argv:
         idx = argv.index("--explain")
         if idx + 1 >= len(argv):
@@ -553,6 +565,8 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         watch_t0 = _time.time()
+        prev_tick: dict | None = None
+        unchanged = 0
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             rows = lint_cases(path, policy_path=policy_path)
             pre_drop = len(rows)
@@ -577,6 +591,14 @@ def main(argv: list[str] | None = None) -> int:
                 if not _write_verdict(rc_now):
                     verdict_ok = False  # warn once, stop retrying
             if fail_fast and (tick["errors"] or (strict and tick["findings"])):
+                break
+            if _watch.same_tick(prev_tick, tick):
+                unchanged += 1
+            else:
+                unchanged = 0
+            prev_tick = dict(tick)
+            if unchanged_max and unchanged >= unchanged_max:
+                sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
             _time.sleep(watch_seconds)
         rc = 1 if (tick.get("errors", 0) or (strict and tick.get("findings", 0))) else 0

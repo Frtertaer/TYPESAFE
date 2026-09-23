@@ -7067,6 +7067,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, steps, failed} JSON to PATH when finished (in --watch mode, the final pass state).")
     parser.add_argument("--junit", metavar="PATH", default="", help="Write a JUnit XML <testsuite> for the step results to PATH (in --watch mode, the final pass).")
     parser.add_argument("--tag", metavar="T", default="", help="Label this run: lands in the verdict payload as tag and in the junit testsuite name")
+    parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     parser.add_argument(
         "--repeat",
         metavar="N",
@@ -7356,6 +7357,8 @@ def main(argv: list[str] | None = None) -> int:
         dead = _watch.deadline("JEV_SMOKE_WATCH_SECS", getattr(args, "watch_max", 0.0))
         last_steps: list[dict] = []
         verdict_ok = True
+        prev_tick: dict | None = None
+        unchanged = 0
         watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             steps = _run_steps()
@@ -7389,6 +7392,14 @@ def main(argv: list[str] | None = None) -> int:
             ):
                 verdict_ok = False  # warn once, stop retrying
             if args.fail_fast and tick["failed"]:
+                break
+            if _watch.same_tick(prev_tick, tick):
+                unchanged += 1
+            else:
+                unchanged = 0
+            prev_tick = dict(tick)
+            if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+                sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
             _time.sleep(args.watch)
         if args.verdict and verdict_ok and not _write_verdict(

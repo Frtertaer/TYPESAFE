@@ -1484,6 +1484,8 @@ def cmd_compact(args: argparse.Namespace) -> int:
             )
 
         watch_t0 = time.time()
+        prev_tick: dict | None = None
+        unchanged = 0
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             if args.file != "-":
                 try:
@@ -1511,6 +1513,14 @@ def cmd_compact(args: argparse.Namespace) -> int:
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
             if getattr(args, "fail_fast", False) and tick["fallback"]:
+                break
+            if _watch.same_tick(prev_tick, tick):
+                unchanged += 1
+            else:
+                unchanged = 0
+            prev_tick = dict(tick)
+            if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+                sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
             _time.sleep(args.watch)
         if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
@@ -1882,6 +1892,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that fell back to the original transcript")
+    parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     parser.add_argument("--verdict", default="", metavar="PATH", help="Write a slim {verdict: ok|fallback, ticks, reduction, fallback} JSON to PATH — refreshed every --watch tick; without --watch a one-shot probe after the run.")
     parser.add_argument(
         "--prune-spill",

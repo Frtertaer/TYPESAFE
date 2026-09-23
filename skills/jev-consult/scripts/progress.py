@@ -48,6 +48,8 @@ def build_parser():
                          help="With --watch: print only noteworthy ticks to stdout (--out still logs all; JEV_PROGRESS_WATCH_QUIET presets)")
         sub.add_argument("--fail-fast", action="store_true",
                          help="With --watch: status stops on the first non-'continue' tick; history/report stop on the first content change")
+        sub.add_argument("--unchanged-max", metavar="N", type=int, default=0,
+                         help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
         if name != "report":  # report --out doubles as markdown target / tick sink
             sub.add_argument("--out", metavar="PATH", default="",
                              help="With --watch: append each tick line to PATH (fail-open); without --watch: write the result JSON to PATH instead of stdout")
@@ -161,6 +163,8 @@ def _status_watch(ledger, args):
     quiet = _watch.quiet("JEV_PROGRESS_WATCH_QUIET", args.quiet)
     ticks = 0
     tick: dict = {}
+    prev_tick: dict | None = None
+    unchanged = 0
     verdict_ok = True
     t0 = time.time()
 
@@ -190,6 +194,14 @@ def _status_watch(ledger, args):
         if args.verdict and verdict_ok and not _write_verdict():
             verdict_ok = False
         if args.fail_fast and tick["action"] != "continue":
+            break
+        if _watch.same_tick(prev_tick, tick):
+            unchanged += 1
+        else:
+            unchanged = 0
+        prev_tick = dict(tick)
+        if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+            sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
             break
         time.sleep(args.watch)
     if args.verdict and verdict_ok and not _write_verdict():
@@ -222,6 +234,8 @@ def _history_watch(ledger, args):
     ticks = 0
     tick: dict = {}
     prev_events: int | None = None
+    prev_tick: dict | None = None
+    unchanged = 0
     verdict_ok = True
     t0 = time.time()
 
@@ -252,6 +266,14 @@ def _history_watch(ledger, args):
         if args.verdict and verdict_ok and not _write_verdict():
             verdict_ok = False
         if args.fail_fast and (tick.get("delta") or "error" in tick):
+            break
+        if _watch.same_tick(prev_tick, tick):
+            unchanged += 1
+        else:
+            unchanged = 0
+        prev_tick = dict(tick)
+        if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+            sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
             break
         time.sleep(args.watch)
     if args.verdict and verdict_ok and not _write_verdict():
@@ -284,6 +306,8 @@ def _report_watch(ledger, args):
     ticks = 0
     tick: dict = {}
     prev_sha: str | None = None
+    prev_tick: dict | None = None
+    unchanged = 0
     verdict_ok = True
     t0 = time.time()
 
@@ -314,6 +338,14 @@ def _report_watch(ledger, args):
         if args.verdict and verdict_ok and not _write_verdict():
             verdict_ok = False
         if args.fail_fast and (tick.get("delta") or "error" in tick):
+            break
+        if _watch.same_tick(prev_tick, tick):
+            unchanged += 1
+        else:
+            unchanged = 0
+        prev_tick = dict(tick)
+        if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+            sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
             break
         time.sleep(args.watch)
     if args.verdict and verdict_ok and not _write_verdict():

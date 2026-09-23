@@ -99,7 +99,8 @@ def emit(tick: dict, out_path=None, quiet: bool = False, bad=None) -> None:
 def same_tick(prev: dict | None, tick: dict, ignore=("ts", "elapsed_s")) -> bool:
     """True when two consecutive ticks are equal apart from volatile keys.
 
-    Watch loops can pass their previous tick to skip re-emitting noise."""
+    Watch loops can pass their previous tick to skip re-emitting noise
+    (--dedupe) or to count identical ticks for --unchanged-max."""
     if not isinstance(prev, dict) or not isinstance(tick, dict):
         return False
     drop = set(ignore)

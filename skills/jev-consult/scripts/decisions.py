@@ -1175,6 +1175,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that reports removals.")
+    parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON to PATH — with --watch a {verdict, count, added, removed, ticks} payload refreshed every tick; without it a one-shot {verdict: ok|empty, count, ticks: 1} probe of the filtered entries.")
     parser.add_argument("--self-test", action="store_true", help="Parse a synthetic 3-entry log + 1 bad line; exit 1 when the counts do not match")
     parser.add_argument("--verify", action="store_true", help="Chain check the raw log: unparseable lines, missing ts/jev_status, missing required schema keys on full routing/fill entries, ts regressions; rc 1 on any problem")
@@ -1635,6 +1636,8 @@ def main(argv: list[str] | None = None) -> int:
         total_removed = 0
         tick: dict = {}
         verdict_ok = True
+        prev_tick: dict | None = None
+        unchanged = 0
         watch_t0 = time.time()
 
         def _write_verdict() -> bool:
@@ -1703,6 +1706,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.verdict and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
             if getattr(args, "fail_fast", False) and tick.get("removed"):
+                break
+            if _watch.same_tick(prev_tick, tick):
+                unchanged += 1
+            else:
+                unchanged = 0
+            prev_tick = dict(tick)
+            if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+                sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
             time.sleep(args.watch)
             try:

@@ -408,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick with failures.")
+    parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     parser.add_argument("--baseline", metavar="PATH", default="", help="Write the current rows to PATH as a baseline file for a later --diff")
     parser.add_argument("--diff", metavar="PATH", default="", help="Load a --baseline file and add a diff block (regressions/improved/changed/added/removed) to the result payload; regressions also join the --strict failure list")
     parser.add_argument("--trend", metavar="DIR", default="", help="Diff the current rows against every *.json baseline in DIR; adds a trend list ({file,ts,regressions,improved,changed,added,removed,unchanged} sorted by ts) to the payload and one stderr line per baseline")
@@ -531,6 +532,8 @@ def main(argv: list[str] | None = None) -> int:
         dead = _watch.deadline("JEV_COMPARE_WATCH_SECS", getattr(args, "watch_max", 0.0))
         verdict_ok = True
         prev_failures: set[str] = set()
+        prev_tick: dict | None = None
+        unchanged = 0
         watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             cur = run(
@@ -558,6 +561,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.verdict and verdict_ok and not _write_verdict(args.verdict, tick):
                 verdict_ok = False  # warn once, stop retrying
             if args.fail_fast and failing:
+                break
+            if _watch.same_tick(prev_tick, tick):
+                unchanged += 1
+            else:
+                unchanged = 0
+            prev_tick = dict(tick)
+            if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+                sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
             _time.sleep(args.watch)
         if args.verdict and verdict_ok:

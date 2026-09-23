@@ -1290,6 +1290,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     parser.add_argument("--schema", action="store_true", help="Print the scan payload + item key contract and exit (--json emits the object)")
     parser.add_argument("--env", action="store_true", help="Print the resolved env config JSON (task/limit/log/watch knobs, policy source) and exit (--jq KEY prints one field, rc 2 on unknown)")
     parser.add_argument("--json", action="store_true", help="With --schema: emit the schema object instead of text rows")
@@ -1801,6 +1802,8 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     watch_t0 = time.time()
+    prev_tick: dict | None = None
+    unchanged = 0
     while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
         time.sleep(watch_seconds)
         fresh = scan(harness, home=home, hermes=hermes)
@@ -1841,6 +1844,14 @@ def main(argv: list[str] | None = None) -> int:
         if verdict_ok and not _write_verdict(ticks):
             verdict_ok = False  # warn once, stop retrying
         if getattr(args, "fail_fast", False) and (tick["added"] or tick["removed"]):
+            break
+        if _watch.same_tick(prev_tick, tick):
+            unchanged += 1
+        else:
+            unchanged = 0
+        prev_tick = dict(tick)
+        if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+            sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
             break
     if args.verdict and verdict_ok and not _write_verdict(ticks):
         return 1

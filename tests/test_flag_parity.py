@@ -51,6 +51,7 @@ class FlagParityTest(unittest.TestCase):
             "--pick", "--from-miss", "--dry-run", "--ask-file", "--json",
             "--jq", "--watch", "--max-ticks", "--watch-max", "--quiet",
             "--fail-fast", "--out", "--verdict", "--schema", "--env", "--help",
+            "--unchanged-max",
         }
         extras = {
             "apply_fill.py": {"--status", "--list", "--show", "--self-test"},
@@ -77,7 +78,7 @@ class FlagParityTest(unittest.TestCase):
 
     WATCH_CORE = {
         "--watch", "--max-ticks", "--watch-max", "--quiet",
-        "--fail-fast", "--out", "--verdict", "--jq",
+        "--fail-fast", "--out", "--verdict", "--jq", "--unchanged-max",
     }
     # Every help screen that advertises --watch, keyed by script. Flat-CLI
     # scripts map to one bare --help; subcommand CLIs list each watchable

@@ -3006,6 +3006,33 @@ class PruneTest(unittest.TestCase):
             counts = json.loads(proc.stdout)["counts"]
             self.assertEqual(counts["unknown"], 1)
 
+    def test_hourly_buckets_by_hour(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1_700_000_000, "jev_status": "ok"},
+                    {"ts": 1_700_000_100, "jev_status": "ok"},
+                    {"ts": 1_700_100_000, "jev_status": "ok"},
+                    {"jev_status": "ok"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--hourly")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = proc.stdout.strip().splitlines()
+            import datetime as _dt
+            h1 = "%02d" % _dt.datetime.fromtimestamp(1_700_000_000, tz=_dt.timezone.utc).hour
+            h2 = "%02d" % _dt.datetime.fromtimestamp(1_700_100_000, tz=_dt.timezone.utc).hour
+            self.assertEqual(
+                sorted(lines),
+                sorted(["%s 2" % h1, "%s 1" % h2, "unknown 1"]),
+            )
+            proc = self.run_cli("--file", str(path), "--hourly", "--json")
+            counts = json.loads(proc.stdout)["counts"]
+            self.assertEqual(counts[h1], 2)
+            self.assertEqual(counts["unknown"], 1)
+
     def test_missing_accepts_comma_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

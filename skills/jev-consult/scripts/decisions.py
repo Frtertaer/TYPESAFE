@@ -989,6 +989,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print per-day entry counts (UTC YYYY-MM-DD), sorted desc",
     )
     parser.add_argument(
+        "--hourly",
+        action="store_true",
+        help="Print per-hour-of-day entry counts (UTC 00-23), sorted desc",
+    )
+    parser.add_argument(
         "--daily-status",
         dest="daily_status",
         action="store_true",
@@ -1894,6 +1899,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.dedupes
         or args.daily
         or args.daily_status
+        or args.hourly
     ):
         counts: dict[str, int] = {}
         if args.daily_status:
@@ -1935,6 +1941,16 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     day = "unknown"
                 counts[day] = counts.get(day, 0) + 1
+        elif args.hourly:
+            for item in entries:
+                ts = item.get("ts")
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+                    hour = "%02d" % datetime.datetime.fromtimestamp(
+                        float(ts), tz=datetime.timezone.utc
+                    ).hour
+                else:
+                    hour = "unknown"
+                counts[hour] = counts.get(hour, 0) + 1
         elif args.winners:
             for item in entries:
                 winner = item.get("winner")

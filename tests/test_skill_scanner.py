@@ -184,6 +184,38 @@ class SkillScannerTests(unittest.TestCase):
             self.assertNotEqual(payload["verdict"], "REJECT-PENDING-REVIEW")
 
 
+class DiscoverSkillsTests(unittest.TestCase):
+    def test_multi_skill_parent_and_single_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "skills"
+            for name in ("alpha", "beta"):
+                d = root / name
+                d.mkdir(parents=True)
+                (d / "SKILL.md").write_text(
+                    "---\nname: %s\ndescription: x\n---\n" % name, encoding="utf-8"
+                )
+            self.assertEqual(len(scanner.discover_skills(root)), 2)
+            self.assertEqual(
+                scanner.discover_skills(root / "alpha" / "SKILL.md"),
+                [root / "alpha"],
+            )
+
+    def test_empty_when_no_skill_md(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(scanner.discover_skills(Path(tmp)), [])
+
+
+class FrontmatterTests(unittest.TestCase):
+    def test_indented_continuation_folds_into_value(self) -> None:
+        fm = scanner.parse_frontmatter(
+            "---\nname: x\ndescription: first line\n  second line\n---\n"
+        )
+        self.assertEqual(fm["description"], "first line second line")
+
+    def test_missing_block_returns_none(self) -> None:
+        self.assertIsNone(scanner.parse_frontmatter("# no frontmatter\n"))
+
+
 class SelfScanTests(unittest.TestCase):
     def test_pack_self_scan_has_no_critical(self) -> None:
         skill_dir = ROOT / "skills" / "jev-consult"

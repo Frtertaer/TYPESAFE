@@ -2920,7 +2920,7 @@ class IncludeDryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             spill, dry = self._dirs(tmp)
             with patch("sys.stdout", io.StringIO()):
-                C.main(["--prune-spill", "0", "--spill-dir", str(spill)])
+                C.main(["--prune-spill", "-1", "--spill-dir", str(spill)])
             self.assertFalse((spill / "live.txt").exists())
             self.assertTrue((dry / "probe.txt").is_file())
 

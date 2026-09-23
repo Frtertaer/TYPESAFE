@@ -67,6 +67,40 @@ class VerdictParityTests(unittest.TestCase):
                     self.assertTrue(verdict, "%s verdict empty" % name)
                     self.assertNotIn("Traceback", proc.stderr)
 
+    def test_verdict_failure_leaves_no_tmp_residue(self) -> None:
+        """A --verdict targeting an existing directory fails os.replace; the
+        <name>.tmp sibling must be cleaned and stderr must say so."""
+        probes = (
+            ("apply_fill.py", []),
+            ("catalog_fill.py", ["--task", "x", "--list"]),
+            ("compare.py", []),
+            ("decisions.py", ["--tail", "3"]),
+            ("doctor.py", []),
+            ("inventory.py", []),
+            ("peer_fill.py", []),
+            ("policy_lint.py", []),
+            ("question_lint.py", [str(EXAMPLE_REQ)]),
+            ("skill_lint.py", [str(SKILL_MD)]),
+            ("trigger_eval.py", []),
+            ("trigger_lint.py", []),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            blocker = Path(tmp) / "blocker"
+            blocker.mkdir()
+            for name, argv in probes:
+                with self.subTest(script=name):
+                    proc = _run(name, [*argv, "--verdict", str(blocker)], tmp)
+                    self.assertIn(proc.returncode, (0, 1), "%s rc=%d" % (name, proc.returncode))
+                    self.assertIn(
+                        "--verdict failed", proc.stderr, "%s silent" % name
+                    )
+                    leftovers = [
+                        p.name for p in Path(tmp).glob("*.tmp")
+                    ]
+                    self.assertEqual(
+                        leftovers, [], "%s left tmp files: %s" % (name, leftovers)
+                    )
+
     def test_compact_watch_verdict(self) -> None:
         """compact's --verdict is watch-scoped: one capped tick writes it."""
         with tempfile.TemporaryDirectory() as tmp:

@@ -107,6 +107,10 @@ class ExitCodeParityTests(unittest.TestCase):
                         blob = proc.stdout + proc.stderr
                         self.assertNotIn("Traceback", blob)
                         self.assertTrue(blob.strip())
+                        if probe == missing:
+                            # Error text must name the offending path —
+                            # a bare "not found" forces users to guess.
+                            self.assertIn("missing.md", blob, "%s" % name)
 
     def test_unknown_subcommand_rc2_clean(self) -> None:
         """Subcommand CLIs exit 2 with a usage/error line on a bogus verb."""

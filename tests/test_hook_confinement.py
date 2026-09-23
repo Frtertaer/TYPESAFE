@@ -63,7 +63,7 @@ class HookConfinementTests(unittest.TestCase):
             for p in created:
                 self.assertEqual(len(p.parts), 1, "unexpected nested path: %s" % p)
 
-    def test_dry_run_writes_nothing(self) -> None:
+    def test_dry_run_writes_only_dry_sidecars(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
             env = dict(os.environ)
@@ -83,8 +83,12 @@ class HookConfinementTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 0, proc.stderr[:300])
             leftovers = [p.name for p in cwd.iterdir() if p.name != "decisions.jsonl"]
+            bad = [
+                p for p in leftovers
+                if p not in (".jev-tools.dry.json", ".jev-tools-miss.dry.json")
+            ]
             self.assertEqual(
-                leftovers, [], "--dry-run leaked files: %s" % leftovers
+                bad, [], "--dry-run touched live names: %s" % bad
             )
 
     def test_log_disabled_writes_no_log(self) -> None:

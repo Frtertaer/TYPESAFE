@@ -492,16 +492,17 @@ def handle(
     append_decision(LAST_DECISION)
     if note:
         extra["note_sha"] = hashlib.sha256(note.encode("utf-8")).hexdigest()[:12]
-    no_sidecar = no_writes or _env_on("JEV_HOOK_NOSIDECAR")
-    if cwd is not None and not no_sidecar:
+    env_no_sidecar = _env_on("JEV_HOOK_NOSIDECAR")
+    env_no_miss = _env_on("JEV_HOOK_NOMISS")
+    if cwd is not None and not env_no_sidecar:
+        sidecar_path = cwd / (".jev-tools.dry.json" if no_writes else SIDECAR_NAME)
         try:
-            write_sidecar(cwd / SIDECAR_NAME, harness, prompt, picked, extra)
+            write_sidecar(sidecar_path, harness, prompt, picked, extra)
         except OSError:
             pass
-        no_miss = no_writes or _env_on("JEV_HOOK_NOMISS")
-        miss_path = cwd / MISS_NAME
+        miss_path = cwd / (".jev-tools-miss.dry.json" if no_writes else MISS_NAME)
         try:
-            if picked or no_miss:
+            if picked or env_no_miss:
                 clear_miss(miss_path)
             elif tokens(prompt):
                 write_miss(miss_path, harness, prompt, {"note": note_tag} if note_tag else None)
@@ -624,7 +625,7 @@ def env_report() -> dict:
     return report
 
 
-USAGE = 'Usage: python inventory_hook.py [--env|--events|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet]\n       [--verdict PATH]]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n  --events   print allowed hook event names and exit\n  --dry-run  resolve the pick without writing sidecar/miss files\n  --simulate TEXT  run the hook on a synthetic UserPromptSubmit event with TEXT as the prompt and the process cwd (implies --dry-run; no stdin)\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --version  print the pack policy version and exit\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --verdict P  write a slim {verdict, ticks, winner, winner_stability, keys} JSON\n'
+USAGE = 'Usage: python inventory_hook.py [--env|--events|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet]\n       [--verdict PATH]]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n  --events   print allowed hook event names and exit\n  --dry-run  resolve the pick writing sidecar/miss as .jev-tools.dry.json /\n             .jev-tools-miss.dry.json instead of the live names\n  --simulate TEXT  run the hook on a synthetic UserPromptSubmit event with TEXT as the prompt and the process cwd (implies --dry-run; no stdin)\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --version  print the pack policy version and exit\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --verdict P  write a slim {verdict, ticks, winner, winner_stability, keys} JSON\n'
 
 
 def main(argv: list[str] | None = None) -> int:

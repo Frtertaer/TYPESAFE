@@ -191,6 +191,18 @@ def run_cli(*argv: str, env: dict | None = None) -> subprocess.CompletedProcess:
 class CliTest(unittest.TestCase):
     run_cli = staticmethod(run_cli)
 
+    def test_self_test_counts_match(self):
+        proc = self.run_cli("--self-test")
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("self-test: ok", proc.stdout)
+        self.assertIn("total=3", proc.stdout)
+        proc = self.run_cli("--self-test", "--json")
+        self.assertEqual(proc.returncode, 0)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["self_test"], "ok")
+        self.assertEqual(payload["total"], 3)
+        self.assertEqual(payload["bad_lines"], 1)
+
     def test_stats_and_tail(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

@@ -1001,7 +1001,41 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that reports removals.")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON to PATH — with --watch a {verdict, count, added, removed, ticks} payload refreshed every tick; without it a one-shot {verdict: ok|empty, count, ticks: 1} probe of the filtered entries.")
+    parser.add_argument("--self-test", action="store_true", help="Parse a synthetic 3-entry log + 1 bad line; exit 1 when the counts do not match")
     args = parser.parse_args(argv)
+    if getattr(args, "self_test", False):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            with open(log, "w", encoding="utf-8") as fh:
+                for i in range(3):
+                    fh.write(
+                        json.dumps(
+                            {
+                                "ts": 1700000000.0 + i,
+                                "jev_status": "ok" if i else "none",
+                                "harness": "hermes",
+                                "prompt_head": "t%d" % i,
+                            }
+                        )
+                        + "\n"
+                    )
+                fh.write("not json\n")
+            entries_st, bad_st = load_entries(log)
+        stats = summarize(entries_st, bad_st)
+        ok = stats["total"] == 3 and stats["bad_lines"] == 1
+        payload = {
+            "self_test": "ok" if ok else "FAIL",
+            "total": stats["total"],
+            "bad_lines": stats["bad_lines"],
+        }
+        if args.json:
+            sys.stdout.write(json.dumps(payload) + "\n")
+        else:
+            sys.stdout.write(
+                "self-test: %s total=%d bad=%d\n"
+                % (payload["self_test"], payload["total"], payload["bad_lines"])
+            )
+        return 0 if ok else 1
     file_arg = args.file or os.environ.get("JEV_DECISIONS", "").strip()
     path = Path(file_arg) if file_arg else inventory.decisions_log_path()
     if path is None:

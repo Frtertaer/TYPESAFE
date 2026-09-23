@@ -336,6 +336,27 @@ def diff_baseline(
     }
 
 
+def env_report(args) -> dict:
+    """Resolved compare.py environment. Values only — never secrets."""
+    policy = os.environ.get("JEV_POLICY", "").strip()
+    try:
+        watch_secs = float(os.environ.get("JEV_COMPARE_WATCH_SECS", "") or 0)
+    except ValueError:
+        watch_secs = 0.0
+    cases = Path(args.cases) if args.cases else cases_path()
+    return {
+        "cases": str(cases),
+        "cases_exists": cases.is_file(),
+        "only": args.only,
+        "live": bool(args.live),
+        "strict": bool(args.strict),
+        "policy": policy if policy else "default",
+        "watch_max": _watch.cap("JEV_COMPARE_WATCH_MAX", None),
+        "watch_secs": watch_secs,
+        "watch_quiet": _watch.quiet("JEV_COMPARE_WATCH_QUIET", False),
+    }
+
+
 def _atomic_write(path, text):
     tmp = path.with_name(path.name + ".tmp")
     try:
@@ -394,6 +415,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Run the offline scorer on two synthetic cases (one pass, one deliberate strict-gate fail); exit 1 when the failure is not detected (--json emits the checks).",
     )
+    parser.add_argument(
+        "--env",
+        action="store_true",
+        help="Print the resolved env config JSON ({cases, cases_exists, only, live, strict, policy, watch_max, watch_secs, watch_quiet}) and exit (--jq KEY prints one field, rc 2 on unknown; --out PATH also writes it).",
+    )
     args = parser.parse_args(argv)
     if getattr(args, "schema", False):
         rows = {
@@ -414,6 +440,33 @@ def main(argv: list[str] | None = None) -> int:
                     "%s: %s (%s)\n"
                     % (key, rows[key]["type"], "required" if rows[key]["required"] else "optional")
                 )
+        return 0
+    if getattr(args, "env", False):
+        report = env_report(args)
+        if getattr(args, "jq", ""):
+            node = report
+            found = True
+            for part in args.jq.split("."):
+                if isinstance(node, dict) and part in node:
+                    node = node[part]
+                else:
+                    found = False
+                    break
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (env has: %s)\n"
+                    % (args.jq, ", ".join(sorted(report)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+            return 0
+        text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+        sys.stdout.write(text)
+        if getattr(args, "out", ""):
+            try:
+                _atomic_write(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
         return 0
     if args.self_test:
         fixture = [

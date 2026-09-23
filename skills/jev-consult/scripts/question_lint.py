@@ -356,7 +356,7 @@ def _atomic_write(path, text):
         raise
 
 
-USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S      preset severity floor (error|warn|info; JEV_QLINT_SEVERITY)\n  --quiet           print only errors/warnings count\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S      preset severity floor (error|warn|info; JEV_QLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -511,6 +511,39 @@ def main(argv: list[str] | None = None) -> int:
         for a in argv
         if a not in ("--json", "--fix", "--strict", "--quiet", "--fail-fast")
     ]
+    if "--env" in argv:
+        try:
+            env_watch_secs = float(os.environ.get("JEV_QLINT_WATCH_SECS", "") or 0)
+        except ValueError:
+            env_watch_secs = 0.0
+        report = {
+            "files": [a for a in argv if not a.startswith("--")],
+            "severity": severity,
+            "strict": strict,
+            "quiet": quiet,
+            "watch_max": _watch.cap("JEV_QLINT_WATCH_MAX", None),
+            "watch_secs": env_watch_secs,
+            "watch_quiet": _watch.quiet("JEV_QLINT_WATCH_QUIET", quiet),
+        }
+        if jq_value:
+            value, found = _watch.dig(report, jq_value)
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (env has: %s)\n"
+                    % (jq_value, ", ".join(sorted(report)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(value) + "\n")
+            return 0
+        text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+        sys.stdout.write(text)
+        if out_path:
+            try:
+                _atomic_write(Path(out_path), text)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+        return 0
+    argv = [a for a in argv if a != "--env"]
     if not argv:
         sys.stderr.write("usage: question_lint.py FILE... [--json] [--fix] [--strict]\n")
         return 2

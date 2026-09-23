@@ -16,6 +16,15 @@ SCRIPTS = ROOT / "skills" / "jev-consult" / "scripts"
 
 # Scripts that must accept --env, and the required keys each report exposes.
 # Additive: new keys are fine, missing pinned keys fail.
+LINT_ENV_KEYS = {
+    "files",
+    "quiet",
+    "severity",
+    "strict",
+    "watch_max",
+    "watch_quiet",
+    "watch_secs",
+}
 ENV_SCRIPTS = {
     "inventory_hook.py": {
         "budget_seconds",
@@ -67,6 +76,46 @@ ENV_SCRIPTS = {
         "watch_quiet",
         "watch_secs",
     },
+    "compact.py": {
+        "keep_first",
+        "keep_threshold",
+        "min_messages",
+        "min_reduction",
+        "policy",
+        "preserve_recent",
+        "spill_dir",
+        "spill_disabled",
+        "spill_max_bytes",
+        "spill_max_files",
+        "truncate_head_chars",
+        "watch_max",
+        "watch_quiet",
+        "watch_secs",
+    },
+    "compare.py": {
+        "cases",
+        "cases_exists",
+        "live",
+        "only",
+        "policy",
+        "strict",
+        "watch_max",
+        "watch_quiet",
+        "watch_secs",
+    },
+    "policy_lint.py": {
+        "files",
+        "policy",
+        "quiet",
+        "severity",
+        "strict",
+        "watch_max",
+        "watch_quiet",
+        "watch_secs",
+    },
+    "skill_lint.py": LINT_ENV_KEYS,
+    "question_lint.py": LINT_ENV_KEYS,
+    "trigger_lint.py": LINT_ENV_KEYS | {"policy"},
 }
 
 SECRETISH = ("api_key", "token", "secret", "password")

@@ -1712,6 +1712,38 @@ def prune_spill(
     return removed
 
 
+def env_report(args) -> dict:
+    """Resolved compact.py environment. Values only — never secrets."""
+    policy = os.environ.get("JEV_POLICY", "").strip()
+    try:
+        watch_secs = float(os.environ.get("JEV_COMPACT_WATCH_SECS", "") or 0)
+    except ValueError:
+        watch_secs = 0.0
+    files, size = _opts_spill_caps(
+        {
+            "spill_max_files": getattr(args, "spill_max_files", None),
+            "spill_max_bytes": getattr(args, "spill_max_bytes", None),
+        }
+    )
+    spill_dir = spill_dir_default()
+    return {
+        "keep_threshold": args.keep_threshold,
+        "preserve_recent": args.preserve_recent,
+        "keep_first": args.keep_first,
+        "min_messages": args.min_messages,
+        "truncate_head_chars": args.truncate_head_chars,
+        "min_reduction": args.min_reduction,
+        "spill_dir": str(spill_dir) if spill_dir else None,
+        "spill_disabled": spill_dir is None,
+        "spill_max_files": files,
+        "spill_max_bytes": size,
+        "policy": policy if policy else "default",
+        "watch_max": _watch.cap("JEV_COMPACT_WATCH_MAX", None),
+        "watch_secs": watch_secs,
+        "watch_quiet": _watch.quiet("JEV_COMPACT_WATCH_QUIET", False),
+    }
+
+
 def _atomic_write(path, text):
     tmp = path.with_name(path.name + ".tmp")
     try:
@@ -1844,6 +1876,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Emit --verify-spill/--orphan-spill results as JSON.",
     )
     parser.add_argument(
+        "--env",
+        action="store_true",
+        help="Print the resolved env config JSON ({keep_threshold, preserve_recent, keep_first, min_messages, truncate_head_chars, min_reduction, spill_dir, spill_disabled, spill_max_files, spill_max_bytes, policy, watch_max, watch_secs, watch_quiet}) and exit (--jq KEY prints one field, rc 2 on unknown; --out PATH also writes it).",
+    )
+    parser.add_argument(
         "--jq",
         metavar="KEY",
         default="",
@@ -1905,6 +1942,33 @@ def main(argv: list[str] | None = None) -> int:
                     "%s: %s (%s)\n"
                     % (key, row["type"], "required" if row["required"] else "optional")
                 )
+        return 0
+    if getattr(args, "env", False):
+        report = env_report(args)
+        if getattr(args, "jq", ""):
+            node = report
+            found = True
+            for part in args.jq.split("."):
+                if isinstance(node, dict) and part in node:
+                    node = node[part]
+                else:
+                    found = False
+                    break
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (env has: %s)\n"
+                    % (args.jq, ", ".join(sorted(report)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+            return 0
+        text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+        sys.stdout.write(text)
+        if getattr(args, "out", ""):
+            try:
+                _atomic_write(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
         return 0
     if args.self_test:
         checks: dict = {}

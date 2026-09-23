@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -699,7 +701,23 @@ def cmd_export(args: argparse.Namespace) -> int:
     rc = emit_jq(data, getattr(args, "jq", ""))
     if rc is not None:
         return rc
-    out_text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    if getattr(args, "csv", False):
+        buf = io.StringIO()
+        writer = csv.writer(buf, lineterminator="\n")
+        writer.writerow(["pick", "ts", "iso", "kind"])
+        for h in data.get("history") or []:
+            if isinstance(h, dict):
+                writer.writerow(
+                    [
+                        h.get("pick") or "",
+                        h.get("ts") or "",
+                        h.get("iso") or "",
+                        h.get("kind") or "",
+                    ]
+                )
+        out_text = buf.getvalue()
+    else:
+        out_text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
     out_path = getattr(args, "out", "") or ""
     if out_path:
         try:
@@ -707,7 +725,10 @@ def cmd_export(args: argparse.Namespace) -> int:
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
             return 1
-        sys.stderr.write("wrote trace export to %s\n" % out_path)
+        sys.stderr.write(
+            "wrote trace export%s to %s\n"
+            % (" (csv)" if getattr(args, "csv", False) else "", out_path)
+        )
         return 0
     sys.stdout.write(out_text)
     return 0
@@ -1198,6 +1219,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export_cmd.add_argument(
         "--out", default="", help="Write the export JSON to PATH instead of stdout"
+    )
+    export_cmd.add_argument(
+        "--csv",
+        action="store_true",
+        help="Emit the (filtered) history list as CSV rows — pick,ts,iso,kind — instead of the JSON bundle",
     )
     export_cmd.add_argument("--since", default=None, help="Only history/notes with ts >= epoch seconds or ISO8601")
     export_cmd.add_argument("--before", default=None, help="Only history/notes with ts <= epoch seconds or ISO8601")

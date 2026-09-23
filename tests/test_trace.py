@@ -1434,6 +1434,46 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("history", json.loads(out_path.read_text(encoding="utf-8")))
 
+    def test_export_csv_emits_history_rows(self) -> None:
+        import io
+        import csv as _csv
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            self._write_history(path, [1000.0, 2000.0])
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "export", "--csv"])
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(io.StringIO(buf.getvalue())))
+            self.assertEqual(rows[0], ["pick", "ts", "iso", "kind"])
+            self.assertEqual(len(rows), 3)
+            self.assertEqual(rows[1][0], "p0")
+            self.assertEqual(rows[2][0], "p1")
+            self.assertEqual(rows[1][3], "idf")
+            self.assertEqual(rows[2][3], "explicit")
+
+    def test_export_csv_honors_kinds_and_out(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            self._write_history(path, [1000.0, 2000.0])
+            out_path = Path(tmp) / "hist.csv"
+            with patch.object(sys, "stdout", io.StringIO()):
+                rc = tr.main(
+                    [
+                        "--file", str(path), "export",
+                        "--csv", "--kinds", "explicit",
+                        "--out", str(out_path),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            lines = out_path.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(lines), 2)
+            self.assertIn("p1", lines[1])
+            self.assertNotIn("p0", lines[1])
+
     def test_export_since_before_bounds_history_and_notes(self) -> None:
         import io
 

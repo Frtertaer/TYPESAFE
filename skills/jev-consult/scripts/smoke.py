@@ -4924,9 +4924,16 @@ def step_compare(tmp: Path) -> dict:
         )
         try:
             diff = json.loads(out).get("diff") or {}
+            n_cases = len(
+                json.loads(
+                    (SKILL_DIR / "examples" / "compare-cases.json").read_text(
+                        encoding="utf-8"
+                    )
+                ).get("cases", [])
+            )
             ok = (
                 rc == 0
-                and diff.get("unchanged") == 4
+                and diff.get("unchanged") == n_cases
                 and not diff.get("regressions")
                 and not diff.get("added")
                 and not diff.get("removed")

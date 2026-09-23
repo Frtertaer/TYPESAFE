@@ -118,6 +118,13 @@ class ExampleFilesTests(unittest.TestCase):
             extra_top = set(req) - {k for k in schema if "." not in k}
             self.assertEqual(extra_top, set(), "%s has unknown keys" % path.name)
 
+    def test_compare_cases_cover_goal_axes(self) -> None:
+        """compare-cases.json has a case for every defect axis the goal names."""
+        data = json.loads((EXAMPLES / "compare-cases.json").read_text(encoding="utf-8"))
+        defects = {case.get("defect") for case in data["cases"]}
+        canonical = {"stall", "invented_next_step", "drift", "loop", "no_memory"}
+        self.assertTrue(canonical <= defects, "missing axes: %s" % sorted(canonical - defects))
+
     def test_readme_names_every_fixture(self) -> None:
         """examples/README.md stays in sync: every *.json fixture is named."""
         readme = EXAMPLES / "README.md"

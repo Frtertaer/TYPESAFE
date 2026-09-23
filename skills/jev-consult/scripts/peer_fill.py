@@ -502,6 +502,19 @@ def main() -> int:
                 "ask_file_exists": ask_path.is_file(),
                 "task": task,
             }
+            if getattr(args, "verdict", ""):
+                if not _watch.write_verdict(
+                    args.verdict,
+                    {
+                        "verdict": "pending"
+                        if (report["miss"] or report["ask_file_exists"])
+                        else "clean",
+                        "ticks": 1,
+                        "miss": report["miss"],
+                        "ask": report["ask_file_exists"],
+                    },
+                ):
+                    return 1
             if getattr(args, "out", ""):
                 try:
                     atomic_write_text(

@@ -143,6 +143,43 @@ class OutParityTests(unittest.TestCase):
                             json.loads(proc.stdout), payload[key], name
                         )
 
+    def test_jq_and_verdict_writes_slim_file(self) -> None:
+        """--verdict PATH must still be written when --jq is set — a
+        projection must not swallow the side-effect flags."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = {
+                "skill_lint.py": ([str(SKILL_MD)], "findings"),
+                "policy_lint.py": ([str(POLICY_JSON)], "errors"),
+                "question_lint.py": ([str(EXAMPLE_REQ)], "findings"),
+                "trigger_lint.py": ([str(TRIGGER_CASES)], "errors"),
+                "trigger_eval.py": (["--json"], "ok"),
+                "compare.py": (["--json"], "rows"),
+                "doctor.py": (["--json"], "ok"),
+                "inventory.py": (["--task", "x", "--home", tmp, "--json"], "counts"),
+                "smoke.py": (["--only", "self_test"], "ok"),
+                "apply_fill.py": (["--status", "--cwd", tmp], "miss"),
+                "catalog_fill.py": (["--status", "--cwd", tmp], "miss"),
+                "peer_fill.py": (["--status", "--cwd", tmp], "miss"),
+            }
+            for name, (argv, key) in sorted(cases.items()):
+                with self.subTest(script=name):
+                    verdict = Path(tmp) / ("%s.verdict" % name)
+                    proc = _run(
+                        name, *argv, "--jq", key, "--verdict", str(verdict)
+                    )
+                    self.assertIn(
+                        proc.returncode,
+                        ALLOWED_RC,
+                        "%s rc=%d: %s" % (name, proc.returncode, proc.stderr[:300]),
+                    )
+                    self.assertTrue(
+                        verdict.is_file(), "%s --verdict skipped by --jq" % name
+                    )
+                    slim = json.loads(verdict.read_text(encoding="utf-8"))
+                    self.assertIn(
+                        "verdict", slim, "%s verdict missing key" % name
+                    )
+
     def test_trace_stats_out_and_jq(self) -> None:
         """trace stats --out is 'instead of stdout', but --jq still prints
         the field after the file write lands."""

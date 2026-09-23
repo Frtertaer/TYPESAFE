@@ -563,6 +563,8 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
             return 1
         sys.stderr.write("wrote %s\n" % args.out)
+    if args.verdict and not _write_verdict(checks):
+        return 1
     if getattr(args, "jq", ""):
         node = payload
         found = True
@@ -606,8 +608,6 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         sys.stderr.write("wrote %s\n" % args.report)
     sys.stdout.write(text)
-    if args.verdict and not _write_verdict(checks):
-        return 1
     return 0 if ok else 1
 
 

@@ -526,16 +526,6 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
                 return 1
             sys.stderr.write("wrote %d finding(s) to %s\n" % (len(rows), out_path))
-        if jq_value:
-            value, found = _watch.dig(payload, jq_value)
-            if not found:
-                sys.stderr.write(
-                    "bad --jq key %r (payload has: %s)\n"
-                    % (jq_value, ", ".join(sorted(payload)))
-                )
-                return 2
-            sys.stdout.write(_json.dumps(value) + "\n")
-            return 0
         def bad(r: dict) -> bool:
             return r["severity"] == "error" or (strict and r["severity"] == "warn")
         rc_now = 1 if any(bad(r) for r in all_rows) else 0
@@ -552,6 +542,16 @@ def main(argv: list[str] | None = None) -> int:
                 },
             ):
                 return 1
+        if jq_value:
+            value, found = _watch.dig(payload, jq_value)
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (payload has: %s)\n"
+                    % (jq_value, ", ".join(sorted(payload)))
+                )
+                return 2
+            sys.stdout.write(_json.dumps(value) + "\n")
+            return 0
         if not as_json:
             return rc_now
         sys.stdout.write(_json.dumps({"findings": rows}, indent=2) + "\n")

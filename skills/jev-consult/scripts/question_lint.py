@@ -697,6 +697,20 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
             return 1
         sys.stderr.write("wrote %d finding(s) to %s\n" % (len(shown), out_path))
+    rc = 1 if any(f["severity"] == "error" for f in findings) or (strict and findings) else 0
+    if verdict_path:
+        if not _watch.write_verdict(
+            verdict_path,
+            {
+                "verdict": "fail" if rc else "pass",
+                "ticks": 1,
+                "findings": len(findings),
+                "errors": sum(1 for f in findings if f["severity"] == "error"),
+                "warnings": sum(1 for f in findings if f["severity"] == "warn"),
+                "infos": sum(1 for f in findings if f["severity"] == "info"),
+            },
+        ):
+            return 1
     if jq_value:
         value, found = _watch.dig({"findings": shown}, jq_value)
         if not found:
@@ -715,20 +729,6 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(format_finding(f) + "\n")
         if not quiet:
             sys.stdout.write("lint: %d finding(s)\n" % len(shown))
-    rc = 1 if any(f["severity"] == "error" for f in findings) or (strict and findings) else 0
-    if verdict_path:
-        if not _watch.write_verdict(
-            verdict_path,
-            {
-                "verdict": "fail" if rc else "pass",
-                "ticks": 1,
-                "findings": len(findings),
-                "errors": sum(1 for f in findings if f["severity"] == "error"),
-                "warnings": sum(1 for f in findings if f["severity"] == "warn"),
-                "infos": sum(1 for f in findings if f["severity"] == "info"),
-            },
-        ):
-            return 1
     return rc
 
 

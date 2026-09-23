@@ -907,6 +907,11 @@ def _summarize(stage: dict, events: list[dict]) -> dict:
 
 
 class Ledger:
+    # Serializes same-process writers: BEGIN IMMEDIATE already serializes
+    # across processes, but the anchor file is written just after commit —
+    # without this lock a same-process writer can observe the lag.
+    _txn_lock = threading.Lock()
+
     def __init__(self, path: Path, repo: Path, *, evidence=None):
         self.path = Path(path).resolve()
         self.repo = Path(repo).resolve()
@@ -1054,8 +1059,17 @@ class Ledger:
             event = {"sequence": row["sequence"], "kind": row["kind"], "data": data, "seal": row["seal"]}
             _validate_event(stage, event)
             result.append(event)
-        if head_row["seal"] != head or (committed and self._read_anchor().get(stage_id) != head):
+        if head_row["seal"] != head:
             raise ProgressError("STORE_INVALID", "Stored event chain is inconsistent")
+        if committed:
+            # A cross-process writer commits before its anchor file lands;
+            # retry briefly so a lagging anchor is not misread as corruption.
+            for attempt in range(4):
+                if self._read_anchor().get(stage_id) == head:
+                    break
+                time.sleep(0.05 * (attempt + 1))
+            else:
+                raise ProgressError("STORE_INVALID", "Stored event chain is inconsistent")
         return result
 
     def _append(self, db, stage_id, kind, data, dedupe=None):
@@ -1076,15 +1090,16 @@ class Ledger:
 
     @contextmanager
     def _transaction(self, stage_id):
-        with self._database() as db:
-            stage = self._load(db, stage_id)
-        with self._database(settings=stage["policy"]["progress"]) as db:
-            db.execute("BEGIN IMMEDIATE")
-            stage = self._load(db, stage_id)
-            events = self._events(db, stage)
-            yield db, stage, events
-            db.commit()
-            self._write_anchor(db)
+        with self._txn_lock:
+            with self._database() as db:
+                stage = self._load(db, stage_id)
+            with self._database(settings=stage["policy"]["progress"]) as db:
+                db.execute("BEGIN IMMEDIATE")
+                stage = self._load(db, stage_id)
+                events = self._events(db, stage)
+                yield db, stage, events
+                db.commit()
+                self._write_anchor(db)
 
     def _snapshot(self, stage):
         settings = stage["policy"]["progress"]

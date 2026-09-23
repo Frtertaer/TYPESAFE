@@ -1683,6 +1683,18 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             sys.stderr.write("wrote %s\n" % out_path)
         if getattr(args, "jq", "") and not watching_jq:
+            if getattr(args, "verdict", ""):
+                ok = _watch.write_verdict(
+                    args.verdict,
+                    {
+                        "verdict": "ok" if items else "empty",
+                        "scanned": len(items),
+                        "shortlisted": len(picked),
+                        "counts": counts,
+                    },
+                )
+                if not ok:
+                    return 1
             cur = payload
             found = True
             for part in args.jq.split("."):

@@ -847,6 +847,20 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
             return 1
         sys.stderr.write("wrote %d finding(s) to %s\n" % (len(shown_rows), out_path))
+    rc = 1 if (errors or (strict and warns)) else 0
+    if verdict_path:
+        if not _watch.write_verdict(
+            verdict_path,
+            {
+                "verdict": "fail" if rc else "pass",
+                "ticks": 1,
+                "findings": len(findings),
+                "errors": errors,
+                "warnings": warns,
+                "infos": infos,
+            },
+        ):
+            return 1
     if jq_value:
         value, found = _watch.dig(payload, jq_value)
         if not found:
@@ -871,20 +885,6 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(format_finding(finding) + "\n")
     if not quiet and not as_json:
         sys.stdout.write("policy_lint: %d error(s), %d warning(s), %d info\n" % (errors, warns, infos))
-    rc = 1 if (errors or (strict and warns)) else 0
-    if verdict_path:
-        if not _watch.write_verdict(
-            verdict_path,
-            {
-                "verdict": "fail" if rc else "pass",
-                "ticks": 1,
-                "findings": len(findings),
-                "errors": errors,
-                "warnings": warns,
-                "infos": infos,
-            },
-        ):
-            return 1
     return rc
 
 

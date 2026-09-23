@@ -197,7 +197,7 @@ Residual `--flags` not spelled out in the prose above (test-pinned: every declar
 | `decisions.py` | `--dedupes` (dedupe true/false counts) |
 | `doctor.py` | `--home`, `--hermes-home` (test overrides) |
 | `jev.py` | `ask --dry` (validate+print resolved request, no API call), `decide --irreversible` (marks the action hard to undo) |
-| `trace.py` | `init --step`, `show --pretty`/`--key`, `set --step`/`--unknown`/`--error`/`--attempt`/`--kv KEY=VALUE`, `record --step`, `prune --older-than` |
+| `trace.py` | `init --step`, `show --pretty`/`--key`, `set --step`/`--unknown`/`--error`/`--attempt`/`--kv KEY=VALUE`, `record --step`, `prune --older-than`, `bump [--error E]` (increments `attempt_count`) |
 | `doctor.py --agents A,B` | restrict the checks to named harnesses |
 
 ## After clone

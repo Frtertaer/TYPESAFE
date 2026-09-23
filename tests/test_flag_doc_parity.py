@@ -48,6 +48,27 @@ class FlagDocParityTests(unittest.TestCase):
         for flag in ("--env", "--watch", "--schema", "--jq", "--out"):
             self.assertIn(flag, doc_flags)
 
+    def test_every_subcommand_is_documented(self) -> None:
+        """Every add_parser("name") subcommand must appear in the docs."""
+        doc = (ROOT / "skills" / "jev-consult" / "SKILL.md").read_text(
+            encoding="utf-8"
+        ) + "\n" + (ROOT / "README.md").read_text(encoding="utf-8")
+        sub_re = re.compile(r'add_parser\(\s*["\']([a-z][a-z0-9-]*)["\']')
+        for path in sorted(SCRIPTS.glob("*.py")):
+            if path.name in EXEMPT:
+                continue
+            with self.subTest(script=path.name):
+                subs = set(sub_re.findall(path.read_text(encoding="utf-8")))
+                missing = sorted(
+                    s
+                    for s in subs
+                    if not re.search(r"\b" + re.escape(s) + r"\b", doc)
+                )
+                self.assertFalse(
+                    missing,
+                    "%s has undocumented subcommands %s" % (path.name, missing),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

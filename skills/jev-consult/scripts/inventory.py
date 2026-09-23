@@ -1296,6 +1296,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that reports added or removed items")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON to PATH: with --watch a {verdict: stable|changed, ticks, added, removed, counts} payload refreshed every tick; otherwise a one-shot {verdict: ok|empty, scanned, shortlisted, counts} payload.")
+    parser.add_argument("--baseline", metavar="PATH", default="", help="With --dupes: drop dupe names already recorded in PATH (written by --baseline-write); missing file leaves every dupe in place")
+    parser.add_argument("--baseline-write", metavar="PATH", default="", help="With --dupes: snapshot the dupe list to PATH for later --baseline runs")
     parser.add_argument("--id", metavar="NAME", default="", help="Print the single matching item's JSON (matches id or name).")
     parser.add_argument(
         "--explain",
@@ -1349,6 +1351,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Scan a temp-dir home with a synthetic catalog through the real machinery and exit 1 on failure.",
     )
     args = parser.parse_args(argv)
+    if (args.baseline or args.baseline_write) and not args.dupes:
+        sys.stderr.write("--baseline/--baseline-write only apply with --dupes\n")
+        return 2
     if args.env:
         log_env = os.environ.get("JEV_CONSULT_LOG", "").strip()
         try:
@@ -1552,6 +1557,38 @@ def main(argv: list[str] | None = None) -> int:
                 }
             )
         dupes.sort(key=lambda d: (-d["count"], d["name"].lower()))
+        if args.baseline_write:
+            snapshot = [{"key": str(d["name"]).lower(), **d} for d in dupes]
+            try:
+                atomic_write_text(
+                    Path(args.baseline_write),
+                    json.dumps({"findings": snapshot}, indent=2) + "\n",
+                )
+            except OSError as exc:
+                sys.stderr.write(
+                    "cannot write --baseline-write %s: %s\n" % (args.baseline_write, exc)
+                )
+                return 1
+            sys.stderr.write(
+                "wrote baseline %s (%d dupes)\n" % (args.baseline_write, len(snapshot))
+            )
+        if args.baseline:
+            known = _watch.load_baseline(args.baseline, ("key",))
+            kept = []
+            suppressed = 0
+            for d in dupes:
+                k = _watch.baseline_key(
+                    {"key": str(d["name"]).lower()}, ("key",)
+                )
+                if k in known:
+                    suppressed += 1
+                else:
+                    kept.append(d)
+            dupes = kept
+            if suppressed:
+                sys.stderr.write(
+                    "baseline: suppressed %d known dupe(s)\n" % suppressed
+                )
         text = json.dumps({"count": len(dupes), "dupes": dupes}, indent=2) + "\n"
         if args.out:
             try:

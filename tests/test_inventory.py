@@ -375,6 +375,73 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(buf.getvalue())["count"], 0)
 
+    def test_dupes_baseline_write_then_suppress(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._seed_home(tmp, "shared", "solo")
+            hermes = self._seed_hermes(tmp, "shared", "other")
+            base = Path(tmp) / "base.json"
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                code = inv.main(
+                    [
+                        "--dupes",
+                        "--home", str(home),
+                        "--hermes-home", str(hermes),
+                        "--baseline-write", str(base),
+                    ]
+                )
+            self.assertEqual(code, 0)
+            self.assertTrue(base.is_file())
+            stored = json.loads(base.read_text(encoding="utf-8"))
+            self.assertEqual(len(stored["findings"]), 1)
+            self.assertEqual(stored["findings"][0]["key"], "shared")
+
+            buf, err = StringIO(), StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                code = inv.main(
+                    [
+                        "--dupes",
+                        "--home", str(home),
+                        "--hermes-home", str(hermes),
+                        "--baseline", str(base),
+                    ]
+                )
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(buf.getvalue())["count"], 0)
+            self.assertIn("suppressed 1", err.getvalue())
+
+    def test_dupes_baseline_missing_file_counts_everything(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._seed_home(tmp, "shared", "solo")
+            hermes = self._seed_hermes(tmp, "shared", "other")
+            buf, err = StringIO(), StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                code = inv.main(
+                    [
+                        "--dupes",
+                        "--home", str(home),
+                        "--hermes-home", str(hermes),
+                        "--baseline", str(Path(tmp) / "absent.json"),
+                    ]
+                )
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(buf.getvalue())["count"], 1)
+            self.assertIn("not found; all findings count", err.getvalue())
+
+    def test_dupes_baseline_without_dupes_rc2(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as err:
+            code = inv.main(["--baseline", "x.json"])
+        self.assertEqual(code, 2)
+        self.assertIn("only apply with --dupes", err.getvalue())
+
     def test_item_all_returns_every_kind_match(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

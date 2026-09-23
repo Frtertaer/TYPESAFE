@@ -1183,7 +1183,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON to PATH — with --watch a {verdict, count, added, removed, ticks} payload refreshed every tick; without it a one-shot {verdict: ok|empty, count, ticks: 1} probe of the filtered entries.")
     parser.add_argument("--self-test", action="store_true", help="Parse a synthetic 3-entry log + 1 bad line; exit 1 when the counts do not match")
-    parser.add_argument("--verify", action="store_true", help="Chain check the raw log: unparseable lines, missing ts/jev_status, missing required schema keys on full routing/fill entries, ts regressions; rc 1 on any problem (--jq KEY digs the report, rc 2 on unknown)")
+    parser.add_argument("--verify", action="store_true", help="Chain check the raw log: unparseable lines, missing ts/jev_status, missing required schema keys on full routing/fill entries, ts regressions; rc 1 on any problem (--jq KEY digs the report, rc 2 on unknown; --out PATH writes the report JSON)")
     args = parser.parse_args(argv)
     if getattr(args, "schema", False):
         if args.json:
@@ -1308,6 +1308,15 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
             return 0 if report["ok"] else 1
+        if getattr(args, "out", ""):
+            try:
+                _atomic_write(
+                    Path(args.out),
+                    json.dumps(report, indent=2) + "\n",
+                )
+                sys.stderr.write("wrote %s\n" % args.out)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
         if args.json:
             sys.stdout.write(json.dumps(report, indent=2) + "\n")
         else:

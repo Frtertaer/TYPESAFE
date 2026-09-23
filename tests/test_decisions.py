@@ -2904,6 +2904,19 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 2)
             self.assertIn("bad --jq key", proc.stderr)
 
+    def test_verify_out_writes_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1, "jev_status": "ok"}])
+            out = Path(tmp) / "report.json"
+            proc = self.run_cli(
+                "--file", str(path), "--verify", "--out", str(out)
+            )
+            self.assertEqual(proc.returncode, 0)
+            report = json.loads(out.read_text(encoding="utf-8"))
+            self.assertTrue(report["ok"])
+            self.assertEqual(report["entries"], 1)
+
     def test_verify_flags_missing_schema_keys_on_routing_entry(self):
         """A routing-shaped entry (has prompt_sha/shortlist) missing required keys fails."""
         with tempfile.TemporaryDirectory() as tmp:

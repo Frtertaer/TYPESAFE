@@ -543,5 +543,36 @@ class DebugFlagTests(unittest.TestCase):
         self.assertNotIn("compact_hook: {", proc.stderr)
 
 
+class SimulateEventTests(unittest.TestCase):
+    """--simulate --event NAME overrides the synthetic hook event name."""
+
+    def _sim(self, argv: list):
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        env["JEV_CONSULT_SPILL"] = "0"
+        return subprocess.run(
+            [sys.executable, str(HOOK_PATH), *argv],
+            input="",
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+
+    def test_event_pretooluse_skips_with_reason(self) -> None:
+        proc = self._sim(
+            ["--simulate", "tiny", "--event", "PreToolUse", "--verbose"]
+        )
+        self.assertEqual(json.loads(proc.stdout.strip()), {})
+        self.assertIn("not a PostToolUse event", proc.stderr)
+
+    def test_event_default_unchanged(self) -> None:
+        proc = self._sim(["--simulate", "tiny", "--verbose"])
+        self.assertIn("below live-fat threshold", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -847,6 +847,7 @@ def main(argv: list[str] | None = None) -> int:
                     "errors": tick.get("errors", 0),
                     "warnings": tick.get("warnings", 0),
                     "infos": tick.get("infos", 0),
+                    "suppressed": tick.get("suppressed", 0),
                     "elapsed_s": round(_time.time() - watch_t0, 2),
                 },
             )
@@ -854,11 +855,13 @@ def main(argv: list[str] | None = None) -> int:
         watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             rows = lint_policy(policy)
+            pre_drop = len(rows)
             if baseline_keys is not None:
                 rows = _drop_baseline(rows, baseline_keys)
             tick = {
                 "ts": int(_time.time()),
                 "findings": len(rows),
+                "suppressed": pre_drop - len(rows),
                 "errors": sum(1 for r in rows if r["severity"] == "error"),
                 "warnings": sum(1 for r in rows if r["severity"] == "warn"),
                 "infos": sum(1 for r in rows if r["severity"] == "info"),

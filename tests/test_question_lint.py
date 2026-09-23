@@ -1202,6 +1202,34 @@ class BaselineTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertIn("not found", err.getvalue())
 
+    def test_watch_verdict_carries_suppressed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = self._bad_request(tmp)
+            baseline = Path(tmp) / "baseline.json"
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                question_lint.main(
+                    [str(bad), "--baseline-write", str(baseline)]
+                )
+            verdict = Path(tmp) / "verdict.json"
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                rc = question_lint.main(
+                    [
+                        str(bad),
+                        "--baseline",
+                        str(baseline),
+                        "--watch",
+                        "0.01",
+                        "--max-ticks",
+                        "1",
+                        "--verdict",
+                        str(verdict),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            data = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(data["verdict"], "pass")
+            self.assertGreater(data["suppressed"], 0)
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

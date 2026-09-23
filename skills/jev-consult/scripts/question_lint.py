@@ -703,6 +703,7 @@ def main(argv: list[str] | None = None) -> int:
                     "errors": tick.get("errors", 0),
                     "warnings": tick.get("warnings", 0),
                     "infos": tick.get("infos", 0),
+                    "suppressed": tick.get("suppressed", 0),
                     "elapsed_s": round(_time.time() - watch_t0, 2),
                 },
             )
@@ -710,11 +711,13 @@ def main(argv: list[str] | None = None) -> int:
         watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             current = lint_request(request)
+            pre_drop = len(current)
             if baseline_keys is not None:
                 current = _drop_baseline(current, baseline_keys)
             tick = {
                 "ts": int(_time.time()),
                 "findings": len(current),
+                "suppressed": pre_drop - len(current),
                 "errors": sum(1 for f in current if f["severity"] == "error"),
                 "warnings": sum(1 for f in current if f["severity"] == "warn"),
                 "infos": sum(1 for f in current if f["severity"] == "info"),

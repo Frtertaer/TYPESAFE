@@ -539,6 +539,7 @@ def main(argv: list[str] | None = None) -> int:
                     "errors": tick.get("errors", 0),
                     "warnings": tick.get("warnings", 0),
                     "infos": tick.get("infos", 0),
+                    "suppressed": tick.get("suppressed", 0),
                     "elapsed_s": round(_time.time() - watch_t0, 2),
                 },
             )
@@ -550,6 +551,7 @@ def main(argv: list[str] | None = None) -> int:
                 for path in paths
                 for f in lint_skill(path)
             ]
+            pre_drop = len(rows)
             if baseline_keys is not None:
                 rows = [
                     r for r in rows if _baseline_key(r) not in baseline_keys
@@ -557,6 +559,7 @@ def main(argv: list[str] | None = None) -> int:
             tick = {
                 "ts": int(_time.time()),
                 "findings": len(rows),
+                "suppressed": pre_drop - len(rows),
                 "errors": sum(1 for r in rows if r["severity"] == "error"),
                 "warnings": sum(1 for r in rows if r["severity"] == "warn"),
                 "infos": sum(1 for r in rows if r["severity"] == "info"),

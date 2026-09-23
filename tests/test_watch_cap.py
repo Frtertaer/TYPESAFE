@@ -115,6 +115,57 @@ class WatchCapTests(unittest.TestCase):
                 _tick_lines(proc.stdout), 1, "trace state watch: %s" % proc.stdout[:300]
             )
 
+    def test_quiet_suppresses_ok_ticks_not_bad(self) -> None:
+        """apply_fill --quiet prints no stdout tick on a clean pass but a
+        miss-file tick still prints (failing ticks survive --quiet)."""
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ)
+            env["JEV_APPLY_WATCH_MAX"] = "2"
+            argv = [
+                sys.executable,
+                str(SCRIPTS_DIR / "apply_fill.py"),
+                "--watch",
+                "0.02",
+                "--quiet",
+            ]
+            clean = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=tmp,
+                env=env,
+                stdin=subprocess.DEVNULL,
+            )
+            self.assertEqual(_tick_lines(clean.stdout), 0, clean.stdout[:200])
+
+            miss = Path(tmp) / ".jev-tools-miss.json"
+            miss.write_text(
+                json.dumps(
+                    {
+                        "harness": "test",
+                        "task": "x",
+                        "empty": True,
+                        "written_at": int(time.time()),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            dirty = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=tmp,
+                env=env,
+                stdin=subprocess.DEVNULL,
+            )
+            self.assertGreaterEqual(
+                _tick_lines(dirty.stdout), 1, "miss tick suppressed: %s" % dirty.stdout[:200]
+            )
+
     def test_compact_watch_caps(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             transcript = Path(tmp) / "t.jsonl"

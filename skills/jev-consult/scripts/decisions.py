@@ -80,7 +80,7 @@ ENTRY_SCHEMA_ROWS = {
 
 def load_entries(path: Path) -> tuple[list[dict], int]:
     try:
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8-sig")
     except OSError:
         return [], 0
     return _parse_jsonl(text)
@@ -90,7 +90,7 @@ def load_bad_lines(path: Path) -> list[tuple[int, str]]:
     """Return [(lineno, raw)] for lines that failed to parse as JSON objects."""
     bad_rows: list[tuple[int, str]] = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
         return bad_rows
     for lineno, line in enumerate(lines, 1):
@@ -113,7 +113,7 @@ def verify_log(path: Path) -> dict:
     problems: list[dict] = []
     entries: list[dict] = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
         return {"ok": False, "entries": 0, "bad_lines": 0,
                 "problems": [{"line": 0, "issue": "unreadable"}]}

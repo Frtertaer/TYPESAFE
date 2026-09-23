@@ -684,7 +684,7 @@ def main(argv: list[str] | None = None) -> int:
         for arg in argv:
             fpath = Path(arg)
             try:
-                fpol = json.loads(fpath.read_text(encoding="utf-8"))
+                fpol = json.loads(fpath.read_text(encoding="utf-8-sig"))
             except (OSError, ValueError) as exc:
                 sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (fpath, exc))
                 return 2
@@ -731,7 +731,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if any_err or (strict and any_warn) else 0
     path = Path(argv[0]) if argv else DEFAULT_POLICY
     try:
-        policy = json.loads(path.read_text(encoding="utf-8"))
+        policy = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as exc:
         sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (path, exc))
         return 2
@@ -750,7 +750,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("%s %s x%d\n" % (verb, rule, applied.count(rule)))
     if diff_path is not None:
         try:
-            other = json.loads(Path(diff_path).read_text(encoding="utf-8"))
+            other = json.loads(Path(diff_path).read_text(encoding="utf-8-sig"))
         except (OSError, ValueError) as exc:
             sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (diff_path, exc))
             return 2
@@ -813,7 +813,7 @@ def main(argv: list[str] | None = None) -> int:
                 break
             _time.sleep(watch_seconds)
             try:
-                policy = json.loads(path.read_text(encoding="utf-8"))
+                policy = json.loads(path.read_text(encoding="utf-8-sig"))
             except (OSError, ValueError):
                 pass
         rc = 1 if (tick.get("errors", 0) or (strict and tick.get("findings", 0))) else 0

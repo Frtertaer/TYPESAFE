@@ -29,7 +29,7 @@ SEVERITIES = ("error", "warn", "info")
 
 def _must_ask_kinds(policy_path: Path = DEFAULT_POLICY) -> set[str] | None:
     try:
-        data = json.loads(policy_path.read_text(encoding="utf-8"))
+        data = json.loads(policy_path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return None
     kinds = data.get("must_ask") if isinstance(data, dict) else None
@@ -45,7 +45,7 @@ def lint_cases(path: Path, policy_path: Path = DEFAULT_POLICY) -> list[dict]:
         findings.append({"rule": rule, "severity": severity, "id": cid, "message": message})
 
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as exc:
         add("T001", "error", "-", "cannot parse %s: %s" % (path, exc))
         return findings
@@ -496,7 +496,7 @@ def main(argv: list[str] | None = None) -> int:
         return rc
     if do_fix:
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError) as exc:
             sys.stderr.write("cannot fix %s: %s\n" % (path, exc))
             return 2

@@ -559,7 +559,7 @@ def main(argv: list[str] | None = None) -> int:
         for arg in argv:
             fpath = Path(arg)
             try:
-                freq = json.loads(fpath.read_text(encoding="utf-8"))
+                freq = json.loads(fpath.read_text(encoding="utf-8-sig"))
             except OSError as exc:
                 sys.stderr.write("cannot read %s (%s)\n" % (arg, exc))
                 return 2
@@ -610,7 +610,7 @@ def main(argv: list[str] | None = None) -> int:
         any_find = any(r["total"] for r in results)
         return 1 if any_err or (strict and any_find) else 0
     try:
-        text = Path(argv[0]).read_text(encoding="utf-8")
+        text = Path(argv[0]).read_text(encoding="utf-8-sig")
     except OSError as exc:
         sys.stderr.write("cannot read %s (%s)\n" % (argv[0], exc))
         return 2
@@ -669,7 +669,7 @@ def main(argv: list[str] | None = None) -> int:
                 break
             _time.sleep(watch_seconds)
             try:
-                fresh = json.loads(Path(argv[0]).read_text(encoding="utf-8"))
+                fresh = json.loads(Path(argv[0]).read_text(encoding="utf-8-sig"))
                 if isinstance(fresh, dict):
                     request = fresh
             except (OSError, ValueError):

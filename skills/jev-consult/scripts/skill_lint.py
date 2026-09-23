@@ -66,7 +66,7 @@ def lint_skill(path: Path) -> list[dict]:
             }
         ]
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
     except OSError as exc:
         return [{"rule": "S001", "severity": "error", "message": "unreadable: %s" % exc}]
     meta = raw_frontmatter(text)
@@ -114,7 +114,7 @@ def lint_skill(path: Path) -> list[dict]:
         try:
             import json as _json
 
-            parsed = _json.loads(policy_file.read_text(encoding="utf-8"))
+            parsed = _json.loads(policy_file.read_text(encoding="utf-8-sig"))
             policy_keys = set(parsed) if isinstance(parsed, dict) else None
         except (OSError, _json.JSONDecodeError):
             policy_keys = None
@@ -164,7 +164,7 @@ def _fm_bounds(text: str) -> tuple[int, int] | None:
 def fix_name(path: Path) -> bool:
     """Rewrite the frontmatter name to the parent directory name. Returns True if changed."""
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
     except OSError:
         return False
     bounds = _fm_bounds(text)
@@ -189,7 +189,7 @@ def fix_name(path: Path) -> bool:
 def fix_case(path: Path) -> bool:
     """Rewrite the frontmatter name as lowercase-hyphenated. Returns True if changed."""
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
     except OSError:
         return False
     bounds = _fm_bounds(text)

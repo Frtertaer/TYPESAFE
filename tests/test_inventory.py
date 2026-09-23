@@ -363,6 +363,53 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(buf.getvalue())["count"], 0)
 
+    def test_item_all_returns_every_kind_match(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = self._seed_hermes(tmp, "shared", "other")
+            (hermes / "config.yaml").write_text(
+                "mcp_servers:\n  shared:\n    command: py\n", encoding="utf-8"
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(hermes),
+                        "--item-all",
+                        "shared",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(sorted(r["kind"] for r in rows), ["mcp", "skill"])
+
+    def test_item_all_rc2_on_absent(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stderr
+
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = self._seed_hermes(tmp, "shared")
+            err = StringIO()
+            with redirect_stderr(err):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(hermes),
+                        "--item-all",
+                        "nonexistent",
+                    ]
+                )
+        self.assertEqual(code, 2)
+        self.assertIn("nonexistent", err.getvalue())
+
     def test_watch_ticks_emit_jsonl(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

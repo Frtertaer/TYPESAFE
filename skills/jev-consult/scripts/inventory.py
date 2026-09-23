@@ -1236,6 +1236,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the single scanned record with this exact name (kind:name or name) as JSON; exits 2 when absent.",
     )
     parser.add_argument(
+        "--item-all",
+        dest="item_all",
+        metavar="NAME",
+        default="",
+        help="Print every scanned record matching NAME (name or kind:name, case-insensitive) as a JSON array; exits 2 when none.",
+    )
+    parser.add_argument(
         "--dupes",
         action="store_true",
         help="List names that appear more than once: across harnesses when --harness is auto, or within the selected harness (different kinds) when it is set.",
@@ -1359,6 +1366,27 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("no item named %s under harness %s\n" % (wanted, harness))
             return 2
         sys.stdout.write(json.dumps(match, indent=2, ensure_ascii=False) + "\n")
+        return 0
+    if getattr(args, "item_all", ""):
+        wanted = args.item_all.strip()
+        lowered = wanted.lower()
+        matches = []
+        seen_ids = set()
+        for item in items:
+            name = str(item.get("name") or "")
+            kind_name = "%s:%s" % (item.get("kind"), name)
+            if (
+                name == wanted
+                or kind_name == wanted
+                or name.lower() == lowered
+                or kind_name.lower() == lowered
+            ) and id(item) not in seen_ids:
+                seen_ids.add(id(item))
+                matches.append(item)
+        if not matches:
+            sys.stderr.write("no item named %s under harness %s\n" % (wanted, harness))
+            return 2
+        sys.stdout.write(json.dumps(matches, indent=2, ensure_ascii=False) + "\n")
         return 0
     if args.dupes:
         rows = []

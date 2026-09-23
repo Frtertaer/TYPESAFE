@@ -1109,6 +1109,93 @@ def cmd_notes(args: argparse.Namespace) -> int:
     return 0
 
 
+def _diff_side(path: Path) -> tuple[dict, bool]:
+    """Raw trace doc + exists flag; missing/corrupt/non-dict reads as empty()."""
+    if not path.is_file():
+        return empty(), False
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return empty(), False
+    return (raw if isinstance(raw, dict) else empty()), True
+
+
+def _canon(value: Any) -> str:
+    try:
+        return json.dumps(value, sort_keys=True, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return repr(value)
+
+
+def _trace_diff(a_path: Path, b_path: Path) -> dict:
+    """Key-level diff of two trace docs: scalar changes + list item sets."""
+    a, a_exists = _diff_side(a_path)
+    b, b_exists = _diff_side(b_path)
+    changed: dict[str, Any] = {}
+    only_a: list[str] = []
+    only_b: list[str] = []
+    added: dict[str, list] = {}
+    removed: dict[str, list] = {}
+    same = 0
+    for key in sorted(set(a) | set(b)):
+        in_a, in_b = key in a, key in b
+        if in_a and not in_b:
+            only_a.append(key)
+            continue
+        if in_b and not in_a:
+            only_b.append(key)
+            continue
+        va, vb = a[key], b[key]
+        if va == vb:
+            same += 1
+        elif isinstance(va, list) and isinstance(vb, list):
+            a_set = [_canon(x) for x in va]
+            b_set = [_canon(x) for x in vb]
+            add_items = [vb[i] for i in range(len(vb)) if b_set[i] not in a_set]
+            rem_items = [va[i] for i in range(len(va)) if a_set[i] not in b_set]
+            if add_items:
+                added[key] = add_items
+            if rem_items:
+                removed[key] = rem_items
+            if not add_items and not rem_items:
+                changed[key] = {"a": va, "b": vb}
+        else:
+            changed[key] = {"a": va, "b": vb}
+    return {
+        "a": str(a_path),
+        "b": str(b_path),
+        "a_exists": a_exists,
+        "b_exists": b_exists,
+        "same": same,
+        "changed": changed,
+        "only_a": only_a,
+        "only_b": only_b,
+        "added": added,
+        "removed": removed,
+        "different": bool(changed or only_a or only_b or added or removed),
+    }
+
+
+def cmd_diff(args: argparse.Namespace) -> int:
+    """Diff two trace files key-by-key (scalars changed, lists added/removed)."""
+    payload = _trace_diff(Path(args.a), Path(args.b))
+    rc = emit_jq(payload, getattr(args, "jq", ""))
+    if rc is not None:
+        return rc
+    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    out_path = getattr(args, "out", "") or ""
+    if out_path:
+        try:
+            _atomic_write(Path(out_path), text)
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % out_path)
+        return 0
+    sys.stdout.write(text)
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     """One-shot summary: attempts, history/inspected counts, last pick, file age."""
     path = Path(args.file) if args.file else default_path()
@@ -1436,6 +1523,15 @@ def build_parser() -> argparse.ArgumentParser:
     sug.add_argument("--pick", default="", help="Skip Jev; record this choice directly")
     sug.add_argument("--kind", default="suggest", help="Kind tag for the history entry (default suggest)")
     sug.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the result payload (rc 2 on unknown key)")
+    diff_cmd = sub.add_parser(
+        "diff",
+        help="Diff two trace files key-by-key: scalars under changed, list items under added/removed, plus only_a/only_b keys and exists flags",
+    )
+    diff_cmd.add_argument("a", help="First trace JSON path")
+    diff_cmd.add_argument("b", help="Second trace JSON path")
+    diff_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the diff payload (rc 2 on unknown key)")
+    diff_cmd.add_argument("--out", default="", help="Write the diff JSON to PATH instead of stdout")
+    diff_cmd.set_defaults(func=cmd_diff)
     sug.set_defaults(func=cmd_suggest)
     export_cmd = sub.add_parser(
         "export", help="Dump the whole trace bundle as JSON"

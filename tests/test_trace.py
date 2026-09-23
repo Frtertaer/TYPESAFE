@@ -2340,5 +2340,82 @@ class AtomicWriteTests(unittest.TestCase):
             self.assertIn(key, rows)
 
 
+class DiffTests(unittest.TestCase):
+    def _write(self, tmp: str, name: str, data: dict) -> Path:
+        path = Path(tmp) / name
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return path
+
+    def test_diff_scalars_and_lists(self) -> None:
+        from io import StringIO
+
+        with tempfile.TemporaryDirectory() as tmp:
+            a = self._write(
+                tmp,
+                "a.json",
+                {
+                    "plan": "p1",
+                    "attempt_count": 1,
+                    "notes": [{"ts": 1, "text": "n1"}],
+                    "custom_k": "a-val",
+                },
+            )
+            b = self._write(
+                tmp,
+                "b.json",
+                {
+                    "plan": "p2",
+                    "attempt_count": 1,
+                    "notes": [{"ts": 1, "text": "n1"}, {"ts": 2, "text": "n2"}],
+                    "custom_k": "a-val",
+                    "extra_b": 1,
+                },
+            )
+            buf = StringIO()
+            with patch("sys.stdout", buf):
+                rc = tr.main(["diff", str(a), str(b)])
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertTrue(payload["different"])
+            self.assertEqual(payload["changed"]["plan"], {"a": "p1", "b": "p2"})
+            self.assertNotIn("custom_k", payload["changed"])
+            self.assertEqual(payload["only_b"], ["extra_b"])
+            self.assertEqual(
+                payload["added"]["notes"], [{"ts": 2, "text": "n2"}]
+            )
+            self.assertEqual(payload["removed"], {})
+
+    def test_diff_identical_and_missing(self) -> None:
+        from io import StringIO
+
+        with tempfile.TemporaryDirectory() as tmp:
+            a = self._write(tmp, "a.json", {"plan": "p", "notes": []})
+            buf = StringIO()
+            with patch("sys.stdout", buf):
+                rc = tr.main(["diff", str(a), str(a), "--jq", "different"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "false")
+            missing = Path(tmp) / "nope.json"
+            buf = StringIO()
+            with patch("sys.stdout", buf):
+                rc = tr.main(["diff", str(missing), str(missing)])
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertFalse(payload["different"])
+            self.assertFalse(payload["a_exists"])
+
+    def test_diff_jq_bad_key(self) -> None:
+        from io import StringIO
+
+        with tempfile.TemporaryDirectory() as tmp:
+            a = self._write(tmp, "a.json", {"plan": "p"})
+            buf = StringIO()
+            err = StringIO()
+            with patch("sys.stdout", buf), patch("sys.stderr", err):
+                rc = tr.main(["diff", str(a), str(a), "--jq", "bogus"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --jq key", err.getvalue())
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

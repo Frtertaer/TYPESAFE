@@ -254,5 +254,47 @@ class SubprocessTests(unittest.TestCase):
             self.assertEqual(document["stage"]["plan"]["id"], "reliability")
 
 
+class SchemaTests(unittest.TestCase):
+    def test_schema_prints_plan_contract(self) -> None:
+        code, out = run_cli(["--schema"])
+        self.assertEqual(code, 0)
+        for line in out.splitlines():
+            self.assertRegex(line, r"^[A-Za-z0-9_.-]+: .+ \((required|optional)\)$")
+
+    def test_schema_json_object_shape(self) -> None:
+        code, out = run_cli(["--schema", "--json"])
+        self.assertEqual(code, 0)
+        data = json.loads(out)
+        self.assertTrue(data)
+        for row in data.values():
+            self.assertEqual(sorted(row), ["required", "type"])
+            self.assertIs(type(row["required"]), bool)
+            self.assertIs(type(row["type"]), str)
+
+    def test_schema_required_top_keys_match_validate_plan(self) -> None:
+        from progress_core import validate_plan
+
+        _, out = run_cli(["--schema", "--json"])
+        data = json.loads(out)
+        required_top = {
+            key for key, row in data.items() if row["required"] and "." not in key
+        }
+        self.assertEqual(required_top, {"id", "goal", "checks", "required_checks", "items"})
+        for key in sorted(required_top):
+            broken = plan(1)
+            broken.pop(key, None)
+            with self.assertRaises(ProgressError, msg="plan missing %r accepted" % key):
+                validate_plan(broken, policy())
+
+    def test_schema_subprocess_matches_module(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(PROGRESS_PATH), "--schema", "--json"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout), progress.PLAN_SCHEMA_ROWS)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

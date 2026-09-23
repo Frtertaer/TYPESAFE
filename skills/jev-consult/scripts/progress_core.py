@@ -12,6 +12,7 @@ import shutil
 import signal
 import sqlite3
 import subprocess
+import threading
 import sys
 import tempfile
 import time
@@ -365,6 +366,7 @@ class GitEvidence:
             if tracked == 0:
                 raise ProgressError("TRACKED_DATABASE", "The runtime progress database must not be tracked by Git")
             exclusions = [":(top,exclude,literal)" + relative + suffix for suffix in ("", "-journal", "-wal", "-shm", ".heads", ".heads.tmp")]
+            exclusions.append(":(top,exclude)" + relative + ".heads.tmp.*")
         _, dirty = self._git(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ".", *exclusions], settings)
         if dirty:
             raise ProgressError("WORKTREE_DIRTY", "Commit the intended changes and resolve unrelated untracked files before assessment")
@@ -975,7 +977,11 @@ class Ledger:
     def _write_anchor(self, db):
         anchor = {row["stage_id"]: row["seal"] for row in db.execute("SELECT stage_id, seal FROM heads")}
         target = self._anchor_path()
-        temp = target.with_name(target.name + ".tmp")
+        # Unique tmp name: callers can run on several threads in one process,
+        # and Windows refuses to unlink a file another thread still holds open.
+        temp = target.with_name(
+            "%s.tmp.%d.%d" % (target.name, os.getpid(), threading.get_ident())
+        )
         try:
             temp.unlink(missing_ok=True)
             fd = os.open(temp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)

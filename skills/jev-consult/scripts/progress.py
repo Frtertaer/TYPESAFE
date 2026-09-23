@@ -16,7 +16,10 @@ from progress_core import Ledger, ProgressError, read_json
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="Evidence-backed contribution credits and stage reviews; not a background agent")
+    parser = argparse.ArgumentParser(
+        description="Evidence-backed contribution credits and stage reviews; not a background agent",
+        epilog="--schema prints the init-plan key contract (no subcommand needed; --schema --json emits the object)",
+    )
     parser.add_argument("--repo", default=".", help="Git repository root")
     parser.add_argument("--db", help="Runtime SQLite ledger (default: REPO/.devin/progress.sqlite3)")
     parser.add_argument("--policy", help="Policy file used only when initializing a new stage")
@@ -50,6 +53,24 @@ def build_parser():
     review.add_argument("--approve-finish", action="store_true", help="Record explicit completion approval; checks and Jev must still permit finishing")
     commands.add_parser("self-test", help="Initialize a scratch ledger with a stub evidence collector and read it back")
     return parser
+
+
+# The init plan contract, mirroring validate_plan in progress_core. --schema
+# prints it like the other pack scripts: `key: type (required|optional)` or
+# the {key: {required, type}} object with --json.
+PLAN_SCHEMA_ROWS = {
+    "id": {"required": True, "type": "string stage identifier"},
+    "goal": {"required": True, "type": "string, agreed outcome statement"},
+    "checks": {"required": True, "type": "object{name: argv[]}, bounded by progress.max_checks"},
+    "required_checks": {"required": True, "type": "list[check name], run on every verify"},
+    "items": {"required": True, "type": "list[item], bounded by progress.max_items"},
+    "directions": {"required": False, "type": "object{id: label}, preauthorized pivots"},
+    "platform": {"required": False, "type": "any|win32|linux|darwin, default any"},
+    "item.id": {"required": True, "type": "string identifier, unique within items"},
+    "item.description": {"required": True, "type": "string, agreed outcome"},
+    "item.checks": {"required": True, "type": "list[check name] referencing plan.checks"},
+    "item.paths": {"required": True, "type": "list[str] repo-relative literals, no .. or drives"},
+}
 
 
 class _StubEvidence:
@@ -104,7 +125,19 @@ def _self_test(args) -> dict:
 
 
 def main(argv=None):
-    if _watch.maybe_version(sys.argv[1:] if argv is None else argv):
+    argv = sys.argv[1:] if argv is None else argv
+    if _watch.maybe_version(argv):
+        return 0
+    if "--schema" in argv:
+        if "--json" in argv:
+            sys.stdout.write(json.dumps(PLAN_SCHEMA_ROWS, indent=2) + "\n")
+        else:
+            for key in PLAN_SCHEMA_ROWS:
+                row = PLAN_SCHEMA_ROWS[key]
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (key, row["type"], "required" if row["required"] else "optional")
+                )
         return 0
     args = build_parser().parse_args(argv)
     try:

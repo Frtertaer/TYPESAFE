@@ -42,7 +42,7 @@ ENV_SCRIPTS = {
         "watch_quiet",
         "watch_secs",
     },
-    "doctor.py": {"count", "env"},
+    "doctor.py": {"count", "env", "policy", "watch_max", "watch_quiet", "watch_secs"},
     "compact_hook.py": {
         "live_fat",
         "live_head",

@@ -873,6 +873,20 @@ class DoctorSchemaTests(unittest.TestCase):
         for name in DOC.CHECK_NAMES:
             self.assertIn(name, out["check.check"]["type"])
 
+    def test_env_reports_resolved_knobs(self) -> None:
+        env = {
+            "JEV_DOCTOR_WATCH_MAX": "5",
+            "JEV_DOCTOR_WATCH_SECS": "20",
+            "JEV_DOCTOR_WATCH_QUIET": "1",
+            "JEV_POLICY": "/tmp/p.json",
+        }
+        rc, out, _ = run_main(["--env"], env_extra=env)
+        self.assertEqual(rc, 0)
+        self.assertEqual(out["watch_max"], 5)
+        self.assertEqual(out["watch_secs"], 20.0)
+        self.assertTrue(out["watch_quiet"])
+        self.assertEqual(out["policy"], "/tmp/p.json")
+
     def test_emitted_checks_within_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rc, out, _ = run_main(

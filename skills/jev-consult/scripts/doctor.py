@@ -381,7 +381,18 @@ def main(argv: list[str] | None = None) -> int:
                 if (value and (secretish.search(name) or blob.search(value)))
                 else value
             )
-        payload = {"env": env, "count": len(env)}
+        try:
+            watch_secs = float(os.environ.get("JEV_DOCTOR_WATCH_SECS", "") or 0)
+        except ValueError:
+            watch_secs = 0.0
+        payload = {
+            "env": env,
+            "count": len(env),
+            "watch_max": _watch.cap("JEV_DOCTOR_WATCH_MAX", None),
+            "watch_secs": watch_secs,
+            "watch_quiet": _watch.quiet("JEV_DOCTOR_WATCH_QUIET", False),
+            "policy": os.environ.get("JEV_POLICY", "").strip() or "default",
+        }
         if getattr(args, "jq", ""):
             node: object = payload
             found = True

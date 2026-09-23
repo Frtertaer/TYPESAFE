@@ -2579,5 +2579,91 @@ class ShowJqTests(unittest.TestCase):
             self.assertEqual(json.loads(buf.getvalue()), "P")
 
 
+class EmitJqTests(unittest.TestCase):
+    """--jq digs the emitted {path, trace} payload on mutating subcommands."""
+
+    def _init(self, tmp: str) -> Path:
+        import io
+        from contextlib import redirect_stdout
+
+        path = Path(tmp) / "trace.json"
+        with redirect_stdout(io.StringIO()):
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+        return path
+
+    def test_init_jq_prints_trace_field(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "init", "--plan", "P", "--jq", "trace.plan"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "P")
+
+    def test_set_bump_record_jq(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._init(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "set", "--step", "s1", "--jq", "trace.current_step"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "s1")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "bump", "--jq", "trace.attempt_count"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), 1)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "record", "--pick", "a", "--jq", "trace.last_pick"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "a")
+
+    def test_prune_jq_removed_field(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._init(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "prune", "--older-than", "-1", "--jq", "removed"])
+            self.assertEqual(rc, 0)
+            self.assertIs(json.loads(buf.getvalue()), True)
+            self.assertFalse(path.exists())
+
+    def test_emit_jq_unknown_key_rc2(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._init(tmp)
+            buf = io.StringIO()
+            err = io.StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = tr.main(["--file", str(path), "bump", "--jq", "nope"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --jq key", err.getvalue())
+            self.assertIn("trace", err.getvalue())
+
+    def test_self_test_jq(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = tr.main(["self-test", "--jq", "self_test"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(buf.getvalue()), "ok")
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

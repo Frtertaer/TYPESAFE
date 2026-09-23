@@ -208,9 +208,27 @@ def record(trace: dict[str, Any], pick: str, kind: str = "") -> dict[str, Any]:
     return data
 
 
-def emit(payload: Any) -> None:
+def emit(payload: Any, jq: str = "") -> int:
+    """Print payload JSON; with jq, print just that dotted field (rc 2 on miss)."""
+    if jq:
+        if isinstance(payload, dict):
+            value, found = jq_lookup(payload, jq)
+        else:
+            value, found = None, False
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (
+                    jq,
+                    ", ".join(sorted(payload)) if isinstance(payload, dict) else "-",
+                )
+            )
+            return 2
+        sys.stdout.write(json.dumps(value, ensure_ascii=False) + "\n")
+        return 0
     json.dump(payload, sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
+    return 0
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -224,8 +242,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         data["current_step"] = args.step
     path = Path(args.file) if args.file else default_path()
     save(data, path)
-    emit({"path": str(path), "trace": data})
-    return 0
+    return emit({"path": str(path), "trace": data}, getattr(args, "jq", ""))
 
 
 def cmd_show(args: argparse.Namespace) -> int:
@@ -307,16 +324,14 @@ def cmd_set(args: argparse.Namespace) -> int:
         if key:
             data[key] = value.strip()
     save(data, path)
-    emit({"path": str(path), "trace": data})
-    return 0
+    return emit({"path": str(path), "trace": data}, getattr(args, "jq", ""))
 
 
 def cmd_bump(args: argparse.Namespace) -> int:
     path = Path(args.file) if args.file else default_path()
     data = bump(load(path), error=args.error or "")
     save(data, path)
-    emit({"path": str(path), "trace": data})
-    return 0
+    return emit({"path": str(path), "trace": data}, getattr(args, "jq", ""))
 
 
 def cmd_record(args: argparse.Namespace) -> int:
@@ -344,8 +359,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         notes.append(entry)
         data["notes"] = notes[-50:]
     save(data, path)
-    emit({"path": str(path), "trace": data})
-    return 0
+    return emit({"path": str(path), "trace": data}, getattr(args, "jq", ""))
 
 
 def cmd_suggest(args: argparse.Namespace) -> int:
@@ -654,33 +668,28 @@ def cmd_history(args: argparse.Namespace) -> int:
 def cmd_prune(args: argparse.Namespace) -> int:
     """Delete the trace file when its mtime is older than --older-than seconds."""
     path = Path(args.file) if args.file else default_path()
+    jq = getattr(args, "jq", "")
     if not path.is_file():
-        emit({"path": str(path), "removed": False, "reason": "missing"})
-        return 0
+        return emit({"path": str(path), "removed": False, "reason": "missing"}, jq)
     try:
         path_mtime = path.stat().st_mtime
         age = time.time() - path_mtime
     except OSError as exc:
-        emit({"path": str(path), "removed": False, "reason": "stat failed: %s" % exc})
-        return 0
+        return emit({"path": str(path), "removed": False, "reason": "stat failed: %s" % exc}, jq)
     if age < float(args.older_than):
-        emit({"path": str(path), "removed": False, "reason": "fresh", "age_seconds": round(age, 3)})
-        return 0
+        return emit({"path": str(path), "removed": False, "reason": "fresh", "age_seconds": round(age, 3)}, jq)
     if getattr(args, "dry_run", False):
-        emit({"path": str(path), "removed": False, "reason": "dry-run", "age_seconds": round(age, 3), "would_remove": True})
-        return 0
+        return emit({"path": str(path), "removed": False, "reason": "dry-run", "age_seconds": round(age, 3), "would_remove": True}, jq)
     try:
         # Re-check right before unlink: a save landing between stat() and
         # unlink() must not lose the fresh trace.
         if path.stat().st_mtime != path_mtime:
-            emit({"path": str(path), "removed": False, "reason": "changed"})
-            return 0
+            return emit({"path": str(path), "removed": False, "reason": "changed"}, jq)
         path.unlink()
     except OSError as exc:
-        emit({"path": str(path), "removed": False, "reason": "unlink failed: %s" % exc})
-        return 1
-    emit({"path": str(path), "removed": True, "age_seconds": round(age, 3)})
-    return 0
+        rc = emit({"path": str(path), "removed": False, "reason": "unlink failed: %s" % exc}, jq)
+        return rc or 1
+    return emit({"path": str(path), "removed": True, "age_seconds": round(age, 3)}, jq)
 
 
 def jq_lookup(obj, path: str):
@@ -787,13 +796,16 @@ def cmd_self_test(args: argparse.Namespace) -> int:
     ok = back.get("last_pick") == "self-test-pick" and any(
         isinstance(h, dict) and h.get("pick") == "self-test-pick" for h in history
     )
-    emit(
+    rc = emit(
         {
             "self_test": "ok" if ok else "FAIL",
             "history": len(history),
             "last_pick": back.get("last_pick"),
-        }
+        },
+        getattr(args, "jq", ""),
     )
+    if rc:
+        return rc
     return 0 if ok else 1
 
 
@@ -1501,6 +1513,7 @@ def build_parser() -> argparse.ArgumentParser:
     init = sub.add_parser("init", help="Create a trace from the human plan")
     init.add_argument("--plan", default=None, help="Plan text (default JEV_TRACE_PLAN env)")
     init.add_argument("--step", default="")
+    init.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
     init.set_defaults(func=cmd_init)
     show = sub.add_parser("show", help="Print the trace (empty object if missing)")
     show.add_argument("--pretty", action="store_true", help="Key fields as text lines.")
@@ -1520,9 +1533,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="KEY=VALUE",
         help="Set an arbitrary trace field (repeatable)",
     )
+    setter.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
     setter.set_defaults(func=cmd_set)
     bump_cmd = sub.add_parser("bump", help="Increment attempt_count")
     bump_cmd.add_argument("--error", default="")
+    bump_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
     bump_cmd.set_defaults(func=cmd_bump)
     rec = sub.add_parser("record", help="Store a Jev pick")
     rec.add_argument("--pick", required=True)
@@ -1530,6 +1545,7 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--harness", default="", help="Tag the --note entry with this harness (default JEV_TRACE_HARNESS)")
     rec.add_argument("--step", default="")
     rec.add_argument("--note", default=None, help="Append a freeform note to trace.notes ('-' reads stdin; default JEV_TRACE_NOTE)")
+    rec.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
     rec.set_defaults(func=cmd_record)
     prune_cmd = sub.add_parser(
         "prune", help="Delete the trace file when older than --older-than seconds"
@@ -1545,6 +1561,7 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Age in seconds before the trace may be removed",
     )
+    prune_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
     prune_cmd.set_defaults(func=cmd_prune)
     state_cmd = sub.add_parser(
         "state", help="Emit trace as a bare state dict (scaffold --state input)"
@@ -1681,6 +1698,7 @@ def build_parser() -> argparse.ArgumentParser:
         "self-test",
         help="Record+read a pick on a temp trace; exit 1 when it does not round-trip",
     )
+    selftest.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
     selftest.set_defaults(func=cmd_self_test)
     return parser
 

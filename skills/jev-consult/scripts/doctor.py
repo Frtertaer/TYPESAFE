@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -263,6 +264,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the {ok,checks} payload (e.g. ok); unknown key exits 2")
     parser.add_argument("--env", action="store_true", help="Print the resolved JEV_*/TYPESAFE_* env vars as JSON and exit (secret-looking names/values masked to <set>)")
     parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown report (verdict line + per-check table with hints) to PATH")
+    parser.add_argument("--self-test", action="store_true", help="Run every check against a synthetic empty HOME; exit 1 when no check fails")
     args = parser.parse_args(argv)
     agents = [a.strip() for a in args.agents.split(",") if a.strip()]
     bad = [a for a in agents if a not in ALLOWED]
@@ -345,6 +347,48 @@ def main(argv: list[str] | None = None) -> int:
             payload["elapsed_s"] = elapsed_s
         return _watch.write_verdict(args.verdict, payload)
 
+    if args.self_test:
+        with tempfile.TemporaryDirectory() as tmp:
+            thome = Path(tmp)
+            thermes = thome / ".hermes"
+            checks = (
+                check_common(thome, thermes)
+                + check_hermes(thome, thermes)
+                + check_claude(thome)
+                + check_grok(thome)
+                + check_codex(thome)
+            )
+        failed = sum(1 for c in checks if not c["ok"])
+        ok = failed > 0
+        if args.jq == "":
+            if args.quiet and ok:
+                return 0
+            sys.stdout.write(
+                "self-test: %s failed=%d/%d\n"
+                % ("ok" if ok else "FAIL", failed, len(checks))
+            )
+        else:
+            payload = {
+                "self_test": "ok" if ok else "FAIL",
+                "checks": len(checks),
+                "failed": failed,
+            }
+            node: object = payload
+            found = True
+            for part in args.jq.split("."):
+                if isinstance(node, dict) and part in node:
+                    node = node[part]
+                else:
+                    found = False
+                    break
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (payload has: %s)\n"
+                    % (args.jq, ", ".join(sorted(payload)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+        return 0 if ok else 1
     if args.watch:
         import time as _time
         from datetime import datetime, timezone

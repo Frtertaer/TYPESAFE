@@ -85,6 +85,18 @@ class DoctorTests(unittest.TestCase):
         self.assertFalse(out["ok"])
         self.assertFalse(check_of(out, "api_key")["ok"])
 
+    def test_self_test_finds_failures_on_empty_home(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(["--self-test"], cwd=tmp)
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", text)
+        self.assertIn("failed=", text)
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, failed, _ = run_main(["--self-test", "--jq", "failed"], cwd=tmp)
+        self.assertEqual(rc, 0)
+        self.assertIsInstance(failed, int)
+        self.assertGreater(failed, 0)
+
     def test_jq_prints_one_field_of_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rc, out, _ = run_main(

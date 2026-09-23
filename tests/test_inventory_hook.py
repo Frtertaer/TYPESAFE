@@ -3642,5 +3642,43 @@ class WrongTypedFieldTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(json.loads(buf.getvalue()), {})
 
+    def test_simulate_matches_stdin_payload(self) -> None:
+        # --simulate must produce the same emitted payload as a real stdin
+        # event carrying the same prompt/cwd/event name.
+        items = [
+            {
+                "id": "skill:jwt-auth",
+                "kind": "skill",
+                "name": "jwt-auth",
+                "description": "jwt tokens",
+                "path": "",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch.object(HOOK, "scan_cached", return_value=items):
+                    buf_sim = io.StringIO()
+                    with patch("sys.stdout", buf_sim):
+                        rc_sim = HOOK.main(["--simulate", "please run jwt-auth"])
+                    event = {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "please run jwt-auth",
+                        "cwd": str(Path(tmp)),
+                    }
+                    buf_stdin = io.StringIO()
+                    with patch("sys.stdin", io.StringIO(json.dumps(event))):
+                        with patch("sys.stdout", buf_stdin):
+                            rc_stdin = HOOK.main([])
+            finally:
+                os.chdir(old)
+            self.assertEqual(rc_sim, rc_stdin)
+            self.assertEqual(
+                json.loads(buf_sim.getvalue()), json.loads(buf_stdin.getvalue())
+            )
+            self.assertTrue(json.loads(buf_sim.getvalue()))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

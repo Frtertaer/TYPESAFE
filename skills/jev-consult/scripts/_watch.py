@@ -81,6 +81,21 @@ def emit(tick: dict, out_path=None, quiet: bool = False, bad=None) -> None:
             pass
 
 
+def dig(node, path: str):
+    """Dotted-path lookup over dicts and lists; (value, True) or (None, False).
+
+    List nodes index by numeric parts (``0.errors`` digs the first row)."""
+    cur = node
+    for part in path.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
+            cur = cur[int(part)]
+        else:
+            return None, False
+    return cur, True
+
+
 def emit_or_jq(tick: dict, jq: str, out_path=None, quiet: bool = False, bad=None) -> None:
     """Emit a tick, or print just the named field(s) when jq is set.
 
@@ -208,6 +223,9 @@ def _self_test() -> int:
                 "policy v" in buf.getvalue()
             )
             checks["no_version"] = maybe_version(["--other"], out=buf) is False
+        checks["dig_dict"] = dig({"a": {"b": 3}}, "a.b") == (3, True)
+        checks["dig_list"] = dig([{"x": 1}, {"x": 2}], "1.x") == (2, True)
+        checks["dig_miss"] = dig({"a": 1}, "a.b") == (None, False)
     finally:
         for name, val in saved.items():
             if val is None:

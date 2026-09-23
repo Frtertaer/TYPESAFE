@@ -368,6 +368,16 @@ def main(argv: list[str] | None = None) -> int:
                     "infos": finfo,
                 }
             )
+        if jq_value:
+            value, found = _watch.dig(results, jq_value)
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (payload is a %d-file list)\n"
+                    % (jq_value, len(results))
+                )
+                return 2
+            sys.stdout.write(json.dumps(value) + "\n")
+            return 0
         if as_json:
             sys.stdout.write(json.dumps(results, indent=2) + "\n")
         else:
@@ -474,19 +484,27 @@ def main(argv: list[str] | None = None) -> int:
     n_err = sum(1 for f in findings if f["severity"] == "error")
     n_warn = sum(1 for f in findings if f["severity"] == "warn")
     n_info = sum(1 for f in findings if f["severity"] == "info")
+    payload = {
+        "path": str(path),
+        "findings": shown,
+        "errors": n_err,
+        "warnings": n_warn,
+        "infos": n_info,
+    }
+    if jq_value:
+        value, found = _watch.dig(payload, jq_value)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (jq_value, ", ".join(sorted(payload)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+        return 0
     if out_path:
         try:
             _atomic_write(Path(out_path), 
-                json.dumps(
-                    {
-                        "path": str(path),
-                        "findings": shown,
-                        "errors": n_err,
-                        "warnings": n_warn,
-                        "infos": n_info,
-                    },
-                    indent=2,
-                )
+                json.dumps(payload, indent=2)
                 + "\n")
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
@@ -494,16 +512,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("wrote %d finding(s) to %s\n" % (len(shown), out_path))
     if as_json:
         sys.stdout.write(
-            json.dumps(
-                {
-                    "path": str(path),
-                    "findings": shown,
-                    "errors": n_err,
-                    "warnings": n_warn,
-                    "infos": n_info,
-                },
-                indent=2,
-            )
+            json.dumps(payload, indent=2)
             + "\n"
         )
     else:

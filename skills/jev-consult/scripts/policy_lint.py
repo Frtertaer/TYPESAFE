@@ -741,19 +741,27 @@ def main(argv: list[str] | None = None) -> int:
     errors = sum(1 for f in findings if f["severity"] == "error")
     warns = sum(1 for f in findings if f["severity"] == "warn")
     infos = sum(1 for f in findings if f["severity"] == "info")
+    payload = {
+        "path": str(path),
+        "findings": shown_rows,
+        "errors": errors,
+        "warnings": warns,
+        "infos": infos,
+    }
+    if jq_value:
+        value, found = _watch.dig(payload, jq_value)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (jq_value, ", ".join(sorted(payload)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+        return 0
     if out_path:
         try:
             _atomic_write(Path(out_path), 
-                json.dumps(
-                    {
-                        "path": str(path),
-                        "findings": shown_rows,
-                        "errors": errors,
-                        "warnings": warns,
-                        "infos": infos,
-                    },
-                    indent=2,
-                )
+                json.dumps(payload, indent=2)
                 + "\n")
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
@@ -761,16 +769,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("wrote %d finding(s) to %s\n" % (len(shown_rows), out_path))
     if as_json:
         sys.stdout.write(
-            json.dumps(
-                {
-                    "path": str(path),
-                    "findings": shown_rows,
-                    "errors": errors,
-                    "warnings": warns,
-                    "infos": infos,
-                },
-                indent=2,
-            )
+            json.dumps(payload, indent=2)
             + "\n"
         )
     else:

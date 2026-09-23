@@ -420,13 +420,24 @@ def main(argv: list[str] | None = None) -> int:
             if any(f["rule"] == "S008" for f in lint_skill(path)):
                 if fix_case(path):
                     sys.stderr.write("fixed S008 %s\n" % path)
-    if as_json or out_path:
+    if as_json or out_path or jq_value:
         import json as _json
 
         all_rows = [
             {"path": str(path), **f} for path in paths for f in lint_skill(path)
         ]
         rows = [r for r in all_rows if not severity or r["severity"] == severity]
+        if jq_value:
+            payload = {"findings": rows}
+            value, found = _watch.dig(payload, jq_value)
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (payload has: %s)\n"
+                    % (jq_value, ", ".join(sorted(payload)))
+                )
+                return 2
+            sys.stdout.write(_json.dumps(value) + "\n")
+            return 0
         def bad(r: dict) -> bool:
             return r["severity"] == "error" or (strict and r["severity"] == "warn")
 

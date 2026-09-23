@@ -508,6 +508,16 @@ def main(argv: list[str] | None = None) -> int:
             results.append(
                 {"path": arg, "findings": fshown, "errors": ferr, "total": len(ffind)}
             )
+        if jq_value:
+            value, found = _watch.dig(results, jq_value)
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (payload is a %d-file list)\n"
+                    % (jq_value, len(results))
+                )
+                return 2
+            sys.stdout.write(json.dumps(value) + "\n")
+            return 0
         if as_json:
             sys.stdout.write(json.dumps(results, indent=2) + "\n")
         else:
@@ -603,6 +613,15 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("fixed %s\n" % rule)
     findings = lint_request(request)
     shown = [f for f in findings if not severity or f["severity"] == severity]
+    if jq_value:
+        value, found = _watch.dig({"findings": shown}, jq_value)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: findings)\n" % jq_value
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+        return 0
     if out_path:
         try:
             _atomic_write(

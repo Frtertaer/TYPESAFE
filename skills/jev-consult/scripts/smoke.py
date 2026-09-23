@@ -46,16 +46,17 @@ def jq_lookup(obj, path: str):
     return cur, True
 
 
-def junit_xml(steps: list[dict]) -> str:
+def junit_xml(steps: list[dict], tag: str = "") -> str:
     """Render a JUnit <testsuite> document for the step rows."""
     failures = sum(
         1 for s in steps if not s.get("ok") and not s.get("suppressed")
     )
     skipped = sum(1 for s in steps if s.get("suppressed"))
+    suite = "jev-smoke" + ("-" + str(tag) if tag else "")
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        '<testsuite name="jev-smoke" tests="%d" failures="%d" skipped="%d">'
-        % (len(steps), failures, skipped),
+        '<testsuite name="%s" tests="%d" failures="%d" skipped="%d">'
+        % (escape(suite, {'"': "&quot;"}), len(steps), failures, skipped),
     ]
     for s in steps:
         name = escape(str(s.get("name") or "step"), {'"': "&quot;"})
@@ -7065,6 +7066,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, steps, failed} JSON to PATH when finished (in --watch mode, the final pass state).")
     parser.add_argument("--junit", metavar="PATH", default="", help="Write a JUnit XML <testsuite> for the step results to PATH (in --watch mode, the final pass).")
+    parser.add_argument("--tag", metavar="T", default="", help="Label this run: lands in the verdict payload as tag and in the junit testsuite name")
     parser.add_argument(
         "--repeat",
         metavar="N",
@@ -7309,6 +7311,8 @@ def main(argv: list[str] | None = None) -> int:
             "failed": failed,
             "suppressed": sum(1 for s in steps_now if s.get("suppressed")),
         }
+        if args.tag:
+            payload["tag"] = args.tag
         if elapsed_s is not None:
             payload["elapsed_s"] = elapsed_s
         return _watch.write_verdict(args.verdict, payload)
@@ -7393,7 +7397,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if args.junit:
             try:
-                _atomic_write(Path(args.junit), junit_xml(last_steps))
+                _atomic_write(Path(args.junit), junit_xml(last_steps, args.tag))
             except OSError as exc:
                 sys.stderr.write("cannot write %s: %s\n" % (args.junit, exc))
                 return 1
@@ -7408,12 +7412,15 @@ def main(argv: list[str] | None = None) -> int:
         )
     ok = all(s["ok"] or s.get("suppressed") for s in steps)
     payload = {"ok": ok, "steps": steps, "suppressed": suppressed}
+    if args.tag:
+        payload["tag"] = args.tag
     text = json.dumps(payload, indent=2) + "\n"
     if args.jq:
         value, found = jq_lookup(payload, args.jq)
         if not found:
             sys.stderr.write(
-                "bad --jq key %r (payload has: ok, steps, suppressed)\n" % args.jq
+                "bad --jq key %r (payload has: %s)\n"
+                % (args.jq, ", ".join(sorted(payload)))
             )
             return 2
         sys.stdout.write(json.dumps(value) + "\n")
@@ -7455,7 +7462,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("wrote %s\n" % args.report)
     if args.junit:
         try:
-            _atomic_write(Path(args.junit), junit_xml(steps))
+            _atomic_write(Path(args.junit), junit_xml(steps, args.tag))
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (args.junit, exc))
             return 1

@@ -448,6 +448,47 @@ class SmokeTests(unittest.TestCase):
         self.assertTrue(all(t["ok"] is False for t in ticks))
         self.assertTrue(all(t["failed"] for t in ticks))
 
+    def test_tag_lands_in_payload_verdict_and_junit(self) -> None:
+        def ok_step(tmp):
+            return {"name": "policy", "ok": True, "detail": "fake"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            junit = Path(tmp) / "j.xml"
+            with patch.object(MOD, "step_policy", side_effect=ok_step):
+                import io
+
+                buf = io.StringIO()
+                with patch.object(sys, "stdout", buf):
+                    rc = MOD.main(
+                        [
+                            "--only", "policy",
+                            "--tag", "nightly",
+                            "--verdict", str(verdict),
+                            "--junit", str(junit),
+                        ]
+                    )
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue())["tag"], "nightly")
+            self.assertEqual(json.loads(verdict.read_text(encoding="utf-8"))["tag"], "nightly")
+            import xml.etree.ElementTree as ET
+
+            root = ET.fromstring(junit.read_text(encoding="utf-8"))
+            self.assertEqual(root.get("name"), "jev-smoke-nightly")
+
+    def test_no_tag_keeps_default_suite_name(self) -> None:
+        import io
+
+        xml = MOD.junit_xml([{"name": "x", "ok": True}], "")
+        self.assertIn('name="jev-smoke"', xml)
+        buf = io.StringIO()
+        with patch.object(
+            MOD, "step_policy", side_effect=lambda tmp: {"name": "policy", "ok": True, "detail": ""}
+        ), patch.object(sys, "stdout", buf):
+            rc = MOD.main(["--only", "policy", "--tag", "ci", "--jq", "tag"])
+        self.assertEqual(json.loads(buf.getvalue()), "ci")
+        self.assertEqual(rc, 0)
+
     def test_junit_writes_xml(self) -> None:
         def ok_step(tmp):
             return {"name": "policy", "ok": True, "detail": "fake"}

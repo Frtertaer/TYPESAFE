@@ -12,6 +12,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import _watch
+from inventory import atomic_write_text
 from progress_core import Ledger, ProgressError, read_json, validate_plan, validate_progress_policy
 
 
@@ -54,12 +55,50 @@ def build_parser():
     commands.add_parser("self-test", help="Initialize a scratch ledger with a stub evidence collector and read it back")
     lint_p = commands.add_parser("lint", help="Dry-validate a plan against a policy with the same checks as init; writes nothing")
     lint_p.add_argument("plan", help="Stage-plan JSON file")
+    report = commands.add_parser("report", help="Print a markdown summary of a stage (plan, credits, events); --out writes it to a file")
+    report.add_argument("stage")
+    report.add_argument("--out", metavar="PATH", default="", help="Write the markdown to PATH instead of stdout (prints {wrote, bytes} JSON)")
     for name in commands.choices:
         commands.choices[name].add_argument(
             "--jq", metavar="KEY", default="",
             help="Print just this dotted-path field of the result payload (rc 2 on unknown key)",
         )
     return parser
+
+
+def _report_md(summary: dict, hist: dict) -> str:
+    """Markdown document for one stage: goal, action, per-item credit, events."""
+    plan = hist["stage"]["plan"]
+    awarded = set(summary["awarded_items"])
+    blocked = set(summary["blocked_items"])
+    lines = [
+        "# Progress: %s" % summary["stage_id"],
+        "",
+        "- Goal: %s" % plan.get("goal", ""),
+        "- Action: `%s` (%s)" % (summary["action"], summary["reason"]),
+        "- Points: %s / %s" % (summary["points"], summary["review_at"]),
+        "- Assessments: %s / %s; Jev calls: %s / %s" % (
+            summary["assessment_count"], summary["assessment_limit"],
+            summary["model_attempts"], summary["model_attempt_limit"],
+        ),
+    ]
+    if summary.get("next_direction"):
+        lines.append("- Next direction: `%s`" % summary["next_direction"])
+    if summary.get("failed_checks"):
+        lines.append("- Failed checks: %s" % ", ".join(summary["failed_checks"]))
+    lines += ["", "| item | state |", "| --- | --- |"]
+    for item in plan.get("items", []):
+        state = "credited" if item["id"] in awarded else "blocked" if item["id"] in blocked else "open"
+        lines.append("| `%s` | %s |" % (item["id"], state))
+    lines += ["", "| seq | event | detail |", "| --- | --- | --- |"]
+    for event in hist["events"]:
+        data = event.get("data", {})
+        detail = (
+            data.get("summary") or data.get("choice") or data.get("status")
+            or data.get("reason") or ""
+        )
+        lines.append("| %s | %s | %s |" % (event.get("sequence", "?"), event.get("kind", "?"), str(detail).replace("|", "\\|")))
+    return "\n".join(lines)
 
 
 def _emit_jq(payload, jq):
@@ -199,6 +238,19 @@ def main(argv=None):
             result = ledger.restore(args.stage, args.item, args.reason, args.reviewer)
         elif args.command == "self-test":
             result = _self_test(args)
+        elif args.command == "report":
+            summary = ledger.status(args.stage)
+            hist = ledger.history(args.stage)
+            md = _report_md(summary, hist)
+            if args.out:
+                atomic_write_text(Path(args.out), md)
+                result = {"wrote": args.out, "bytes": len(md.encode("utf-8"))}
+            elif args.jq:
+                result = {"report_md": md, "stage": summary["stage_id"],
+                          "points": summary["points"], "action": summary["action"]}
+            else:
+                sys.stdout.write(md + "\n")
+                return 0
         else:
             result = ledger.review(args.stage, args.reason, args.reviewer, approve_finish=args.approve_finish)
     except ProgressError as exc:

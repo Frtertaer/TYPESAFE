@@ -42,6 +42,7 @@ class ParserTests(unittest.TestCase):
             ["restore", "s", "i", "--reason", "r", "--reviewer", "v"],
             ["review", "s", "--reason", "r", "--reviewer", "v"],
             ["lint", "plan.json"],
+            ["report", "s"],
         ):
             args = parser.parse_args(argv)
             self.assertTrue(args.command)
@@ -253,6 +254,38 @@ class SubprocessTests(unittest.TestCase):
             document = json.loads(proc.stdout)
             self.assertEqual(document["events"], [])
             self.assertEqual(document["stage"]["plan"]["id"], "reliability")
+            proc = subprocess.run(
+                cli + ["report", "reliability"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("# Progress: reliability", proc.stdout)
+            self.assertIn("| `item_0` | open |", proc.stdout)
+            out_path = base / "report.md"
+            proc = subprocess.run(
+                cli + ["report", "reliability", "--out", str(out_path)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            wrote = json.loads(proc.stdout)
+            self.assertEqual(wrote["wrote"], str(out_path))
+            self.assertIn("# Progress: reliability", out_path.read_text(encoding="utf-8"))
+            proc = subprocess.run(
+                cli + ["report", "reliability", "--jq", "points"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertEqual(json.loads(proc.stdout), 0)
+            proc = subprocess.run(
+                cli + ["report", "missing_stage"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 2)
+            self.assertEqual(json.loads(proc.stdout)["error"]["code"], "STAGE_MISSING")
 
 
 class LintTests(unittest.TestCase):

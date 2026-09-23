@@ -444,6 +444,15 @@ class InventoryHookTests(unittest.TestCase):
             self.assertTrue(all(t["keys"] == [] for t in ticks))
             self.assertTrue(all(t["winner"] is None for t in ticks))
 
+    def test_self_test_runs_emit_machinery(self) -> None:
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            rc = HOOK.main(["--self-test"])
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", buf.getvalue())
+        self.assertIn("explicit_winner=ok", buf.getvalue())
+        self.assertIn("miss_written=ok", buf.getvalue())
+
     def test_watch_fail_fast_breaks_on_winnerless_tick(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             payload = Path(tmp) / "payload.json"

@@ -13,6 +13,7 @@ import json
 import os
 import socket
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -625,7 +626,79 @@ def env_report() -> dict:
     return report
 
 
-USAGE = 'Usage: python inventory_hook.py [--env|--events|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet]\n       [--verdict PATH]]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n  --events   print allowed hook event names and exit\n  --dry-run  resolve the pick writing sidecar/miss as .jev-tools.dry.json /\n             .jev-tools-miss.dry.json instead of the live names\n  --simulate TEXT  run the hook on a synthetic UserPromptSubmit event with TEXT as the prompt and the process cwd (implies --dry-run; no stdin)\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --version  print the pack policy version and exit\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --verdict P  write a slim {verdict, ticks, winner, winner_stability, keys} JSON\n'
+USAGE = 'Usage: python inventory_hook.py [--env|--events|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet]\n       [--verdict PATH]] [--self-test]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n  --events   print allowed hook event names and exit\n  --dry-run  resolve the pick writing sidecar/miss as .jev-tools.dry.json /\n             .jev-tools-miss.dry.json instead of the live names\n  --simulate TEXT  run the hook on a synthetic UserPromptSubmit event with TEXT as the prompt and the process cwd (implies --dry-run; no stdin)\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --version  print the pack policy version and exit\n  --self-test  run the emit machinery on synthetic payloads in a temp dir\n             (no Jev); prints self-test ok|FAIL per check, rc 0/1\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --verdict P  write a slim {verdict, ticks, winner, winner_stability, keys} JSON\n'
+
+
+def _self_test() -> int:
+    """Exercise handle()'s emit paths on synthetic payloads; no Jev calls."""
+    checks: dict = {}
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            item = {
+                "id": "selftest-item",
+                "kind": "skill",
+                "name": "selftest-item",
+                "description": "self-test item",
+                "path": "",
+            }
+            old_log = os.environ.get("JEV_CONSULT_LOG")
+            os.environ["JEV_CONSULT_LOG"] = str(tmp_path / "decisions.jsonl")
+            try:
+                checks["empty_event"] = handle({}) == {}
+                checks["bad_event"] = (
+                    handle({"hook_event_name": "Bogus", "prompt": "x"}) == {}
+                )
+                winner_out = handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "please run selftest-item on this repo",
+                        "cwd": str(tmp_path),
+                    },
+                    items=[item],
+                    harness="hermes",
+                    no_writes=True,
+                )
+                checks["explicit_winner"] = (
+                    isinstance(winner_out, dict)
+                    and bool(winner_out.get("context"))
+                    and (tmp_path / ".jev-tools.dry.json").is_file()
+                )
+                miss_out = handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "unrelated task with no matching items",
+                        "cwd": str(tmp_path),
+                    },
+                    items=[],
+                    harness="hermes",
+                    pick_fn=lambda *a, **kw: {"status": "none", "winner": None},
+                    no_writes=True,
+                )
+                checks["miss_written"] = (
+                    isinstance(miss_out, dict)
+                    and bool(miss_out.get("context"))
+                    and (tmp_path / ".jev-tools-miss.dry.json").is_file()
+                )
+            finally:
+                if old_log is None:
+                    os.environ.pop("JEV_CONSULT_LOG", None)
+                else:
+                    os.environ["JEV_CONSULT_LOG"] = old_log
+    except Exception:
+        checks = {"raised": False}
+    ok = bool(checks) and all(checks.values())
+    sys.stdout.write(
+        "self-test: %s %s\n"
+        % (
+            "ok" if ok else "FAIL",
+            " ".join(
+                "%s=%s" % (k, "ok" if v else "FAIL")
+                for k, v in sorted(checks.items())
+            ),
+        )
+    )
+    return 0 if ok else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -663,6 +736,8 @@ def main(argv: list[str] | None = None) -> int:
             for name in names:
                 sys.stdout.write(name + "\n")
         return 0
+    if "--self-test" in argv:
+        return _self_test()
     if "--env" in argv:
         report = env_report()
         if "--jq" in argv:

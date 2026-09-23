@@ -610,6 +610,63 @@ def uninstall(agents: list[str], dry_run: bool) -> int:
     return 0
 
 
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def env_report(agents: list[str]) -> dict:
+    """Resolved install layout: agent list, homes, target paths, which exist."""
+    home = user_home()
+    hermes = hermes_home()
+    tmap = targets(home, hermes)
+    rendered = {
+        name: {kind: [str(p) for p in paths] for kind, paths in groups.items()}
+        for name, groups in tmap.items()
+    }
+    existing = sorted(
+        str(p)
+        for groups in tmap.values()
+        for paths in groups.values()
+        for p in paths
+        if p.exists()
+    )
+    return {
+        "agents": list(agents),
+        "home": str(home),
+        "hermes_home": str(hermes),
+        "targets": rendered,
+        "existing": existing,
+        "policy": os.environ.get("JEV_POLICY", "").strip() or "default",
+        "key_set": key_is_set(),
+    }
+
+
+def emit_env(report: dict, jq: str | None, out: str | None) -> int:
+    text = json.dumps(report, indent=2, ensure_ascii=False) + "\n"
+    if out:
+        try:
+            _atomic_write(Path(out), text)
+        except OSError as exc:
+            sys.stderr.write("install.py env: --out %s failed: %s\n" % (out, exc))
+    if jq is None:
+        sys.stdout.write(text)
+        return 0
+    value = report
+    for part in jq.split("."):
+        if isinstance(value, dict) and part in value:
+            value = value[part]
+        else:
+            sys.stderr.write(
+                "install.py env: unknown jq key %r; env has: %s\n"
+                % (jq, ", ".join(sorted(report)))
+            )
+            return 2
+    sys.stdout.write(json.dumps(value, ensure_ascii=False) + "\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Copy jev-consult into Hermes, Claude Code, Codex, and Grok only."
@@ -625,11 +682,26 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print whether TYPESAFE_API_KEY is set (never the value).",
     )
+    parser.add_argument(
+        "--env",
+        action="store_true",
+        help="Print the resolved install config JSON (agents, home, "
+        "hermes_home, targets, existing, policy, key_set) and exit.",
+    )
+    parser.add_argument(
+        "--jq",
+        help="With --env: print one report field (dotted dig), rc 2 on unknown key.",
+    )
+    parser.add_argument(
+        "--out", help="With --env: also write the report JSON to PATH (fail-open)."
+    )
     args = parser.parse_args(argv)
     if args.check_key:
         report_key()
         return 0 if key_is_set() else 1
     agents = parse_agents(args.agents)
+    if args.env:
+        return emit_env(env_report(agents), args.jq, args.out)
     if args.uninstall:
         return uninstall(agents, args.dry_run)
     return install(agents, args.dry_run)

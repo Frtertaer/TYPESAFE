@@ -66,6 +66,15 @@ ENV_SCRIPTS = {
     "peer_fill.py": {"fill_timeout_seconds", "policy", "watch_max", "watch_quiet", "watch_secs"},
     "apply_fill.py": {"fill_timeout_seconds", "policy", "watch_max", "watch_quiet", "watch_secs"},
     "decisions.py": {"count", "env", "exists", "file", "source"},
+    "install.py": {
+        "agents",
+        "existing",
+        "hermes_home",
+        "home",
+        "key_set",
+        "policy",
+        "targets",
+    },
     "catalog_fill.py": {
         "ask",
         "catalog_cache_seconds",
@@ -141,6 +150,13 @@ ENV_SCRIPTS = {
 # dedicated tests (its report names api_key_set, which trips the leak guard).
 ENV_SUBCOMMAND = {"trace.py", "progress.py"}
 
+# Env-capable scripts living outside the pack scripts dir.
+SCRIPT_PATHS = {"install.py": ROOT / "scripts" / "install.py"}
+
+
+def _script_path(name):
+    return SCRIPT_PATHS.get(name, SCRIPTS / name)
+
 
 def _env_argv(name, *rest):
     base = ["env"] if name in ENV_SUBCOMMAND else ["--env"]
@@ -153,7 +169,7 @@ def _run(script, argv):
     env = dict(os.environ)
     env["TYPESAFE_API_KEY"] = "typesafe-test-key-do-not-leak"
     return subprocess.run(
-        [sys.executable, str(SCRIPTS / script), *argv],
+        [sys.executable, str(_script_path(script)), *argv],
         input="",
         capture_output=True,
         text=True,

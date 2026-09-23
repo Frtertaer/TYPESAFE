@@ -28,6 +28,18 @@ from compact import estimate_tokens  # noqa: E402
 
 SEVERITIES = ("error", "warn", "info")
 
+# The request.json contract (as scaffolded by jev.py / consumed by ask).
+# --schema prints this like the other pack scripts: text rows or, with
+# --json, the {key: {required, type}} object.
+REQUEST_SCHEMA_ROWS = {
+    "state": {"required": False, "type": "object|string, session context sent to Jev (32k-token cap)"},
+    "questions": {"required": True, "type": "object{qid: question}; qid is the answers key"},
+    "irreversible": {"required": False, "type": "bool, marks irreversible actions"},
+    "question.type": {"required": True, "type": "choice|noul|score"},
+    "question.instructions": {"required": True, "type": "string, the question text"},
+    "question.criteria": {"required": False, "type": "object{option: label} for choice, {true,false} for noul, list[label] for score (missing fires J009)"},
+}
+
 NEGATION = re.compile(r"\b(not|never|no longer|isn't|aren't|doesn't|don't|didn't|won't|cannot|can't|without|except|unless|neither|nor)\b", re.I)
 ARITHMETIC = re.compile(r"\b(how many|count of|number of|at least \d+|at most \d+|more than \d+|fewer than \d+|less than \d+|sum of|total of|average|percent(age)?)\b", re.I)
 DATETIME = re.compile(r"\b(within the (last|past|next)|older than|newer than|earlier than|later than|expired?|overdue|past due|(before|after|since|until) \d|\d+\s*(minutes?|hours?|days?|weeks?|months?|years?))\b", re.I)
@@ -344,7 +356,7 @@ def _atomic_write(path, text):
         raise
 
 
-USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S      preset severity floor (error|warn|info; JEV_QLINT_SEVERITY)\n  --quiet           print only errors/warnings count\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S      preset severity floor (error|warn|info; JEV_QLINT_SEVERITY)\n  --quiet           print only errors/warnings count\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -359,6 +371,17 @@ def main(argv: list[str] | None = None) -> int:
     do_fix = "--fix" in argv
     strict = "--strict" in argv
     quiet = "--quiet" in argv
+    if "--schema" in argv:
+        if "--json" in argv:
+            sys.stdout.write(json.dumps(REQUEST_SCHEMA_ROWS, indent=2) + "\n")
+        else:
+            for key in REQUEST_SCHEMA_ROWS:
+                row = REQUEST_SCHEMA_ROWS[key]
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (key, row["type"], "required" if row["required"] else "optional")
+                )
+        return 0
     fail_fast = "--fail-fast" in argv
     severity = ""
     if "--severity" in argv:

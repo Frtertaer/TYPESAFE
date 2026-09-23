@@ -14,6 +14,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import compact  # noqa: E402
 import compare  # noqa: E402
+import question_lint  # noqa: E402
 import trace  # noqa: E402
 
 EXAMPLES = ROOT / "skills" / "jev-consult" / "examples"
@@ -86,6 +87,36 @@ class ExampleFilesTests(unittest.TestCase):
     def test_trace_template_covers_trace_schema_keys(self) -> None:
         data = json.loads((EXAMPLES / "trace.template.json").read_text(encoding="utf-8"))
         self.assertTrue(set(trace.EMPTY) <= set(data))
+
+    def test_request_examples_cover_question_schema(self) -> None:
+        """*.request.json files satisfy the --schema contract exactly."""
+        schema = question_lint.REQUEST_SCHEMA_ROWS
+        required_top = {
+            k for k, v in schema.items() if v["required"] and "." not in k
+        }
+        required_q = {
+            k.split(".", 1)[1]
+            for k, v in schema.items()
+            if k.startswith("question.") and v["required"]
+        }
+        found = sorted(EXAMPLES.glob("*.request.json"))
+        self.assertTrue(found)
+        for path in found:
+            req = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                required_top - set(req), set(), "%s missing keys" % path.name
+            )
+            for qid, q in req["questions"].items():
+                self.assertEqual(
+                    required_q - set(q), set(), "%s:%s" % (path.name, qid)
+                )
+                crit = q.get("criteria")
+                if crit is not None:
+                    self.assertIsInstance(
+                        crit, (dict, list), "%s:%s criteria" % (path.name, qid)
+                    )
+            extra_top = set(req) - {k for k in schema if "." not in k}
+            self.assertEqual(extra_top, set(), "%s has unknown keys" % path.name)
 
 
 if __name__ == "__main__":

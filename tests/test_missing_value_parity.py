@@ -47,7 +47,7 @@ MISSING_VALUE_RC2 = {
 # Hooks must keep working (rc 0, empty object) even when a valued flag
 # dangles — fail-open beats usage correctness inside a harness.
 MISSING_VALUE_HOOK_RC0 = {
-    "compact_hook.py": ["--file", "--out"],
+    "compact_hook.py": ["--file", "--out", "--verdict"],
     "inventory_hook.py": ["--file", "--jq", "--out"],
 }
 

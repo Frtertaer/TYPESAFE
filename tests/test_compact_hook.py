@@ -263,6 +263,53 @@ class HookE2ETests(unittest.TestCase):
         self.assertEqual(json.loads(self._run("")), {})
         self.assertEqual(json.loads(self._run("[1,2]")), {})
 
+    def test_verdict_skip_and_compacted(self) -> None:
+        """--verdict writes the slim compacted|skip verdict after each run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            vpath = Path(tmp) / "v.json"
+            proc = self._run_full(
+                "",
+                argv=["--simulate", "tiny", "--verdict", str(vpath)],
+            )
+            self.assertEqual(json.loads(proc.stdout.strip()), {})
+            verdict = json.loads(vpath.read_text(encoding="utf-8"))
+            self.assertEqual(verdict["verdict"], "skip")
+            self.assertEqual(verdict["reason"], "below live-fat threshold")
+            self.assertIn("ts", verdict)
+
+            fat = "y" * 40000
+            proc = self._run_full(
+                json.dumps(
+                    {"hook_event_name": "PostToolUse", "toolResult": fat}
+                ),
+                argv=["--verdict", str(vpath)],
+            )
+            self.assertIn("hookSpecificOutput", proc.stdout)
+            verdict = json.loads(vpath.read_text(encoding="utf-8"))
+            self.assertEqual(verdict["verdict"], "compacted")
+
+            # bad stdin still writes a skip verdict (fail-open)
+            vpath.unlink()
+            proc = self._run_full("not json", argv=["--verdict", str(vpath)])
+            self.assertEqual(json.loads(proc.stdout.strip()), {})
+            verdict = json.loads(vpath.read_text(encoding="utf-8"))
+            self.assertEqual(verdict["verdict"], "skip")
+            self.assertEqual(verdict["reason"], "invalid JSON")
+
+    def test_verdict_bad_path_still_emits(self) -> None:
+        proc = self._run_full(
+            "",
+            argv=[
+                "--simulate",
+                "tiny",
+                "--verdict",
+                "N:\\no\\such\\dir\\v.json",
+            ],
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(json.loads(proc.stdout.strip()), {})
+        self.assertIn("--verdict failed", proc.stderr)
+
     def test_malformed_stdin_shapes_all_noop(self) -> None:
         """Fail-open contract: every malformed stdin shape exits 0 with {}."""
         for shape in (

@@ -118,6 +118,24 @@ class ExitCodeParityTests(unittest.TestCase):
                 )
                 self.assertNotIn("Traceback", proc.stderr + proc.stdout)
 
+    def test_jev_scaffold_malformed_option_rc2(self) -> None:
+        """jev scaffold --option rejects non-`qid=key:label` and unknown qids."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = str(Path(tmp) / "req.json")
+            for bad in ("approach=nocolon", "badqid=k:l"):
+                with self.subTest(option=bad):
+                    proc = _run(
+                        "jev.py",
+                        "scaffold",
+                        "approach",
+                        "--out",
+                        out,
+                        "--option",
+                        bad,
+                    )
+                    self.assertEqual(proc.returncode, 2, proc.stderr[:200])
+                    self.assertNotIn("Traceback", proc.stderr + proc.stdout)
+
     def test_every_script_classified(self) -> None:
         covered = USAGE_RC | FAIL_OPEN_RC0
         present = {

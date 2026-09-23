@@ -526,6 +526,36 @@ class ScaffoldTests(unittest.TestCase):
             self.assertIn("keep_vs_change", data["questions"])
             self.assertEqual(data["state"]["plan"], "ship pack")
 
+    def test_cmd_scaffold_dry_run_writes_nothing(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "req.json"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = jev.main(
+                    ["scaffold", "keep_vs_change", "--out", str(out), "--plan", "ship", "--dry-run"]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertTrue(payload["dry_run"])
+            self.assertEqual(payload["request"]["state"]["plan"], "ship")
+            self.assertFalse(out.exists())
+
+    def test_cmd_scaffold_dry_run_bad_option_still_fails(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "req.json"
+            with redirect_stdout(io.StringIO()):
+                rc = jev.main(
+                    ["scaffold", "approach", "--out", str(out), "--option", "bogus", "--dry-run"]
+                )
+            self.assertEqual(rc, 2)
+            self.assertFalse(out.exists())
+
     def test_cmd_scaffold_lint_reports_findings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "req.json"

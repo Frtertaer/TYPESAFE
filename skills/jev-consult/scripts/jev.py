@@ -1077,13 +1077,18 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
         sys.stderr.write("%s\n" % exc)
         return ASK_ESCALATE_EXIT
     out = Path(args.out)
-    try:
-        if out.parent != Path(""):
-            out.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write(out, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
-    except OSError as exc:
-        sys.stderr.write("scaffold: cannot write %s: %s\n" % (out, exc))
-        return ASK_ESCALATE_EXIT
+    if getattr(args, "dry_run", False):
+        sys.stdout.write(
+            json.dumps({"dry_run": True, "out": str(out), "request": payload}, ensure_ascii=False) + "\n"
+        )
+    else:
+        try:
+            if out.parent != Path(""):
+                out.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write(out, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        except OSError as exc:
+            sys.stderr.write("scaffold: cannot write %s: %s\n" % (out, exc))
+            return ASK_ESCALATE_EXIT
     if getattr(args, "lint", False) and question_lint is not None:
         findings = question_lint.lint_request(payload)
         for finding in findings:
@@ -1294,6 +1299,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--lint",
         action="store_true",
         help="Run question_lint on the scaffolded request; findings to stderr, rc 1 on errors",
+    )
+    scaffold.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate options + lint without writing --out; prints {dry_run, out, request} JSON",
     )
     scaffold.set_defaults(func=cmd_scaffold)
     selftest = sub.add_parser(

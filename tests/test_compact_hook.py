@@ -272,6 +272,56 @@ class HookE2ETests(unittest.TestCase):
             self.assertIn("omitted", node["output"])
             self.assertTrue(any(spill.iterdir()))
 
+    def test_env_prints_resolved_config(self) -> None:
+        proc = self._run_full("", argv=["--env"])
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["live_fat"], HOOK.C.LIVE_FAT)
+        self.assertEqual(report["policy"], "default")
+        self.assertIn("spill_max_files", report)
+
+    def test_env_reflects_spill_disable_and_jq(self) -> None:
+        import subprocess
+
+        env = dict(os.environ)
+        env["JEV_CONSULT_SPILL"] = "0"
+        proc = subprocess.run(
+            [sys.executable, str(HOOK_PATH), "--env"],
+            input="",
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+        self.assertTrue(json.loads(proc.stdout)["spill_disabled"])
+        proc = subprocess.run(
+            [sys.executable, str(HOOK_PATH), "--env", "--jq", "live_fat"],
+            input="",
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+        self.assertEqual(json.loads(proc.stdout.strip()), HOOK.C.LIVE_FAT)
+
+    def test_env_jq_bad_key_and_out_file(self) -> None:
+        import subprocess
+
+        proc = subprocess.run(
+            [sys.executable, str(HOOK_PATH), "--env", "--jq", "nope"],
+            input="",
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 2)
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "env.json"
+            proc = self._run_full("", argv=["--env", "--out", str(target)])
+            self.assertEqual(
+                json.loads(target.read_text(encoding="utf-8"))["live_fat"],
+                HOOK.C.LIVE_FAT,
+            )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

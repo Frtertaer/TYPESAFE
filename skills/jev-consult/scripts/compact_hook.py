@@ -9,6 +9,7 @@ prints {} and exits 0. Never exits non-zero — fail open.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ if str(HERE) not in sys.path:
 
 import _watch  # noqa: E402
 import compact as C  # noqa: E402
+from inventory import atomic_write_text as _atomic_write_text  # noqa: E402
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -108,7 +110,25 @@ def handle(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose] [--file PATH] [--simulate TEXT] [--self-test]\n\nReads one PostToolUse JSON event from stdin (or --file). When the tool result\nis longer than the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n--simulate TEXT runs a synthetic PostToolUse event with TEXT as the tool\nresult — a quick probe of the live-fat decision without crafting JSON.\n--self-test runs handle() on synthetic payloads and exits 1 on failure.\n'
+def env_report() -> dict:
+    """Resolved compact-hook environment: the JEV_* knobs that reach the hook
+    through compact.py. Values only — never secrets."""
+    spill = C.spill_dir_default()
+    max_files, max_bytes = C._spill_caps()
+    policy = os.environ.get("JEV_POLICY", "").strip()
+    return {
+        "live_fat": C.LIVE_FAT,
+        "live_head": C.LIVE_HEAD,
+        "live_tail": C.LIVE_TAIL,
+        "spill_dir": str(spill) if spill else None,
+        "spill_disabled": os.environ.get("JEV_CONSULT_SPILL", "").strip() == "0",
+        "spill_max_files": max_files,
+        "spill_max_bytes": max_bytes,
+        "policy": policy if policy else "default",
+    }
+
+
+USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose] [--file PATH] [--simulate TEXT] [--env [--jq KEY] [--out PATH]] [--self-test]\n\nReads one PostToolUse JSON event from stdin (or --file). When the tool result\nis longer than the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n--simulate TEXT runs a synthetic PostToolUse event with TEXT as the tool\nresult — a quick probe of the live-fat decision without crafting JSON.\n--self-test runs handle() on synthetic payloads and exits 1 on failure.\n--env prints the resolved hook config JSON (--jq KEY prints one value;\n--out PATH also writes it, fail-open).\n'
 
 
 def _self_test() -> int:
@@ -167,6 +187,32 @@ def main() -> int:
         sys.stdout.write(USAGE)
         return 0
     verbose = "--verbose" in sys.argv[1:]
+    if "--env" in sys.argv[1:]:
+        report = env_report()
+        if "--jq" in sys.argv[1:]:
+            idx = sys.argv[1:].index("--jq")
+            if idx + 1 < len(sys.argv[1:]):
+                key = sys.argv[1:][idx + 1]
+                if key in report:
+                    sys.stdout.write(json.dumps(report[key]) + "\n")
+                    return 0
+                sys.stderr.write(
+                    "bad --jq key %r (env has: %s)\n"
+                    % (key, ", ".join(sorted(report)))
+                )
+                return 2
+            sys.stderr.write("--jq needs a KEY value\n")
+            return 2
+        text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+        if "--out" in sys.argv[1:]:
+            idx = sys.argv[1:].index("--out")
+            if idx + 1 < len(sys.argv[1:]):
+                try:
+                    _atomic_write_text(Path(sys.argv[1:][idx + 1]), text)
+                except OSError:
+                    pass  # fail-open: still print to stdout
+        sys.stdout.write(text)
+        return 0
     if "--self-test" in sys.argv[1:]:
         return _self_test()
     if "--simulate" in sys.argv[1:]:

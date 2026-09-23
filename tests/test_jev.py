@@ -416,6 +416,23 @@ class ScaffoldTests(unittest.TestCase):
             self.assertIn("keep_vs_change", data["questions"])
             self.assertEqual(data["state"]["plan"], "ship pack")
 
+    def test_cmd_scaffold_lint_reports_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "req.json"
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = jev.main(
+                    [
+                        "scaffold", "approach", "--out", str(out),
+                        "--option", "approach=a:do a thing",
+                        "--option", "approach=b:do b thing",
+                        "--lint",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertIn("lint J012", err.getvalue())
+            self.assertTrue(out.is_file())
+
     def test_guard_no_decision_action(self) -> None:
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         skill = (ROOT / "skills" / "jev-consult" / "SKILL.md").read_text(encoding="utf-8")

@@ -981,6 +981,15 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
     if out.parent != Path(""):
         out.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write(out, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+    if getattr(args, "lint", False) and question_lint is not None:
+        findings = question_lint.lint_request(payload)
+        for finding in findings:
+            sys.stderr.write(
+                "lint %s %s: %s\n"
+                % (finding["rule"], finding["qid"], finding["message"])
+            )
+        if any(f["severity"] == "error" for f in findings):
+            return ASK_ESCALATE_EXIT
     return 0
 
 
@@ -1167,6 +1176,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="ID=key:label extra choice option (repeatable)",
+    )
+    scaffold.add_argument(
+        "--lint",
+        action="store_true",
+        help="Run question_lint on the scaffolded request; findings to stderr, rc 1 on errors",
     )
     scaffold.set_defaults(func=cmd_scaffold)
     selftest = sub.add_parser(

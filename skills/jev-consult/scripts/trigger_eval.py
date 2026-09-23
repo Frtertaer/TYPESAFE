@@ -163,6 +163,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
+        "--schema",
+        action="store_true",
+        help="Print the trigger-cases file key contract and exit (--json emits the object).",
+    )
+    parser.add_argument(
         "--csv",
         action="store_true",
         help="Print rows as CSV: id,should_trigger,lexical,score,ok.",
@@ -345,6 +350,25 @@ def main(argv: list[str] | None = None) -> int:
         help="With --watch: stop after the first tick that fails any gate (rc still reflects the last tick).",
     )
     args = parser.parse_args(argv)
+    if getattr(args, "schema", False):
+        rows = {
+            "skill": {"required": True, "type": "string, skill name"},
+            "cases": {"required": True, "type": "list[case]"},
+            "case.id": {"required": True, "type": "string, unique"},
+            "case.prompt": {"required": True, "type": "string, user-style prompt"},
+            "case.should_trigger": {"required": True, "type": "boolean"},
+            "case.covers": {"required": False, "type": "list[string], trigger tags exercised"},
+            "case.lexical": {"required": False, "type": "boolean (default true); false skips scoring"},
+        }
+        if args.json:
+            sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+        else:
+            for key in rows:
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (key, rows[key]["type"], "required" if rows[key]["required"] else "optional")
+                )
+        return 0
     if args.env:
         scorer_margin = None
         if VENDORED_SCORER.is_file():

@@ -1496,6 +1496,21 @@ class TriggerEvalTests(unittest.TestCase):
                 rc = te.main(["--cases", str(Path(tmp) / "nope.json")])
         self.assertEqual(rc, 2)
 
+    def test_schema_prints_case_contract(self) -> None:
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            rc = te.main(["--schema"])
+        self.assertEqual(rc, 0)
+        self.assertIn("case.should_trigger: boolean (required)", buf.getvalue())
+        self.assertIn("case.lexical:", buf.getvalue())
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            rc = te.main(["--schema", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertTrue(rows["case.prompt"]["required"])
+        self.assertFalse(rows["case.covers"]["required"])
+
     def test_watch_leaves_no_tmp_litter(self) -> None:
         # --verdict/--out writes are atomic (.tmp + os.replace): after a
         # watch run only the declared outputs may exist

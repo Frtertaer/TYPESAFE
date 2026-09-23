@@ -6863,7 +6863,18 @@ STEPS = (
     ("catalog_fill", "step_catalog_fill"),
     ("ask_verdict", "step_ask_verdict"),
     ("perf", "step_perf"),
+    ("self_test", "step_self_test"),
 )
+
+
+def step_self_test(tmp: Path) -> dict:
+    """Run `smoke.py --self-test` in a subprocess; fails when detection breaks."""
+    rc, out = _run(
+        [str(Path(__file__).resolve()), "--self-test", "--json"],
+        cwd=tmp,
+    )
+    ok = rc == 0 and '"self_test": "ok"' in out
+    return _step("self_test", ok, out.strip()[:120] or "rc=%d" % rc)
 
 
 def main(argv: list[str] | None = None) -> int:

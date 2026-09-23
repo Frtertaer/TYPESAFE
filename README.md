@@ -14,6 +14,16 @@ Windows: `install.cmd`. Unix: `sh install.sh`. То же самое, что ко
 
 Открыл этот репозиторий как проект — копировать ничего не нужно: `AGENTS.md`, `CLAUDE.md` и `.hermes.md` уже в git.
 
+## Быстрый старт
+
+```text
+git clone <repo-url> && cd TYPESAFE
+python scripts/install.py                 # ставит скилл в 4 харнесса
+# TYPESAFE_API_KEY=... в .env или env харнесса (значение не печатать)
+python skills/jev-consult/scripts/doctor.py        # rc 0 = установка ок
+python -m unittest discover -s tests      # прогон всей suite
+```
+
 ## Что в репозитории
 
 | Путь | Зачем |

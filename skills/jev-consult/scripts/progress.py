@@ -31,21 +31,22 @@ def build_parser():
     for name in ("status", "history"):
         command = commands.add_parser(name)
         command.add_argument("stage")
-    status_cmd = commands.choices["status"]
-    status_cmd.add_argument("--watch", metavar="S", type=float, default=0.0,
-                            help="Re-read the stage every S seconds, printing one status tick per pass (read-only; JEV_PROGRESS_WATCH_MAX caps ticks)")
-    status_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0,
-                            help="With --watch: stop after N ticks (overrides JEV_PROGRESS_WATCH_MAX)")
-    status_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0,
-                            help="With --watch: stop after S elapsed seconds (JEV_PROGRESS_WATCH_SECS bounds without the flag)")
-    status_cmd.add_argument("--quiet", action="store_true",
-                            help="With --watch: print only non-continue ticks to stdout (--out still logs all; JEV_PROGRESS_WATCH_QUIET presets)")
-    status_cmd.add_argument("--fail-fast", action="store_true",
-                            help="With --watch: stop after the first tick whose action is not 'continue'")
-    status_cmd.add_argument("--out", metavar="PATH", default="",
-                            help="With --watch: append each tick line to PATH (fail-open)")
-    status_cmd.add_argument("--verdict", metavar="PATH", default="",
-                            help="With --watch: write a slim {verdict: active|resolved, ticks, action, points} JSON to PATH, refreshed every tick")
+    for name in ("status", "history"):
+        sub = commands.choices[name]
+        sub.add_argument("--watch", metavar="S", type=float, default=0.0,
+                         help="Re-read the stage every S seconds, printing one tick per pass (read-only; JEV_PROGRESS_WATCH_MAX caps ticks)")
+        sub.add_argument("--max-ticks", metavar="N", type=int, default=0,
+                         help="With --watch: stop after N ticks (overrides JEV_PROGRESS_WATCH_MAX)")
+        sub.add_argument("--watch-max", metavar="S", type=float, default=0.0,
+                         help="With --watch: stop after S elapsed seconds (JEV_PROGRESS_WATCH_SECS bounds without the flag)")
+        sub.add_argument("--quiet", action="store_true",
+                         help="With --watch: print only noteworthy ticks to stdout (--out still logs all; JEV_PROGRESS_WATCH_QUIET presets)")
+        sub.add_argument("--fail-fast", action="store_true",
+                         help="With --watch: status stops on the first non-'continue' tick; history stops on the first count change")
+        sub.add_argument("--out", metavar="PATH", default="",
+                         help="With --watch: append each tick line to PATH (fail-open)")
+        sub.add_argument("--verdict", metavar="PATH", default="",
+                         help="With --watch: write a slim verdict JSON to PATH, refreshed every tick")
     replay = commands.add_parser("evidence", help="Rebuild the exact Jev input recorded for an assessment or review event")
     replay.add_argument("stage")
     replay.add_argument("sequence", type=int, help="Event sequence number from history")
@@ -181,6 +182,68 @@ def _status_watch(ledger, args):
     return 0 if tick.get("action") not in ("continue", "error") else 1
 
 
+def _history_tick(ledger, stage, t0, prev_events):
+    try:
+        events = ledger.history(stage)["events"]
+        tick = {
+            "stage": stage,
+            "events": len(events),
+            "delta": None if prev_events is None else len(events) - prev_events,
+            "last_kind": events[-1]["kind"] if events else None,
+            "last_seq": events[-1].get("sequence") if events else None,
+        }
+    except ProgressError as exc:
+        tick = {"stage": stage, "events": 0, "delta": None, "error": exc.code}
+    tick["elapsed_s"] = round(time.time() - t0, 2)
+    return tick
+
+
+def _history_watch(ledger, args):
+    """Poll ledger.history on a loop; read-only. Exits 1 when the final tick
+    reports an empty history (no events ever landed)."""
+    max_ticks = _watch.cap("JEV_PROGRESS_WATCH_MAX", args.max_ticks)
+    dead = _watch.deadline("JEV_PROGRESS_WATCH_SECS", args.watch_max)
+    quiet = _watch.quiet("JEV_PROGRESS_WATCH_QUIET", args.quiet)
+    ticks = 0
+    tick: dict = {}
+    prev_events: int | None = None
+    verdict_ok = True
+    t0 = time.time()
+
+    def _write_verdict() -> bool:
+        return _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "changed" if tick.get("delta") else "steady",
+                "ticks": ticks,
+                "events": tick.get("events"),
+                "delta": tick.get("delta"),
+                "elapsed_s": round(time.time() - t0, 2),
+            },
+        )
+
+    while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
+        tick = _history_tick(ledger, args.stage, t0, prev_events)
+        prev_events = tick["events"]
+        ticks += 1
+        _watch.emit_or_jq(
+            tick, args.jq, args.out, quiet=quiet,
+            bad=not tick["events"] or bool(tick.get("delta")),
+        )
+        sys.stderr.write(
+            "watch tick=%d events=%s delta=%s\n"
+            % (ticks, tick["events"], tick.get("delta"))
+        )
+        if args.verdict and verdict_ok and not _write_verdict():
+            verdict_ok = False
+        if args.fail_fast and (tick.get("delta") or "error" in tick):
+            break
+        time.sleep(args.watch)
+    if args.verdict and verdict_ok and not _write_verdict():
+        return 1
+    return 0 if tick.get("events") else 1
+
+
 def _emit_jq(payload, jq):
     """When --jq is set, print just that dotted field and return an rc; else None."""
     if not jq:
@@ -311,6 +374,8 @@ def main(argv=None):
                 return _status_watch(ledger, args)
             result = ledger.status(args.stage)
         elif args.command == "history":
+            if args.watch and args.watch > 0:
+                return _history_watch(ledger, args)
             result = ledger.history(args.stage)
         elif args.command == "evidence":
             result = ledger.evidence(args.stage, args.sequence)

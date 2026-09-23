@@ -1116,7 +1116,7 @@ class GitEvidenceTests(unittest.TestCase):
 
 def _watch_args(**over):
     args = SimpleNamespace(
-        stage="reliability", watch=0.01, max_ticks=0, watch_max=0.0,
+        stage="reliability", watch=0.01, max_ticks=0, watch_max=10.0,
         quiet=False, fail_fast=False, out="", verdict="", jq="",
     )
     for key, value in over.items():
@@ -1197,6 +1197,82 @@ class StatusWatchTests(unittest.TestCase):
         target = self.root / "ticks.jsonl"
         self._run(_watch_args(max_ticks=2, out=str(target)))
         self.assertEqual(len(target.read_text(encoding="utf-8").strip().splitlines()), 2)
+
+
+class HistoryWatchTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.ledger = progress.Ledger(
+            self.root / "progress.sqlite3", self.root, evidence=FakeEvidence()
+        )
+        self.ledger.initialize(plan(), policy())
+
+    def _run(self, args):
+        out, err = StringIO(), StringIO()
+        with patch("sys.stdout", out), patch("sys.stderr", err):
+            rc = progress_cli._history_watch(self.ledger, args)
+        return rc, out.getvalue(), err.getvalue()
+
+    def _score_one(self):
+        self.ledger.assess(
+            "reliability", "item_0", "Verified outcome", asker=picker("material")
+        )
+
+    def test_history_watch_counts_events(self):
+        self._score_one()
+        args = _watch_args(max_ticks=2, verdict=str(self.root / "v.json"))
+        rc, out, err = self._run(args)
+        self.assertEqual(rc, 0)
+        lines = out.strip().splitlines()
+        self.assertEqual(len(lines), 2)
+        tick = json.loads(lines[0])
+        self.assertEqual(tick["events"], 1)
+        self.assertIsNone(tick["delta"])
+        self.assertEqual(json.loads(lines[1])["delta"], 0)
+        self.assertIn("watch tick=1 events=1", err)
+        data = json.loads((self.root / "v.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["verdict"], "steady")
+
+    def test_history_watch_missing_stage_errors(self):
+        args = _watch_args(stage="nope", max_ticks=2)
+        rc, out, _err = self._run(args)
+        self.assertEqual(rc, 1)
+        self.assertEqual(json.loads(out.strip().splitlines()[0])["events"], 0)
+
+    def test_history_watch_fail_fast_on_change(self):
+        original = self.ledger.history
+        calls = {"n": 0}
+
+        def growing(stage):
+            result = original(stage)
+            calls["n"] += 1
+            if calls["n"] > 1:
+                result = dict(result)
+                result["events"] = result["events"] * calls["n"]
+            return result
+
+        self._score_one()
+        with patch.object(self.ledger, "history", side_effect=growing):
+            rc, out, _err = self._run(_watch_args(fail_fast=True, verdict=str(self.root / "v.json")))
+        self.assertEqual(rc, 0)
+        lines = out.strip().splitlines()
+        self.assertEqual(len(lines), 2)  # tick1 baseline, tick2 delta=1 -> stop
+        self.assertEqual(json.loads(lines[1])["delta"], 1)
+        data = json.loads((self.root / "v.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["verdict"], "changed")
+
+    def test_history_watch_quiet_mutes_steady_ticks(self):
+        self._score_one()
+        with patch.dict(os.environ, {"JEV_PROGRESS_WATCH_QUIET": "1"}):
+            _rc, out, _err = self._run(_watch_args(max_ticks=2))
+        self.assertEqual(out.strip(), "")  # steady ticks are quieted
+
+    def test_history_watch_empty_exits_one(self):
+        rc, out, _err = self._run(_watch_args(max_ticks=2))
+        self.assertEqual(rc, 1)  # init logs no events; still empty at cap
+        self.assertEqual(json.loads(out.strip().splitlines()[-1])["events"], 0)
 
 
 if __name__ == "__main__":

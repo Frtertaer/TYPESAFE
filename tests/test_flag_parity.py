@@ -96,7 +96,7 @@ class FlagParityTest(unittest.TestCase):
         "inventory_hook.py": [["--help"]],
         "smoke.py": [["--help"]],
         "jev.py": [["ping", "--help"]],
-        "progress.py": [["status", "--help"]],
+        "progress.py": [["status", "--help"], ["history", "--help"]],
         "trace.py": [
             ["state", "--help"], ["notes", "--help"],
             ["history", "--help"], ["stats", "--help"],

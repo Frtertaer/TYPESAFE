@@ -2167,6 +2167,24 @@ class ScanPerfTests(unittest.TestCase):
             self.assertEqual([i["name"] for i in picked], ["skill-007"])
             self.assertLess(short_s, 15.0, "shortlist too slow: %.1fs" % short_s)
 
+    def test_self_test_scans_synthetic_catalog(self) -> None:
+        import subprocess
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "skills" / "jev-consult" / "scripts" / "inventory.py"),
+                "--self-test",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("self-test: ok", proc.stdout)
+        self.assertIn("scan_finds=ok", proc.stdout)
+        self.assertIn("explicit_hit=ok", proc.stdout)
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -1121,6 +1122,47 @@ def write_ask(path: Path, task: str, harness: str, picked: list[dict]) -> None:
     _atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
 
+def _self_test() -> int:
+    """Scan a temp-dir home with a synthetic catalog through the real
+    scan/shortlist machinery (no Jev); print ok|FAIL per check."""
+    checks = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        skill_dir = home / ".claude" / "skills" / "selftest-skill"
+        skill_dir.mkdir(parents=True)
+        with open(
+            skill_dir / "SKILL.md", "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                "---\nname: selftest-skill\ndescription: selftest token for scan checks\n---\n"
+            )
+        items = scan("claude-code", home=home)
+        names = {item.get("name") for item in items}
+        checks["scan_finds"] = "selftest-skill" in names
+        picked = shortlist(items, "selftest token", 8, [])
+        checks["shortlist_ranks"] = bool(picked) and picked[0].get("name") == "selftest-skill"
+        checks["explicit_hit"] = any(
+            item.get("name") == "selftest-skill"
+            for item in explicit_mentions("please run selftest-skill", items)
+        )
+        duped = items + [dict(item) for item in items[:1]]
+        uniq = uniquify(duped)
+        checks["uniquify"] = len({item["id"] for item in uniq}) == len(uniq) and any(
+            item["id"].endswith("_2") for item in uniq
+        )
+    ok = all(checks.values())
+    sys.stdout.write(
+        "self-test: %s %s\n"
+        % (
+            "ok" if ok else "FAIL",
+            " ".join(
+                "%s=%s" % (k, "ok" if v else "FAIL") for k, v in sorted(checks.items())
+            ),
+        )
+    )
+    return 0 if ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     if _watch.maybe_version(sys.argv[1:] if argv is None else argv):
         return 0
@@ -1253,7 +1295,14 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="Compare the current scan's item ids against a payload saved via --out (uses installed_names when present, else shortlist ids); prints {added,removed} JSON and exits.",
     )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Scan a temp-dir home with a synthetic catalog through the real machinery and exit 1 on failure.",
+    )
     args = parser.parse_args(argv)
+    if args.self_test:
+        return _self_test()
     if args.check_sidecar or args.check_miss:
         target = Path(args.check_sidecar or args.check_miss)
         if target.is_dir():

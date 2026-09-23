@@ -61,6 +61,33 @@ class JsonOutputParityTests(unittest.TestCase):
                 self.assertIsInstance(payload, dict, "%s --json not an object" % name)
                 self.assertTrue(payload, "%s --json empty object" % name)
 
+    def test_json_still_valid_when_findings_exist(self) -> None:
+        """--json stays parseable on the rc-1 findings path, not just clean."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad_md = Path(tmp) / "bad.md"
+            bad_md.write_text("# no frontmatter\njust text\n", encoding="utf-8")
+            bad_json = Path(tmp) / "bad.json"
+            bad_json.write_text('{"qid": "x"}\n', encoding="utf-8")
+            probes = (
+                ("skill_lint.py", [str(bad_md)]),
+                ("policy_lint.py", [str(bad_json)]),
+            )
+            for name, argv in probes:
+                with self.subTest(script=name):
+                    proc = subprocess.run(
+                        [sys.executable, str(SCRIPTS_DIR / name), *argv, "--json"],
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                    )
+                    self.assertEqual(proc.returncode, 1, "%s rc=%d" % (name, proc.returncode))
+                    payload = json.loads(proc.stdout)
+                    findings = payload.get("findings")
+                    self.assertIsInstance(findings, list)
+                    self.assertTrue(findings, "%s rc1 with empty findings" % name)
+
     def test_no_script_prints_usage_on_json(self) -> None:
         """'usage:' on stdout means argparse rejected the probe argv."""
         for name, argv in sorted(JSON_PROBES.items()):

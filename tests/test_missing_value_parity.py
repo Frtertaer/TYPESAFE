@@ -36,6 +36,8 @@ MISSING_VALUE_RC2 = {
         "--out",
         "--verdict",
         "--explain",
+        "--baseline",
+        "--baseline-write",
     ],
     "skill_scanner.py": ["--top", "--task"],
     "smoke.py": ["--only", "--repeat", "--jobs", "--timeout"],

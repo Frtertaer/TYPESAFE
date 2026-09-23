@@ -344,6 +344,43 @@ class CliTests(unittest.TestCase):
     def test_no_args_rc2(self):
         self.assertEqual(self._run().returncode, 2)
 
+    def test_baseline_suppresses_known_findings(self):
+        """--baseline PATH suppresses recorded findings; new ones still fire."""
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_skill(tmp, "BadCase", GOOD.format(name="BadCase"))
+            base = Path(tmp) / "base.json"
+            proc = self._run(str(bad), "--baseline-write", str(base))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(base.is_file())
+            # strict now passes: both warns are recorded
+            proc = self._run(str(bad), "--baseline", str(base), "--strict")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("suppressed", proc.stderr)
+            # a new finding not in the baseline still fails
+            bad.write_text("---\ndescription: no name\n---\n", encoding="utf-8")
+            proc = self._run(str(bad), "--baseline", str(base), "--strict")
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("S003", proc.stdout)
+
+    def test_baseline_missing_or_corrupt_counts_everything(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_skill(tmp, "BadCase", GOOD.format(name="BadCase"))
+            proc = self._run(
+                str(bad), "--baseline", str(Path(tmp) / "nope.json"),
+                "--strict",
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("not found", proc.stderr)
+            corrupt = Path(tmp) / "bad.json"
+            corrupt.write_text("{oops", encoding="utf-8")
+            proc = self._run(str(bad), "--baseline", str(corrupt), "--strict")
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("unreadable", proc.stderr)
+
+    def test_baseline_dangling_flag_rc2(self):
+        self.assertEqual(self._run("--baseline").returncode, 2)
+        self.assertEqual(self._run("--baseline-write").returncode, 2)
+
     def test_clean_rc0(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = write_skill(tmp, "jwt-auth", GOOD.format(name="jwt-auth"))

@@ -244,6 +244,36 @@ RULES = {
 }
 
 
+def _baseline_key(row: dict) -> tuple:
+    """Stable identity of a finding: file + rule + message text."""
+    return (
+        str(row.get("path")),
+        str(row.get("rule")),
+        str(row.get("message")),
+    )
+
+
+def load_baseline(path: str) -> set:
+    """Load a baseline findings file (from --baseline-write or --out).
+    Accepts {"findings": [...]} or a bare list; missing/corrupt warns and
+    returns an empty set so every finding still counts."""
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        sys.stderr.write("baseline %s not found; all findings count\n" % path)
+        return set()
+    except (OSError, ValueError):
+        sys.stderr.write("baseline %s unreadable; all findings count\n" % path)
+        return set()
+    items = raw.get("findings") if isinstance(raw, dict) else raw
+    keys: set = set()
+    if isinstance(items, list):
+        for f in items:
+            if isinstance(f, dict):
+                keys.add(_baseline_key(f))
+    return keys
+
+
 def _atomic_write(path, text):
     tmp = path.with_name(path.name + ".tmp")
     try:
@@ -257,7 +287,7 @@ def _atomic_write(path, text):
         raise
 
 
-USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S      preset severity floor (error|warn|info; JEV_SLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S      preset severity floor (error|warn|info; JEV_SLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -417,6 +447,22 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         verdict_path = argv[idx + 1]
         argv = argv[:idx] + argv[idx + 2 :]
+    baseline_path = ""
+    if "--baseline" in argv:
+        idx = argv.index("--baseline")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--baseline needs a PATH value\n")
+            return 2
+        baseline_path = argv[idx + 1]
+        argv = argv[:idx] + argv[idx + 2 :]
+    baseline_write = ""
+    if "--baseline-write" in argv:
+        idx = argv.index("--baseline-write")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--baseline-write needs a PATH value\n")
+            return 2
+        baseline_write = argv[idx + 1]
+        argv = argv[:idx] + argv[idx + 2 :]
     argv = [
         a
         for a in argv
@@ -472,6 +518,27 @@ def main(argv: list[str] | None = None) -> int:
             paths.extend(sorted(path.rglob("SKILL.md")))
         else:
             paths.append(path)
+    baseline_keys: set | None = None
+    if baseline_write:
+        snapshot = [
+            {"path": str(p), **f} for p in paths for f in lint_skill(p)
+        ]
+        try:
+            _atomic_write(
+                Path(baseline_write),
+                json.dumps({"findings": snapshot}, indent=2) + "\n",
+            )
+            sys.stderr.write(
+                "wrote baseline %s (%d findings)\n"
+                % (baseline_write, len(snapshot))
+            )
+        except OSError as exc:
+            sys.stderr.write(
+                "cannot write --baseline-write %s: %s\n" % (baseline_write, exc)
+            )
+            return 1
+    if baseline_path:
+        baseline_keys = load_baseline(baseline_path)
     if watch_seconds > 0:
         import time as _time
 
@@ -497,7 +564,15 @@ def main(argv: list[str] | None = None) -> int:
 
         watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
-            rows = [f for path in paths for f in lint_skill(path)]
+            rows = [
+                {**f, "path": str(path)}
+                for path in paths
+                for f in lint_skill(path)
+            ]
+            if baseline_keys is not None:
+                rows = [
+                    r for r in rows if _baseline_key(r) not in baseline_keys
+                ]
             tick = {
                 "ts": int(_time.time()),
                 "findings": len(rows),
@@ -536,8 +611,17 @@ def main(argv: list[str] | None = None) -> int:
         all_rows = [
             {"path": str(path), **f} for path in paths for f in lint_skill(path)
         ]
+        suppressed = 0
+        if baseline_keys is not None:
+            kept = [r for r in all_rows if _baseline_key(r) not in baseline_keys]
+            suppressed = len(all_rows) - len(kept)
+            all_rows = kept
         rows = [r for r in all_rows if not severity or r["severity"] == severity]
         payload = {"findings": rows}
+        if suppressed:
+            sys.stderr.write(
+                "baseline: suppressed %d known finding(s)\n" % suppressed
+            )
         if out_path:
             try:
                 _atomic_write(Path(out_path),
@@ -556,6 +640,7 @@ def main(argv: list[str] | None = None) -> int:
                     "verdict": "fail" if rc_now else "pass",
                     "ticks": 1,
                     "findings": len(all_rows),
+                    "suppressed": suppressed,
                     "errors": sum(1 for r in all_rows if r["severity"] == "error"),
                     "warnings": sum(1 for r in all_rows if r["severity"] == "warn"),
                     "infos": sum(1 for r in all_rows if r["severity"] == "info"),
@@ -578,8 +663,13 @@ def main(argv: list[str] | None = None) -> int:
         return rc_now
     n_err = 0
     n_warn = 0
+    n_suppressed = 0
     for path in paths:
         for f in lint_skill(path):
+            row = {"path": str(path), **f}
+            if baseline_keys is not None and _baseline_key(row) in baseline_keys:
+                n_suppressed += 1
+                continue
             if f["severity"] == "error":
                 n_err += 1
             else:
@@ -591,19 +681,32 @@ def main(argv: list[str] | None = None) -> int:
             if quiet and f["severity"] != "error":
                 continue
             sys.stdout.write("%s %s %s: %s\n" % (f["severity"], f["rule"], path, f["message"]))
+    if n_suppressed:
+        sys.stderr.write(
+            "baseline: suppressed %d known finding(s)\n" % n_suppressed
+        )
     if not quiet and n_err + n_warn and len(paths) > 1:
         sys.stdout.write(
             "%d findings (%d errors, %d warns) in %d files\n"
             % (n_err + n_warn, n_err, n_warn, len(paths))
         )
     if verdict_path:
-        all_f = [f for path in paths for f in lint_skill(path)]
+        all_f = [
+            {"path": str(path), **f}
+            for path in paths
+            for f in lint_skill(path)
+        ]
+        if baseline_keys is not None:
+            all_f = [
+                r for r in all_f if _baseline_key(r) not in baseline_keys
+            ]
         if not _watch.write_verdict(
             verdict_path,
             {
                 "verdict": "fail" if rc else "pass",
                 "ticks": 1,
                 "findings": len(all_f),
+                "suppressed": n_suppressed,
                 "errors": sum(1 for f in all_f if f["severity"] == "error"),
                 "warnings": sum(1 for f in all_f if f["severity"] == "warn"),
                 "infos": sum(1 for f in all_f if f["severity"] == "info"),

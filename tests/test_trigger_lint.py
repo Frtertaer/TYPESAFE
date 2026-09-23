@@ -131,6 +131,21 @@ class CliTests(unittest.TestCase):
                 rc = trigger_lint.main([str(bad)])
             self.assertEqual(rc, 1)
 
+    def test_self_test_finds_schema_errors(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = trigger_lint.main(["--self-test"])
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", buf.getvalue())
+        self.assertIn("T004", buf.getvalue())
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = trigger_lint.main(["--self-test", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["self_test"], "ok")
+        self.assertIn("T004", payload["rules"])
+
     def test_multiple_paths_lint_each_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             good = write_cases(tmp, [dict(GOOD_CASE)])

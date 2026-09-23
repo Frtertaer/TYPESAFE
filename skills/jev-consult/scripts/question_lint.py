@@ -547,6 +547,10 @@ def main(argv: list[str] | None = None) -> int:
     if not argv:
         sys.stderr.write("usage: question_lint.py FILE... [--json] [--fix] [--strict]\n")
         return 2
+    unknown = [a for a in argv if a.startswith("-")]
+    if unknown:
+        sys.stderr.write("unknown flag(s): %s\n" % ", ".join(unknown))
+        return 2
     if len(argv) > 1:
         if watch_seconds > 0 or do_fix:
             sys.stderr.write("multiple paths support neither --watch nor --fix\n")

@@ -439,6 +439,10 @@ def main(argv: list[str] | None = None) -> int:
             "usage: skill_lint.py SKILL.md [more.md ...] [--fix] [--strict]\n"
         )
         return 2
+    unknown = [a for a in argv if a.startswith("-")]
+    if unknown:
+        sys.stderr.write("unknown flag(s): %s\n" % ", ".join(unknown))
+        return 2
     rc = 0
     paths: list[Path] = []
     for arg in argv:

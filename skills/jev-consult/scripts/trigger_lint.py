@@ -376,6 +376,10 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
         return 0
     argv = [a for a in argv if a != "--env"]
+    unknown = [a for a in argv if a.startswith("-")]
+    if unknown:
+        sys.stderr.write("unknown flag(s): %s\n" % ", ".join(unknown))
+        return 2
     if len(argv) > 1:
         if watch_seconds > 0 or do_fix:
             sys.stderr.write("multiple paths support neither --watch nor --fix\n")

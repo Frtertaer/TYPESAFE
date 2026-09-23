@@ -6909,7 +6909,12 @@ def step_self_test(tmp: Path) -> dict:
         [str(Path(__file__).resolve()), "--self-test", "--json"],
         cwd=tmp,
     )
-    ok = rc == 0 and '"self_test": "ok"' in out
+    ok = rc == 0 and '"self_test": "ok"' in out and '"selftest_bad"' in out
+    rc2, out2 = _run(
+        [str(Path(__file__).resolve()), "--self-test"],
+        cwd=tmp,
+    )
+    ok = ok and rc2 == 0 and out2.splitlines()[0].startswith("self-test: ok")
     return _step("self_test", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

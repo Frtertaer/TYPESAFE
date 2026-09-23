@@ -338,6 +338,14 @@ class SmokeTests(unittest.TestCase):
         self.assertIn("coverage:", proc.stdout)
         self.assertNotIn("uncovered:", proc.stdout)
 
+    def test_self_test_step_passes(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            row = MOD.step_self_test(Path(tmp))
+        self.assertTrue(row["ok"], row)
+        self.assertEqual(row["name"], "self_test")
+
     def test_fail_fast_stops_after_first_failure(self) -> None:
         def boom(tmp):
             raise RuntimeError("explode")

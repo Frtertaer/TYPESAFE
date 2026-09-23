@@ -586,6 +586,23 @@ class StrictGateTest(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("bad --jq key", err.getvalue())
 
+    def test_schema_prints_case_contract(self) -> None:
+        import io as _io
+        from contextlib import redirect_stdout
+
+        buf = _io.StringIO()
+        with redirect_stdout(buf):
+            rc = compare.main(["--schema"])
+        self.assertEqual(rc, 0)
+        self.assertIn("case.after: object, guarded outcome fields (required)", buf.getvalue())
+        buf = _io.StringIO()
+        with redirect_stdout(buf):
+            rc = compare.main(["--schema", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertTrue(rows["case.before"]["required"])
+        self.assertFalse(rows["case.score"]["required"])
+
     def test_watch_rc_1_when_last_tick_has_failures(self) -> None:
         import os as _os
 

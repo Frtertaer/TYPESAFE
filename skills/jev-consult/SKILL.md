@@ -97,7 +97,7 @@ python skills/jev-consult/scripts/trace.py notes  # list notes (--json for the a
 Same sticky prompts, unguarded vs trace+Jev. Offline lists defects; `--live` scores `on_track` / `grounded_enough`. This does not raise IQ.
 
 ```text
-python skills/jev-consult/scripts/compare.py  # --only id1,id2 runs a subset; --cases PATH picks the cases file; --failing shows only cases failing the strict gate; --jq KEY prints one dotted-path field of the result payload (rc 2 on unknown); --md prints a Markdown table; --out PATH also writes the result JSON to a file; --report PATH writes a markdown verdict report (with --json, a {verdict,cases,failures,rows} object); --verdict PATH writes a slim {verdict,cases,failures} JSON (in --watch mode, refreshed every tick)
+python skills/jev-consult/scripts/compare.py  # --only id1,id2 runs a subset; --cases PATH picks the cases file; --failing shows only cases failing the strict gate; --jq KEY prints one dotted-path field of the result payload (rc 2 on unknown); --md prints a Markdown table; --out PATH also writes the result JSON to a file; --report PATH writes a markdown verdict report (with --json, a {verdict,cases,failures,rows} object); --verdict PATH writes a slim {verdict,cases,failures} JSON (in --watch mode, refreshed every tick); --schema prints the compare-cases.json key contract (`--json` emits the object)
 python skills/jev-consult/scripts/compare.py --live
 ```
 

@@ -356,6 +356,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report", metavar="PATH", default="", help="Write a markdown compare report (verdict + per-case table) to PATH; with --json writes the report object instead")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, cases, failures} JSON to PATH (in --watch mode refreshed every tick)")
     parser.add_argument("--cases", default=os.environ.get("JEV_COMPARE_CASES", "") or None, help="Path to compare-cases.json")
+    parser.add_argument("--schema", action="store_true", help="Print the compare-cases.json key contract and exit (--json emits the object)")
     parser.add_argument(
         "--only",
         default=os.environ.get("JEV_COMPARE_ONLY", ""),
@@ -386,6 +387,26 @@ def main(argv: list[str] | None = None) -> int:
         help="Run the offline scorer on two synthetic cases (one pass, one deliberate strict-gate fail); exit 1 when the failure is not detected (--json emits the checks).",
     )
     args = parser.parse_args(argv)
+    if getattr(args, "schema", False):
+        rows = {
+            "goal": {"required": False, "type": "string, shared task description"},
+            "cases": {"required": True, "type": "list[case]"},
+            "case.id": {"required": True, "type": "string, unique"},
+            "case.prompt": {"required": True, "type": "string, sticky prompt text"},
+            "case.defect": {"required": False, "type": "string label (e.g. drift)"},
+            "case.before": {"required": True, "type": "object, unguarded outcome fields"},
+            "case.after": {"required": True, "type": "object, guarded outcome fields"},
+            "case.score": {"required": False, "type": "number, hand-tuned weight"},
+        }
+        if args.as_json:
+            sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+        else:
+            for key in rows:
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (key, rows[key]["type"], "required" if rows[key]["required"] else "optional")
+                )
+        return 0
     if args.self_test:
         fixture = [
             {

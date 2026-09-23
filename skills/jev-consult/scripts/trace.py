@@ -521,6 +521,43 @@ def cmd_history(args: argparse.Namespace) -> int:
                 sys.stdout.write("%s %d\n" % (day, n))
         return 0
 
+    if getattr(args, "gap", 0.0) and args.gap > 0:
+        chronological = sorted(
+            history,
+            key=lambda h: h.get("ts")
+            if isinstance(h.get("ts"), (int, float)) and not isinstance(h.get("ts"), bool)
+            else 0,
+        )
+        gaps = []
+        prev = None
+        for i, entry in enumerate(chronological):
+            ts = entry.get("ts")
+            if not (isinstance(ts, (int, float)) and not isinstance(ts, bool)):
+                continue
+            if prev is not None and float(ts) - float(prev["ts"]) > args.gap:
+                gaps.append(
+                    {
+                        "index": i,
+                        "prev_ts": prev["ts"],
+                        "ts": ts,
+                        "gap_s": round(float(ts) - float(prev["ts"]), 3),
+                        "prev_pick": prev.get("pick"),
+                        "pick": entry.get("pick"),
+                    }
+                )
+            prev = {"ts": ts, "pick": entry.get("pick")}
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps({"gaps": gaps}, ensure_ascii=False, indent=2) + "\n"
+            )
+        else:
+            for g in gaps:
+                sys.stdout.write(
+                    "%d %.3f %s -> %s\n"
+                    % (g["index"], g["gap_s"], g["prev_pick"], g["pick"])
+                )
+        return 0
+
     if getattr(args, "watch", 0.0) and args.watch > 0:
         import time as _time
 
@@ -1212,6 +1249,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--since", default=None, help="Only picks with ts >= epoch seconds or ISO8601")
     hist_cmd.add_argument("--grep", default="", help="Only picks whose pick/kind contains SUBSTR (case-insensitive; default JEV_TRACE_HISTORY_GREP)")
     hist_cmd.add_argument("--before", default=None, help="Only picks with ts <= epoch seconds or ISO8601")
+    hist_cmd.add_argument("--gap", metavar="S", type=float, default=0.0, help="List consecutive-pick gaps wider than S seconds ({index,gap_s,prev_pick,pick} rows; --json emits {gaps})")
     hist_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,picks} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     hist_cmd.add_argument("--jq", metavar="KEY", default="", help="With --watch: print just the named tick field(s) per pass, comma list")
     hist_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")

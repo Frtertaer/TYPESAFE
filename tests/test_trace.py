@@ -329,6 +329,40 @@ class TraceTests(unittest.TestCase):
             self.assertIn("picks_per_day 2.0", lines)
             self.assertTrue(any(l.startswith("1970-01-01 2") for l in lines))
 
+    def test_history_gap_lists_wide_gaps(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            self._write_history(path, [100.0, 110.0, 500.0, 510.0])
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = tr.main(
+                    ["--file", str(path), "history", "--gap", "50", "--json"]
+                )
+            self.assertEqual(code, 0)
+            gaps = json.loads(buf.getvalue())["gaps"]
+            self.assertEqual(len(gaps), 1)
+            self.assertEqual(gaps[0]["gap_s"], 390.0)
+            self.assertEqual(gaps[0]["prev_pick"], "p1")
+            self.assertEqual(gaps[0]["pick"], "p2")
+
+    def test_history_gap_empty_when_all_narrow(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            self._write_history(path, [100.0, 110.0, 120.0])
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = tr.main(
+                    ["--file", str(path), "history", "--gap", "60", "--json"]
+                )
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(buf.getvalue())["gaps"], [])
+
     def test_history_rate_empty_history(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

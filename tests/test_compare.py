@@ -550,6 +550,24 @@ class StrictGateTest(unittest.TestCase):
             self.assertEqual(len(out["rows"]), 1)
             self.assertFalse(out["rows"][0]["after"]["called_jev"])
 
+    def test_self_test_detects_synthetic_strict_failure(self) -> None:
+        import io as _io
+        from contextlib import redirect_stdout
+
+        buf = _io.StringIO()
+        with redirect_stdout(buf):
+            rc = compare.main(["--self-test", "--json"])
+        self.assertEqual(rc, 0)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["self_test"], "ok")
+        self.assertTrue(all(out["checks"].values()))
+
+        buf = _io.StringIO()
+        with redirect_stdout(buf):
+            rc = compare.main(["--self-test"])
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", buf.getvalue())
+
     def test_jq_prints_one_field_of_result(self) -> None:
         import io as _io
         from contextlib import redirect_stdout, redirect_stderr

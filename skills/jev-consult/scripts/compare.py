@@ -380,7 +380,65 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline", metavar="PATH", default="", help="Write the current rows to PATH as a baseline file for a later --diff")
     parser.add_argument("--diff", metavar="PATH", default="", help="Load a --baseline file and add a diff block (regressions/improved/changed/added/removed) to the result payload; regressions also join the --strict failure list")
     parser.add_argument("--trend", metavar="DIR", default="", help="Diff the current rows against every *.json baseline in DIR; adds a trend list ({file,ts,regressions,improved,changed,added,removed,unchanged} sorted by ts) to the payload and one stderr line per baseline")
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Run the offline scorer on two synthetic cases (one pass, one deliberate strict-gate fail); exit 1 when the failure is not detected (--json emits the checks).",
+    )
     args = parser.parse_args(argv)
+    if args.self_test:
+        fixture = [
+            {
+                "id": "st_good",
+                "defect": "none",
+                "prompt": "self-test prompt",
+                "before": {"called_jev": False, "current_step": "drifted"},
+                "after": {
+                    "called_jev": True,
+                    "last_pick": "return_to_plan",
+                    "current_step": "on plan",
+                },
+            },
+            {
+                "id": "st_bad",
+                "defect": "drift",
+                "prompt": "self-test prompt",
+                "before": {"called_jev": False, "current_step": "drifted"},
+                "after": {"called_jev": False, "current_step": "still drifted"},
+            },
+        ]
+        checks: dict[str, bool] = {}
+        try:
+            rows = [row_offline(case) for case in fixture]
+            checks["rows"] = [r.get("id") for r in rows] == [
+                "st_good",
+                "st_bad",
+            ]
+            failures = strict_failures(rows, live=False)
+            checks["strict_detection"] = failures == [
+                "st_bad: guarded side did not call Jev"
+            ]
+            checks["render"] = "st_bad" in format_table(
+                rows, False
+            ) and "st_bad" in format_md(rows, False)
+        except Exception:
+            checks = {"raised": False}
+        ok = bool(checks) and all(checks.values())
+        payload = {"self_test": "ok" if ok else "FAIL", "checks": checks}
+        if args.as_json:
+            sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+        else:
+            sys.stdout.write(
+                "self-test: %s %s\n"
+                % (
+                    payload["self_test"],
+                    " ".join(
+                        "%s=%s" % (k, "ok" if v else "FAIL")
+                        for k, v in sorted(checks.items())
+                    ),
+                )
+            )
+        return 0 if ok else 1
     only = {s.strip() for s in args.only.split(",") if s.strip()} or None
     if args.watch and args.watch > 0:
         import time as _time

@@ -750,6 +750,26 @@ class RulesCatalogTest(unittest.TestCase):
         )
         self.assertTrue(all(r["description"] for r in rows))
 
+    def test_schema_covers_known_keys(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = policy_lint.main(["--schema", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertEqual(sorted(rows), sorted(policy_lint.KNOWN_TOP_KEYS))
+        self.assertEqual(rows["confidence_floor"]["type"], "prob [0,1]")
+        self.assertTrue(rows["confidence_floor"]["required"])
+        self.assertFalse(rows["catalogs"]["required"])
+        self.assertEqual(rows["escalate_if"]["type"].split("{")[0], "object")
+
+    def test_schema_text_lists_required_marker(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = policy_lint.main(["--schema"])
+        self.assertEqual(rc, 0)
+        self.assertIn("confidence_floor: prob [0,1] (required)", buf.getvalue())
+        self.assertIn("catalogs: list[{name,url}] (optional)", buf.getvalue())
+
 
 class WatchJqTests(unittest.TestCase):
     def test_watch_jq_prints_only_named_tick_field(self) -> None:

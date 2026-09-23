@@ -20,11 +20,9 @@ BAD_FLAG = "--definitely-not-a-real-flag"
 USAGE_RC = {
     "apply_fill.py",
     "catalog_fill.py",
-    "catalog_inventory_hook.py",
     "compare.py",
     "compact.py",
     "decisions.py",
-    "decisions_hook.py",
     "doctor.py",
     "inventory.py",
     "jev.py",

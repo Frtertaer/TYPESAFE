@@ -1562,6 +1562,61 @@ class ScoresFlagTests(unittest.TestCase):
         self.assertTrue(all("score" not in item for item in data["shortlist"]))
 
 
+class ExplainFlagTests(unittest.TestCase):
+    def _args(self, *extra: str) -> list[str]:
+        return [
+            "--harness", "hermes",
+            "--hermes-home", str(FIXTURE),
+            "--home", str(FIXTURE),
+            "--task", "Add JWT access tokens in Python",
+            *extra,
+        ]
+
+    def test_explain_decomposes_score(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(self._args("--explain-item", "jwt-auth"))
+        self.assertEqual(code, 0)
+        data = json.loads(buf.getvalue())
+        self.assertEqual(data["name"], "jwt-auth")
+        self.assertEqual(data["score"], sum(t["weight"] for t in data["terms"].values()))
+        self.assertTrue(data["on_shortlist"])
+        self.assertTrue(data["terms"]["jwt"]["name"])
+        self.assertGreater(data["terms"]["jwt"]["weight"], 0)
+
+    def test_explain_unmatched_terms_zero(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                self._args("--explain-item", "jwt-auth")[:-4]
+                + ["--explain-item", "jwt-auth", "--task", "Kubernetes pod autoscaling guide"]
+            )
+        self.assertEqual(code, 0)
+        data = json.loads(buf.getvalue())
+        missing = [t for t, row in data["terms"].items() if row["weight"] == 0]
+        self.assertTrue(missing)
+        for token in missing:
+            self.assertFalse(data["terms"][token]["name"])
+            self.assertFalse(data["terms"][token]["description"])
+        self.assertFalse(data["on_shortlist"])
+
+    def test_explain_unknown_name_rc2(self) -> None:
+        buf = io.StringIO()
+        err = io.StringIO()
+        with redirect_stdout(buf):
+            with patch("sys.stderr", err):
+                code = inv.main(self._args("--explain-item", "no-such-item"))
+        self.assertEqual(code, 2)
+        self.assertIn("no installed item", err.getvalue())
+
+    def test_explain_jq_score(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(self._args("--explain-item", "jwt-auth", "--jq", "score"))
+        self.assertEqual(code, 0)
+        self.assertGreater(int(buf.getvalue().strip()), 0)
+
+
 class TtlEnvOverrideTests(unittest.TestCase):
     def test_env_override_wins(self) -> None:
         import os

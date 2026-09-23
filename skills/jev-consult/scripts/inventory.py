@@ -548,6 +548,40 @@ def score_item(item: dict, query: set[str], df: dict[str, int] | None = None) ->
     return score
 
 
+def explain_item(item: dict, task: str, items: list[dict]) -> dict:
+    """Per-token score decomposition for one item against a task."""
+    query = sorted(tokens(task))
+    df = name_df(items, set(query)) if query else {}
+    name_words = tokens(item.get("name") or "")
+    desc_words = tokens(item.get("description") or "")
+    terms: dict[str, dict] = {}
+    score = 0
+    for token in query:
+        in_name = token in name_words
+        in_desc = token in desc_words
+        if in_name:
+            weight = token_weight(token, df)
+        elif in_desc:
+            weight = 1
+        else:
+            weight = 0
+        score += weight
+        terms[token] = {
+            "name": in_name,
+            "description": in_desc,
+            "df": df.get(token, 0),
+            "weight": weight,
+        }
+    return {
+        "item": item.get("id"),
+        "name": item.get("name"),
+        "kind": item.get("kind"),
+        "task": task,
+        "score": score,
+        "terms": terms,
+    }
+
+
 def shortlist(items: list[dict], task: str, limit: int, extra: list[str]) -> list[dict]:
     query = tokens(task)
     df = name_df(items, query) if query else {}
@@ -1281,6 +1315,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--paths", action="store_true", help="Print bare shortlist item paths, one per line (for piping).")
     parser.add_argument("--count", action="store_true", help="Print only PICKED/SCANNED counts instead of the payload.")
     parser.add_argument("--kinds", action="store_true", help="Print per-kind counts (kind N per line) and exit.")
+    parser.add_argument("--explain-item", metavar="NAME", default="", help="Print the IDF score decomposition for the installed item NAME vs --task (per-term name/description/df/weight) as JSON; rc 2 when NAME is not installed.")
     parser.add_argument(
         "--watch",
         metavar="SECONDS",
@@ -1616,6 +1651,45 @@ def main(argv: list[str] | None = None) -> int:
     extra = [part.strip() for part in args.include.split(",") if part.strip()]
     limit = max(1, min(args.limit, 24))
     picked = shortlist(items, args.task, limit, extra)
+    if args.explain_item:
+        needle = args.explain_item.strip().lower()
+        target = next(
+            (
+                item
+                for item in items
+                if str(item.get("name") or "").lower() == needle
+                or str(item.get("id") or "").lower() == needle
+            ),
+            None,
+        )
+        if target is None:
+            sys.stderr.write(
+                "explain: no installed item named %r\n" % args.explain_item
+            )
+            return 2
+        report = explain_item(target, args.task, items)
+        report["on_shortlist"] = target["id"] in {i["id"] for i in picked}
+        if args.jq:
+            value, found = _watch.dig(report, args.jq)
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (report has: %s)\n"
+                    % (args.jq, ", ".join(sorted(report)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(value) + "\n")
+            return 0
+        text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+        if args.out:
+            try:
+                atomic_write_text(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+                return 1
+            sys.stderr.write("wrote %s\n" % args.out)
+        else:
+            sys.stdout.write(text)
+        return 0
     if args.grep and not args.task.strip():
         seen_ids = {item["id"] for item in picked}
         picked += [item for item in items if item["id"] not in seen_ids][:limit]

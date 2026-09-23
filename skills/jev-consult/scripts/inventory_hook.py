@@ -608,6 +608,7 @@ def env_report() -> dict:
         "watch_max": _watch.cap("JEV_HOOK_WATCH_MAX", None),
         "watch_secs": _float_or_zero("JEV_HOOK_WATCH_SECS"),
         "watch_quiet": _watch.quiet("JEV_HOOK_WATCH_QUIET", False),
+        "watch_dedupe": _env_on("JEV_HOOK_WATCH_DEDUPE"),
     }
     for name in onoff:
         report[name.lower()] = os.environ.get(name, "").strip().lower() in {
@@ -824,9 +825,7 @@ def main(argv: list[str] | None = None) -> int:
             idx = argv.index("--verdict")
             if idx + 1 < len(argv):
                 verdict_path = argv[idx + 1]
-        dedupe = "--dedupe" in argv or os.environ.get(
-            "JEV_HOOK_WATCH_DEDUPE", ""
-        ).strip().lower() in ("1", "true", "yes", "on")
+        dedupe = "--dedupe" in argv or _env_on("JEV_HOOK_WATCH_DEDUPE")
         ticks = 0
         dupes = 0
         prev_tick: dict | None = None

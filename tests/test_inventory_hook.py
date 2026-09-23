@@ -3495,6 +3495,7 @@ class EnvReportMatrixTests(unittest.TestCase):
         "jev_timeout_seconds", "limit", "max_age_seconds", "max_payload_bytes",
         "max_prompt_chars", "miss_present", "note_limit", "sidecar_present",
         "ttl_seconds", "watch_max", "watch_secs", "watch_quiet",
+        "watch_dedupe",
     }
 
     def test_report_covers_every_knob(self) -> None:
@@ -3749,6 +3750,72 @@ class WrongTypedFieldTests(unittest.TestCase):
             data = json.loads(verdict.read_text(encoding="utf-8"))
             self.assertEqual(data["dupes"], 2)
             self.assertEqual(data["ticks"], 3)
+
+
+class WatchDedupeEnvTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+
+    def test_env_presets_dedupe(self) -> None:
+        """JEV_HOOK_WATCH_DEDUPE presets --dedupe without the flag."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            event = tmp_path / "event.json"
+            with open(event, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"hook_event_name": "Bogus", "prompt": "x"}))
+            verdict = tmp_path / "verdict.json"
+            buf = io.StringIO()
+            err = io.StringIO()
+            env = {"JEV_HOOK_OFF": "1", "JEV_HOOK_WATCH_DEDUPE": "1"}
+            with patch.dict(os.environ, env):
+                with patch("sys.stdout", buf), patch("sys.stderr", err):
+                    rc = HOOK.main([
+                        "--file", str(event),
+                        "--watch", "0.1",
+                        "--max-ticks", "3",
+                        "--verdict", str(verdict),
+                    ])
+            self.assertIn(rc, (0, 1))
+            self.assertEqual(len(buf.getvalue().strip().splitlines()), 1)
+            data = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(data["dupes"], 2)
+            self.assertEqual(data["ticks"], 3)
+
+    def test_env_report_reports_watch_dedupe(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_WATCH_DEDUPE": "on"}):
+            self.assertTrue(HOOK.env_report()["watch_dedupe"])
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("JEV_HOOK_WATCH_DEDUPE", None)
+            self.assertFalse(HOOK.env_report()["watch_dedupe"])
+
+
+class EventSetTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+
+    def test_events_replace_then_skip_narrows(self) -> None:
+        """SKIP_EVENTS is applied after EVENTS replaces the default set."""
+        env = {
+            "JEV_HOOK_EVENTS": "UserPromptSubmit,pre_llm_call,extra_evt",
+            "JEV_HOOK_SKIP_EVENTS": "extra_evt",
+        }
+        with patch.dict(os.environ, env):
+            self.assertEqual(
+                sorted(HOOK.allowed_events()),
+                ["UserPromptSubmit", "pre_llm_call"],
+            )
+
+    def test_skip_events_outside_replace_set_is_noop(self) -> None:
+        env = {
+            "JEV_HOOK_EVENTS": "extra_evt",
+            "JEV_HOOK_SKIP_EVENTS": "UserPromptSubmit",
+        }
+        with patch.dict(os.environ, env):
+            self.assertEqual(sorted(HOOK.allowed_events()), ["extra_evt"])
 
 
 if __name__ == "__main__":

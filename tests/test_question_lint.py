@@ -966,6 +966,21 @@ class ApplyFixesTests(unittest.TestCase):
             rc = question_lint.main(["--explain"])
         self.assertEqual(rc, 2)
 
+    def test_self_test_finds_j010(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = question_lint.main(["--self-test"])
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", buf.getvalue())
+        self.assertIn("J010", buf.getvalue())
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = question_lint.main(["--self-test", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["self_test"], "ok")
+        self.assertIn("J010", payload["rules"])
+
     def test_rules_lists_every_rule_sorted(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

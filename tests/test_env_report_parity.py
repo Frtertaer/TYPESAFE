@@ -57,6 +57,16 @@ ENV_SCRIPTS = {
     "peer_fill.py": {"fill_timeout_seconds", "policy", "watch_max", "watch_quiet", "watch_secs"},
     "apply_fill.py": {"fill_timeout_seconds", "policy", "watch_max", "watch_quiet", "watch_secs"},
     "decisions.py": {"count", "env", "exists", "file", "source"},
+    "catalog_fill.py": {
+        "ask",
+        "catalog_cache_seconds",
+        "fill_timeout_seconds",
+        "miss",
+        "policy",
+        "watch_max",
+        "watch_quiet",
+        "watch_secs",
+    },
 }
 
 SECRETISH = ("api_key", "token", "secret", "password")

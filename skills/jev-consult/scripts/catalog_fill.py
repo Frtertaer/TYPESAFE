@@ -40,7 +40,13 @@ from inventory import (  # noqa: E402
     write_sidecar,
     _policy_float_key,
 )
-from peer_fill import copy_one, read_miss, run_jev, skill_dirs  # noqa: E402
+from peer_fill import (  # noqa: E402
+    copy_one,
+    fill_timeout_seconds,
+    read_miss,
+    run_jev,
+    skill_dirs,
+)
 
 ASK_NAME = ".jev-catalog-fill.request.json"
 SEARCH_LIMIT = 8
@@ -127,6 +133,25 @@ def drop_blocked(hits: list[dict]) -> list[dict]:
 def catalog_cache_seconds() -> float:
     """TTL for cached catalog search hits. Threshold lives in policy.json."""
     return _policy_float_key("catalog_cache_seconds", DEFAULT_CATALOG_CACHE_SECONDS)
+
+
+def env_report() -> dict:
+    """Resolved catalog_fill environment. Values only -- never secrets."""
+    policy = os.environ.get("JEV_POLICY", "").strip()
+    try:
+        watch_secs = float(os.environ.get("JEV_CATALOG_WATCH_SECS", "") or 0)
+    except ValueError:
+        watch_secs = 0.0
+    return {
+        "fill_timeout_seconds": fill_timeout_seconds(),
+        "catalog_cache_seconds": catalog_cache_seconds(),
+        "watch_max": _watch.cap("JEV_CATALOG_WATCH_MAX", None),
+        "watch_secs": watch_secs,
+        "watch_quiet": _watch.quiet("JEV_CATALOG_WATCH_QUIET", False),
+        "policy": policy if policy else "default",
+        "miss": MISS_NAME,
+        "ask": ASK_NAME,
+    }
 
 
 def catalog_cache_path() -> Path:
@@ -563,6 +588,11 @@ def main() -> int:
         action="store_true",
         help="Exercise the cache/search machinery on a temp-dir catalog (no Jev, no Hermes); exits 1 on failure.",
     )
+    parser.add_argument(
+        "--env",
+        action="store_true",
+        help="Print the resolved env config JSON ({fill_timeout_seconds, catalog_cache_seconds, watch_max, watch_secs, watch_quiet, policy, miss, ask}) and exit (--jq KEY prints one field, rc 2 on unknown; --out PATH also writes it).",
+    )
     args = parser.parse_args()
     if args.schema:
         rows = {key: dict(row) for key, row in FILL_SCHEMA_ROWS.items()}
@@ -578,6 +608,26 @@ def main() -> int:
                     "%s: %s (%s)\n"
                     % (key, row["type"], "required" if row["required"] else "optional")
                 )
+        return 0
+    if args.env:
+        report = env_report()
+        if args.jq:
+            value, found = _watch.dig(report, args.jq)
+            if found:
+                sys.stdout.write(json.dumps(value) + "\n")
+                return 0
+            sys.stderr.write(
+                "bad --jq key %r (env has: %s)\n"
+                % (args.jq, ", ".join(sorted(report)))
+            )
+            return 2
+        text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+        sys.stdout.write(text)
+        if args.out:
+            try:
+                atomic_write_text(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
         return 0
     if args.self_test:
         return _self_test()

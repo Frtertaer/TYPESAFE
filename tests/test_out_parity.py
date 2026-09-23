@@ -102,6 +102,28 @@ class OutParityTests(unittest.TestCase):
                         leftovers, [], "%s left tmp files: %s" % (name, leftovers)
                     )
 
+    def test_out_failure_leaves_no_tmp_residue(self) -> None:
+        """A failed --out write must clean its <name>.tmp sibling: targeting
+        an existing directory fails os.replace — the tmp must not linger."""
+        with tempfile.TemporaryDirectory() as tmp:
+            blocker = Path(tmp) / "blocker"
+            blocker.mkdir()
+            for name, argv in sorted(JSON_OUT.items()):
+                with self.subTest(script=name):
+                    proc = _run(name, *argv, "--out", str(blocker))
+                    self.assertIn(
+                        proc.returncode,
+                        ALLOWED_RC,
+                        "%s rc=%d: %s" % (name, proc.returncode, proc.stderr[:200]),
+                    )
+                    self.assertIn(
+                        "cannot write", proc.stderr, "%s silent failure" % name
+                    )
+                    leftovers = [p.name for p in Path(tmp).glob("*.tmp")]
+                    self.assertEqual(
+                        leftovers, [], "%s left tmp files: %s" % (name, leftovers)
+                    )
+
     def test_out_and_jq_write_file_and_print_field(self) -> None:
         """--out PATH with --jq KEY must do BOTH: the file gets the full
         payload, stdout gets just the jq'd field (same convention as the

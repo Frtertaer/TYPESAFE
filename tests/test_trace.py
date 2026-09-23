@@ -3124,5 +3124,58 @@ class UnchangedMaxTests(unittest.TestCase):
             self.assertEqual(len(ticks), 3)
 
 
+class VerifyFixTests(unittest.TestCase):
+    def _broken(self, tmp: str) -> Path:
+        import hashlib
+        import io
+        from contextlib import redirect_stdout
+
+        path = Path(tmp) / "trace.json"
+        with redirect_stdout(io.StringIO()):
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            tr.main(["--file", str(path), "record", "--pick", "x", "--note", "good"])
+            tr.main(["--file", str(path), "record", "--pick", "x", "--note", "bad"])
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["notes"][1]["sha"] = "deadbeefdead"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return path
+
+    def test_fix_repairs_sha(self) -> None:
+        import hashlib
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._broken(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "verify", "--fix", "--json"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["fixed"], 1)
+            self.assertEqual(payload["bad"], [])
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                data["notes"][1]["sha"],
+                hashlib.sha256(b"bad").hexdigest()[:12],
+            )
+            self.assertEqual(data["notes"][1]["text"], "bad")
+
+    def test_no_fix_reports_bad(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._broken(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "verify", "--json"])
+            self.assertEqual(rc, 1)
+            self.assertEqual(len(json.loads(buf.getvalue())["bad"]), 1)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["notes"][1]["sha"], "deadbeefdead")
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

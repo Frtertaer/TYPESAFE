@@ -997,7 +997,17 @@ def cmd_verify(args: argparse.Namespace) -> int:
                     payload["bad"].append({"index": i, "stored": note["sha"], "computed": computed})
                 else:
                     payload["checked"] += 1
-            payload["ok"] = not payload["bad"]
+            if payload["bad"] and getattr(args, "fix", False):
+                for row in payload["bad"]:
+                    notes[row["index"] - 1]["sha"] = row["computed"]
+                try:
+                    save(raw, path)
+                    payload["fixed"] = len(payload["bad"])
+                    payload["checked"] = payload["notes"] - payload["skipped"]
+                    payload["bad"] = []
+                except OSError as exc:
+                    payload["error"] = "fix failed: %s" % exc
+            payload["ok"] = not payload["bad"] and "error" not in payload
     if getattr(args, "verdict", ""):
         _watch.write_verdict(
             args.verdict,
@@ -1022,8 +1032,13 @@ def cmd_verify(args: argparse.Namespace) -> int:
         sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
     elif payload["ok"]:
         sys.stdout.write(
-            "verify: ok notes=%d checked=%d skipped=%d\n"
-            % (payload["notes"], payload["checked"], payload["skipped"])
+            "verify: ok notes=%d checked=%d skipped=%d%s\n"
+            % (
+                payload["notes"],
+                payload["checked"],
+                payload["skipped"],
+                " fixed=%d" % payload["fixed"] if payload.get("fixed") else "",
+            )
         )
     else:
         detail = payload.get("error") or ("missing" if payload.get("missing") else "bad=%d" % len(payload["bad"]))
@@ -1842,6 +1857,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the verify payload (rc 2 on unknown key)")
     verify_cmd.add_argument("--out", metavar="PATH", default="", help="Also write the verify payload JSON to PATH")
     verify_cmd.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict: ok|fail, notes, checked, bad} JSON to PATH")
+    verify_cmd.add_argument("--fix", action="store_true", help="Rewrite mismatched note shas to the computed value in place (payload gains fixed)")
     verify_cmd.set_defaults(func=cmd_verify)
     schema_cmd = sub.add_parser(
         "schema", help="Print the .jev-trace.json key contract and exit"

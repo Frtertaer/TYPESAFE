@@ -3124,6 +3124,52 @@ class UnchangedMaxTests(unittest.TestCase):
             self.assertEqual(len(ticks), 3)
 
 
+class NotesFirstTests(unittest.TestCase):
+    def _three_notes(self, tmp: str) -> Path:
+        import io
+        from contextlib import redirect_stdout
+
+        path = Path(tmp) / "trace.json"
+        with redirect_stdout(io.StringIO()):
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            for text in ("one", "two", "three"):
+                tr.main(["--file", str(path), "record", "--pick", "x", "--note", text])
+        return path
+
+    def test_first_returns_earliest(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._three_notes(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--first", "2", "--field", "text"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().splitlines(), ["one", "two"])
+
+    def test_first_then_limit_and_reverse(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._three_notes(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--first", "2", "--limit", "1", "--field", "text"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().splitlines(), ["two"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--first", "2", "--reverse", "--field", "text"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().splitlines(), ["two", "one"])
+
+
 class VerifyFixTests(unittest.TestCase):
     def _broken(self, tmp: str) -> Path:
         import hashlib

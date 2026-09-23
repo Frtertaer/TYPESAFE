@@ -1146,6 +1146,9 @@ def cmd_notes(args: argparse.Namespace) -> int:
                 seen_notes.add(key)
                 deduped.append(n)
             items = deduped
+        first = getattr(args, "first", None)
+        if isinstance(first, int) and first >= 0:
+            items = items[:first]
         limit = getattr(args, "limit", None)
         if isinstance(limit, int) and limit >= 0:
             items = items[-limit:] if limit else []
@@ -1765,6 +1768,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd = sub.add_parser("notes", help="List recorded notes (iso + text)")
     notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")
     notes_cmd.add_argument("--limit", type=int, help="Show only the last N notes")
+    notes_cmd.add_argument("--first", type=int, default=None, help="Show only the earliest N notes (applied before --limit/--reverse)")
     notes_cmd.add_argument("--prune", type=int, help="Rewrite the trace keeping only the last N notes")
     notes_cmd.add_argument("--edit", nargs=2, metavar=("I", "TEXT"), help="Rewrite note I (1-based, into the unfiltered list) — or every note in range I-J — with TEXT; keeps ts/iso/harness, recomputes sha; rc 2 out of range")
     notes_cmd.add_argument("--since", default=None, help="Only notes with ts >= epoch seconds or ISO8601")

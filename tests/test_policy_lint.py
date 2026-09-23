@@ -461,6 +461,45 @@ class PolicyLintTests(unittest.TestCase):
         self.assertIn("P002", buf.getvalue())
 
 
+class UsageScanTests(unittest.TestCase):
+    def test_helper_flags_dead_known_key(self) -> None:
+        findings = policy_lint.usage_findings({"noul_unsure": 0.5})
+        self.assertEqual([f["path"] for f in findings], ["noul_unsure"])
+        self.assertEqual(findings[0]["rule"], "P015")
+        self.assertEqual(findings[0]["severity"], "info")
+
+    def test_helper_skips_unknown_and_live_keys(self) -> None:
+        findings = policy_lint.usage_findings({"zzz_unknown": 1, "model": "m"})
+        self.assertEqual(findings, [])
+
+    def test_helper_scan_dir_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "reader.py").write_text(
+                'x = policy["noul_unsure"]\n', encoding="utf-8"
+            )
+            findings = policy_lint.usage_findings(
+                {"noul_unsure": 0.5}, scripts_dir=Path(tmp)
+            )
+        self.assertEqual(findings, [])
+
+    def test_cli_usage_flags_dead_keys_on_real_policy(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = policy_lint.main([str(POLICY_PATH), "--usage", "--json"])
+        self.assertEqual(rc, 0)  # info findings never fail the run
+        payload = json.loads(buf.getvalue())
+        dead = {f["path"] for f in payload["findings"] if f["rule"] == "P015"}
+        self.assertEqual(dead, {"coder_role", "hallucination", "never_ask", "noul_unsure"})
+
+    def test_cli_without_usage_has_no_p015(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = policy_lint.main([str(POLICY_PATH), "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertNotIn("P015", rule_ids(payload["findings"]))
+
+
 class ShowFlagTests(unittest.TestCase):
     def test_show_prints_resolved_policy(self) -> None:
         buf = io.StringIO()

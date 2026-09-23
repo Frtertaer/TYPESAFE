@@ -114,6 +114,7 @@ RULES = {
     "P012": "a must_ask kind has no template to send",
     "P013": "template not listed in must_ask; the trigger layer never auto-asks it",
     "P014": "require_hatch is off and a closed choice list (2+ options) has no none/other escape hatch",
+    "P015": "a known policy key is never referenced by any pack script - dead knob or consumer drift (only with --usage)",
 }
 
 
@@ -424,6 +425,36 @@ def lint_policy(policy) -> list[dict]:
     return findings
 
 
+def usage_findings(policy, scripts_dir: Path | None = None) -> list[dict]:
+    """P015 rows for known keys the pack's scripts never reference."""
+    if not isinstance(policy, dict):
+        return []
+    root = scripts_dir if scripts_dir is not None else Path(__file__).resolve().parent
+    try:
+        blob = "\n".join(
+            f.read_text(encoding="utf-8", errors="replace")
+            for f in sorted(root.glob("*.py"))
+            if f.name != "policy_lint.py"
+        )
+    except OSError:
+        return []
+    findings = []
+    for key in sorted(policy):
+        if key not in KNOWN_TOP_KEYS:
+            continue  # unknown keys are P011's job
+        if not re.search(r"\b" + re.escape(key) + r"\b", blob):
+            findings.append(
+                {
+                    "rule": "P015",
+                    "severity": "info",
+                    "path": key,
+                    "message": "no pack script reads '%s'; dead knob or consumer drift" % key,
+                    "fix": "drop the key or wire a reader in the scripts",
+                }
+            )
+    return findings
+
+
 def fix_policy(policy) -> list[str]:
     """Drop unknown keys (P011 top-level, P010 escalate_if); returns rule ids applied."""
     applied: list[str] = []
@@ -510,7 +541,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python policy_lint.py [POLICY.json ...] [flags]\nStatic checks for policy.json (required keys, ranges, ordering, template).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --diff            print a unified diff after --fix\n  --show            print the effective policy JSON and exit\n  --severity S      preset severity floor (error|warn|info; JEV_PLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the known policy.json key/type table (--json emits an object)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad policy dict; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python policy_lint.py [POLICY.json ...] [flags]\nStatic checks for policy.json (required keys, ranges, ordering, template).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --diff            print a unified diff after --fix\n  --show            print the effective policy JSON and exit\n  --severity S      preset severity floor (error|warn|info; JEV_PLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the known policy.json key/type table (--json emits an object)\n  --usage           flag known keys no pack script reads (P015, info; scans scripts dir)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad policy dict; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -681,11 +712,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         baseline_write = argv[idx + 1]
         del argv[idx : idx + 2]
+    usage = "--usage" in argv
     argv = [
         a
         for a in argv
         if a
-        not in {"--strict", "--show", "--quiet", "--json", "--fail-fast", "--fix", "--dry-run"}
+        not in {"--strict", "--show", "--quiet", "--json", "--fail-fast", "--fix", "--dry-run", "--usage"}
     ]
     baseline_keys: set | None = None
     if "--env" in argv:
@@ -739,6 +771,8 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (fpath, exc))
                 return 2
             ffind = lint_policy(fpol)
+            if usage:
+                ffind += usage_findings(fpol)
             if baseline_write:
                 snapshot.extend({"file": arg, **f} for f in ffind)
             if baseline_keys is not None:
@@ -855,6 +889,8 @@ def main(argv: list[str] | None = None) -> int:
         watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             rows = lint_policy(policy)
+            if usage:
+                rows += usage_findings(policy)
             pre_drop = len(rows)
             if baseline_keys is not None:
                 rows = _drop_baseline(rows, baseline_keys)
@@ -888,6 +924,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return rc
     findings = lint_policy(policy)
+    if usage:
+        findings += usage_findings(policy)
     if baseline_write and not _write_baseline(
         baseline_write, [{"file": str(path), **f} for f in findings]
     ):

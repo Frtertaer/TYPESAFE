@@ -515,6 +515,9 @@ def cmd_history(args: argparse.Namespace) -> int:
                 seen_picks.add(key)
                 deduped.append(h)
             items = deduped
+        first = getattr(args, "first", None)
+        if isinstance(first, int) and first >= 0:
+            items = items[:first]
         limit = getattr(args, "limit", None)
         if isinstance(limit, int) and limit >= 0:
             items = items[-limit:] if limit else []
@@ -1796,6 +1799,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")
     hist_cmd.add_argument("--limit", type=int, help="Show only the last N picks")
+    hist_cmd.add_argument("--first", type=int, default=None, help="Show only the earliest N picks (applied before --limit/--reverse)")
     hist_cmd.add_argument("--reverse", action="store_true", help="List picks newest-first")
     hist_cmd.add_argument("--field", default="", help="Print only this field per pick (a.b digs into nested objects)")
     hist_cmd.add_argument("--kinds", action="store_true", help="Print distinct history kinds with counts, sorted desc (empty kind shown as '-')")

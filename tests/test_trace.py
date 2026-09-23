@@ -3124,6 +3124,45 @@ class UnchangedMaxTests(unittest.TestCase):
             self.assertEqual(len(ticks), 3)
 
 
+class HistoryFirstTests(unittest.TestCase):
+    def _three_picks(self, tmp: str) -> Path:
+        import io
+        from contextlib import redirect_stdout
+
+        path = Path(tmp) / "trace.json"
+        with redirect_stdout(io.StringIO()):
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            for pick in ("a", "b", "c"):
+                tr.main(["--file", str(path), "record", "--pick", pick])
+        return path
+
+    def test_first_returns_earliest_picks(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._three_picks(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--first", "2", "--field", "pick"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().splitlines(), ["a", "b"])
+
+    def test_first_then_reverse(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._three_picks(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "history", "--first", "2", "--reverse", "--field", "pick"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().splitlines(), ["b", "a"])
+
+
 class NotesFirstTests(unittest.TestCase):
     def _three_notes(self, tmp: str) -> Path:
         import io

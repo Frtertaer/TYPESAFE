@@ -830,6 +830,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Print per-day entry counts (UTC YYYY-MM-DD), sorted desc",
     )
     parser.add_argument(
+        "--daily-status",
+        dest="daily_status",
+        action="store_true",
+        help="Print a per-day x per-status matrix: rows 'YYYY-MM-DD STATUS N' sorted day-desc then count-desc (--json emits {daily_status: {day: {status: n}}})",
+    )
+    parser.add_argument(
         "--evidence",
         action="store_true",
         help="Print a routing-evidence block (statuses/winners/open misses) for PRs; --json emits it as JSON",
@@ -1580,8 +1586,38 @@ def main(argv: list[str] | None = None) -> int:
         or args.fields
         or args.dedupes
         or args.daily
+        or args.daily_status
     ):
         counts: dict[str, int] = {}
+        if args.daily_status:
+            matrix: dict[str, dict[str, int]] = {}
+            for item in entries:
+                ts = item.get("ts")
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+                    day = datetime.datetime.fromtimestamp(
+                        float(ts), tz=datetime.timezone.utc
+                    ).strftime("%Y-%m-%d")
+                else:
+                    day = "unknown"
+                status = str(item.get("jev_status") or "unknown")
+                bucket = matrix.setdefault(day, {})
+                bucket[status] = bucket.get(status, 0) + 1
+            rows = [
+                (day, status, n)
+                for day, bucket in matrix.items()
+                for status, n in bucket.items()
+            ]
+            rows.sort(key=lambda r: (-r[2], r[1]))
+            rows.sort(key=lambda r: r[0], reverse=True)
+            rows.sort(key=lambda r: r[0] == "unknown")
+            if args.top > 0:
+                rows = rows[: args.top]
+            if args.json:
+                sys.stdout.write(json.dumps({"daily_status": matrix}, indent=2) + "\n")
+            else:
+                for day, status, n in rows:
+                    sys.stdout.write("%s %s %d\n" % (day, status, n))
+            return 0
         if args.daily:
             for item in entries:
                 ts = item.get("ts")

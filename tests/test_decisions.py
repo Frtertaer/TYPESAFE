@@ -2532,6 +2532,77 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(buf.getvalue().strip(), "2")
 
+    def test_daily_status_matrix_json(self):
+        import datetime as _dt
+        day0 = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc).timestamp()
+        day1 = day0 + 86400
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [
+                {"ts": day0, "jev_status": "ok"},
+                {"ts": day0 + 60, "jev_status": "none"},
+                {"ts": day0 + 120, "jev_status": "ok"},
+                {"ts": day1, "jev_status": "ok"},
+            ])
+            import io
+            from unittest.mock import patch
+
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = decisions.main(
+                    ["--file", str(path), "--daily-status", "--json"]
+                )
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())["daily_status"]
+            self.assertEqual(out["2026-01-01"], {"ok": 2, "none": 1})
+            self.assertEqual(out["2026-01-02"], {"ok": 1})
+
+    def test_daily_status_text_rows_day_desc(self):
+        import datetime as _dt
+        day0 = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc).timestamp()
+        day1 = day0 + 86400
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [
+                {"ts": day0, "jev_status": "ok"},
+                {"ts": day0 + 60, "jev_status": "none"},
+                {"ts": day1, "jev_status": "ok"},
+                {"ts": day1 + 30, "jev_status": "ok"},
+            ])
+            import io
+            from unittest.mock import patch
+
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = decisions.main(
+                    ["--file", str(path), "--daily-status"]
+                )
+            self.assertEqual(rc, 0)
+            lines = buf.getvalue().strip().splitlines()
+            self.assertEqual(lines[0], "2026-01-02 ok 2")
+            self.assertEqual(lines[1], "2026-01-01 none 1")
+            self.assertEqual(lines[2], "2026-01-01 ok 1")
+
+    def test_daily_status_top_caps_rows(self):
+        import datetime as _dt
+        day0 = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc).timestamp()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [
+                {"ts": day0, "jev_status": "ok"},
+                {"ts": day0 + 60, "jev_status": "none"},
+            ])
+            import io
+            from unittest.mock import patch
+
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = decisions.main(
+                    ["--file", str(path), "--daily-status", "--top", "1"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(buf.getvalue().strip().splitlines()), 1)
+
     def test_skip_drops_first_n(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

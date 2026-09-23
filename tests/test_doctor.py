@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -762,6 +763,100 @@ class EnvDumpTests(unittest.TestCase):
                 ["--env", "--jq", "nope.deep"], cwd=tmp
             )
             self.assertEqual(rc, 2)
+
+
+class ProgressCheckTests(unittest.TestCase):
+    SEAL = "a" * 64
+
+    def _make_ledger(self, repo: Path, seal: str = SEAL) -> Path:
+        dev = repo / ".devin"
+        dev.mkdir(parents=True, exist_ok=True)
+        db = dev / "progress.sqlite3"
+        conn = sqlite3.connect(str(db))
+        try:
+            conn.execute("CREATE TABLE heads (stage_id TEXT, seal TEXT)")
+            conn.execute("INSERT INTO heads VALUES ('s1', ?)", (seal,))
+            conn.commit()
+        finally:
+            conn.close()
+        return db
+
+    def test_absent_is_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = DOC.check_progress(Path(tmp))
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["ok"])
+        self.assertEqual(rows[0]["detail"], "absent")
+
+    def test_healthy_with_anchor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            db = self._make_ledger(repo)
+            Path(str(db) + ".heads").write_text(json.dumps({"s1": self.SEAL}))
+            rows = DOC.check_progress(repo)
+        self.assertTrue(rows[0]["ok"], rows)
+        self.assertIn("anchor ok", rows[0]["detail"])
+
+    def test_healthy_no_anchor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = DOC.check_progress(Path(tmp))
+            self._make_ledger(Path(tmp))
+            rows = DOC.check_progress(Path(tmp))
+        self.assertTrue(rows[0]["ok"], rows)
+        self.assertIn("no anchor", rows[0]["detail"])
+
+    def test_divergent_anchor_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            db = self._make_ledger(repo)
+            Path(str(db) + ".heads").write_text(json.dumps({"s1": "b" * 64}))
+            rows = DOC.check_progress(repo)
+        self.assertFalse(rows[0]["ok"])
+        self.assertIn("diverges", rows[0]["detail"])
+
+    def test_unreadable_anchor_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            db = self._make_ledger(repo)
+            Path(str(db) + ".heads").write_text("{bad json")
+            rows = DOC.check_progress(repo)
+        self.assertFalse(rows[0]["ok"])
+        self.assertIn("anchor unreadable", rows[0]["detail"])
+
+    def test_not_a_database_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / ".devin").mkdir()
+            (repo / ".devin" / "progress.sqlite3").write_text("not sqlite")
+            rows = DOC.check_progress(repo)
+        self.assertFalse(rows[0]["ok"])
+        self.assertIn("sqlite", rows[0]["detail"].lower())
+
+    def test_missing_heads_table_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / ".devin").mkdir()
+            db = repo / ".devin" / "progress.sqlite3"
+            conn = sqlite3.connect(str(db))
+            conn.execute("CREATE TABLE other (x TEXT)")
+            conn.commit()
+            conn.close()
+            rows = DOC.check_progress(repo)
+        self.assertFalse(rows[0]["ok"])
+        self.assertIn("heads", rows[0]["detail"])
+
+    def test_main_runs_progress_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            self._make_ledger(repo)
+            rc, data, _ = run_main(
+                ["--only", "progress_ledger"], cwd=tmp,
+                env_extra={"TYPESAFE_API_KEY": ""},
+            )
+            names = [c["check"] for c in data["checks"]]
+            self.assertIn("progress_ledger", names)
+            self.assertTrue(next(c for c in data["checks"] if c["check"] == "progress_ledger")["ok"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

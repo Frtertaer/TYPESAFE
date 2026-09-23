@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import re
+import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -231,6 +232,49 @@ def check_common(home: Path, hermes: Path) -> list[dict]:
     return out
 
 
+def check_progress(repo: Path) -> list[dict]:
+    """Read-only health check on the opt-in progress ledger under the repo.
+
+    Absent ledger is fine (progress is opt-in). A present one must open
+    read-only, pass PRAGMA quick_check and agree with its .heads anchor."""
+    db_path = repo / ".devin" / "progress.sqlite3"
+    if not db_path.is_file():
+        return [_check("*", "progress_ledger", True, "absent")]
+    try:
+        db = sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True)
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        return [_check("*", "progress_ledger", False, "unreadable %s: %s" % (db_path, exc))]
+    try:
+        try:
+            quick = db.execute("PRAGMA quick_check").fetchone()
+        except sqlite3.Error as exc:
+            return [_check("*", "progress_ledger", False, "not a sqlite db: %s" % exc)]
+        if not quick or quick[0] != "ok":
+            return [_check("*", "progress_ledger", False, "quick_check: %s" % (quick[0] if quick else "?"))]
+        try:
+            heads = {row[0]: row[1] for row in db.execute("SELECT stage_id, seal FROM heads")}
+        except sqlite3.Error as exc:
+            return [_check("*", "progress_ledger", False, "heads table: %s" % exc)]
+    finally:
+        db.close()
+    anchor_path = Path(str(db_path) + ".heads")
+    anchor_note = ", no anchor"
+    if anchor_path.is_file():
+        anchor = _load_json(anchor_path)
+        if not isinstance(anchor, dict):
+            return [_check("*", "progress_ledger", False, "anchor unreadable: %s" % anchor_path)]
+        if anchor != heads:
+            return [_check(
+                "*", "progress_ledger", False,
+                "anchor diverges: %d seals vs %d heads" % (len(anchor), len(heads)),
+            )]
+        anchor_note = ", anchor ok"
+    return [_check(
+        "*", "progress_ledger", True,
+        "ok (%d stage%s%s)" % (len(heads), "" if len(heads) == 1 else "s", anchor_note),
+    )]
+
+
 def _atomic_write(path, text):
     tmp = path.with_name(path.name + ".tmp")
     try:
@@ -320,6 +364,7 @@ def main(argv: list[str] | None = None) -> int:
 
     def collect() -> list[dict]:
         checks: list[dict] = check_common(home, hermes)
+        checks += check_progress(Path.cwd())
         if "hermes" in agents:
             checks += check_hermes(home, hermes)
         if "claude-code" in agents:

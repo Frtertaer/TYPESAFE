@@ -858,5 +858,38 @@ class ProgressCheckTests(unittest.TestCase):
             self.assertTrue(next(c for c in data["checks"] if c["check"] == "progress_ledger")["ok"])
 
 
+class DoctorSchemaTests(unittest.TestCase):
+    def test_schema_text_marks_rows(self) -> None:
+        rc, _, text = run_main(["--schema"])
+        self.assertEqual(rc, 0)
+        for line in text.splitlines():
+            if line.strip():
+                self.assertRegex(line, r"^[A-Za-z0-9_.-]+: .+ \((required|optional)\)$")
+
+    def test_schema_json_object(self) -> None:
+        rc, out, _ = run_main(["--schema", "--json"])
+        self.assertEqual(rc, 0)
+        self.assertIn("check.check", out)
+        for name in DOC.CHECK_NAMES:
+            self.assertIn(name, out["check.check"]["type"])
+
+    def test_emitted_checks_within_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run_main(
+                ["--home", tmp, "--hermes-home", str(Path(tmp) / "h")],
+                cwd=tmp,
+            )
+        self.assertIn(rc, (0, 1))
+        for check in out["checks"]:
+            self.assertIn(check["check"], DOC.CHECK_NAMES)
+            self.assertIsInstance(check["ok"], bool)
+            self.assertIsInstance(check["detail"], str)
+            for key in check:
+                self.assertIn(
+                    key, ("agent", "check", "ok", "detail", "hint"),
+                    "undocumented check key %r" % key,
+                )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

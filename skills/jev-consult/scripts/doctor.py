@@ -33,6 +33,33 @@ COMPACT_MARK = "compact_hook.py"
 TOOLS_MARK = "inventory_hook.py"
 ALLOWED = ("hermes", "claude-code", "codex", "grok")
 
+# Every check name collect() can emit; --schema lists it and tests pin it.
+CHECK_NAMES = (
+    "skill",
+    "plugin_dir",
+    "plugin_enabled",
+    "hooks_json",
+    "hooks",
+    "compact_hook",
+    "inventory_hook",
+    "jev-compact.json",
+    "jev-tools.json",
+    "api_key",
+    "policy",
+    "decisions_log",
+    "progress_ledger",
+)
+
+DOCTOR_SCHEMA_ROWS = {
+    "ok": {"required": True, "type": "boolean, true when every check passed"},
+    "checks": {"required": True, "type": "list[check]"},
+    "check.agent": {"required": True, "type": "string, harness name or *"},
+    "check.check": {"required": True, "type": "check name: " + "|".join(CHECK_NAMES)},
+    "check.ok": {"required": True, "type": "boolean"},
+    "check.detail": {"required": True, "type": "string, human-readable evidence"},
+    "check.hint": {"required": False, "type": "string, remediation hint (failing checks only)"},
+}
+
 HINTS = {
     "skill": "run python scripts/install.py --agents <agent>",
     "plugin_dir": "run python scripts/install.py --agents hermes",
@@ -314,9 +341,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first failing tick.")
     parser.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the {ok,checks} payload (e.g. ok); unknown key exits 2")
     parser.add_argument("--env", action="store_true", help="Print the resolved JEV_*/TYPESAFE_* env vars as JSON and exit (secret-looking names/values masked to <set>)")
+    parser.add_argument("--schema", action="store_true", help="Print the {ok,checks} payload key contract and check-name catalog (--json emits the object) and exit")
+    parser.add_argument("--json", action="store_true", help="With --schema: emit the contract object instead of text rows (the normal payload is already JSON)")
     parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown report (verdict line + per-check table with hints) to PATH")
     parser.add_argument("--self-test", action="store_true", help="Run every check against a synthetic empty HOME; exit 1 when no check fails")
     args = parser.parse_args(argv)
+    if args.schema:
+        rows = {key: dict(row) for key, row in DOCTOR_SCHEMA_ROWS.items()}
+        if args.json:
+            sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+        else:
+            for key in rows:
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (key, rows[key]["type"], "required" if rows[key]["required"] else "optional")
+                )
+        return 0
     agents = [a.strip() for a in args.agents.split(",") if a.strip()]
     bad = [a for a in agents if a not in ALLOWED]
     if bad:

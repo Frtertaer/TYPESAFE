@@ -6914,6 +6914,7 @@ SCHEMA_SCRIPTS = {
     "compact.py": ("--schema",),
     "compare.py": ("--schema",),
     "decisions.py": ("--schema",),
+    "doctor.py": ("--schema",),
     "inventory.py": ("--schema",),
     "jev.py": ("--schema",),
     "peer_fill.py": ("--schema",),

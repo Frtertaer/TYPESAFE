@@ -12,8 +12,10 @@ and jev.py ask --verdict against a one-shot 127.0.0.1 stub endpoint
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -6867,6 +6869,40 @@ STEPS = (
 )
 
 
+_STEP_SCRIPT_RE = re.compile(r'SCRIPTS / "([A-Za-z0-9_]+\.py)"')
+_INTERNAL_SCRIPTS = {"_watch.py", "skill_scanner.py"}
+
+
+def coverage_payload() -> dict:
+    """Map each STEPS entry to the pack scripts its body runs, then diff
+    against the scripts on disk (internal/vendored helpers excluded)."""
+    step_scripts = {}
+    for name, fn_name in STEPS:
+        fn = globals().get(fn_name)
+        refs = []
+        if callable(fn):
+            try:
+                src = inspect.getsource(fn)
+            except (OSError, TypeError):
+                src = ""
+            refs = set(_STEP_SCRIPT_RE.findall(src))
+            if "__file__" in src:
+                refs.add(Path(__file__).name)
+            refs = sorted(refs)
+        step_scripts[name] = refs
+    covered = sorted({s for refs in step_scripts.values() for s in refs})
+    scripts = sorted(
+        p.name for p in SCRIPTS.glob("*.py") if p.name not in _INTERNAL_SCRIPTS
+    )
+    return {
+        "scripts": len(scripts),
+        "steps": len(STEPS),
+        "covered": covered,
+        "uncovered": [s for s in scripts if s not in covered],
+        "step_scripts": step_scripts,
+    }
+
+
 def step_self_test(tmp: Path) -> dict:
     """Run `smoke.py --self-test` in a subprocess; fails when detection breaks."""
     rc, out = _run(
@@ -6897,9 +6933,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Print step names (for --only) and exit.",
     )
     parser.add_argument(
+        "--coverage",
+        action="store_true",
+        help="Report which pack scripts the STEPS entries exercise (rc 1 when any script is uncovered) and exit.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
-        help="With --list, emit the step names as a JSON array.",
+        help="With --list/--coverage, emit JSON instead of text.",
     )
     parser.add_argument(
         "--timeout",
@@ -6966,6 +7007,26 @@ def main(argv: list[str] | None = None) -> int:
             for name in sorted(names):
                 sys.stdout.write(name + "\n")
         return 0
+    if args.coverage:
+        payload = coverage_payload()
+        if args.json:
+            sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+        else:
+            sys.stdout.write(
+                "coverage: %d/%d scripts covered by %d steps\n"
+                % (
+                    len(payload["covered"]),
+                    payload["scripts"],
+                    payload["steps"],
+                )
+            )
+            for name, refs in payload["step_scripts"].items():
+                sys.stdout.write("  %s: %s\n" % (name, ", ".join(refs) or "-"))
+            if payload["uncovered"]:
+                sys.stdout.write(
+                    "uncovered: " + " ".join(payload["uncovered"]) + "\n"
+                )
+        return 0 if not payload["uncovered"] else 1
     jobs = args.jobs
     if jobs <= 0:
         try:

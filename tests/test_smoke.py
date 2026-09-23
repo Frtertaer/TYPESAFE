@@ -315,6 +315,29 @@ class SmokeTests(unittest.TestCase):
         self.assertIn("perf", names)
         self.assertEqual(names, sorted(names))
 
+    def test_coverage_reports_every_script_covered(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--coverage", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["uncovered"], [])
+        self.assertEqual(payload["steps"], 23)
+        self.assertIn("inventory_hook.py", payload["covered"])
+        self.assertIn("smoke.py", payload["step_scripts"]["self_test"])
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--coverage"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("coverage:", proc.stdout)
+        self.assertNotIn("uncovered:", proc.stdout)
+
     def test_fail_fast_stops_after_first_failure(self) -> None:
         def boom(tmp):
             raise RuntimeError("explode")

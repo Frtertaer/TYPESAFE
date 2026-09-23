@@ -176,9 +176,11 @@ def _env_argv(name, *rest):
 SECRETISH = ("api_key", "token", "secret", "password")
 
 
-def _run(script, argv):
+def _run(script, argv, extra_env=None):
     env = dict(os.environ)
     env["TYPESAFE_API_KEY"] = "typesafe-test-key-do-not-leak"
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [sys.executable, str(_script_path(script)), *argv],
         input="",
@@ -269,6 +271,60 @@ class EnvReportParityTests(unittest.TestCase):
                 saved = json.loads(target.read_text(encoding="utf-8"))
                 self.assertIsInstance(saved, dict)
                 self.assertTrue(ENV_SCRIPTS[name] <= set(saved))
+
+    def test_env_overrides_land_in_report(self) -> None:
+        """A JEV_* env override must show up in the script's --env report —
+        guards knobs that exist but are silently not read."""
+        probes = [
+            ("inventory.py", {"JEV_LIMIT": "5"}, "limit", 5),
+            ("inventory.py", {"JEV_INV_WATCH_MAX": "9"}, "watch_max", 9),
+            (
+                "inventory_hook.py",
+                {"JEV_HOOK_LIMIT": "4"},
+                "limit",
+                4,
+            ),
+            (
+                "inventory_hook.py",
+                {"JEV_HOOK_TTL": "33"},
+                "ttl_seconds",
+                33.0,
+            ),
+            ("smoke.py", {"JEV_SMOKE_JOBS": "7"}, "jobs", 7),
+            (
+                "smoke.py",
+                {"JEV_SMOKE_WATCH_QUIET": "1"},
+                "watch_quiet",
+                True,
+            ),
+            (
+                "compare.py",
+                {"JEV_COMPARE_ONLY": "a,b"},
+                "only",
+                "a,b",
+            ),
+            (
+                "compact.py",
+                {"JEV_KEEP_THRESHOLD": "0.5"},
+                "keep_threshold",
+                0.5,
+            ),
+            (
+                "trace.py",
+                {"JEV_FILL_TIMEOUT": "12"},
+                "fill_timeout_seconds",
+                12.0,
+            ),
+        ]
+        for name, env, field, want in probes:
+            with self.subTest(script=name, field=field):
+                proc = _run(name, _env_argv(name, "--jq", field), extra_env=env)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(
+                    json.loads(proc.stdout.strip()),
+                    want,
+                    "%s %s env override not honored" % (name, field),
+                )
 
     def test_env_out_write_failure_is_fail_open(self) -> None:
         """--env --out into a missing dir still prints the report and exits 0."""

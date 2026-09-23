@@ -326,6 +326,44 @@ class EnvReportParityTests(unittest.TestCase):
                     "%s %s env override not honored" % (name, field),
                 )
 
+    def test_env_jq_digs_nested_fields(self) -> None:
+        """--env --jq honors dotted digs into nested objects and list indexes."""
+        proc = _run("install.py", ["--env", "--jq", "targets.hermes.skills"])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        skills = json.loads(proc.stdout.strip())
+        self.assertIsInstance(skills, list)
+        self.assertTrue(skills, "install.py targets.hermes.skills empty")
+
+        proc = _run("install.py", ["--env", "--jq", "targets.hermes.skills.0"])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIsInstance(json.loads(proc.stdout.strip()), str)
+
+        for name, env, field, want in (
+            (
+                "doctor.py",
+                {"JEV_DOCTOR_WATCH_MAX": "3"},
+                "env.JEV_DOCTOR_WATCH_MAX",
+                "3",
+            ),
+            (
+                "decisions.py",
+                {"JEV_DECISIONS_TAIL": "5"},
+                "env.JEV_DECISIONS_TAIL",
+                "5",
+            ),
+        ):
+            with self.subTest(script=name, field=field):
+                proc = _run(name, _env_argv(name, "--jq", field), extra_env=env)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(json.loads(proc.stdout.strip()), want)
+
+        # a miss inside a nested map still exits 2
+        proc = _run(
+            "doctor.py", ["--env", "--jq", "env.NO_SUCH_ENV_KEY_XYZ"]
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("has:", proc.stderr)
+
     def test_env_out_write_failure_is_fail_open(self) -> None:
         """--env --out into a missing dir still prints the report and exits 0."""
         import tempfile

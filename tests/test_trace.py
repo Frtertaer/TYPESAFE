@@ -903,6 +903,40 @@ class TraceTests(unittest.TestCase):
             data = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual([n["text"] for n in data["notes"]], ["c"])
 
+    def test_cli_notes_edit_rewrites_text_and_sha(self) -> None:
+        import hashlib as _hl
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            for text in ("a", "b", "c"):
+                tr.main(["--file", str(path), "record", "--pick", "x", "--note", text])
+            before = json.loads(path.read_text(encoding="utf-8"))["notes"]
+            rc = tr.main(["--file", str(path), "notes", "--edit", "2", "B2"])
+            self.assertEqual(rc, 0)
+            after = json.loads(path.read_text(encoding="utf-8"))["notes"]
+            self.assertEqual([n["text"] for n in after], ["a", "B2", "c"])
+            self.assertEqual(after[1]["ts"], before[1]["ts"])
+            self.assertEqual(
+                after[1]["sha"],
+                _hl.sha256("B2".encode("utf-8")).hexdigest()[:12],
+            )
+            self.assertNotEqual(after[1]["sha"], before[1]["sha"])
+
+    def test_cli_notes_edit_out_of_range_rc2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            tr.main(["--file", str(path), "record", "--pick", "x", "--note", "a"])
+            self.assertEqual(
+                tr.main(["--file", str(path), "notes", "--edit", "5", "x"]), 2
+            )
+            self.assertEqual(
+                tr.main(["--file", str(path), "notes", "--edit", "x", "y"]), 2
+            )
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual([n["text"] for n in data["notes"]], ["a"])
+
     def test_cli_record_note_stdin_dash(self) -> None:
         import io
         from unittest.mock import patch

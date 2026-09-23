@@ -749,6 +749,25 @@ def cmd_notes(args: argparse.Namespace) -> int:
             sys.stderr.write("prune failed: %s\n" % exc)
             return 1
         notes = data["notes"]
+    edit = getattr(args, "edit", None)
+    if edit:
+        try:
+            idx = int(edit[0])
+        except (TypeError, ValueError):
+            sys.stderr.write("bad --edit index: %s\n" % edit[0])
+            return 2
+        if idx < 1 or idx > len(notes) or not isinstance(notes[idx - 1], dict):
+            sys.stderr.write("--edit %d out of range (%d notes)\n" % (idx, len(notes)))
+            return 2
+        target = notes[idx - 1]
+        target["text"] = edit[1]
+        target["sha"] = hashlib.sha256(edit[1].encode("utf-8")).hexdigest()[:12]
+        try:
+            save(data, path)
+            sys.stderr.write("note %d updated\n" % idx)
+        except OSError as exc:
+            sys.stderr.write("edit failed: %s\n" % exc)
+            return 1
     def _filtered(items: list) -> list | None:
         since = getattr(args, "since", None)
         if since is not None:
@@ -1166,6 +1185,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")
     notes_cmd.add_argument("--limit", type=int, help="Show only the last N notes")
     notes_cmd.add_argument("--prune", type=int, help="Rewrite the trace keeping only the last N notes")
+    notes_cmd.add_argument("--edit", nargs=2, metavar=("I", "TEXT"), help="Rewrite note I (1-based, into the unfiltered list) with TEXT — keeps ts/iso/harness, recomputes sha; rc 2 out of range")
     notes_cmd.add_argument("--since", default=None, help="Only notes with ts >= epoch seconds or ISO8601")
     notes_cmd.add_argument("--before", default=None, help="Only notes with ts <= epoch seconds or ISO8601")
     notes_cmd.add_argument("--harness", default="", help="Only notes tagged with this harness")

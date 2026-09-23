@@ -69,6 +69,14 @@ def _step(name: str, ok: bool, detail: str) -> dict:
     return {"name": name, "ok": bool(ok), "detail": detail}
 
 
+def _selftest_ok_step(tmp: Path) -> dict:
+    return _step("selftest_ok", True, "deliberate pass")
+
+
+def _selftest_bad_step(tmp: Path) -> dict:
+    return _step("selftest_bad", False, "deliberate failure")
+
+
 def _atomic_write(path: Path, text: str) -> None:
     tmp = path.with_name(path.name + ".tmp")
     try:
@@ -6927,6 +6935,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print just one dotted-path field of the results payload (e.g. ok); unknown key exits 2.",
     )
     parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Run the runner on two synthetic steps (one pass, one fail) and verify failures are detected; exit 1 when not (--json emits the payload).",
+    )
+    parser.add_argument(
         "--jobs",
         metavar="N",
         type=int,
@@ -7045,6 +7058,37 @@ def main(argv: list[str] | None = None) -> int:
             payload["elapsed_s"] = elapsed_s
         return _watch.write_verdict(args.verdict, payload)
 
+    if args.self_test:
+        with tempfile.TemporaryDirectory() as sttmp:
+            rows = [
+                _attempt(_selftest_ok_step, Path(sttmp)),
+                _attempt(_selftest_bad_step, Path(sttmp)),
+            ]
+        failed = [s["name"] for s in rows if not s["ok"]]
+        dug, found = jq_lookup({"outer": {"ok": False}}, "outer.ok")
+        ok = (
+            len(rows) == 2
+            and rows[0]["ok"]
+            and not rows[1]["ok"]
+            and failed == ["selftest_bad"]
+            and 'failures="1"' in junit_xml(rows)
+            and found
+            and dug is False
+        )
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {"self_test": "ok" if ok else "FAIL", "steps": rows, "failed": failed},
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "self-test: %s steps=%d failed=%d\n"
+                % ("ok" if ok else "FAIL", len(rows), len(failed))
+            )
+        return 0 if ok else 1
     if args.watch and args.watch > 0:
         import time as _time
 

@@ -59,6 +59,28 @@ class SmokeTests(unittest.TestCase):
             },
         )
 
+    def test_self_test_detects_synthetic_failure(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--self-test", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["self_test"], "ok")
+        self.assertEqual(out["failed"], ["selftest_bad"])
+        self.assertEqual(len(out["steps"]), 2)
+
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--self-test"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("self-test: ok", proc.stdout)
+
     def test_only_runs_subset(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(SMOKE), "--only", "policy,trace"],

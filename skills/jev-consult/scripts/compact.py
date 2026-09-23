@@ -1134,6 +1134,30 @@ def compact(
     keep_threshold = float(opts.get("keep_threshold") if opts.get("keep_threshold") is not None else KEEP_THRESHOLD)
     head_chars = int(opts.get("truncate_head_chars") if opts.get("truncate_head_chars") is not None else TRUNCATE_HEAD_CHARS)
     messages = [normalize_message(item) for item in messages]
+    min_messages = int(opts.get("min_messages") or 0)
+    if min_messages > 0 and len(messages) < min_messages:
+        chars = sum(message_chars(message) for message in messages)
+        return {
+            "messages": messages,
+            "decisions": [],
+            "stats": {
+                "messagesBefore": len(messages),
+                "messagesAfter": len(messages),
+                "charsBefore": chars,
+                "charsAfter": chars,
+                "calls": 0,
+                "kept": 0,
+                "resultsDropped": 0,
+                "callsDropped": 0,
+                "pinned": 0,
+                "stateTokens": 0,
+                "stateStage": "",
+                "requests": 0,
+                "ms": int((time.time() - started) * 1000),
+                "fallback": False,
+                "skipped": "min_messages",
+            },
+        }
     calls = collect_tool_calls(messages, preserve, keep_first)
     pin_errors_and_trace(calls, opts.get("trace"))
     keep_re = None
@@ -1269,6 +1293,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
         "keep_first": args.keep_first,
         "truncate_head_chars": args.truncate_head_chars,
         "min_reduction": args.min_reduction,
+        "min_messages": args.min_messages,
         "keep_text": args.keep_text or os.environ.get("JEV_KEEP_TEXT", ""),
         "trace": load_trace(args.trace),
         "no_spill": bool(
@@ -1612,6 +1637,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         env_first = 0
     parser.add_argument("--keep-first", type=int, default=max(0, env_first), help="Always keep the first N messages pinned")
+    parser.add_argument("--min-messages", type=int, default=0, help="Return the transcript untouched when it has fewer than N messages (stats.skipped = 'min_messages')")
     try:
         env_head = int(os.environ.get("JEV_TRUNCATE_HEAD", "") or TRUNCATE_HEAD_CHARS)
     except ValueError:
@@ -1920,6 +1946,7 @@ def main(argv: list[str] | None = None) -> int:
                     "keep_first": args.keep_first,
                     "truncate_head_chars": args.truncate_head_chars,
                     "min_reduction": args.min_reduction,
+                    "min_messages": args.min_messages,
                     "keep_text": args.keep_text or os.environ.get("JEV_KEEP_TEXT", ""),
                     "trace": load_trace(args.trace),
                 }

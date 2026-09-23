@@ -1155,6 +1155,44 @@ class CompactCliTests(unittest.TestCase):
             text = out_f.read_text(encoding="utf-8")
             self.assertTrue(text.startswith("# compact result"))
 
+    def test_min_messages_returns_transcript_untouched(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            transcript = self._transcript()
+            f.write_text(json.dumps(transcript), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [
+                        str(f), "--history", "--fake", "--min-reduction", "0",
+                        "--min-messages", "10", "--json",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["stats"]["skipped"], "min_messages")
+            self.assertEqual(payload["stats"]["calls"], 0)
+            self.assertEqual(
+                len(payload["messages"]), len(transcript)
+            )
+
+    def test_min_messages_passes_when_above_floor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [
+                        str(f), "--history", "--fake", "--min-reduction", "0",
+                        "--min-messages", "2", "--json",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertNotIn("skipped", payload["stats"])
+            self.assertGreaterEqual(payload["stats"]["calls"], 1)
+
     def test_fake_compact_stdout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

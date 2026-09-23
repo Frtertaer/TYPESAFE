@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -692,6 +693,28 @@ def emit_jq(payload: dict, jq: str) -> int | None:
     return 0
 
 
+def cmd_self_test(args: argparse.Namespace) -> int:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / ".jev-trace.json"
+        data = empty()
+        data["plan"] = "self-test"
+        save(data, path)
+        save(record(load(path), "self-test-pick", kind="self_test"), path)
+        back = load(path)
+    history = back.get("history") or []
+    ok = back.get("last_pick") == "self-test-pick" and any(
+        isinstance(h, dict) and h.get("pick") == "self-test-pick" for h in history
+    )
+    emit(
+        {
+            "self_test": "ok" if ok else "FAIL",
+            "history": len(history),
+            "last_pick": back.get("last_pick"),
+        }
+    )
+    return 0 if ok else 1
+
+
 def cmd_export(args: argparse.Namespace) -> int:
     """Dump the whole trace bundle (state, history, notes, counts) as JSON."""
     path = Path(args.file) if args.file else default_path()
@@ -1288,6 +1311,11 @@ def build_parser() -> argparse.ArgumentParser:
     export_cmd.add_argument("--kinds", default="", help="Comma list of pick kinds to keep in exported history")
     export_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the export payload (rc 2 on unknown key)")
     export_cmd.set_defaults(func=cmd_export)
+    selftest = sub.add_parser(
+        "self-test",
+        help="Record+read a pick on a temp trace; exit 1 when it does not round-trip",
+    )
+    selftest.set_defaults(func=cmd_self_test)
     return parser
 
 

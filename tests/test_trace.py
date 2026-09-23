@@ -65,6 +65,19 @@ class TraceTests(unittest.TestCase):
                 else:
                     os.environ["JEV_TRACE"] = old
 
+    def test_self_test_roundtrips_a_pick(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = tr.main(["self-test"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["self_test"], "ok")
+        self.assertEqual(payload["last_pick"], "self-test-pick")
+        self.assertEqual(payload["history"], 1)
+
     def test_stats_missing_file(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

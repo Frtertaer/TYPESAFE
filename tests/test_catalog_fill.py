@@ -280,6 +280,54 @@ class CatalogFillTests(unittest.TestCase):
             self.assertIn("jwt-auth", buf.getvalue())
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
 
+    def test_status_prints_cwd_state_and_jq(self) -> None:
+        import io
+        import time as _t
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            miss_path = base / FILL.MISS_NAME
+            miss_path.write_text(
+                json.dumps({"task": "jwt setup", "written_at": _t.time() - 30}),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(
+                sys, "argv", ["catalog_fill.py", "--cwd", str(base), "--status"]
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            report = json.loads(buf.getvalue())
+            self.assertTrue(report["miss"])
+            self.assertEqual(report["task"], "jwt setup")
+            self.assertFalse(report["ask"])
+            self.assertIsNotNone(report["miss_age_s"])
+            buf = io.StringIO()
+            with patch.object(
+                sys,
+                "argv",
+                ["catalog_fill.py", "--cwd", str(base), "--status", "--jq", "task"],
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "jwt setup")
+
+    def test_status_empty_cwd(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            buf = io.StringIO()
+            with patch.object(
+                sys, "argv", ["catalog_fill.py", "--cwd", str(base), "--status"]
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            report = json.loads(buf.getvalue())
+            self.assertFalse(report["miss"])
+            self.assertFalse(report["ask"])
+            self.assertIsNone(report["miss_age_s"])
+
     def test_list_verdict_writes_oneshot(self) -> None:
         import io
 

@@ -55,7 +55,7 @@ class FlagParityTest(unittest.TestCase):
         extras = {
             "apply_fill.py": {"--status", "--list", "--show"},
             "peer_fill.py": {"--status", "--list", "--show"},
-            "catalog_fill.py": {"--clear", "--list", "--show"},
+            "catalog_fill.py": {"--clear", "--status", "--list", "--show"},
         }
         for name, allowed in extras.items():
             path = SCRIPTS / name

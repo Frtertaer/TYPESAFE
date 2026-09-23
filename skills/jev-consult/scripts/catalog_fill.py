@@ -479,13 +479,18 @@ def main() -> int:
         help="Drop the cached catalog hits for --task and exit.",
     )
     parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Print the cwd fill state (miss present/age, ask file) as JSON and exit; --jq KEY prints one dotted-path field.",
+    )
+    parser.add_argument(
         "--watch",
         metavar="S",
         type=float,
         default=0.0,
         help="Re-run the catalog search for --task every S seconds, printing {ts,hits,cached,cache_age_s} ticks (read-only; JEV_CATALOG_WATCH_MAX caps ticks).",
     )
-    parser.add_argument("--jq", metavar="KEY", default="", help="With --watch: print just the named tick field(s) per pass, comma list (e.g. hits); null on a miss.")
+    parser.add_argument("--jq", metavar="KEY", default="", help="With --status: print just one dotted-path field of the report (e.g. miss_age_s); unknown key exits 2. With --watch: print just the named tick field(s) per pass, comma list (e.g. hits); null on a miss.")
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
@@ -506,6 +511,41 @@ def main() -> int:
         task = task or str(miss.get("task") or "")
         if dest == "auto":
             dest = str(miss.get("harness") or "auto")
+    if args.status:
+        try:
+            now = time.time()
+            miss = read_miss(cwd / MISS_NAME)
+            miss_ts = miss.get("written_at") if isinstance(miss.get("written_at"), (int, float)) else None
+            ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+            report = {
+                "cwd": str(cwd),
+                "miss": bool(miss),
+                "miss_age_s": round(now - miss_ts, 1) if miss_ts is not None else None,
+                "miss_written_at": miss_ts,
+                "ask": ask_path.is_file(),
+                "task": str(miss.get("task") or "") if miss else "",
+            }
+            if args.jq:
+                cur = report
+                found = True
+                for part in args.jq.split("."):
+                    if isinstance(cur, dict) and part in cur:
+                        cur = cur[part]
+                    else:
+                        found = False
+                        break
+                if not found:
+                    sys.stderr.write(
+                        "bad --jq key %r (payload has: %s)\n"
+                        % (args.jq, ", ".join(sorted(report)))
+                    )
+                    return 2
+                sys.stdout.write(json.dumps(cur) + "\n")
+            else:
+                sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        except Exception:
+            sys.stdout.write(json.dumps({"error": "fail_open"}) + "\n")
+        return 0
     if not task.strip():
         sys.stdout.write(
             json.dumps({"outcome": "no_task"}) + "\n" if args.json else "no_task\n"

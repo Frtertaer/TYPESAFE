@@ -627,7 +627,7 @@ def env_report() -> dict:
     return report
 
 
-USAGE = 'Usage: python inventory_hook.py [--env|--events|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet] [--dedupe]\n       [--verdict PATH]] [--self-test]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n             (limit/ttl/dedupe/budget/payload caps/events/policy source,\n             sidecar+miss presence; --jq KEY prints one value, rc 2 unknown)\n  --events   print allowed hook event names and exit\n  --dry-run  resolve the pick writing sidecar/miss as .jev-tools.dry.json /\n             .jev-tools-miss.dry.json instead of the live names\n  --simulate TEXT  run the hook on a synthetic UserPromptSubmit event with TEXT as the prompt and the process cwd (implies --dry-run; no stdin)\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --version  print the pack policy version and exit\n  --self-test  run the emit machinery on synthetic payloads in a temp dir\n             (no Jev); prints self-test ok|FAIL per check, rc 0/1\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --dedupe   with --watch: skip emitting a tick identical to the previous\n             (ts/elapsed_s ignored; JEV_HOOK_WATCH_DEDUPE presets)\n  --verdict P  write a slim {verdict, ticks, winner, winner_stability, keys} JSON\n'
+USAGE = 'Usage: python inventory_hook.py [--env|--events|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet] [--dedupe]\n       [--verdict PATH]] [--self-test]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n             (limit/ttl/dedupe/budget/payload caps/events/policy source,\n             sidecar+miss presence; --jq KEY prints one value, rc 2 unknown)\n  --events   print allowed hook event names and exit\n  --dry-run  resolve the pick writing sidecar/miss as .jev-tools.dry.json /\n             .jev-tools-miss.dry.json instead of the live names\n  --simulate TEXT  run the hook on a synthetic UserPromptSubmit event with TEXT as the prompt and the process cwd (implies --dry-run; no stdin)\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --version  print the pack policy version and exit\n  --self-test  run the emit machinery on synthetic payloads in a temp dir\n             (no Jev); prints self-test ok|FAIL per check, rc 0/1\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --dedupe   with --watch: skip emitting a tick identical to the previous\n             (ts/elapsed_s ignored; JEV_HOOK_WATCH_DEDUPE presets)\n  --verdict P  write a slim {verdict, ticks, winner, winner_stability, keys} JSON\n  --schema   print the emitted payload key contract and exit (--json emits\n             the object); empty payload {} when the hook has nothing to add\n'
 
 
 def _self_test() -> int:
@@ -702,6 +702,16 @@ def _self_test() -> int:
     return 0 if ok else 1
 
 
+# Emitted-payload contract (--schema): {} means the hook adds nothing; the
+# non-empty shape depends on the harness.
+PAYLOAD_SCHEMA = {
+    "context": {"required": False, "type": "string injected note (hermes pre_llm_call)"},
+    "hookSpecificOutput": {"required": False, "type": "object (claude-code/codex UserPromptSubmit)"},
+    "hookSpecificOutput.hookEventName": {"required": True, "type": "string, always UserPromptSubmit"},
+    "hookSpecificOutput.additionalContext": {"required": True, "type": "string injected note"},
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if _watch.maybe_version(list(argv)):
@@ -739,6 +749,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if "--self-test" in argv:
         return _self_test()
+    if "--schema" in argv:
+        if "--json" in argv:
+            sys.stdout.write(json.dumps(PAYLOAD_SCHEMA, indent=2) + "\n")
+        else:
+            for key, row in PAYLOAD_SCHEMA.items():
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (key, row["type"], "required" if row["required"] else "optional")
+                )
+        return 0
     if "--env" in argv:
         report = env_report()
         if "--jq" in argv:

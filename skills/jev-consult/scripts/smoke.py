@@ -6916,6 +6916,7 @@ SCHEMA_SCRIPTS = {
     "decisions.py": ("--schema",),
     "doctor.py": ("--schema",),
     "inventory.py": ("--schema",),
+    "inventory_hook.py": ("--schema",),
     "jev.py": ("--schema",),
     "peer_fill.py": ("--schema",),
     "policy_lint.py": ("--schema",),

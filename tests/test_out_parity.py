@@ -86,6 +86,20 @@ class OutParityTests(unittest.TestCase):
                     for row in rows:
                         self.assertIsInstance(row, dict, name)
 
+    def test_out_leaves_no_tmp_residue(self) -> None:
+        """Atomic writes clean up: after --out succeeds no *.tmp sibling remains."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, argv in sorted(JSON_OUT.items()):
+                with self.subTest(script=name):
+                    target = Path(tmp) / ("%s.out" % name)
+                    proc = _run(name, *argv, "--out", str(target))
+                    self.assertIn(proc.returncode, ALLOWED_RC, name)
+                    self.assertTrue(target.is_file(), name)
+                    leftovers = [p.name for p in Path(tmp).glob("*.tmp")]
+                    self.assertEqual(
+                        leftovers, [], "%s left tmp files: %s" % (name, leftovers)
+                    )
+
     def test_out_bad_path_errors_cleanly(self) -> None:
         missing_dir = "nonexistent-dir-xyz"  # relative, guaranteed absent
         probes = dict(JSON_OUT)

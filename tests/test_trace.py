@@ -41,6 +41,33 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(merged["request"], "just a note")
         self.assertEqual(merged["trace"]["plan"], "A")
 
+    def test_init_requires_plan_and_bump_monotonic(self) -> None:
+        """init needs --plan (or JEV_TRACE_PLAN); bump increments and a
+        re-init resets the attempt counter (fresh trace semantics)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            old = os.environ.get("JEV_TRACE")
+            os.environ["JEV_TRACE"] = str(path)
+            os.environ.pop("JEV_TRACE_PLAN", None)
+            try:
+                self.assertEqual(tr.main(["init"]), 2)
+                self.assertFalse(path.exists())
+                self.assertEqual(tr.main(["init", "--plan", "P"]), 0)
+                self.assertEqual(tr.main(["bump", "--error", "E1"]), 0)
+                self.assertEqual(tr.main(["bump"]), 0)
+                data = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(data["attempt_count"], 2)
+                self.assertEqual(data["last_error"], "E1")
+                self.assertEqual(tr.main(["init", "--plan", "P2"]), 0)
+                data = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(data["attempt_count"], 0)
+                self.assertEqual(data["plan"], "P2")
+            finally:
+                if old is None:
+                    os.environ.pop("JEV_TRACE", None)
+                else:
+                    os.environ["JEV_TRACE"] = old
+
     def test_bump_and_record_roundtrip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "trace.json"

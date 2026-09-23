@@ -133,6 +133,86 @@
       ]
     },
     {
+      "id": "pos-library-2",
+      "prompt": "Pick a library for JSON parsing in this service, which one should we use",
+      "should_trigger": true,
+      "covers": [
+        "library"
+      ]
+    },
+    {
+      "id": "pos-architecture-2",
+      "prompt": "Pick the architecture for this service layer, decide the approach",
+      "should_trigger": true,
+      "covers": [
+        "architecture"
+      ]
+    },
+    {
+      "id": "pos-delete-2",
+      "prompt": "Decided whether to delete this unused helper or keep it, you choose",
+      "should_trigger": true,
+      "covers": [
+        "delete"
+      ]
+    },
+    {
+      "id": "pos-refactor-2",
+      "prompt": "Refactor the parser in place or rewrite it, pick one",
+      "should_trigger": true,
+      "covers": [
+        "refactor_vs_rewrite"
+      ]
+    },
+    {
+      "id": "pos-naming-2",
+      "prompt": "Pick a name for the new retry policy class before I implement it",
+      "should_trigger": true,
+      "covers": [
+        "naming"
+      ]
+    },
+    {
+      "id": "pos-good-enough-2",
+      "prompt": "Deciding if this approximation is good enough, ship or change",
+      "should_trigger": true,
+      "covers": [
+        "good_enough"
+      ]
+    },
+    {
+      "id": "pos-unknown-move-2",
+      "prompt": "I do not know the next move after everything failed, you decide",
+      "should_trigger": true,
+      "covers": [
+        "unknown_move"
+      ]
+    },
+    {
+      "id": "pos-on-track-2",
+      "prompt": "Decided already? Check whether I am on track or drifted off the plan",
+      "should_trigger": true,
+      "covers": [
+        "on_track"
+      ]
+    },
+    {
+      "id": "pos-installed-enough-2",
+      "prompt": "Decide if the installed skills are enough or pick more for this task",
+      "should_trigger": true,
+      "covers": [
+        "installed_enough"
+      ]
+    },
+    {
+      "id": "pos-market-tools-2",
+      "prompt": "Pick a plugin or MCP server from the marketplace for PDF parsing",
+      "should_trigger": true,
+      "covers": [
+        "market_tools"
+      ]
+    },
+    {
       "id": "neg-format",
       "prompt": "Format this file with black",
       "should_trigger": false
@@ -177,6 +257,14 @@
       "prompt": "The while loop in main.py is stuck, find the bug in it",
       "should_trigger": false,
       "lexical": false
+    },
+    {
+      "id": "neg-library-info",
+      "prompt": "Tell me about popular HTTP retry libraries and their tradeoffs",
+      "should_trigger": false,
+      "covers": [
+        "library"
+      ]
     }
   ]
 }

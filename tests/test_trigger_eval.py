@@ -201,7 +201,7 @@ class TriggerEvalTests(unittest.TestCase):
         m = _re.search(r"coverage: (\d+)/(\d+) \((\d+)%\)", buf.getvalue())
         self.assertIsNotNone(m)
         hits, total = int(m.group(1)), int(m.group(2))
-        self.assertEqual(total, 25)
+        self.assertEqual(total, 36)
         self.assertLessEqual(hits, total)
         with tempfile.TemporaryDirectory() as tmp:
             cases = write_cases(
@@ -231,9 +231,9 @@ class TriggerEvalTests(unittest.TestCase):
             rc = te.main(["--coverage", "--json"])
         self.assertEqual(rc, 0)
         out = json.loads(buf.getvalue())
-        self.assertEqual(out["total"], 25)
-        self.assertEqual(out["hits"], 23)
-        self.assertAlmostEqual(out["coverage"], 0.92)
+        self.assertEqual(out["total"], 36)
+        self.assertEqual(out["hits"], 34)
+        self.assertAlmostEqual(out["coverage"], 34 / 36)
         self.assertTrue(out["ok"])
         self.assertEqual(len(out["uncovered"]), 2)
 
@@ -256,7 +256,7 @@ class TriggerEvalTests(unittest.TestCase):
         with redirect_stdout(buf):
             rc = te.main(["--coverage", "--json", "--jq", "coverage"])
         self.assertEqual(rc, 0)
-        self.assertAlmostEqual(json.loads(buf.getvalue()), 0.92)
+        self.assertAlmostEqual(json.loads(buf.getvalue()), 34 / 36)
         buf = io.StringIO()
         with redirect_stdout(buf):
             rc = te.main(["--json", "--jq", "worst_positive"])
@@ -787,8 +787,8 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             text = path.read_text(encoding="utf-8")
             self.assertIn("verdict: **PASS**", text)
-            self.assertIn("- positives: 16", text)
-            self.assertIn("- coverage: 23/25 (92%)", text)
+            self.assertIn("- positives: 26", text)
+            self.assertIn("- coverage: 34/36 (94%)", text)
             self.assertIn("| pos-approach | True | True |", text)
             self.assertIn("- uncovered:", text)
 
@@ -797,7 +797,7 @@ class TriggerEvalTests(unittest.TestCase):
         with patch.dict(os.environ, {"JEV_TRIGGER_MIN_COVERAGE": "0.99"}):
             with redirect_stdout(buf):
                 rc = te.main(["--quiet"])
-        self.assertEqual(rc, 1)  # 0.92 coverage < 0.99 gate
+        self.assertEqual(rc, 1)  # 0.94 coverage < 0.99 gate
 
     def test_min_coverage_flag_overrides_env(self) -> None:
         buf = io.StringIO()
@@ -824,7 +824,7 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertEqual(payload["verdict"], "PASS")
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["failed_gates"], [])
-            self.assertEqual(payload["total"], 25)
+            self.assertEqual(payload["total"], 36)
             self.assertNotIn("cases", payload)
             self.assertNotIn("uncovered", payload)
 
@@ -953,7 +953,7 @@ class TriggerEvalTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertTrue(payload["ok"])
-            self.assertEqual(payload["total"], 25)
+            self.assertEqual(payload["total"], 36)
             self.assertEqual(payload["coverage_gate"], "PASS")
             self.assertEqual(payload["covers_gate"], "PASS")
             self.assertEqual(len(payload["uncovered"]), 2)
@@ -1043,7 +1043,7 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(len(ticks), 2)
         self.assertTrue(all(t["ok"] for t in ticks))
         self.assertIn("worst_positive", ticks[0])
-        self.assertAlmostEqual(ticks[0]["coverage"], 0.92)
+        self.assertAlmostEqual(ticks[0]["coverage"], 34 / 36)
         self.assertTrue(ticks[0]["coverage_ok"])
 
     def test_watch_jq_prints_only_the_named_tick_field(self) -> None:

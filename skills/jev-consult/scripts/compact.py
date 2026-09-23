@@ -1434,7 +1434,38 @@ def cmd_compact(args: argparse.Namespace) -> int:
             return 2
         sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
         return 0
-    text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
+    if getattr(args, "md", False):
+        stats = result.get("stats") if isinstance(result, dict) else {}
+        stats = stats if isinstance(stats, dict) else {}
+        lines = [
+            "# compact result",
+            "",
+            "- messages: %s -> %s"
+            % (stats.get("messagesBefore"), stats.get("messagesAfter")),
+            "- chars: %s -> %s (reduction %s)"
+            % (
+                stats.get("charsBefore"),
+                stats.get("charsAfter"),
+                stats.get("reduction"),
+            ),
+            "- calls: %s kept, %s dropped; results dropped: %s; pinned: %s"
+            % (
+                stats.get("kept"),
+                stats.get("callsDropped"),
+                stats.get("resultsDropped"),
+                stats.get("pinned"),
+            ),
+            "- state: stage=%s tokens=%s"
+            % (stats.get("stateStage") or "-", stats.get("stateTokens")),
+            "- fallback: %s  ms: %s"
+            % (bool(stats.get("fallback")), stats.get("ms")),
+        ]
+        spill = result.get("spill") if isinstance(result, dict) else None
+        if isinstance(spill, dict) and spill.get("files"):
+            lines.append("- spill files: %d" % len(spill["files"]))
+        text = "\n".join(lines) + "\n"
+    else:
+        text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     if args.output:
         _atomic_write(Path(args.output), text)
     else:
@@ -1662,6 +1693,11 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FILE",
         default="",
         help="List spill files not referenced by FILE (uses --spill-dir for the dir).",
+    )
+    parser.add_argument(
+        "--md",
+        action="store_true",
+        help="Emit a markdown summary of the compaction stats instead of the JSON payload (-o writes the markdown to the file too)",
     )
     parser.add_argument(
         "--json",

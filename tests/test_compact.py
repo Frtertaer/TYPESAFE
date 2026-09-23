@@ -1123,6 +1123,38 @@ class CompactCliTests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("--history", err.getvalue())
 
+    def test_md_emits_markdown_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0", "--md"]
+                )
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertTrue(out.startswith("# compact result"))
+            self.assertIn("messages:", out)
+            self.assertIn("chars:", out)
+            self.assertIn("fallback:", out)
+
+    def test_md_writes_markdown_to_output_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            out_f = Path(tmp) / "plan.md"
+            with patch.object(sys, "stdout", io.StringIO()):
+                rc = C.main(
+                    [
+                        str(f), "--history", "--fake", "--min-reduction", "0",
+                        "--md", "-o", str(out_f),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            text = out_f.read_text(encoding="utf-8")
+            self.assertTrue(text.startswith("# compact result"))
+
     def test_fake_compact_stdout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

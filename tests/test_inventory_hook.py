@@ -2542,6 +2542,22 @@ class HookE2ETests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return proc.stdout.strip()
 
+    def test_malformed_stdin_shapes_all_noop(self) -> None:
+        """Fail-open contract: every malformed stdin shape exits 0 with {}."""
+        for shape in (
+            "",
+            "not json",
+            "null",
+            "[]",
+            '{"x":{}}',
+            '{"prompt":123}',
+            '{"prompt":null}',
+            "   ",
+            "{" + '"a":' * 50,  # truncated mid-JSON
+        ):
+            with self.subTest(shape=shape):
+                self.assertEqual(json.loads(self._run(shape)), {})
+
     def test_jq_prints_one_field_of_emitted_payload(self) -> None:
         import subprocess
 

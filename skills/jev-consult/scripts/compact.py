@@ -1377,6 +1377,53 @@ def load_trace(path: str | None) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def _diff_results(a_path: str, b_path: str) -> dict | None:
+    """Compare the decision sets of two compact result files by call id.
+
+    Returns the diff payload, or None (stderr already named the problem)
+    when either file is unreadable or lacks a decisions list.
+    """
+    sides = []
+    for label, raw_path in (("a", a_path), ("b", b_path)):
+        try:
+            data = json.loads(Path(raw_path).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            sys.stderr.write("--diff %s unreadable: %s\n" % (label, exc))
+            return None
+        decisions = data.get("decisions") if isinstance(data, dict) else None
+        if not isinstance(decisions, list):
+            sys.stderr.write(
+                "--diff %s: %s is not a compact result (no decisions list)\n"
+                % (label, raw_path)
+            )
+            return None
+        side = {}
+        for d in decisions:
+            if isinstance(d, dict) and d.get("id"):
+                side[d["id"]] = {
+                    "action": d.get("action") or "?",
+                    "tool": d.get("tool") or "",
+                }
+        sides.append(side)
+    a_map, b_map = sides
+    shared = [i for i in a_map if i in b_map]
+    changed = [
+        {"id": i, "tool": a_map[i]["tool"], "a": a_map[i]["action"], "b": b_map[i]["action"]}
+        for i in sorted(shared)
+        if a_map[i]["action"] != b_map[i]["action"]
+    ]
+    return {
+        "a": a_path,
+        "b": b_path,
+        "calls_a": len(a_map),
+        "calls_b": len(b_map),
+        "same": sum(1 for i in shared if a_map[i]["action"] == b_map[i]["action"]),
+        "changed": changed,
+        "only_a": sorted(i for i in a_map if i not in b_map),
+        "only_b": sorted(i for i in b_map if i not in a_map),
+    }
+
+
 def cmd_compact(args: argparse.Namespace) -> int:
     try:
         if args.file == "-":
@@ -1924,6 +1971,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Compact every *.json/*.jsonl transcript in DIR; one JSON line per file on stdout.",
     )
     parser.add_argument(
+        "--diff",
+        nargs=2,
+        metavar=("A", "B"),
+        help="Diff the per-call decisions of two compact result files (-o output): {same, changed, only_a, only_b} (+ --json/--jq/--out).",
+    )
+    parser.add_argument(
         "--self-test",
         action="store_true",
         help="Compact a synthetic transcript with a stub asker (no Jev) and check the stats/min-messages paths; exit 1 on failure.",
@@ -2058,6 +2111,56 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError):
             version = "?"
         sys.stdout.write("jev-consult (policy v%s)\n" % version)
+        return 0
+    if args.diff:
+        payload_or_none = _diff_results(args.diff[0], args.diff[1])
+        if payload_or_none is None:
+            return 1
+        payload = payload_or_none
+        if getattr(args, "jq", ""):
+            node = payload
+            found = True
+            for part in args.jq.split("."):
+                if isinstance(node, dict) and part in node:
+                    node = node[part]
+                else:
+                    found = False
+                    break
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (diff has: %s)\n"
+                    % (args.jq, ", ".join(sorted(payload)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+            return 0
+        text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+        if getattr(args, "json", False):
+            sys.stdout.write(text)
+        else:
+            sys.stdout.write(
+                "diff: same=%d changed=%d only_a=%d only_b=%d\n"
+                % (
+                    payload["same"],
+                    len(payload["changed"]),
+                    len(payload["only_a"]),
+                    len(payload["only_b"]),
+                )
+            )
+            for row in payload["changed"][:20]:
+                sys.stdout.write(
+                    "  %s %s: %s -> %s\n"
+                    % (row["id"], row.get("tool") or "", row["a"], row["b"])
+                )
+            for ident in payload["only_a"][:10]:
+                sys.stdout.write("  only-a: %s\n" % ident)
+            for ident in payload["only_b"][:10]:
+                sys.stdout.write("  only-b: %s\n" % ident)
+        if getattr(args, "out", ""):
+            try:
+                _atomic_write(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
         return 0
     if args.verify_spill:
         try:

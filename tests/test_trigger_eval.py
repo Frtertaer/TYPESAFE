@@ -9,7 +9,7 @@ import os
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1590,6 +1590,80 @@ class WatchSecsEnvTests(unittest.TestCase):
         ]
         self.assertLessEqual(len(ticks), 10)
         self.assertGreaterEqual(len(ticks), 1)
+
+
+class BaselineTests(unittest.TestCase):
+    def _failing_cases(self, tmp: str) -> Path:
+        cases = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
+        cases.append(
+            {
+                "id": "pos-bogus",
+                "prompt": "zzz qqq xxx unrelated jargon phrase",
+                "should_trigger": True,
+            }
+        )
+        return write_cases(tmp, cases)
+
+    def test_baseline_suppresses_known_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = self._failing_cases(tmp)
+            buf, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = te.main(["--cases", str(cases), "--quiet"])
+            self.assertEqual(rc, 1)
+            baseline = Path(tmp) / "baseline.json"
+            buf, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = te.main(
+                    [
+                        "--cases",
+                        str(cases),
+                        "--quiet",
+                        "--baseline-write",
+                        str(baseline),
+                    ]
+                )
+            self.assertEqual(rc, 1)
+            saved = json.loads(baseline.read_text(encoding="utf-8"))
+            self.assertTrue(
+                any(f["id"] == "pos-bogus" for f in saved["findings"])
+            )
+
+            verdict = Path(tmp) / "verdict.json"
+            buf, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = te.main(
+                    [
+                        "--cases",
+                        str(cases),
+                        "--baseline",
+                        str(baseline),
+                        "--strict",
+                        "--verdict",
+                        str(verdict),
+                    ]
+                )
+            self.assertEqual(rc, 0, err.getvalue())
+            self.assertIn("suppressed", err.getvalue())
+            data = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(data["verdict"], "PASS")
+            self.assertGreater(data["suppressed"], 0)
+
+    def test_baseline_missing_file_counts_everything(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = self._failing_cases(tmp)
+            buf, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = te.main(
+                    [
+                        "--cases",
+                        str(cases),
+                        "--baseline",
+                        str(Path(tmp) / "nope.json"),
+                    ]
+                )
+            self.assertEqual(rc, 1)
+            self.assertIn("not found", err.getvalue())
 
 if __name__ == "__main__":
     unittest.main()

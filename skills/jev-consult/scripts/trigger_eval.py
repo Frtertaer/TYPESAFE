@@ -147,6 +147,86 @@ def _atomic_write(path, text):
         raise
 
 
+def _row_fails(row: dict) -> bool:
+    """True when the row fails a gate: unhit positive or scored negative."""
+    return (not row["ok"]) or (
+        not row["should_trigger"] and (row["score"] or 0) > 0
+    )
+
+
+def _apply_baseline(res: dict, ids: set) -> int:
+    """Mark baseline-known failing rows suppressed and recompute the gates
+    (margin/coverage/hits) over the remaining rows. Returns the count."""
+    n = 0
+    for row in res["cases"]:
+        if row.get("id") in ids and _row_fails(row):
+            row["suppressed"] = True
+            n += 1
+    if not n:
+        return 0
+    eff = [r for r in res["cases"] if not r.get("suppressed")]
+    if not eff:
+        res.update(
+            {
+                "ok": True,
+                "worst_positive": 0.0,
+                "best_negative": 0.0,
+                "n_positives": 0,
+                "n_negatives": 0,
+                "hits": 0,
+                "coverage": 1.0,
+            }
+        )
+        return n
+    pos = [
+        r["score"]
+        for r in eff
+        if r["should_trigger"] and r["lexical"] and r["score"] is not None
+    ]
+    neg = [
+        r["score"]
+        for r in eff
+        if not r["should_trigger"] and r["lexical"] and r["score"] is not None
+    ]
+    worst_pos = min(pos) if pos else 0.0
+    best_neg = max(neg) if neg else 0.0
+    res["worst_positive"] = worst_pos
+    res["best_negative"] = best_neg
+    res["n_positives"] = len(pos)
+    res["n_negatives"] = len(neg)
+    res["ok"] = bool(pos) and worst_pos > 0 and worst_pos > best_neg * res["margin"]
+    res["hits"] = sum(
+        1
+        for r in eff
+        if (r["should_trigger"] and r["score"] is not None and r["score"] > 0)
+        or (not r["should_trigger"] and (not r["lexical"] or not r["score"]))
+    )
+    res["coverage"] = res["hits"] / len(eff)
+    return n
+
+
+def _write_baseline(path: str, res: dict) -> bool:
+    """Snapshot the currently failing case rows for later --baseline runs."""
+    rows = [
+        {
+            "id": r.get("id"),
+            "should_trigger": r["should_trigger"],
+            "score": r["score"],
+        }
+        for r in res["cases"]
+        if _row_fails(r)
+    ]
+    try:
+        _atomic_write(
+            Path(path), json.dumps({"findings": rows}, indent=2) + "\n"
+        )
+    except OSError as exc:
+        sys.stderr.write("cannot write --baseline-write %s: %s\n" % (path, exc))
+        return False
+    sys.stderr.write("wrote baseline %s (%d findings)\n" % (path, len(rows)))
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     _watch.fix_stdio()
     if _watch.maybe_version(sys.argv[1:] if argv is None else argv):
@@ -346,6 +426,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Write a slim verdict JSON ({verdict, verdict_label, ok, failed_gates, coverage, hits, total, worst_positive, best_negative, margin}) to PATH (with --watch, refreshed every tick).",
     )
     parser.add_argument(
+        "--baseline",
+        metavar="PATH",
+        default="",
+        help="Suppress failing cases whose ids are recorded in PATH (written by --baseline-write); they still print, marked suppressed.",
+    )
+    parser.add_argument(
+        "--baseline-write",
+        metavar="PATH",
+        default="",
+        help="Snapshot the currently failing cases to PATH for --baseline runs (output/rc unchanged).",
+    )
+    parser.add_argument(
         "--fail-fast",
         action="store_true",
         help="With --watch: stop after the first tick that fails any gate (rc still reflects the last tick).",
@@ -505,6 +597,19 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.id:
         result["ok"] = all(row["ok"] for row in result["cases"])
+    if args.baseline_write and not _write_baseline(args.baseline_write, result):
+        return 1
+    baseline_ids: set | None = None
+    n_suppressed = 0
+    if args.baseline:
+        baseline_ids = {
+            k[0] for k in _watch.load_baseline(args.baseline, ("id",))
+        }
+        n_suppressed = _apply_baseline(result, baseline_ids)
+        if n_suppressed:
+            sys.stderr.write(
+                "baseline: suppressed %d known failure(s)\n" % n_suppressed
+            )
 
     def _covers_counts() -> dict[str, int]:
         counts: dict[str, int] = {}
@@ -525,7 +630,8 @@ def main(argv: list[str] | None = None) -> int:
         return [
             row["id"]
             for row in result["cases"]
-            if not (
+            if not row.get("suppressed")
+            and not (
                 (
                     row["should_trigger"]
                     and row["score"] is not None
@@ -546,9 +652,10 @@ def main(argv: list[str] | None = None) -> int:
             row = res["cases"][0] if res["cases"] else None
             case_payload = (
                 {
-                    "verdict": "PASS" if row["ok"] else "FAIL",
+                    "verdict": "PASS" if row["ok"] or row.get("suppressed") else "FAIL",
                     "id": row["id"],
                     "ok": bool(row["ok"]),
+                    "suppressed": bool(row.get("suppressed")),
                     "should_trigger": row["should_trigger"],
                     "score": row["score"],
                     "covers": row["covers"],
@@ -576,6 +683,9 @@ def main(argv: list[str] | None = None) -> int:
             ),
             "ok": bool(res["ok"]),
             "failed_gates": failed,
+            "suppressed": sum(
+                1 for row in res["cases"] if row.get("suppressed")
+            ),
             "coverage": res["coverage"],
             "hits": res["hits"],
             "total": len(res["cases"]),
@@ -605,6 +715,7 @@ def main(argv: list[str] | None = None) -> int:
         ticks = 0
         dead = _watch.deadline("JEV_TRIGGER_WATCH_SECS", getattr(args, "watch_max", 0.0))
         cur = result
+        cur_suppressed = n_suppressed
         prev_gates: list[str] | None = None
         prev_tick: dict | None = None
         watch_t0 = _time.time()
@@ -625,8 +736,9 @@ def main(argv: list[str] | None = None) -> int:
                     tag for tag, n in counts.items() if n < args.min_covers
                 ]
             strict_bad = args.strict and any(
-                not row["ok"]
-                or (not row["should_trigger"] and (row["score"] or 0) > 0)
+                (not row["ok"]
+                or (not row["should_trigger"] and (row["score"] or 0) > 0))
+                and not row.get("suppressed")
                 for row in cur["cases"]
             )
             failed = []
@@ -671,6 +783,7 @@ def main(argv: list[str] | None = None) -> int:
                 "hits": cur.get("hits"),
                 "n_positives": cur.get("n_positives"),
                 "n_negatives": cur.get("n_negatives"),
+                "suppressed": cur_suppressed,
                 "min_coverage": args.min_coverage,
                 "coverage_ok": coverage_ok,
                 "failed_gates": failed,
@@ -687,6 +800,7 @@ def main(argv: list[str] | None = None) -> int:
                     "error_ticks": error_ticks,
                     "gates_seen": sorted(gates_seen),
                     "elapsed_s": round(_time.time() - watch_t0, 2),
+                    "suppressed": cur_suppressed,
                 },
             ):
                 args.verdict = ""  # warn once, stop retrying
@@ -708,6 +822,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
             except (OSError, ValueError, KeyError):
                 cur = None
+            if cur is not None and baseline_ids is not None:
+                cur_suppressed = _apply_baseline(cur, baseline_ids)
             if cur is None:
                 error_ticks += 1
                 _watch.emit({"ts": int(_time.time()), "ok": None}, args.out)
@@ -735,8 +851,9 @@ def main(argv: list[str] | None = None) -> int:
             if any(n < args.min_covers for n in counts.values()):
                 return 1
         if args.strict and any(
-            not row["ok"]
-            or (not row["should_trigger"] and (row["score"] or 0) > 0)
+            (not row["ok"]
+            or (not row["should_trigger"] and (row["score"] or 0) > 0))
+            and not row.get("suppressed")
             for row in cur["cases"]
         ):
             return 1
@@ -1030,6 +1147,8 @@ def main(argv: list[str] | None = None) -> int:
             for row in _rows():
                 score = "-" if row["score"] is None else "%.3f" % row["score"]
                 marker = "" if row["ok"] else "  <-- FAIL"
+                if row.get("suppressed"):
+                    marker += " (baseline)"
                 line = "%-28s should_trigger=%-5s lexical=%-5s score=%s%s" % (
                     row["id"],
                     row["should_trigger"],
@@ -1057,7 +1176,8 @@ def main(argv: list[str] | None = None) -> int:
                 % (result["n_positives"], result["n_negatives"])
             )
     if args.strict and any(
-        not row["ok"] or (not row["should_trigger"] and (row["score"] or 0) > 0)
+        (not row["ok"] or (not row["should_trigger"] and (row["score"] or 0) > 0))
+        and not row.get("suppressed")
         for row in result["cases"]
     ):
         return 1

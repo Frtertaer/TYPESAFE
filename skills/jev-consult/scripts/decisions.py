@@ -690,6 +690,15 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="Only entries logged after the newest entry whose jev_status is STATUS (default: ok).",
     )
+    parser.add_argument(
+        "--until-last",
+        dest="until_last",
+        metavar="STATUS",
+        nargs="?",
+        const="ok",
+        default="",
+        help="Only entries logged before the newest entry whose jev_status is STATUS (default: ok) — the complement of --since-last.",
+    )
     parser.add_argument("--harness", default=os.environ.get("JEV_DECISIONS_HARNESS", ""), help="Only entries for this harness")
     parser.add_argument("--status", default=os.environ.get("JEV_DECISIONS_STATUS", ""), help="Only entries with this jev_status")
     parser.add_argument("--outcome", default=os.environ.get("JEV_DECISIONS_OUTCOME", ""), help="Only entries with this outcome (e.g. human, blocked)")
@@ -1068,6 +1077,24 @@ def main(argv: list[str] | None = None) -> int:
                     if isinstance(item.get("ts"), (int, float))
                     and not isinstance(item.get("ts"), bool)
                     and float(item["ts"]) > bound
+                ]
+        if getattr(args, "until_last", ""):
+            bound = None
+            for item in items:
+                ts = item.get("ts")
+                if (
+                    str(item.get("jev_status") or "") == args.until_last
+                    and isinstance(ts, (int, float))
+                    and not isinstance(ts, bool)
+                ):
+                    bound = ts if bound is None else max(bound, ts)
+            if bound is not None:
+                items = [
+                    item
+                    for item in items
+                    if isinstance(item.get("ts"), (int, float))
+                    and not isinstance(item.get("ts"), bool)
+                    and float(item["ts"]) < bound
                 ]
         if args.harness:
             items = filter_harness(items, args.harness)

@@ -2484,6 +2484,54 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(buf.getvalue().strip(), "0")
 
+    def test_until_last_keeps_only_before_newest_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [
+                {"ts": 1, "jev_status": "ok", "winner": {"name": "old"}},
+                {"ts": 2, "jev_status": "none", "winner": {"name": "mid"}},
+                {"ts": 3, "jev_status": "ok", "winner": {"name": "boundary"}},
+                {"ts": 4, "jev_status": "none", "winner": {"name": "last"}},
+            ])
+            import io
+            from unittest.mock import patch
+
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = decisions.main(
+                    ["--file", str(path), "--until-last", "--jq", "winner.name"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().split(), ["old", "mid"])
+
+    def test_until_last_custom_status_and_no_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [
+                {"ts": 1, "jev_status": "blocked", "winner": {"name": "a"}},
+                {"ts": 2, "jev_status": "ok", "winner": {"name": "b"}},
+            ])
+            import io
+            from unittest.mock import patch
+
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = decisions.main(
+                    ["--file", str(path), "--until-last", "blocked",
+                     "--count"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "0")
+
+            # no entry with that status -> everything precedes it
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = decisions.main(
+                    ["--file", str(path), "--until-last", "winner", "--count"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "2")
+
     def test_skip_drops_first_n(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

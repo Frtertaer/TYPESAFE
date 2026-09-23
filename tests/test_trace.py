@@ -2665,5 +2665,55 @@ class EmitJqTests(unittest.TestCase):
         self.assertEqual(json.loads(buf.getvalue()), "ok")
 
 
+class SetDryRunTests(unittest.TestCase):
+    def test_set_dry_run_emits_without_writing(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with redirect_stdout(io.StringIO()):
+                tr.main(["--file", str(path), "init", "--plan", "P"])
+            mtime = path.stat().st_mtime_ns
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    [
+                        "--file",
+                        str(path),
+                        "set",
+                        "--step",
+                        "s9",
+                        "--kv",
+                        "tag=v1",
+                        "--dry-run",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertTrue(payload["dry_run"])
+            self.assertEqual(payload["trace"]["current_step"], "s9")
+            self.assertEqual(payload["trace"]["tag"], "v1")
+            on_disk = json.loads(path.read_text(encoding="utf-8"))
+            self.assertNotEqual(on_disk.get("current_step"), "s9")
+            self.assertNotIn("tag", on_disk)
+            self.assertEqual(path.stat().st_mtime_ns, mtime)
+
+    def test_set_dry_run_on_missing_file(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "nope.json"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "set", "--plan", "X", "--dry-run"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue())["trace"]["plan"], "X")
+            self.assertFalse(path.exists())
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

@@ -323,6 +323,11 @@ def cmd_set(args: argparse.Namespace) -> int:
         key = key.strip()
         if key:
             data[key] = value.strip()
+    if getattr(args, "dry_run", False):
+        return emit(
+            {"path": str(path), "trace": data, "dry_run": True},
+            getattr(args, "jq", ""),
+        )
     save(data, path)
     return emit({"path": str(path), "trace": data}, getattr(args, "jq", ""))
 
@@ -1534,6 +1539,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Set an arbitrary trace field (repeatable)",
     )
     setter.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
+    setter.add_argument("--dry-run", action="store_true", help="Emit the would-be trace without writing the file")
     setter.set_defaults(func=cmd_set)
     bump_cmd = sub.add_parser("bump", help="Increment attempt_count")
     bump_cmd.add_argument("--error", default="")

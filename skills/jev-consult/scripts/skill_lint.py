@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -208,7 +209,7 @@ def _atomic_write(path, text):
         raise
 
 
-USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S      preset severity floor (error|warn|info; JEV_SLINT_SEVERITY)\n  --quiet           print only errors/warnings count\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S      preset severity floor (error|warn|info; JEV_SLINT_SEVERITY)\n  --quiet           print only errors/warnings count\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -251,6 +252,25 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         sys.stdout.write("%s: %s\n" % (rule, RULES[rule]))
         return 0
+    if "--self-test" in argv:
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad-skill" / "SKILL.md"
+            bad.parent.mkdir(parents=True, exist_ok=True)
+            with open(bad, "w", encoding="utf-8") as fh:
+                fh.write("no frontmatter here\n")
+            findings = lint_skill(bad)
+        rules = sorted({f["rule"] for f in findings})
+        ok = bool(rules)
+        if as_json:
+            sys.stdout.write(
+                json.dumps({"self_test": "ok" if ok else "FAIL", "rules": rules})
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "self-test: %s rules=%s\n" % ("ok" if ok else "FAIL", ",".join(rules))
+            )
+        return 0 if ok else 1
     if "--rules" in argv:
         if "--json" in argv:
             sys.stdout.write(

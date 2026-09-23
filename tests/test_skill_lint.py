@@ -132,6 +132,21 @@ class LintSkillTests(unittest.TestCase):
                 rc = skill_lint.main([str(warn_path), "--out"])
             self.assertEqual(rc, 2)
 
+    def test_self_test_finds_s002(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = skill_lint.main(["--self-test"])
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", buf.getvalue())
+        self.assertIn("S002", buf.getvalue())
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = skill_lint.main(["--self-test", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["self_test"], "ok")
+        self.assertIn("S002", payload["rules"])
+
     def test_severity_filters_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             warn_path = write_skill(tmp, "x", "---\nname: x\n---\n")

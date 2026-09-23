@@ -360,6 +360,13 @@ def apply_fixes(request: dict) -> list[str]:
                     criteria[key] = key
             applied.append("J009")
         if (
+            q.get("type") == "choice"
+            and "J016" in before
+            and isinstance(criteria, dict)
+        ):
+            criteria["none"] = "None of the listed options."
+            applied.append("J016")
+        if (
             q.get("type") == "noul"
             and "J014" in before
             and isinstance(criteria, dict)

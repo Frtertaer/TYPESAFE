@@ -712,6 +712,51 @@ class StandaloneCliTests(unittest.TestCase):
         self.assertEqual(criteria["other"], "other")
         self.assertEqual(criteria["none"], "skip")
 
+    def test_fix_adds_missing_none_option(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {
+                "q": {
+                    "type": "choice",
+                    "instructions": "Which of these should the coder use?",
+                    "criteria": {"a": "the fast path", "b": "the safe path"},
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            proc = self._run(str(path), "--fix")
+            fixed = json.loads(path.read_text(encoding="utf-8"))
+        self.assertIn("fixed J016", proc.stderr)
+        criteria = fixed["questions"]["q"]["criteria"]
+        self.assertIn("none", criteria)
+        self.assertNotIn(
+            ("J016", "warn"),
+            {(f["rule"], f["severity"]) for f in question_lint.lint_question("q", fixed["questions"]["q"])},
+        )
+
+    def test_fix_keeps_existing_none_option(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {
+                "q": {
+                    "type": "choice",
+                    "instructions": "Which of these should the coder use?",
+                    "criteria": {"a": "the fast path", "none": "custom abstain"},
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            proc = self._run(str(path), "--fix")
+            fixed = json.loads(path.read_text(encoding="utf-8"))
+        self.assertNotIn("fixed J016", proc.stderr)
+        self.assertEqual(
+            fixed["questions"]["q"]["criteria"]["none"], "custom abstain"
+        )
+
     def test_fix_noul_identical_criteria(self) -> None:
         request = {
             "state": {"task": "x"},

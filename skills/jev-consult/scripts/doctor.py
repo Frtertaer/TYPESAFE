@@ -410,7 +410,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
             return 0
-        text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+        text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         sys.stdout.write(text)
         if getattr(args, "out", ""):
             try:

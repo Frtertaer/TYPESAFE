@@ -326,6 +326,34 @@ class EnvReportParityTests(unittest.TestCase):
                     "%s %s env override not honored" % (name, field),
                 )
 
+    def test_env_keys_sorted(self) -> None:
+        """--env output keys are sorted — deterministic diffs in reviews."""
+        for name in ENV_SCRIPTS:
+            with self.subTest(script=name):
+                proc = _run(name, _env_argv(name))
+                payload = json.loads(proc.stdout)
+                self.assertEqual(
+                    list(payload), sorted(payload), "%s keys unsorted" % name
+                )
+
+    def test_env_out_file_matches_stdout(self) -> None:
+        """--env --out PATH writes exactly the stdout report bytes."""
+        import tempfile
+
+        for name in ENV_SCRIPTS:
+            with self.subTest(script=name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    target = Path(tmp) / "env.json"
+                    proc = _run(name, _env_argv(name, "--out", str(target)))
+                    self.assertEqual(
+                        proc.returncode, 0, "%s rc=%d" % (name, proc.returncode)
+                    )
+                    self.assertEqual(
+                        target.read_text(encoding="utf-8"),
+                        proc.stdout,
+                        "%s --out file != stdout" % name,
+                    )
+
     def test_env_jq_digs_nested_fields(self) -> None:
         """--env --jq honors dotted digs into nested objects and list indexes."""
         proc = _run("install.py", ["--env", "--jq", "targets.hermes.skills"])

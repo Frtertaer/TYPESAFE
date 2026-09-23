@@ -403,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
                 % (args.jq, ", ".join(sorted(report)))
             )
             return 2
-        text = json.dumps(report, indent=2) + "\n"
+        text = json.dumps(report, indent=2, sort_keys=True) + "\n"
         sys.stdout.write(text)
         if getattr(args, "out", ""):
             try:

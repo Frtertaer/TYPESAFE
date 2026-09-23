@@ -7155,7 +7155,7 @@ def main(argv: list[str] | None = None) -> int:
             "watch_quiet": _watch.quiet("JEV_SMOKE_WATCH_QUIET", args.quiet),
             "policy": os.environ.get("JEV_POLICY", "").strip() or "default",
         }
-        text = json.dumps(report, indent=2, ensure_ascii=False) + "\n"
+        text = json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
         if args.out:
             try:
                 _atomic_write(Path(args.out), text)

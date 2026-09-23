@@ -644,7 +644,7 @@ def env_report(agents: list[str]) -> dict:
 
 
 def emit_env(report: dict, jq: str | None, out: str | None) -> int:
-    text = json.dumps(report, indent=2, ensure_ascii=False) + "\n"
+    text = json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
     if out:
         try:
             _atomic_write(Path(out), text)

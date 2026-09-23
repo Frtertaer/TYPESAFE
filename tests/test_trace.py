@@ -2527,5 +2527,57 @@ class NotesModeTests(unittest.TestCase):
             self.assertEqual(gaps[0]["gap_s"], 295.0)
 
 
+class ShowJqTests(unittest.TestCase):
+    def _trace(self, tmp: str) -> Path:
+        path = Path(tmp) / "trace.json"
+        tr.main(["--file", str(path), "init", "--plan", "P"])
+        tr.main(["--file", str(path), "record", "--pick", "x", "--note", "n1"])
+        return path
+
+    def test_show_jq_digs_nested(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "show", "--jq", "notes.0.text"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "n1")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "show", "--jq", "plan"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "P")
+
+    def test_show_jq_unknown_key_rc2(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            err = io.StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = tr.main(["--file", str(path), "show", "--jq", "nope.deep"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --jq key", err.getvalue())
+
+    def test_show_jq_takes_precedence_over_key(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "show", "--key", "notes", "--jq", "plan"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "P")
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

@@ -48,18 +48,23 @@ def jq_lookup(obj, path: str):
 
 def junit_xml(steps: list[dict]) -> str:
     """Render a JUnit <testsuite> document for the step rows."""
-    failures = sum(1 for s in steps if not s.get("ok"))
+    failures = sum(
+        1 for s in steps if not s.get("ok") and not s.get("suppressed")
+    )
+    skipped = sum(1 for s in steps if s.get("suppressed"))
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        '<testsuite name="jev-smoke" tests="%d" failures="%d">'
-        % (len(steps), failures),
+        '<testsuite name="jev-smoke" tests="%d" failures="%d" skipped="%d">'
+        % (len(steps), failures, skipped),
     ]
     for s in steps:
         name = escape(str(s.get("name") or "step"), {'"': "&quot;"})
         lines.append(
             '  <testcase name="%s" classname="jev-consult.smoke">' % name
         )
-        if not s.get("ok"):
+        if s.get("suppressed"):
+            lines.append('    <skipped message="baseline"/>')
+        elif not s.get("ok"):
             detail = escape(str(s.get("detail") or "failed"))
             lines.append('    <failure>%s</failure>' % detail)
         lines.append("  </testcase>")
@@ -7085,6 +7090,18 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="Run steps on N worker threads (default 1 = serial; JEV_SMOKE_JOBS presets). Each step gets its own temp subdir; results keep STEPS order.",
     )
+    parser.add_argument(
+        "--baseline",
+        metavar="PATH",
+        default="",
+        help="Suppress step failures named in a baseline file ({findings:[{name}]}); suppressed steps still run and print but do not fail the run, ticks, verdict, report, or junit.",
+    )
+    parser.add_argument(
+        "--baseline-write",
+        metavar="PATH",
+        default="",
+        help="Snapshot the failing step names to PATH ({findings:[{name}]}) — the first pass in --watch mode — for a later --baseline.",
+    )
     args = parser.parse_args(argv)
     names = {name for name, _ in STEPS}
     if args.list:
@@ -7137,6 +7154,10 @@ def main(argv: list[str] | None = None) -> int:
             "unknown step(s): %s (valid: %s)\n" % (", ".join(sorted(unknown)), ", ".join(sorted(names)))
         )
         return 2
+    baseline_keys = None
+    if args.baseline:
+        baseline_keys = _watch.load_baseline(args.baseline, ("name",))
+        sys.stderr.write("baseline: loaded %d known failure(s)\n" % len(baseline_keys))
     global STEP_TIMEOUT
     if args.timeout > 0:
         STEP_TIMEOUT = float(args.timeout)
@@ -7241,13 +7262,52 @@ def main(argv: list[str] | None = None) -> int:
                     break
         return rows
 
+    baseline_written = False
+
+    def _maybe_write_baseline(rows: list[dict]) -> bool:
+        """Snapshot failing step names once (first pass under --watch)."""
+        nonlocal baseline_written
+        if not args.baseline_write or baseline_written:
+            return True
+        baseline_written = True
+        failing = [{"name": s["name"]} for s in rows if not s["ok"]]
+        try:
+            _atomic_write(
+                Path(args.baseline_write),
+                json.dumps({"findings": failing}, indent=2) + "\n",
+            )
+        except OSError as exc:
+            sys.stderr.write(
+                "cannot write --baseline-write %s: %s\n" % (args.baseline_write, exc)
+            )
+            return False
+        sys.stderr.write(
+            "wrote baseline %s (%d failing step(s))\n"
+            % (args.baseline_write, len(failing))
+        )
+        return True
+
+    def _apply_baseline(rows: list[dict]) -> int:
+        if baseline_keys is None:
+            return 0
+        n = 0
+        for row in rows:
+            if not row.get("ok") and (str(row.get("name")),) in baseline_keys:
+                row["suppressed"] = True
+                n += 1
+        return n
+
     def _write_verdict(steps_now: list[dict], elapsed_s=None) -> bool:
         if not args.verdict:
             return True
+        failed = [
+            s["name"] for s in steps_now if not s["ok"] and not s.get("suppressed")
+        ]
         payload = {
-            "verdict": "PASS" if all(s["ok"] for s in steps_now) else "FAIL",
+            "verdict": "PASS" if not failed else "FAIL",
             "steps": len(steps_now),
-            "failed": [s["name"] for s in steps_now if not s["ok"]],
+            "failed": failed,
+            "suppressed": sum(1 for s in steps_now if s.get("suppressed")),
         }
         if elapsed_s is not None:
             payload["elapsed_s"] = elapsed_s
@@ -7295,10 +7355,22 @@ def main(argv: list[str] | None = None) -> int:
         watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             steps = _run_steps()
+            if not _maybe_write_baseline(steps):
+                return 1
+            suppressed_now = _apply_baseline(steps)
+            if suppressed_now:
+                sys.stderr.write(
+                    "baseline: suppressed %d known failure(s)\n" % suppressed_now
+                )
             tick = {
                 "ts": int(_time.time()),
-                "ok": all(s["ok"] for s in steps),
-                "failed": [s["name"] for s in steps if not s["ok"]],
+                "ok": all(s["ok"] or s.get("suppressed") for s in steps),
+                "failed": [
+                    s["name"]
+                    for s in steps
+                    if not s["ok"] and not s.get("suppressed")
+                ],
+                "suppressed": suppressed_now,
                 "elapsed_s": round(_time.time() - watch_t0, 2),
             }
             _watch.emit_or_jq(tick, args.jq, args.out, quiet=_watch.quiet("JEV_SMOKE_WATCH_QUIET", args.quiet), bad=bool(tick["failed"]))
@@ -7327,13 +7399,21 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
         return 0 if tick["ok"] else 1
     steps = _run_steps()
-    ok = all(s["ok"] for s in steps)
-    text = json.dumps({"ok": ok, "steps": steps}, indent=2) + "\n"
+    if not _maybe_write_baseline(steps):
+        return 1
+    suppressed = _apply_baseline(steps)
+    if suppressed:
+        sys.stderr.write(
+            "baseline: suppressed %d known failure(s)\n" % suppressed
+        )
+    ok = all(s["ok"] or s.get("suppressed") for s in steps)
+    payload = {"ok": ok, "steps": steps, "suppressed": suppressed}
+    text = json.dumps(payload, indent=2) + "\n"
     if args.jq:
-        value, found = jq_lookup({"ok": ok, "steps": steps}, args.jq)
+        value, found = jq_lookup(payload, args.jq)
         if not found:
             sys.stderr.write(
-                "bad --jq key %r (payload has: ok, steps)\n" % args.jq
+                "bad --jq key %r (payload has: ok, steps, suppressed)\n" % args.jq
             )
             return 2
         sys.stdout.write(json.dumps(value) + "\n")
@@ -7355,16 +7435,18 @@ def main(argv: list[str] | None = None) -> int:
             "verdict: **%s**" % ("PASS" if ok else "FAIL"),
             "",
             "- steps: %d" % len(steps),
-            "- failed: %d" % sum(1 for s in steps if not s["ok"]),
+            "- failed: %d"
+            % sum(1 for s in steps if not s["ok"] and not s.get("suppressed")),
             "",
             "| step | ok | detail |",
             "| --- | --- | --- |",
         ]
+        if suppressed:
+            lines.insert(6, "- suppressed: %d" % suppressed)
         for s in steps:
             detail = str(s.get("detail") or "").replace("|", "\\|").replace("\n", " ")
-            lines.append(
-                "| %s | %s | %s |" % (s["name"], "yes" if s["ok"] else "NO", detail)
-            )
+            state = "yes" if s["ok"] else ("suppressed" if s.get("suppressed") else "NO")
+            lines.append("| %s | %s | %s |" % (s["name"], state, detail))
         try:
             _atomic_write(Path(args.report), "\n".join(lines) + "\n")
         except OSError as exc:

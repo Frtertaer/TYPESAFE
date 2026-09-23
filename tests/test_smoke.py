@@ -869,5 +869,138 @@ class StepsTableTests(unittest.TestCase):
             self.assertNotIn(internal, payload["uncovered"])
 
 
+class SmokeBaselineTests(unittest.TestCase):
+    @staticmethod
+    def _fail():
+        return patch.object(
+            MOD,
+            "step_policy",
+            side_effect=lambda tmp: {
+                "name": "policy",
+                "ok": False,
+                "detail": "broke",
+            },
+        )
+
+    def _run(self, argv):
+        import io
+
+        buf = io.StringIO()
+        err = io.StringIO()
+        with patch.object(sys, "stdout", buf), patch.object(sys, "stderr", err):
+            rc = MOD.main(argv)
+        return rc, buf.getvalue(), err.getvalue()
+
+    def test_baseline_write_then_suppress(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "b.json"
+            with self._fail():
+                rc, _out, _err = self._run(
+                    ["--only", "policy", "--baseline-write", str(base)]
+                )
+            self.assertEqual(rc, 1)  # snapshot alone does not suppress
+            findings = json.loads(base.read_text(encoding="utf-8"))["findings"]
+            self.assertEqual(findings, [{"name": "policy"}])
+
+            with self._fail():
+                rc, out, err = self._run(
+                    ["--only", "policy", "--baseline", str(base)]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(out)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["suppressed"], 1)
+            self.assertTrue(payload["steps"][0]["suppressed"])
+            self.assertIn("suppressed 1 known failure", err)
+
+    def test_baseline_partial_still_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "b.json"
+            base.write_text(
+                json.dumps({"findings": [{"name": "other_step"}]}),
+                encoding="utf-8",
+            )
+            with self._fail():
+                rc, out, _err = self._run(
+                    ["--only", "policy", "--baseline", str(base)]
+                )
+            self.assertEqual(rc, 1)
+            payload = json.loads(out)
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["suppressed"], 0)
+            self.assertNotIn("suppressed", payload["steps"][0])
+
+    def test_baseline_missing_file_counts_everything(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._fail():
+                rc, out, err = self._run(
+                    ["--only", "policy", "--baseline", str(Path(tmp) / "x.json")]
+                )
+            self.assertEqual(rc, 1)
+            payload = json.loads(out)
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["suppressed"], 0)
+            self.assertIn("baseline", err)
+
+    def test_baseline_verdict_and_junit_skip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "b.json"
+            base.write_text(
+                json.dumps({"findings": [{"name": "policy"}]}), encoding="utf-8"
+            )
+            verdict = Path(tmp) / "v.json"
+            junit = Path(tmp) / "j.xml"
+            with self._fail():
+                rc, _out, _err = self._run(
+                    [
+                        "--only",
+                        "policy",
+                        "--baseline",
+                        str(base),
+                        "--verdict",
+                        str(verdict),
+                        "--junit",
+                        str(junit),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            doc = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(doc["verdict"], "PASS")
+            self.assertEqual(doc["failed"], [])
+            self.assertEqual(doc["suppressed"], 1)
+            xml = junit.read_text(encoding="utf-8")
+            self.assertIn('failures="0"', xml)
+            self.assertIn('skipped="1"', xml)
+            self.assertIn('<skipped message="baseline"/>', xml)
+
+    def test_baseline_suppresses_watch_tick(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "b.json"
+            base.write_text(
+                json.dumps({"findings": [{"name": "policy"}]}), encoding="utf-8"
+            )
+            with self._fail():
+                rc, out, _err = self._run(
+                    [
+                        "--only",
+                        "policy",
+                        "--baseline",
+                        str(base),
+                        "--watch",
+                        "0.001",
+                        "--max-ticks",
+                        "1",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(ln) for ln in out.splitlines() if ln.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 1)
+            self.assertTrue(ticks[0]["ok"])
+            self.assertEqual(ticks[0]["failed"], [])
+            self.assertEqual(ticks[0]["suppressed"], 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

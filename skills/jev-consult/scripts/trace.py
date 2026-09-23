@@ -232,6 +232,16 @@ def cmd_show(args: argparse.Namespace) -> int:
     path = Path(args.file) if args.file else default_path()
     data = load(path)
     exists = path.is_file()
+    if getattr(args, "jq", ""):
+        value, found = _watch.dig(data, args.jq)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (trace has: %s)\n"
+                % (args.jq, ", ".join(sorted(data)) if isinstance(data, dict) else "-")
+            )
+            return 2
+        sys.stdout.write(json.dumps(value, ensure_ascii=False) + "\n")
+        return 0
     key = getattr(args, "key", "")
     if key:
         value = data.get(key)
@@ -1495,6 +1505,7 @@ def build_parser() -> argparse.ArgumentParser:
     show = sub.add_parser("show", help="Print the trace (empty object if missing)")
     show.add_argument("--pretty", action="store_true", help="Key fields as text lines.")
     show.add_argument("--key", default="", help="Print only this field's value")
+    show.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the trace (rc 2 on unknown key; takes precedence over --key)")
     show.add_argument("--out", default="", help="Write the show JSON to PATH instead of stdout (ignored with --key/--pretty)")
     show.set_defaults(func=cmd_show)
     setter = sub.add_parser("set", help="Update fields")

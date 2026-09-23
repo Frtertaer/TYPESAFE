@@ -9,6 +9,7 @@
 
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -81,6 +82,31 @@ class ExitCodeParityTests(unittest.TestCase):
                     "%s rc=%d: %s" % (name, proc.returncode, proc.stderr[:200]),
                 )
                 self.assertNotIn("Traceback", proc.stderr, name)
+
+    def test_empty_and_missing_input_files_fail_cleanly(self) -> None:
+        """File-consuming lints exit non-zero with a message, never a traceback."""
+        file_lints = (
+            "skill_lint.py",
+            "question_lint.py",
+            "trigger_lint.py",
+            "policy_lint.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = Path(tmp) / "empty.md"
+            empty.write_text("", encoding="utf-8")
+            missing = str(Path(tmp) / "missing.md")
+            for name in file_lints:
+                for probe in (str(empty), missing):
+                    with self.subTest(script=name, path=probe):
+                        proc = _run(name, probe)
+                        self.assertIn(
+                            proc.returncode,
+                            (1, 2),
+                            "%s rc=%d on %s" % (name, proc.returncode, probe),
+                        )
+                        blob = proc.stdout + proc.stderr
+                        self.assertNotIn("Traceback", blob)
+                        self.assertTrue(blob.strip())
 
     def test_every_script_classified(self) -> None:
         covered = USAGE_RC | FAIL_OPEN_RC0

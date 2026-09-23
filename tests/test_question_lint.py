@@ -1148,5 +1148,60 @@ class WatchSecsEnvTests(unittest.TestCase):
         )
         self.assertNotIn(("J017", "warn"), rules(findings))
 
+
+class BaselineTests(unittest.TestCase):
+    def _bad_request(self, tmp: str) -> Path:
+        request = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Is it not true that the fix cannot ship?")},
+        }
+        path = Path(tmp) / "req.json"
+        path.write_text(json.dumps(request), encoding="utf-8")
+        return path
+
+    def test_baseline_suppresses_known_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = self._bad_request(tmp)
+            baseline = Path(tmp) / "baseline.json"
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = question_lint.main(
+                    [str(bad), "--baseline-write", str(baseline)]
+                )
+            self.assertEqual(rc, 1)
+            saved = json.loads(baseline.read_text(encoding="utf-8"))
+            self.assertTrue(saved["findings"])
+
+            verdict = Path(tmp) / "verdict.json"
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = question_lint.main(
+                    [
+                        str(bad),
+                        "--baseline",
+                        str(baseline),
+                        "--strict",
+                        "--verdict",
+                        str(verdict),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertIn("suppressed", err.getvalue())
+            data = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(data["verdict"], "pass")
+            self.assertGreater(data["suppressed"], 0)
+
+    def test_baseline_missing_file_counts_everything(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = self._bad_request(tmp)
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = question_lint.main(
+                    [str(bad), "--baseline", str(Path(tmp) / "nope.json")]
+                )
+            self.assertEqual(rc, 1)
+            self.assertIn("not found", err.getvalue())
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

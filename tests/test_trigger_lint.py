@@ -584,5 +584,55 @@ class RulesCatalogTest(unittest.TestCase):
         )
 
 
+class BaselineTests(unittest.TestCase):
+    def test_baseline_suppresses_known_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_cases(
+                tmp,
+                [
+                    dict(GOOD_CASE),
+                    {"id": "pos-x", "should_trigger": True},
+                    {"id": "BADID", "prompt": "short", "should_trigger": "yes"},
+                ],
+            )
+            baseline = Path(tmp) / "baseline.json"
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = trigger_lint.main([str(bad), "--baseline-write", str(baseline)])
+            self.assertEqual(rc, 1)
+            saved = json.loads(baseline.read_text(encoding="utf-8"))
+            self.assertTrue(saved["findings"])
+
+            verdict = Path(tmp) / "verdict.json"
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = trigger_lint.main(
+                    [
+                        str(bad),
+                        "--baseline",
+                        str(baseline),
+                        "--strict",
+                        "--verdict",
+                        str(verdict),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertIn("suppressed", err.getvalue())
+            data = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(data["verdict"], "pass")
+            self.assertGreater(data["suppressed"], 0)
+
+    def test_baseline_missing_file_counts_everything(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_cases(tmp, [{"id": "pos-x", "should_trigger": True}])
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = trigger_lint.main(
+                    [str(bad), "--baseline", str(Path(tmp) / "nope.json")]
+                )
+            self.assertEqual(rc, 1)
+            self.assertIn("not found", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

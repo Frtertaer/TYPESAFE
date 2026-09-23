@@ -901,5 +901,52 @@ class PolicyKeyUsageTests(unittest.TestCase):
         self.assertEqual([], unused, "escalate_if sub-keys never read: %s" % unused)
 
 
+class BaselineTests(unittest.TestCase):
+    def _run(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(LINT_PATH), *args],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_baseline_suppresses_known_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            policy = base_policy()
+            policy["noul_yes"] = 1.7  # P001 error
+            bad = Path(tmp) / "policy.json"
+            bad.write_text(json.dumps(policy), encoding="utf-8")
+            baseline = Path(tmp) / "baseline.json"
+            verdict = Path(tmp) / "verdict.json"
+
+            proc = self._run(str(bad), "--baseline-write", str(baseline))
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            saved = json.loads(baseline.read_text(encoding="utf-8"))
+            self.assertTrue(saved["findings"])
+
+            proc = self._run(
+                str(bad),
+                "--baseline",
+                str(baseline),
+                "--strict",
+                "--verdict",
+                str(verdict),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("suppressed", proc.stderr)
+            data = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(data["verdict"], "pass")
+            self.assertGreater(data["suppressed"], 0)
+
+    def test_baseline_missing_file_counts_everything(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            policy = base_policy()
+            policy["noul_yes"] = 1.7
+            bad = Path(tmp) / "policy.json"
+            bad.write_text(json.dumps(policy), encoding="utf-8")
+            proc = self._run(str(bad), "--baseline", str(Path(tmp) / "nope.json"))
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("not found", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

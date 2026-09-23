@@ -188,6 +188,32 @@ def write_verdict(path: str, payload: dict) -> bool:
     return True
 
 
+def baseline_key(row: dict, fields) -> tuple:
+    """Stable identity of a lint finding: the named fields' str() values."""
+    return tuple(str(row.get(f)) for f in fields)
+
+
+def load_baseline(path: str, fields=("path", "rule", "message")) -> set:
+    """Load a baseline findings file written by a lint's --baseline-write/--out.
+    Accepts {"findings": [...]} or a bare list; missing/corrupt warns and
+    returns an empty set so every finding still counts."""
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        sys.stderr.write("baseline %s not found; all findings count\n" % path)
+        return set()
+    except (OSError, ValueError):
+        sys.stderr.write("baseline %s unreadable; all findings count\n" % path)
+        return set()
+    items = raw.get("findings") if isinstance(raw, dict) else raw
+    keys: set = set()
+    if isinstance(items, list):
+        for f in items:
+            if isinstance(f, dict):
+                keys.add(baseline_key(f, fields))
+    return keys
+
+
 def _self_test() -> int:
     """Exercise cap/deadline/quiet/emit/verdict helpers offline (no Jev);
     print self-test ok|FAIL per check, rc 0/1."""

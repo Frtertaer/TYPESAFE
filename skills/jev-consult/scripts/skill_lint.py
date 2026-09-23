@@ -246,32 +246,13 @@ RULES = {
 
 def _baseline_key(row: dict) -> tuple:
     """Stable identity of a finding: file + rule + message text."""
-    return (
-        str(row.get("path")),
-        str(row.get("rule")),
-        str(row.get("message")),
-    )
+    return _watch.baseline_key(row, ("path", "rule", "message"))
 
 
 def load_baseline(path: str) -> set:
-    """Load a baseline findings file (from --baseline-write or --out).
-    Accepts {"findings": [...]} or a bare list; missing/corrupt warns and
-    returns an empty set so every finding still counts."""
-    try:
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        sys.stderr.write("baseline %s not found; all findings count\n" % path)
-        return set()
-    except (OSError, ValueError):
-        sys.stderr.write("baseline %s unreadable; all findings count\n" % path)
-        return set()
-    items = raw.get("findings") if isinstance(raw, dict) else raw
-    keys: set = set()
-    if isinstance(items, list):
-        for f in items:
-            if isinstance(f, dict):
-                keys.add(_baseline_key(f))
-    return keys
+    """Load a baseline findings file (from --baseline-write or --out);
+    missing/corrupt warns and returns an empty set so all findings count."""
+    return _watch.load_baseline(path, ("path", "rule", "message"))
 
 
 def _atomic_write(path, text):

@@ -482,7 +482,35 @@ def _atomic_write(path, text):
         raise
 
 
-USAGE = 'Usage: python policy_lint.py [POLICY.json ...] [flags]\nStatic checks for policy.json (required keys, ranges, ordering, template).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --diff            print a unified diff after --fix\n  --show            print the effective policy JSON and exit\n  --severity S      preset severity floor (error|warn|info; JEV_PLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the known policy.json key/type table (--json emits an object)\n  --quiet           print only errors/warnings count\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad policy dict; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+BASELINE_FIELDS = ("rule", "path", "message")
+
+
+def _baseline_key(row: dict) -> tuple:
+    return _watch.baseline_key(row, BASELINE_FIELDS)
+
+
+def _drop_baseline(rows: list, keys: set) -> list:
+    return [r for r in rows if _baseline_key(r) not in keys]
+
+
+def _write_baseline(path: str, rows: list) -> bool:
+    """Snapshot findings for later --baseline suppression; True on success."""
+    try:
+        _atomic_write(
+            Path(path), json.dumps({"findings": rows}, indent=2) + "\n"
+        )
+    except OSError as exc:
+        sys.stderr.write(
+            "cannot write --baseline-write %s: %s\n" % (path, exc)
+        )
+        return False
+    sys.stderr.write(
+        "wrote baseline %s (%d findings)\n" % (path, len(rows))
+    )
+    return True
+
+
+USAGE = 'Usage: python policy_lint.py [POLICY.json ...] [flags]\nStatic checks for policy.json (required keys, ranges, ordering, template).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --diff            print a unified diff after --fix\n  --show            print the effective policy JSON and exit\n  --severity S      preset severity floor (error|warn|info; JEV_PLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the known policy.json key/type table (--json emits an object)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad policy dict; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -637,12 +665,29 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         verdict_path = argv[idx + 1]
         del argv[idx : idx + 2]
+    baseline_path = ""
+    if "--baseline" in argv:
+        idx = argv.index("--baseline")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--baseline needs a PATH value\n")
+            return 2
+        baseline_path = argv[idx + 1]
+        del argv[idx : idx + 2]
+    baseline_write = ""
+    if "--baseline-write" in argv:
+        idx = argv.index("--baseline-write")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--baseline-write needs a PATH value\n")
+            return 2
+        baseline_write = argv[idx + 1]
+        del argv[idx : idx + 2]
     argv = [
         a
         for a in argv
         if a
         not in {"--strict", "--show", "--quiet", "--json", "--fail-fast", "--fix", "--dry-run"}
     ]
+    baseline_keys: set | None = None
     if "--env" in argv:
         try:
             env_watch_secs = float(os.environ.get("JEV_PLINT_WATCH_SECS", "") or 0)
@@ -677,11 +722,15 @@ def main(argv: list[str] | None = None) -> int:
             except OSError as exc:
                 sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
         return 0
+    if baseline_path:
+        baseline_keys = _watch.load_baseline(baseline_path, BASELINE_FIELDS)
     if len(argv) > 1:
         if do_fix:
             sys.stderr.write("--fix does not support multiple paths\n")
             return 2
         results = []
+        n_suppressed = 0
+        snapshot = []
         for arg in argv:
             fpath = Path(arg)
             try:
@@ -690,6 +739,12 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (fpath, exc))
                 return 2
             ffind = lint_policy(fpol)
+            if baseline_write:
+                snapshot.extend({"file": arg, **f} for f in ffind)
+            if baseline_keys is not None:
+                kept = _drop_baseline(ffind, baseline_keys)
+                n_suppressed += len(ffind) - len(kept)
+                ffind = kept
             ferr = sum(1 for f in ffind if f["severity"] == "error")
             fwarn = sum(1 for f in ffind if f["severity"] == "warn")
             finfo = sum(1 for f in ffind if f["severity"] == "info")
@@ -727,6 +782,12 @@ def main(argv: list[str] | None = None) -> int:
             except OSError as exc:
                 sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
                 return 1
+        if baseline_write and not _write_baseline(baseline_write, snapshot):
+            return 1
+        if n_suppressed:
+            sys.stderr.write(
+                "baseline: suppressed %d known finding(s)\n" % n_suppressed
+            )
         any_err = any(r["errors"] for r in results)
         any_warn = any(r["warnings"] for r in results)
         return 1 if any_err or (strict and any_warn) else 0
@@ -793,6 +854,8 @@ def main(argv: list[str] | None = None) -> int:
         watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             rows = lint_policy(policy)
+            if baseline_keys is not None:
+                rows = _drop_baseline(rows, baseline_keys)
             tick = {
                 "ts": int(_time.time()),
                 "findings": len(rows),
@@ -822,6 +885,19 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return rc
     findings = lint_policy(policy)
+    if baseline_write and not _write_baseline(
+        baseline_write, [{"file": str(path), **f} for f in findings]
+    ):
+        return 1
+    n_suppressed = 0
+    if baseline_keys is not None:
+        kept = _drop_baseline(findings, baseline_keys)
+        n_suppressed = len(findings) - len(kept)
+        findings = kept
+        if n_suppressed:
+            sys.stderr.write(
+                "baseline: suppressed %d known finding(s)\n" % n_suppressed
+            )
     shown_rows = [
         f
         for f in findings
@@ -855,6 +931,7 @@ def main(argv: list[str] | None = None) -> int:
                 "verdict": "fail" if rc else "pass",
                 "ticks": 1,
                 "findings": len(findings),
+                "suppressed": n_suppressed,
                 "errors": errors,
                 "warnings": warns,
                 "infos": infos,

@@ -2125,6 +2125,44 @@ class SidecarSchemaTests(unittest.TestCase):
         self.assertEqual(inv.sidecar_items("junk"), [])
 
 
+class SchemaTests(unittest.TestCase):
+    """--schema documents the scan payload + shortlist item contract."""
+
+    def test_schema_rows_cover_real_scan(self) -> None:
+        items = inv.scan("hermes", hermes=FIXTURE)
+        self.assertTrue(items)
+        required = {
+            k.split(".", 1)[1]
+            for k, v in inv.SCAN_SCHEMA_ROWS.items()
+            if k.startswith("item.") and v["required"]
+        }
+        allowed = {k.split(".", 1)[1] for k in inv.SCAN_SCHEMA_ROWS if k.startswith("item.")}
+        for item in items:
+            self.assertEqual(required - set(item), set(), item.get("id"))
+            self.assertEqual(set(item) - allowed, set(), item.get("id"))
+
+    def test_schema_flag_text_and_json(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = inv.main(["--schema"])
+        self.assertEqual(rc, 0)
+        text = buf.getvalue()
+        self.assertIn("item.id:", text)
+        self.assertIn("(required)", text)
+        self.assertIn("(optional)", text)
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = inv.main(["--schema", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertEqual(set(rows), set(inv.SCAN_SCHEMA_ROWS))
+        self.assertTrue(rows["item.id"]["required"])
+
+
 class LogPermissionTests(unittest.TestCase):
     """append_decision creates the log dir 0700 and the file 0600 —
     the routing log records prompts, so it must not be world-readable."""

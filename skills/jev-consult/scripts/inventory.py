@@ -88,6 +88,24 @@ SIDECAR_TTL_KEY = "sidecar_ttl_seconds"
 DEFAULT_SIDECAR_TTL_SECONDS = 14400.0
 _SCAN_CACHE: dict[str, tuple[float, list[dict]]] = {}
 
+# Scan payload + shortlist item contract (--schema).
+SCAN_SCHEMA_ROWS = {
+    "harness": {"required": True, "type": "string, detected harness (hermes|claude-code|codex|grok)"},
+    "task": {"required": True, "type": "string, the --task query text"},
+    "counts": {"required": True, "type": "object{kind: int} totals across all scanned items"},
+    "shortlist": {"required": True, "type": "list[item] IDF-ranked picks for --task"},
+    "catalogs": {"required": True, "type": "list[{name, url}] configured skill catalogs"},
+    "installed_names": {"required": False, "type": "list[kind:name] of every scanned item (--all-names)"},
+    "item.id": {"required": True, "type": "string, unique slug (kind + name, <=48 chars)"},
+    "item.kind": {"required": True, "type": "skill|plugin|mcp"},
+    "item.name": {"required": True, "type": "string, display name"},
+    "item.description": {"required": True, "type": "string, frontmatter/synthesized blurb"},
+    "item.path": {"required": False, "type": "string, skill/plugin directory (absent for mcp)"},
+    "item.explicit_only": {"required": True, "type": "bool, hidden from auto shortlist unless named"},
+    "item.score": {"required": False, "type": "int, IDF score (--scores only)"},
+    "item.matched": {"required": False, "type": "list[str] query tokens that hit (--explain only)"},
+}
+
 
 def user_home() -> Path:
     return Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or Path.home())
@@ -1252,6 +1270,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--schema", action="store_true", help="Print the scan payload + item key contract and exit (--json emits the object)")
+    parser.add_argument("--json", action="store_true", help="With --schema: emit the schema object instead of text rows")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that reports added or removed items")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON to PATH: with --watch a {verdict: stable|changed, ticks, added, removed, counts} payload refreshed every tick; otherwise a one-shot {verdict: ok|empty, scanned, shortlisted, counts} payload.")
@@ -1308,6 +1328,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Scan a temp-dir home with a synthetic catalog through the real machinery and exit 1 on failure.",
     )
     args = parser.parse_args(argv)
+    if args.schema:
+        if args.json:
+            sys.stdout.write(json.dumps(SCAN_SCHEMA_ROWS, indent=2) + "\n")
+        else:
+            for key, row in SCAN_SCHEMA_ROWS.items():
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (key, row["type"], "required" if row["required"] else "optional")
+                )
+        return 0
     if args.self_test:
         return _self_test()
     if args.check_sidecar or args.check_miss:

@@ -627,8 +627,7 @@ class CompactTests(unittest.TestCase):
                 old.write_text("x" * 60000, encoding="utf-8")
                 os.utime(old, (1000 + i, 1000 + i))
                 stale.append(old)
-            with patch.object(C, "SPILL_MAX_BYTES", 100_000):
-                got = C.spill("n" * 40000, folder)
+            got = C.spill("n" * 40000, folder, caps=(C.SPILL_MAX_FILES, 100_000))
             files = list(folder.glob("*.txt"))
             self.assertIn(got, files)
             self.assertIn(stale[2], files)
@@ -2579,6 +2578,60 @@ class SpillGcTests(unittest.TestCase):
             self.assertEqual(buf.getvalue(), "")
             text = out_f.read_text(encoding="utf-8")
             self.assertIn("count 1", text)
+
+
+class SpillCapTests(unittest.TestCase):
+    def test_spill_caps_param_limits_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            for i in range(3):
+                old = folder / ("o%d.txt" % i)
+                old.write_text("x" * 100, encoding="utf-8")
+                os.utime(old, (1000 + i, 1000 + i))
+            C.spill("new payload", folder, caps=(3, 10**9))
+            files = sorted(p.name for p in folder.glob("*.txt"))
+        self.assertEqual(len(files), 3)
+        self.assertNotIn("o0.txt", files)  # oldest pruned, new one kept
+
+    def test_spill_caps_param_limits_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            for i in range(3):
+                old = folder / ("b%d.txt" % i)
+                old.write_text("x" * 100, encoding="utf-8")
+                os.utime(old, (1000 + i, 1000 + i))
+            path = C.spill("new payload", folder, caps=(10**9, 50))
+            files = list(folder.glob("*.txt"))
+        self.assertEqual(files, [path])  # byte cap pruned every old file
+
+    def test_spill_caps_come_from_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            policy_src = COMPACT_PATH.parent.parent / "policy.json"
+            custom = Path(tmp) / "policy.json"
+            data = json.loads(policy_src.read_text(encoding="utf-8"))
+            data["spill_max_files"] = 2
+            custom.write_text(json.dumps(data), encoding="utf-8")
+            folder = Path(tmp) / "spill"
+            folder.mkdir()
+            for i in range(3):
+                old = folder / ("p%d.txt" % i)
+                old.write_text("x" * 100, encoding="utf-8")
+                os.utime(old, (1000 + i, 1000 + i))
+            with patch.dict(os.environ, {"JEV_POLICY": str(custom)}):
+                C.spill("new payload", folder)
+            files = list(folder.glob("*.txt"))
+        self.assertEqual(len(files), 2)
+
+    def test_opts_spill_caps_flags_win_over_policy(self) -> None:
+        files, size = C._opts_spill_caps({})
+        self.assertEqual(files, C.SPILL_MAX_FILES)
+        self.assertEqual(size, C.SPILL_MAX_BYTES)
+        files, size = C._opts_spill_caps(
+            {"spill_max_files": 5, "spill_max_bytes": 123}
+        )
+        self.assertEqual((files, size), (5, 123))
+        files, size = C._opts_spill_caps({"spill_max_files": "junk"})
+        self.assertEqual(files, C.SPILL_MAX_FILES)
 
 
 class SchemaTests(unittest.TestCase):

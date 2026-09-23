@@ -203,8 +203,37 @@ def _atomic_write_surrogate(path: Path, text: str) -> None:
             pass
 
 
-def spill(text: str, spill_dir: Path | None = None) -> Path | None:
+def _spill_caps() -> tuple[int, int]:
+    """(max_files, max_bytes) from policy.json; built-in caps on failure."""
+    try:
+        policy = load_jev().load_policy()
+        files = max(0, int(policy.get("spill_max_files", SPILL_MAX_FILES)))
+        size = max(0, int(policy.get("spill_max_bytes", SPILL_MAX_BYTES)))
+        return files, size
+    except (SystemExit, OSError, TypeError, ValueError):
+        return SPILL_MAX_FILES, SPILL_MAX_BYTES
+
+
+def _opts_spill_caps(opts: dict[str, Any]) -> tuple[int, int]:
+    """Policy caps overridden by explicit opts (CLI flags)."""
+    files, size = _spill_caps()
+    try:
+        if opts.get("spill_max_files") is not None:
+            files = max(0, int(opts["spill_max_files"]))
+        if opts.get("spill_max_bytes") is not None:
+            size = max(0, int(opts["spill_max_bytes"]))
+    except (TypeError, ValueError):
+        pass
+    return files, size
+
+
+def spill(
+    text: str,
+    spill_dir: Path | None = None,
+    caps: tuple[int, int] | None = None,
+) -> Path | None:
     """Content-addressed copy of the omitted payload; None when disabled/failed."""
+    max_files, max_bytes = caps if caps is not None else _spill_caps()
     target = spill_dir if spill_dir is not None else spill_dir_default()
     if target is None:
         return None
@@ -235,11 +264,11 @@ def spill(text: str, spill_dir: Path | None = None) -> Path | None:
                 continue
             entries.append((info.st_mtime, info.st_size, candidate))
             total_size += info.st_size
-        if len(entries) > SPILL_MAX_FILES or total_size > SPILL_MAX_BYTES:
+        if len(entries) > max_files or total_size > max_bytes:
             entries.sort(key=lambda entry: entry[0])
             count = len(entries)
             for _mtime, size, old in entries:
-                if count <= SPILL_MAX_FILES and total_size <= SPILL_MAX_BYTES:
+                if count <= max_files and total_size <= max_bytes:
                     break
                 if old == path:
                     continue
@@ -1049,13 +1078,17 @@ def decide_call(
 
 
 def truncated_result_text(
-    text: str, is_error: bool, head_chars: int, spill_enabled: bool = True
+    text: str,
+    is_error: bool,
+    head_chars: int,
+    spill_enabled: bool = True,
+    caps: tuple[int, int] | None = None,
 ) -> str:
     if len(text) <= head_chars + 120:
         return text
     head = "%s\n" % text[:head_chars] if head_chars > 0 else ""
     extra = " (error)" if is_error else ""
-    saved = spill(text) if spill_enabled else None
+    saved = spill(text, caps=caps) if spill_enabled else None
     if saved is not None:
         extra += "; full output saved: %s" % saved
     return "%s[fast-jev-compaction truncated %s chars of this tool result%s; re-run the tool if needed]" % (
@@ -1071,6 +1104,7 @@ def apply_decisions(
     calls: list[ToolCall],
     head_chars: int,
     spill_enabled: bool = True,
+    caps: tuple[int, int] | None = None,
 ) -> list[dict[str, Any]]:
     by_id = {call.id: call for call in calls}
     actions: dict[str, str] = {}
@@ -1100,6 +1134,7 @@ def apply_decisions(
                 bool(tool.get("isError")),
                 head_chars,
                 spill_enabled,
+                caps,
             )
             if (tool.get("text") or "") == text:
                 return tool
@@ -1124,6 +1159,7 @@ def apply_decisions(
                 bool(result.get("isError")),
                 head_chars,
                 spill_enabled,
+                caps,
             )
             if text == (result.get("text") or ""):
                 return result
@@ -1190,6 +1226,7 @@ def compact(
     keep_first = int(opts.get("keep_first") or 0)
     keep_threshold = float(opts.get("keep_threshold") if opts.get("keep_threshold") is not None else KEEP_THRESHOLD)
     head_chars = int(opts.get("truncate_head_chars") if opts.get("truncate_head_chars") is not None else TRUNCATE_HEAD_CHARS)
+    spill_caps = _opts_spill_caps(opts)
     messages = [normalize_message(item) for item in messages]
     min_messages = int(opts.get("min_messages") or 0)
     if min_messages > 0 and len(messages) < min_messages:
@@ -1273,6 +1310,7 @@ def compact(
     kept = apply_decisions(
         messages, decisions, calls, head_chars,
         spill_enabled=not opts.get("no_spill"),
+        caps=spill_caps,
     )
     return {
         "messages": kept,
@@ -1357,6 +1395,8 @@ def cmd_compact(args: argparse.Namespace) -> int:
         "truncate_head_chars": args.truncate_head_chars,
         "min_reduction": args.min_reduction,
         "min_messages": args.min_messages,
+        "spill_max_files": args.spill_max_files,
+        "spill_max_bytes": args.spill_max_bytes,
         "keep_text": args.keep_text or os.environ.get("JEV_KEEP_TEXT", ""),
         "trace": load_trace(args.trace),
         "no_spill": bool(
@@ -1769,6 +1809,8 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PATH",
         help="With --list-spill/--prune-spill: write the listing to PATH instead of stdout.",
     )
+    parser.add_argument("--spill-max-files", type=int, default=None, metavar="N", help="Spill-dir file cap (default: policy spill_max_files)")
+    parser.add_argument("--spill-max-bytes", type=int, default=None, metavar="N", help="Spill-dir byte cap (default: policy spill_max_bytes)")
     parser.add_argument(
         "--list-spill",
         action="store_true",

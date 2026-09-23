@@ -277,5 +277,7 @@
     "max_evidence_chars": 24000,
     "max_checks": 32,
     "max_items": 24
-  }
+  },
+  "spill_max_files": 200,
+  "spill_max_bytes": 268435456
 }

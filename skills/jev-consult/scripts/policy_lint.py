@@ -74,6 +74,8 @@ NONNEG_NUM_FIELDS = (
     "hook_payload_max_bytes",
     "sidecar_ttl_seconds",
     "smoke_perf_budget_seconds",
+    "spill_max_bytes",
+    "spill_max_files",
 )
 NONEMPTY_STR_FIELDS = ("model", "endpoint", "default", "role", "coder_role")
 ESCALATE_BOOL_FIELDS = ("irreversible",)
@@ -90,6 +92,8 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "hook_payload_max_bytes",
     "progress",
     "smoke_perf_budget_seconds",
+    "spill_max_bytes",
+    "spill_max_files",
     "stop_words",
 )
 

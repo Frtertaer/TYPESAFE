@@ -3679,6 +3679,31 @@ class WrongTypedFieldTests(unittest.TestCase):
             )
             self.assertTrue(json.loads(buf_sim.getvalue()))
 
+    def test_watch_dedupe_skips_identical_ticks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            event = tmp_path / "event.json"
+            with open(event, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"hook_event_name": "Bogus", "prompt": "x"}))
+            verdict = tmp_path / "verdict.json"
+            buf = io.StringIO()
+            err = io.StringIO()
+            with patch.dict(os.environ, {"JEV_HOOK_OFF": "1"}):
+                with patch("sys.stdout", buf), patch("sys.stderr", err):
+                    rc = HOOK.main([
+                        "--file", str(event),
+                        "--watch", "0.1",
+                        "--max-ticks", "3",
+                        "--dedupe",
+                        "--verdict", str(verdict),
+                    ])
+            self.assertIn(rc, (0, 1))
+            self.assertEqual(len(buf.getvalue().strip().splitlines()), 1)
+            self.assertIn("watch tick=3", err.getvalue())
+            data = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(data["dupes"], 2)
+            self.assertEqual(data["ticks"], 3)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

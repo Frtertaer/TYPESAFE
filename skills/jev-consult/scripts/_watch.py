@@ -81,6 +81,18 @@ def emit(tick: dict, out_path=None, quiet: bool = False, bad=None) -> None:
             pass
 
 
+def same_tick(prev: dict | None, tick: dict, ignore=("ts", "elapsed_s")) -> bool:
+    """True when two consecutive ticks are equal apart from volatile keys.
+
+    Watch loops can pass their previous tick to skip re-emitting noise."""
+    if not isinstance(prev, dict) or not isinstance(tick, dict):
+        return False
+    drop = set(ignore)
+    a = {k: v for k, v in prev.items() if k not in drop}
+    b = {k: v for k, v in tick.items() if k not in drop}
+    return a == b
+
+
 def dig(node, path: str):
     """Dotted-path lookup over dicts and lists; (value, True) or (None, False).
 
@@ -226,6 +238,9 @@ def _self_test() -> int:
         checks["dig_dict"] = dig({"a": {"b": 3}}, "a.b") == (3, True)
         checks["dig_list"] = dig([{"x": 1}, {"x": 2}], "1.x") == (2, True)
         checks["dig_miss"] = dig({"a": 1}, "a.b") == (None, False)
+        checks["same_tick"] = same_tick(
+            {"ts": 1, "winner": "w"}, {"ts": 2, "winner": "w"}
+        ) and not same_tick({"ts": 1, "winner": "w"}, {"ts": 2, "winner": "x"})
     finally:
         for name, val in saved.items():
             if val is None:

@@ -89,6 +89,69 @@ class ApplyFillTests(unittest.TestCase):
             self.assertIn("never claude plugin install", blob)
             self.assertIn("not skillbox", blob)
 
+    def test_list_prints_ranked_candidates(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        hits = [
+            FILL.as_item("plugin", "alpha", "a plugin"),
+            FILL.as_item("mcp", "beta", "b mcp"),
+        ]
+        with patch.object(FILL, "search_hits", return_value=hits):
+            with patch.object(sys, "argv", ["apply_fill.py", "--task", "alpha", "--list"]):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+        self.assertEqual(rc, 0)
+        self.assertIn("alpha", buf.getvalue())
+
+    def test_list_json_emits_rows(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        hits = [FILL.as_item("mcp", "beta", "b mcp")]
+        with patch.object(FILL, "search_hits", return_value=hits):
+            with patch.object(
+                sys, "argv", ["apply_fill.py", "--task", "beta", "--list", "--json"]
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertEqual(rows[0]["name"], "beta")
+        self.assertEqual(rows[0]["kind"], "mcp")
+
+    def test_show_prints_matching_record(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        hits = [FILL.as_item("plugin", "alpha", "a plugin")]
+        with patch.object(FILL, "search_hits", return_value=hits):
+            with patch.object(
+                sys, "argv", ["apply_fill.py", "--task", "x", "--show", "alpha"]
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+        self.assertEqual(rc, 0)
+        rec = json.loads(buf.getvalue())
+        self.assertEqual(rec["identifier"], "plugin:alpha")
+
+    def test_show_not_found_line(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with patch.object(FILL, "search_hits", return_value=[]):
+            with patch.object(
+                sys, "argv", ["apply_fill.py", "--task", "x", "--show", "nope"]
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+        self.assertEqual(rc, 0)
+        self.assertIn("not found: nope", buf.getvalue())
+
     def test_watch_emits_readonly_ticks(self) -> None:
         import subprocess
         import time

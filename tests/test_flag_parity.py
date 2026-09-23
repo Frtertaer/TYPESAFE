@@ -53,7 +53,7 @@ class FlagParityTest(unittest.TestCase):
             "--fail-fast", "--out", "--verdict", "--help",
         }
         extras = {
-            "apply_fill.py": {"--status"},
+            "apply_fill.py": {"--status", "--list", "--show"},
             "peer_fill.py": {"--status", "--list", "--show"},
             "catalog_fill.py": {"--clear", "--list", "--show"},
         }

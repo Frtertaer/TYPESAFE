@@ -368,6 +368,17 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--ask-file", default="")
     parser.add_argument(
+        "--list",
+        action="store_true",
+        help="Print the ranked installable candidates for --task (or the miss task) and exit; no installs.",
+    )
+    parser.add_argument(
+        "--show",
+        default="",
+        metavar="NAME",
+        help="Print one candidate's full JSON record by name/id and exit.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit the outcome as a JSON object instead of a text line.",
@@ -491,6 +502,52 @@ def main() -> int:
         task = task or str(miss.get("task") or "")
         if dest == "auto":
             dest = str(miss.get("harness") or "auto")
+    if args.list or args.show:
+        try:
+            hits = search_hits(task)
+            if args.list:
+                items = shortlist(hits, task, SEARCH_LIMIT, []) if hits else []
+                if args.json:
+                    rows = [
+                        {
+                            "kind": item.get("kind") or "?",
+                            "name": item.get("name") or "?",
+                            "id": item.get("id") or "",
+                        }
+                        for item in items
+                    ]
+                    sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+                else:
+                    for item in items:
+                        sys.stdout.write(
+                            "%s %s %s\n"
+                            % (
+                                item.get("kind") or "?",
+                                item.get("name") or "?",
+                                item.get("id") or "",
+                            )
+                        )
+            else:
+                match = next(
+                    (
+                        item
+                        for item in (hits or [])
+                        if args.show
+                        in (
+                            item.get("name"),
+                            item.get("id"),
+                            item.get("identifier"),
+                        )
+                    ),
+                    None,
+                )
+                if match is None:
+                    sys.stdout.write("not found: %s\n" % args.show)
+                else:
+                    sys.stdout.write(json.dumps(match, indent=2) + "\n")
+        except Exception:
+            pass
+        return 0
     ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
     if args.verdict:
         miss_now = bool(read_miss(cwd / MISS_NAME))

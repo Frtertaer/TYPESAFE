@@ -478,5 +478,70 @@ class DryRunTests(unittest.TestCase):
             self.assertTrue(any(p.suffix == ".txt" for p in spill.iterdir()))
 
 
+class DebugFlagTests(unittest.TestCase):
+    """--debug prints a one-line JSON diag record to stderr every run."""
+
+    def _run_debug(self, stdin_text: str, argv: list):
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        env["JEV_CONSULT_SPILL"] = "0"
+        return subprocess.run(
+            [sys.executable, str(HOOK_PATH), *argv],
+            input=stdin_text,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+
+    def _record(self, proc) -> dict:
+        line = [
+            ln
+            for ln in proc.stderr.splitlines()
+            if ln.startswith("compact_hook: {")
+        ]
+        self.assertEqual(len(line), 1, proc.stderr)
+        return json.loads(line[0].split(": ", 1)[1])
+
+    def test_debug_compact_records_lengths(self) -> None:
+        fat = "B" * 40000
+        proc = self._run_debug(
+            json.dumps({"hook_event_name": "PostToolUse", "toolResult": fat}),
+            ["--debug"],
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        rec = self._record(proc)
+        self.assertEqual(rec["verdict"], "compacted")
+        self.assertEqual(rec["in_chars"], len(fat))
+        self.assertLess(rec["out_chars"], len(fat))
+        self.assertIn("hookSpecificOutput", proc.stdout)
+
+    def test_debug_skip_has_reason(self) -> None:
+        proc = self._run_debug(
+            json.dumps(
+                {"hook_event_name": "PostToolUse", "toolResult": "tiny"}
+            ),
+            ["--debug"],
+        )
+        rec = self._record(proc)
+        self.assertEqual(rec["verdict"], "skip")
+        self.assertEqual(rec["reason"], "below live-fat threshold")
+        self.assertEqual(rec["in_chars"], 4)
+
+    def test_debug_bad_stdin_records_null_lens(self) -> None:
+        proc = self._run_debug("not json", ["--debug"])
+        rec = self._record(proc)
+        self.assertEqual(rec["verdict"], "skip")
+        self.assertEqual(rec["reason"], "invalid JSON")
+        self.assertIsNone(rec["in_chars"])
+
+    def test_no_debug_no_record(self) -> None:
+        proc = self._run_debug("not json", [])
+        self.assertNotIn("compact_hook: {", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

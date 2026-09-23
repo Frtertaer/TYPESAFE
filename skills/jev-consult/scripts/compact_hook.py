@@ -78,6 +78,7 @@ def replace_payload(original: Any, abridged: str) -> Any:
 
 
 LAST_SKIP: str = ""
+LAST_LENS: dict = {}
 
 
 def _dry_spill_dir() -> Path | None:
@@ -86,8 +87,9 @@ def _dry_spill_dir() -> Path | None:
 
 
 def handle(payload: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
-    global LAST_SKIP
+    global LAST_SKIP, LAST_LENS
     LAST_SKIP = ""
+    LAST_LENS = {}
     event = str(payload.get("hook_event_name") or payload.get("hookEventName") or "")
     if event and event not in ("PostToolUse", "post_tool_use"):
         LAST_SKIP = "not a PostToolUse event"
@@ -106,6 +108,7 @@ def handle(payload: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
     abridged = C.abridge_live(
         text, is_error=is_error, spill_dir=_dry_spill_dir() if dry_run else None
     )
+    LAST_LENS = {"in": len(text), "out": len(abridged) if abridged else 0}
     if abridged is None:
         LAST_SKIP = "below live-fat threshold"
         return {}
@@ -135,7 +138,7 @@ def env_report() -> dict:
     }
 
 
-USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose] [--file PATH] [--simulate TEXT] [--dry-run] [--verdict PATH] [--env [--jq KEY] [--out PATH]] [--self-test]\n\nReads one PostToolUse JSON event from stdin (or --file). When the tool result\nis longer than the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n--dry-run resolves the same abridge decision but spills the omitted text\nunder <spill_dir>/dry/ instead of the live spill dir.\n--simulate TEXT runs a synthetic PostToolUse event with TEXT as the tool\nresult — a quick probe of the live-fat decision without crafting JSON.\n--self-test runs handle() on synthetic payloads and exits 1 on failure.\n--verdict PATH writes a slim {verdict: compacted|skip, reason} JSON after the\nhook run (fail-open on a bad path).\n--env prints the resolved hook config JSON ({live_fat, live_head, live_tail,\nspill_dir, spill_disabled, spill_max_files, spill_max_bytes, policy};\n--jq KEY prints one value; --out PATH also writes it, fail-open).\n'
+USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose|--debug] [--file PATH] [--simulate TEXT] [--dry-run] [--verdict PATH] [--env [--jq KEY] [--out PATH]] [--self-test]\n\nReads one PostToolUse JSON event from stdin (or --file). When the tool result\nis longer than the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n--debug prints a one-line JSON record {verdict, reason, in_chars,\nout_chars} to stderr every run.\n--dry-run resolves the same abridge decision but spills the omitted text\nunder <spill_dir>/dry/ instead of the live spill dir.\n--simulate TEXT runs a synthetic PostToolUse event with TEXT as the tool\nresult — a quick probe of the live-fat decision without crafting JSON.\n--self-test runs handle() on synthetic payloads and exits 1 on failure.\n--verdict PATH writes a slim {verdict: compacted|skip, reason} JSON after the\nhook run (fail-open on a bad path).\n--env prints the resolved hook config JSON ({live_fat, live_head, live_tail,\nspill_dir, spill_disabled, spill_max_files, spill_max_bytes, policy};\n--jq KEY prints one value; --out PATH also writes it, fail-open).\n'
 
 
 def _flag_value(argv: list, flag: str) -> str:
@@ -147,11 +150,18 @@ def _flag_value(argv: list, flag: str) -> str:
     return ""
 
 
-def _emit(payload: dict, verdict_path: str, verdict: dict) -> int:
+def _emit(payload: dict, verdict_path: str, verdict: dict, debug: bool = False) -> int:
     """Print the hook payload and refresh the --verdict file."""
     sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
     if verdict_path:
         _watch.write_verdict(verdict_path, verdict)
+    if debug:
+        record = dict(verdict)
+        record["in_chars"] = LAST_LENS.get("in")
+        record["out_chars"] = LAST_LENS.get("out")
+        sys.stderr.write(
+            "compact_hook: %s\n" % json.dumps(record, sort_keys=True)
+        )
     return 0
 
 
@@ -212,6 +222,8 @@ def _read_stdin() -> str:
 
 
 def main() -> int:
+    global LAST_LENS
+    LAST_LENS = {}
     _watch.fix_stdio()
     if _watch.maybe_version(sys.argv[1:]):
         return 0
@@ -219,6 +231,7 @@ def main() -> int:
         sys.stdout.write(USAGE)
         return 0
     verbose = "--verbose" in sys.argv[1:]
+    debug = "--debug" in sys.argv[1:]
     verdict_path = _flag_value(sys.argv[1:], "--verdict")
     if "--env" in sys.argv[1:]:
         report = env_report()
@@ -257,7 +270,7 @@ def main() -> int:
         )
         if verbose and not out and LAST_SKIP:
             sys.stderr.write("compact_hook: %s\n" % LAST_SKIP)
-        return _emit(out, verdict_path, _run_verdict(out))
+        return _emit(out, verdict_path, _run_verdict(out), debug=debug)
     raw = ""
     if "--file" in sys.argv[1:]:
         idx = sys.argv[1:].index("--file")
@@ -269,35 +282,48 @@ def main() -> int:
                 if verbose:
                     sys.stderr.write("compact_hook: unreadable --file %s\n" % file_arg)
                 return _emit(
-                    {}, verdict_path, {"verdict": "skip", "reason": "unreadable --file"}
+                    {},
+                    verdict_path,
+                    {"verdict": "skip", "reason": "unreadable --file"},
+                    debug=debug,
                 )
     else:
         raw = _read_stdin()
     if not raw.strip():
         if verbose:
             sys.stderr.write("compact_hook: empty stdin\n")
-        return _emit({}, verdict_path, {"verdict": "skip", "reason": "empty stdin"})
+        return _emit(
+            {}, verdict_path, {"verdict": "skip", "reason": "empty stdin"},
+            debug=debug,
+        )
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
         if verbose:
             sys.stderr.write("compact_hook: invalid JSON\n")
-        return _emit({}, verdict_path, {"verdict": "skip", "reason": "invalid JSON"})
+        return _emit(
+            {}, verdict_path, {"verdict": "skip", "reason": "invalid JSON"},
+            debug=debug,
+        )
     if not isinstance(payload, dict):
         if verbose:
             sys.stderr.write("compact_hook: payload is not an object\n")
         return _emit(
-            {}, verdict_path, {"verdict": "skip", "reason": "payload is not an object"}
+            {},
+            verdict_path,
+            {"verdict": "skip", "reason": "payload is not an object"},
+            debug=debug,
         )
     try:
         out = handle(payload, dry_run="--dry-run" in sys.argv[1:])
     except Exception:
         return _emit(
-            {}, verdict_path, {"verdict": "skip", "reason": "handler error"}
+            {}, verdict_path, {"verdict": "skip", "reason": "handler error"},
+            debug=debug,
         )
     if verbose and not out and LAST_SKIP:
         sys.stderr.write("compact_hook: %s\n" % LAST_SKIP)
-    return _emit(out, verdict_path, _run_verdict(out))
+    return _emit(out, verdict_path, _run_verdict(out), debug=debug)
 
 
 if __name__ == "__main__":

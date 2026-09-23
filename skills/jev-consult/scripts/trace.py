@@ -636,6 +636,8 @@ def cmd_history(args: argparse.Namespace) -> int:
         dead = _watch.deadline("JEV_TRACE_WATCH_SECS", getattr(args, "watch_max", 0.0))
         tick: dict = {}
         verdict_ok = True
+        prev_tick: dict | None = None
+        unchanged = 0
 
         def _write_verdict() -> bool:
             picks = tick.get("picks")
@@ -670,7 +672,15 @@ def cmd_history(args: argparse.Namespace) -> int:
             )
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
+            if _watch.same_tick(prev_tick, tick):
+                unchanged += 1
+            else:
+                unchanged = 0
+            prev_tick = dict(tick)
             if getattr(args, "fail_fast", False) and not tick["picks"]:
+                break
+            if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+                sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
             _time.sleep(args.watch)
         if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
@@ -1264,6 +1274,8 @@ def cmd_notes(args: argparse.Namespace) -> int:
                 },
             )
 
+        prev_tick: dict | None = None
+        unchanged = 0
         watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             fresh = load(path).get("notes")
@@ -1281,7 +1293,15 @@ def cmd_notes(args: argparse.Namespace) -> int:
             )
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
+            if _watch.same_tick(prev_tick, tick):
+                unchanged += 1
+            else:
+                unchanged = 0
+            prev_tick = dict(tick)
             if getattr(args, "fail_fast", False) and not tick["notes"]:
+                break
+            if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+                sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
             _time.sleep(args.watch)
         if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
@@ -1443,6 +1463,8 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 },
             )
 
+        prev_tick: dict | None = None
+        unchanged = 0
         watch_t0 = _time.time()
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
             cur = load(path)
@@ -1462,7 +1484,15 @@ def cmd_stats(args: argparse.Namespace) -> int:
             )
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
+            if _watch.same_tick(prev_tick, tick):
+                unchanged += 1
+            else:
+                unchanged = 0
+            prev_tick = dict(tick)
             if getattr(args, "fail_fast", False) and not tick["exists"]:
+                break
+            if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+                sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
             _time.sleep(args.watch)
         if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
@@ -1531,6 +1561,8 @@ def cmd_state(args: argparse.Namespace) -> int:
         state: dict = {}
         verdict_ok = True
         prev_attempt: int | None = None
+        prev_tick: dict | None = None
+        unchanged = 0
         watch_t0 = _time.time()
 
         def _write_verdict() -> bool:
@@ -1577,9 +1609,23 @@ def cmd_state(args: argparse.Namespace) -> int:
             )
             if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
                 verdict_ok = False  # warn once, stop retrying
+            tick_cmp = {
+                "state": state,
+                "attempt_count": cur_attempt,
+                "history": len(data.get("history") or []),
+                "inspected": len(data.get("inspected") or []),
+            }
+            if _watch.same_tick(prev_tick, tick_cmp):
+                unchanged += 1
+            else:
+                unchanged = 0
+            prev_tick = tick_cmp
             if getattr(args, "fail_fast", False) and not any(
                 k != "attempt_count" for k in state
             ):
+                break
+            if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
+                sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
             _time.sleep(args.watch)
         if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
@@ -1687,6 +1733,7 @@ def build_parser() -> argparse.ArgumentParser:
     state_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     state_cmd.add_argument("--jq", metavar="KEY", default="", help="With --watch: print just the named tick field(s) per pass, comma list")
     state_cmd.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick whose state is empty")
+    state_cmd.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     state_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: ok|empty, ticks, attempt_count, state} JSON to PATH, refreshed every tick")
     state_cmd.set_defaults(func=cmd_state)
     stats_cmd = sub.add_parser("stats", help="Summary: counts, last pick, file age")
@@ -1697,6 +1744,7 @@ def build_parser() -> argparse.ArgumentParser:
     stats_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     stats_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     stats_cmd.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick where the trace file is missing")
+    stats_cmd.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     stats_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: exists|missing, ticks, attempt_count, history, inspected} JSON to PATH, refreshed every tick")
     stats_cmd.set_defaults(func=cmd_stats)
     notes_cmd = sub.add_parser("notes", help="List recorded notes (iso + text)")
@@ -1724,6 +1772,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     notes_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: notes|empty, ticks, notes} JSON to PATH, refreshed every tick")
     notes_cmd.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick with zero notes")
+    notes_cmd.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     notes_cmd.set_defaults(func=cmd_notes)
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")
@@ -1746,6 +1795,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--out", default="", help="With --watch: append each tick line to PATH (fail-open)")
     hist_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: picks|empty, ticks, picks} JSON to PATH, refreshed every tick")
     hist_cmd.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick with zero picks")
+    hist_cmd.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     hist_cmd.set_defaults(func=cmd_history)
     sug = sub.add_parser(
         "suggest",

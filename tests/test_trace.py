@@ -3037,5 +3037,92 @@ class CountFlagTests(unittest.TestCase):
             self.assertEqual(buf.getvalue().strip(), "1")
 
 
+class UnchangedMaxTests(unittest.TestCase):
+    def _trace(self, tmp: str) -> Path:
+        import io
+        from contextlib import redirect_stdout
+
+        path = Path(tmp) / "trace.json"
+        with redirect_stdout(io.StringIO()):
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            tr.main(["--file", str(path), "record", "--pick", "a"])
+        return path
+
+    def test_history_unchanged_max_stops_early(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            err = io.StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = tr.main(
+                    [
+                        "--file",
+                        str(path),
+                        "history",
+                        "--watch",
+                        "0.02",
+                        "--max-ticks",
+                        "50",
+                        "--unchanged-max",
+                        "2",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            ticks = [l for l in buf.getvalue().splitlines() if '"picks"' in l]
+            self.assertEqual(len(ticks), 3)
+            self.assertIn("consecutive identical ticks", err.getvalue())
+
+    def test_state_unchanged_max(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            err = io.StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = tr.main(
+                    [
+                        "--file",
+                        str(path),
+                        "state",
+                        "--watch",
+                        "0.02",
+                        "--max-ticks",
+                        "50",
+                        "--unchanged-max",
+                        "1",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertIn("consecutive identical ticks", err.getvalue())
+
+    def test_notes_unchanged_max_zero_never_stops_by_itself(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    [
+                        "--file",
+                        str(path),
+                        "notes",
+                        "--watch",
+                        "0.02",
+                        "--max-ticks",
+                        "3",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            ticks = [l for l in buf.getvalue().splitlines() if '"notes"' in l]
+            self.assertEqual(len(ticks), 3)
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

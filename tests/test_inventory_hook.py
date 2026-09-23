@@ -2542,6 +2542,24 @@ class HookE2ETests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return proc.stdout.strip()
 
+    def test_invalid_utf8_stdin_fail_open(self) -> None:
+        """Binary garbage on stdin (not valid utf-8) must still emit {} rc 0."""
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        proc = subprocess.run(
+            [sys.executable, str(self.HOOK_PATH)],
+            input=b"\x80\x81\xff\xfe\x00abc",
+            capture_output=True,
+            env=env,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.decode("utf-8", "replace").strip(), "{}")
+        self.assertNotIn(b"Traceback", proc.stderr)
+
     def test_file_flag_missing_or_unreadable_emits_empty(self) -> None:
         """--file on a missing path or a directory fails open with {} rc 0."""
         import subprocess

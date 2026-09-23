@@ -197,6 +197,24 @@ class HookE2ETests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return proc
 
+    def test_invalid_utf8_stdin_fail_open(self) -> None:
+        """Binary garbage on stdin (not valid utf-8) must still emit {} rc 0."""
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        proc = subprocess.run(
+            [sys.executable, str(HOOK_PATH)],
+            input=b"\x80\x81\xff\xfe\x00abc",
+            capture_output=True,
+            env=env,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.decode("utf-8", "replace").strip(), "{}")
+        self.assertNotIn(b"Traceback", proc.stderr)
+
     def test_verbose_prints_skip_reason(self) -> None:
         proc = self._run_full(
             json.dumps({"hook_event_name": "UserPromptSubmit", "toolResult": "x"}),

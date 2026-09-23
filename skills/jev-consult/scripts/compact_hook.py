@@ -108,7 +108,43 @@ def handle(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose] [--file PATH] [--simulate TEXT]\n\nReads one PostToolUse JSON event from stdin (or --file). When the tool result\nis longer than the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n--simulate TEXT runs a synthetic PostToolUse event with TEXT as the tool\nresult — a quick probe of the live-fat decision without crafting JSON.\n'
+USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose] [--file PATH] [--simulate TEXT] [--self-test]\n\nReads one PostToolUse JSON event from stdin (or --file). When the tool result\nis longer than the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n--simulate TEXT runs a synthetic PostToolUse event with TEXT as the tool\nresult — a quick probe of the live-fat decision without crafting JSON.\n--self-test runs handle() on synthetic payloads and exits 1 on failure.\n'
+
+
+def _self_test() -> int:
+    """Run handle() on synthetic PostToolUse payloads; print ok|FAIL per check."""
+    checks = {}
+    fat = "x" * (C.LIVE_FAT + 512)
+    out = handle({"hook_event_name": "PostToolUse", "toolResult": fat})
+    updated = out.get("hookSpecificOutput", {}).get("updatedToolOutput")
+    checks["fat_abridged"] = (
+        isinstance(updated, str)
+        and 0 < len(updated) < len(fat)
+        and LAST_SKIP == ""
+    )
+    out = handle({"hook_event_name": "PostToolUse", "toolResult": "tiny"})
+    checks["thin_skip"] = out == {} and LAST_SKIP == "below live-fat threshold"
+    out = handle(
+        {
+            "hook_event_name": "PostToolUse",
+            "toolResult": {"is_error": True, "text": fat},
+        }
+    )
+    checks["error_skip"] = out == {} and LAST_SKIP == "tool result is an error"
+    out = handle({"hook_event_name": "PreToolUse", "toolResult": fat})
+    checks["event_skip"] = out == {} and LAST_SKIP == "not a PostToolUse event"
+    ok = all(checks.values())
+    sys.stdout.write(
+        "self-test: %s %s\n"
+        % (
+            "ok" if ok else "FAIL",
+            " ".join(
+                "%s=%s" % (k, "ok" if v else "FAIL")
+                for k, v in sorted(checks.items())
+            ),
+        )
+    )
+    return 0 if ok else 1
 
 
 def _read_stdin() -> str:
@@ -131,6 +167,8 @@ def main() -> int:
         sys.stdout.write(USAGE)
         return 0
     verbose = "--verbose" in sys.argv[1:]
+    if "--self-test" in sys.argv[1:]:
+        return _self_test()
     if "--simulate" in sys.argv[1:]:
         idx = sys.argv[1:].index("--simulate")
         text = sys.argv[1:][idx + 1] if idx + 1 < len(sys.argv[1:]) else ""

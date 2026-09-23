@@ -2242,6 +2242,63 @@ class ListSpillTests(unittest.TestCase):
             self.assertIn("wrote", err.getvalue())
 
 
+class ReindexSpillTests(unittest.TestCase):
+    def test_reindex_rebuilds_index_from_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            live = target / "a.txt"
+            live.write_text("x" * 4, encoding="utf-8")
+            index = target / "index.jsonl"
+            index.write_text(
+                json.dumps({"ts": 1, "name": "deleted.txt", "bytes": 9}) + "\n",
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--reindex-spill", str(target)])
+            self.assertEqual(rc, 0)
+            self.assertIn("reindexed 1 spill files", buf.getvalue())
+            rows = [
+                json.loads(line)
+                for line in index.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["name"], "a.txt")
+            self.assertEqual(rows[0]["bytes"], 4)
+
+    def test_reindex_json_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            (target / "a.txt").write_text("x", encoding="utf-8")
+            (target / "b.txt").write_text("yy", encoding="utf-8")
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--reindex-spill", str(target), "--json"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["reindexed"], 2)
+            self.assertEqual(payload["dir"], str(target))
+
+    def test_reindex_missing_dir_rc2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = C.main(["--reindex-spill", str(Path(tmp) / "nope")])
+            self.assertEqual(rc, 2)
+
+    def test_reindex_unit_empty_dir_writes_empty_index(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            rows, index_path = C.reindex_spill(target)
+            self.assertEqual(rows, 0)
+            self.assertEqual(
+                index_path.read_text(encoding="utf-8"), ""
+            )
+
+
 class KeepTextTests(unittest.TestCase):
     def setUp(self):
         self._spill_env = patch.dict(os.environ, {"JEV_CONSULT_SPILL": "0"})

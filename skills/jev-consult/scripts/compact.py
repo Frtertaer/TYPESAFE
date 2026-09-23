@@ -1757,6 +1757,33 @@ def _spill_dirs(directory: Path | None, include_dry: bool) -> list[Path | None]:
     return dirs
 
 
+def reindex_spill(directory: Path | None = None) -> tuple[int, Path | None]:
+    """Rewrite index.jsonl from the spill files on disk (mtime as ts).
+
+    Returns (rows, index_path); index_path is None when no dir is resolved.
+    """
+    target = directory if directory is not None else spill_dir_default()
+    if target is None or not target.is_dir():
+        return 0, None
+    rows: list[dict] = []
+    for candidate in sorted(target.iterdir()):
+        try:
+            info = candidate.stat()
+        except OSError:
+            continue
+        if not stat.S_ISREG(info.st_mode) or candidate.name == SPILL_INDEX_NAME:
+            continue
+        rows.append(
+            {"ts": info.st_mtime, "name": candidate.name, "bytes": info.st_size}
+        )
+    index_path = _spill_index_path(target)
+    _atomic_write(
+        index_path,
+        "".join(json.dumps(row) + "\n" for row in rows),
+    )
+    return len(rows), index_path
+
+
 def prune_spill(
     directory: Path | None = None,
     older_than: float = 0.0,
@@ -1944,6 +1971,14 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FILE",
         default="",
         help="List spill files not referenced by FILE (uses --spill-dir for the dir).",
+    )
+    parser.add_argument(
+        "--reindex-spill",
+        metavar="DIR",
+        nargs="?",
+        const="",
+        default=None,
+        help="Rebuild index.jsonl from the spill files on disk (file mtime as ts; DIR or the default spill dir).",
     )
     parser.add_argument(
         "--md",
@@ -2250,6 +2285,24 @@ def main(argv: list[str] | None = None) -> int:
             for path in orphans:
                 sys.stdout.write("orphan: %s\n" % path)
             sys.stdout.write("%d orphans\n" % len(orphans))
+        return 0
+    if args.reindex_spill is not None:
+        directory = Path(args.reindex_spill) if args.reindex_spill else None
+        rows, index_path = reindex_spill(directory)
+        if index_path is None:
+            sys.stderr.write("--reindex-spill: no spill dir resolved\n")
+            return 2
+        payload = {
+            "reindexed": rows,
+            "dir": str(index_path.parent),
+            "index": str(index_path),
+        }
+        if args.json:
+            sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+        else:
+            sys.stdout.write(
+                "reindexed %d spill files in %s\n" % (rows, payload["dir"])
+            )
         return 0
     if getattr(args, "spill_stats", False):
         directory = Path(args.spill_dir) if args.spill_dir else None

@@ -1183,7 +1183,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON to PATH — with --watch a {verdict, count, added, removed, ticks} payload refreshed every tick; without it a one-shot {verdict: ok|empty, count, ticks: 1} probe of the filtered entries.")
     parser.add_argument("--self-test", action="store_true", help="Parse a synthetic 3-entry log + 1 bad line; exit 1 when the counts do not match")
-    parser.add_argument("--verify", action="store_true", help="Chain check the raw log: unparseable lines, missing ts/jev_status, missing required schema keys on full routing/fill entries, ts regressions; rc 1 on any problem")
+    parser.add_argument("--verify", action="store_true", help="Chain check the raw log: unparseable lines, missing ts/jev_status, missing required schema keys on full routing/fill entries, ts regressions; rc 1 on any problem (--jq KEY digs the report, rc 2 on unknown)")
     args = parser.parse_args(argv)
     if getattr(args, "schema", False):
         if args.json:
@@ -1285,6 +1285,29 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if getattr(args, "verify", False):
         report = verify_log(path)
+        if args.jq:
+            node = report
+            found = True
+            for part in args.jq.split("."):
+                if isinstance(node, dict) and part in node:
+                    node = node[part]
+                elif isinstance(node, list):
+                    try:
+                        node = node[int(part)]
+                    except (ValueError, IndexError):
+                        found = False
+                        break
+                else:
+                    found = False
+                    break
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (verify has: %s)\n"
+                    % (args.jq, ", ".join(sorted(report)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+            return 0 if report["ok"] else 1
         if args.json:
             sys.stdout.write(json.dumps(report, indent=2) + "\n")
         else:

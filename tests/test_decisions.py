@@ -2880,6 +2880,30 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(report["bad_lines"], 1)
             self.assertEqual(len(report["problems"]), 3)
 
+    def test_verify_jq_digs_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1, "jev_status": "ok"}])
+            proc = self.run_cli("--file", str(path), "--verify", "--jq", "entries")
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(json.loads(proc.stdout), 1)
+
+    def test_verify_jq_list_index_and_unknown_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("not json\n")
+            proc = self.run_cli(
+                "--file", str(path), "--verify", "--jq", "problems.0.issue"
+            )
+            self.assertEqual(proc.returncode, 1)  # verify rc still propagates
+            self.assertEqual(json.loads(proc.stdout), "unparseable")
+            proc = self.run_cli(
+                "--file", str(path), "--verify", "--jq", "nope"
+            )
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("bad --jq key", proc.stderr)
+
     def test_verify_flags_missing_schema_keys_on_routing_entry(self):
         """A routing-shaped entry (has prompt_sha/shortlist) missing required keys fails."""
         with tempfile.TemporaryDirectory() as tmp:

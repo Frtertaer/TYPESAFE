@@ -54,6 +54,39 @@ class ExampleFilesTests(unittest.TestCase):
         self.assertIn("plan", data)
         self.assertIn("history", data)
 
+    def test_request_examples_carry_question_contract(self) -> None:
+        files = sorted(EXAMPLES.glob("*.request.json"))
+        self.assertGreaterEqual(len(files), 5)
+        for path in files:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            questions = data.get("questions")
+            self.assertIsInstance(questions, dict, path.name)
+            self.assertTrue(questions, path.name)
+            for qid, q in questions.items():
+                self.assertIsInstance(q, dict, "%s %s" % (path.name, qid))
+                self.assertIn(q.get("type"), ("choice", "noul", "score"), "%s %s" % (path.name, qid))
+                self.assertTrue(str(q.get("instructions") or "").strip(), "%s %s" % (path.name, qid))
+
+    def test_compare_cases_match_schema_contract(self) -> None:
+        import io as _io
+        from contextlib import redirect_stdout
+
+        buf = _io.StringIO()
+        with redirect_stdout(buf):
+            rc = compare.main(["--schema", "--json"])
+        self.assertEqual(rc, 0)
+        schema = json.loads(buf.getvalue())
+        required_case_keys = {
+            k.split(".", 1)[1] for k, v in schema.items() if k.startswith("case.") and v["required"]
+        }
+        blob = json.loads((EXAMPLES / "compare-cases.json").read_text(encoding="utf-8"))
+        for case in blob["cases"]:
+            self.assertTrue(required_case_keys <= set(case), case.get("id"))
+
+    def test_trace_template_covers_trace_schema_keys(self) -> None:
+        data = json.loads((EXAMPLES / "trace.template.json").read_text(encoding="utf-8"))
+        self.assertTrue(set(trace.EMPTY) <= set(data))
+
 
 if __name__ == "__main__":
     unittest.main()

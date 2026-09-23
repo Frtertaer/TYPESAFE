@@ -185,6 +185,21 @@ One-glance index of every `JEV_*` / `TYPESAFE_API_KEY` / `HERMES_HOME` env var t
 | `JEV_TRIGGER_MIN_COVERAGE`, `JEV_TRIGGER_MIN_COVERS` | trigger_eval coverage gates |
 | `HERMES_HOME` | harness detection fallback to `hermes` |
 
+## Flag map
+
+Residual `--flags` not spelled out in the prose above (test-pinned: every declared flag must appear here or in README.md):
+
+| Script | Flags |
+| --- | --- |
+| `inventory.py` | `--all-names` (every scanned item name, no descriptions), `--catalogs` (marketplace URLs), `--check-miss FILE` (miss-file freshness like `--check-sidecar`), `--show-policy`, `--sidecar` (write `.jev-tools.json`-style name list), `--home`/`--hermes-home` (test overrides) |
+| fills (`peer_fill.py`/`catalog_fill.py`/`apply_fill.py`) | `--cwd`, `--home`, `--hermes-home` (test overrides); install argv containing `--force` or `--enable` aborts the fill (refused tokens) |
+| `compact.py` | `--goal`, `--keep-threshold`, `--preserve-recent`, `--truncate-head-chars` (defaults env-backed), `--spill-dir` (spill dir override for spill ops), `--output` (redirect the compacted text), `--fake` (no-Jev test fixture) |
+| `decisions.py` | `--dedupes` (dedupe true/false counts) |
+| `doctor.py` | `--home`, `--hermes-home` (test overrides) |
+| `jev.py` | `ask --dry` (validate+print resolved request, no API call), `decide --irreversible` (marks the action hard to undo) |
+| `trace.py` | `init --step`, `show --pretty`/`--key`, `set --step`/`--unknown`/`--error`/`--attempt`/`--kv KEY=VALUE`, `record --step`, `prune --older-than` |
+| `doctor.py --agents A,B` | restrict the checks to named harnesses |
+
 ## After clone
 
 ```text

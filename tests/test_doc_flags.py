@@ -25,7 +25,7 @@ FLAG_RE = re.compile(r"--[a-z][a-z0-9-]+")
 # prohibitions like "Never --force") or attributes to a different tool
 # (hermes install --yes) — excluded from the parity check.
 EXCLUDE = {
-    "apply_fill": {"--force", "--no-enable"},
+    "apply_fill": {"--force", "--enable", "--no-enable"},
     "catalog_fill": {"--severity", "--yes", "--force", "--no-enable"},
 }
 

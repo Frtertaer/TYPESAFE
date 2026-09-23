@@ -3124,6 +3124,54 @@ class UnchangedMaxTests(unittest.TestCase):
             self.assertEqual(len(ticks), 3)
 
 
+class NotesContextTests(unittest.TestCase):
+    def _five(self, tmp: str) -> Path:
+        import io
+        from contextlib import redirect_stdout
+
+        path = Path(tmp) / "trace.json"
+        with redirect_stdout(io.StringIO()):
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            for i in range(1, 6):
+                tr.main(["--file", str(path), "record", "--pick", "x", "--note", "n%d" % i])
+        return path
+
+    def test_context_window(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._five(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--context", "3", "--around", "1"])
+            self.assertEqual(rc, 0)
+            lines = buf.getvalue().splitlines()
+            self.assertIn("> 3", lines[1])
+            self.assertIn("n2", lines[0])
+            self.assertIn("n4", lines[2])
+            self.assertEqual(len(lines), 4)  # 3 notes + footer
+
+    def test_context_bounds_and_json(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._five(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--context", "1", "--json"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["index"], 1)
+            self.assertEqual(len(payload["notes"]), 3)  # clipped at start
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = tr.main(["--file", str(path), "notes", "--context", "9"])
+            self.assertEqual(rc, 2)
+            self.assertIn("out of range", err.getvalue())
+
+
 class HistoryKindTests(unittest.TestCase):
     def _mixed(self, tmp: str) -> Path:
         import io

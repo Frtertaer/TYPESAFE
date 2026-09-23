@@ -1141,6 +1141,48 @@ def cmd_notes(args: argparse.Namespace) -> int:
         except OSError as exc:
             sys.stderr.write("edit failed: %s\n" % exc)
             return 1
+    context = getattr(args, "context", None)
+    if context is not None:
+        try:
+            center = int(str(context).strip())
+        except (TypeError, ValueError):
+            sys.stderr.write("bad --context index: %s\n" % context)
+            return 2
+        around = getattr(args, "around", 2)
+        if not isinstance(around, int) or around < 0:
+            sys.stderr.write("bad --around: %s\n" % around)
+            return 2
+        if center < 1 or center > len(notes):
+            sys.stderr.write(
+                "--context %d out of range (%d notes)\n" % (center, len(notes))
+            )
+            return 2
+        lo = max(0, center - 1 - around)
+        hi = min(len(notes), center + around)
+        window = notes[lo:hi]
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps(
+                    {"index": center, "around": around, "notes": window},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            lines = []
+            for offset, note in enumerate(window):
+                if isinstance(note, dict):
+                    stamp = str(note.get("iso") or int(note.get("ts") or 0))
+                    mark = ">" if lo + offset + 1 == center else " "
+                    lines.append(
+                        "%s %d %s %s"
+                        % (mark, lo + offset + 1, stamp, str(note.get("text") or ""))
+                    )
+            lines.append("context %d+%d-%d of %d note(s)" % (center, 0, around, len(notes)))
+            sys.stdout.write("\n".join(lines) + "\n")
+        return 0
+
     def _filtered(items: list) -> list | None:
         since = getattr(args, "since", None)
         if since is not None:
@@ -1829,6 +1871,8 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--first", type=int, default=None, help="Show only the earliest N notes (applied before --limit/--reverse)")
     notes_cmd.add_argument("--prune", type=int, help="Rewrite the trace keeping only the last N notes")
     notes_cmd.add_argument("--edit", nargs=2, metavar=("I", "TEXT"), help="Rewrite note I (1-based, into the unfiltered list) — or every note in range I-J — with TEXT; keeps ts/iso/harness, recomputes sha; rc 2 out of range")
+    notes_cmd.add_argument("--context", metavar="I", default=None, help="Print the notes surrounding index I (1-based, into the unfiltered list; other filters ignored)")
+    notes_cmd.add_argument("--around", metavar="K", type=int, default=2, help="With --context: show K notes on each side (default 2)")
     notes_cmd.add_argument("--since", default=None, help="Only notes with ts >= epoch seconds or ISO8601")
     notes_cmd.add_argument("--before", default=None, help="Only notes with ts <= epoch seconds or ISO8601")
     notes_cmd.add_argument("--harness", default="", help="Only notes tagged with this harness")

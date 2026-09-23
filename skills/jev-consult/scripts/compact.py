@@ -99,6 +99,49 @@ SPILL_MAX_FILES = 200
 SPILL_MAX_BYTES = 256 * 1024 * 1024
 SPILL_INDEX_NAME = "index.jsonl"
 
+# --schema contract: the compact result payload, the spill index rows, and
+# the --spill-stats payload. Keys are dotted paths; required marks keys every
+# caller can rely on, optional marks conditional ones.
+COMPACT_SCHEMA_ROWS = {
+    "messages": {"required": True, "type": "list<message>"},
+    "message.role": {"required": True, "type": "str (system|user|assistant|tool)"},
+    "message.text": {"required": True, "type": "str"},
+    "message.toolUses": {"required": True, "type": "list<{tool_use_id, tool, input, text?, isError?}>"},
+    "message.toolResults": {"required": False, "type": "list<{tool_use_id, text, isError}>"},
+    "decisions": {"required": True, "type": "list<decision>"},
+    "decision.id": {"required": True, "type": "str (tool call id)"},
+    "decision.tool": {"required": True, "type": "str"},
+    "decision.keepCall": {"required": True, "type": "number 0-1"},
+    "decision.keepResult": {"required": True, "type": "number 0-1"},
+    "decision.action": {"required": True, "type": "keep|drop_result|drop_call"},
+    "decision.reason": {"required": True, "type": "pinned|kept|result_dropped|call_dropped"},
+    "stats": {"required": True, "type": "dict"},
+    "stats.messagesBefore": {"required": True, "type": "int"},
+    "stats.messagesAfter": {"required": True, "type": "int"},
+    "stats.charsBefore": {"required": True, "type": "int"},
+    "stats.charsAfter": {"required": True, "type": "int"},
+    "stats.calls": {"required": True, "type": "int"},
+    "stats.kept": {"required": True, "type": "int"},
+    "stats.resultsDropped": {"required": True, "type": "int"},
+    "stats.callsDropped": {"required": True, "type": "int"},
+    "stats.pinned": {"required": True, "type": "int"},
+    "stats.stateTokens": {"required": True, "type": "int"},
+    "stats.stateStage": {"required": True, "type": "str"},
+    "stats.requests": {"required": True, "type": "int"},
+    "stats.ms": {"required": True, "type": "int"},
+    "stats.fallback": {"required": True, "type": "bool (true when min_reduction gate reverted the compaction)"},
+    "stats.reduction": {"required": False, "type": "float (compact_or_keep adds it)"},
+    "stats.skipped": {"required": False, "type": "str (e.g. min_messages short-circuit)"},
+    "spill_index.ts": {"required": True, "type": "number (epoch)"},
+    "spill_index.name": {"required": True, "type": "str (spill file name)"},
+    "spill_index.bytes": {"required": True, "type": "int"},
+    "spill_stats.dir": {"required": True, "type": "str"},
+    "spill_stats.count": {"required": True, "type": "int"},
+    "spill_stats.bytes": {"required": True, "type": "int"},
+    "spill_stats.oldest_ts": {"required": True, "type": "number|null"},
+    "spill_stats.newest_ts": {"required": True, "type": "number|null"},
+}
+
 
 def _spill_index_path(target: Path) -> Path:
     return target / SPILL_INDEX_NAME
@@ -1805,7 +1848,22 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Compact a synthetic transcript with a stub asker (no Jev) and check the stats/min-messages paths; exit 1 on failure.",
     )
+    parser.add_argument(
+        "--schema",
+        action="store_true",
+        help="Print the result/spill/stats key contract and exit (--json emits the object).",
+    )
     args = parser.parse_args(argv)
+    if args.schema:
+        if args.json:
+            sys.stdout.write(json.dumps(COMPACT_SCHEMA_ROWS, indent=2) + "\n")
+        else:
+            for key, row in COMPACT_SCHEMA_ROWS.items():
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (key, row["type"], "required" if row["required"] else "optional")
+                )
+        return 0
     if args.self_test:
         checks: dict = {}
         try:

@@ -6911,6 +6911,7 @@ def coverage_payload() -> dict:
 SCHEMA_SCRIPTS = {
     "apply_fill.py": ("--schema",),
     "catalog_fill.py": ("--schema",),
+    "compact.py": ("--schema",),
     "compare.py": ("--schema",),
     "decisions.py": ("--schema",),
     "inventory.py": ("--schema",),

@@ -2581,5 +2581,69 @@ class SpillGcTests(unittest.TestCase):
             self.assertIn("count 1", text)
 
 
+class SchemaTests(unittest.TestCase):
+    def test_schema_flag_text_and_json(self) -> None:
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = C.main(["--schema"])
+        self.assertEqual(rc, 0)
+        self.assertIn("stats.fallback: bool", buf.getvalue())
+        self.assertIn("(required)", buf.getvalue())
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = C.main(["--schema", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertIn("stats.reduction", rows)
+        self.assertFalse(rows["stats.reduction"]["required"])
+
+    def test_schema_rows_cover_real_compact_output(self) -> None:
+        """A real compact() run must satisfy the required schema keys and
+        never emit a key the schema doesn't document."""
+
+        def stub(_state, questions):
+            return {
+                "answers": {
+                    name: {"type": "noul", "noul": 0.9}
+                    for name in questions
+                }
+            }
+
+        transcript = [
+            msg("user", "task"),
+            msg("assistant", "", uses=[{"tool_use_id": "t1", "tool": "Read", "input": {"f": "x"}}]),
+            msg("tool", results=[{"tool_use_id": "t1", "text": "y" * 4000}]),
+        ]
+        result = C.compact_or_keep(transcript, stub, {"keep_threshold": 0.5})
+        rows = C.COMPACT_SCHEMA_ROWS
+        top = set(result.keys())
+        required_top = {k for k, r in rows.items() if r["required"] and "." not in k}
+        self.assertTrue(required_top <= top, required_top - top)
+        self.assertTrue(top <= {k for k in rows if "." not in k})
+        stats_keys = set(result["stats"].keys())
+        documented_stats = {
+            k.split(".", 1)[1] for k in rows if k.startswith("stats.")
+        }
+        self.assertTrue(stats_keys <= documented_stats, stats_keys - documented_stats)
+        required_stats = {
+            k.split(".", 1)[1]
+            for k, r in rows.items()
+            if k.startswith("stats.") and r["required"]
+        }
+        self.assertTrue(required_stats <= stats_keys, required_stats - stats_keys)
+        for decision in result["decisions"]:
+            documented_dec = {
+                k.split(".", 1)[1] for k in rows if k.startswith("decision.")
+            }
+            self.assertTrue(set(decision) <= documented_dec, set(decision) - documented_dec)
+        for message in result["messages"]:
+            documented_msg = {
+                k.split(".", 1)[1] for k in rows if k.startswith("message.")
+            }
+            self.assertTrue(set(message) <= documented_msg, set(message) - documented_msg)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

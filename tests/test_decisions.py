@@ -2880,6 +2880,92 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(report["bad_lines"], 1)
             self.assertEqual(len(report["problems"]), 3)
 
+    def test_verify_flags_missing_schema_keys_on_routing_entry(self):
+        """A routing-shaped entry (has prompt_sha/shortlist) missing required keys fails."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {
+                        "ts": 1,
+                        "jev_status": "ok",
+                        "prompt_sha": "abc123def456",
+                        "harness": "hermes",
+                    }
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--verify")
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("missing keys:", proc.stdout)
+            self.assertIn("winner", proc.stdout)
+
+    def test_verify_routing_entry_with_all_keys_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            entry = {}
+            for key, meta in decisions.ENTRY_SCHEMA_ROWS.items():
+                if not meta["required"]:
+                    continue
+                t = meta["type"]
+                if "null" in t:
+                    entry[key] = None
+                elif "bool" in t:
+                    entry[key] = False
+                elif "list" in t:
+                    entry[key] = []
+                elif "object" in t:
+                    entry[key] = {}
+                elif "int" in t or "number" in t:
+                    entry[key] = 0
+                else:
+                    entry[key] = "x"
+            entry["ts"] = 1
+            entry["jev_status"] = "none"
+            write_log(path, [entry])
+            proc = self.run_cli("--file", str(path), "--verify")
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+            self.assertIn("verify: ok", proc.stdout)
+
+    def test_verify_fill_entries_use_fill_schema(self):
+        """Fill entries only owe the fill contract; missing 'outcome' flags."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {
+                        "ts": 1,
+                        "jev_status": "fill",
+                        "fill": "apply",
+                        "harness": "codex",
+                        "outcome": "done",
+                        "prompt_head": "x",
+                    },
+                    {"ts": 2, "jev_status": "fill", "fill": "peer", "harness": "codex"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--verify")
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("missing keys:", proc.stdout)
+            self.assertIn("outcome", proc.stdout)
+            # the complete fill entry alone verifies clean
+            write_log(
+                path,
+                [
+                    {
+                        "ts": 1,
+                        "jev_status": "fill",
+                        "fill": "apply",
+                        "harness": "codex",
+                        "outcome": "done",
+                        "prompt_head": "x",
+                    }
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--verify")
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+
     def test_missing_filters_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

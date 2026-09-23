@@ -143,6 +143,22 @@ def verify_log(path: Path) -> dict:
             prev_ts = ts if prev_ts is None else max(prev_ts, ts)
         if "jev_status" not in item:
             problems.append({"line": lineno, "issue": "missing jev_status"})
+        if item.get("jev_status") == "fill":
+            want = inventory.FILL_SCHEMA_ROWS
+        elif "prompt_sha" in item or "shortlist" in item:
+            want = ENTRY_SCHEMA_ROWS
+        else:
+            # minimal entry (tests, hand-written): ts/jev_status checks only
+            want = {}
+        missing = [
+            key
+            for key, meta in want.items()
+            if meta.get("required") and key not in item
+        ]
+        if missing:
+            problems.append(
+                {"line": lineno, "issue": "missing keys: %s" % ",".join(missing)}
+            )
     return {
         "ok": not problems,
         "entries": len(entries),
@@ -1120,7 +1136,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that reports removals.")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON to PATH — with --watch a {verdict, count, added, removed, ticks} payload refreshed every tick; without it a one-shot {verdict: ok|empty, count, ticks: 1} probe of the filtered entries.")
     parser.add_argument("--self-test", action="store_true", help="Parse a synthetic 3-entry log + 1 bad line; exit 1 when the counts do not match")
-    parser.add_argument("--verify", action="store_true", help="Chain check the raw log: unparseable lines, missing ts/jev_status, ts regressions; rc 1 on any problem")
+    parser.add_argument("--verify", action="store_true", help="Chain check the raw log: unparseable lines, missing ts/jev_status, missing required schema keys on full routing/fill entries, ts regressions; rc 1 on any problem")
     args = parser.parse_args(argv)
     if getattr(args, "schema", False):
         if args.json:

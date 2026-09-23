@@ -118,6 +118,14 @@ class ExampleFilesTests(unittest.TestCase):
             extra_top = set(req) - {k for k in schema if "." not in k}
             self.assertEqual(extra_top, set(), "%s has unknown keys" % path.name)
 
+    def test_readme_names_every_fixture(self) -> None:
+        """examples/README.md stays in sync: every *.json fixture is named."""
+        readme = EXAMPLES / "README.md"
+        self.assertTrue(readme.is_file(), "examples/README.md missing")
+        text = readme.read_text(encoding="utf-8")
+        for path in sorted(EXAMPLES.glob("*.json")):
+            self.assertIn(path.name, text, "%s not documented" % path.name)
+
 
 if __name__ == "__main__":
     unittest.main()

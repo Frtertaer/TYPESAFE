@@ -127,14 +127,16 @@ def emit_or_jq(tick: dict, jq: str, out_path=None, quiet: bool = False, bad=None
 
     jq is a comma list of dotted paths; each prints one JSON line (null on a
     miss). In jq mode the tick JSON is not emitted and out_path is not written,
-    matching decisions.py's --jq watch behavior."""
+    matching decisions.py's --jq watch behavior. quiet suppresses clean ticks
+    in both modes: a jq projection reaches stdout only for a `bad` tick."""
     if jq:
-        for field in [f.strip() for f in jq.split(",") if f.strip()]:
-            cur = tick
-            for part in field.split("."):
-                cur = cur.get(part) if isinstance(cur, dict) else None
-            sys.stdout.write(json.dumps(cur) + "\n")
-        sys.stdout.flush()
+        if not (quiet and not bad):
+            for field in [f.strip() for f in jq.split(",") if f.strip()]:
+                cur = tick
+                for part in field.split("."):
+                    cur = cur.get(part) if isinstance(cur, dict) else None
+                sys.stdout.write(json.dumps(cur) + "\n")
+            sys.stdout.flush()
         return
     emit(tick, out_path, quiet=quiet, bad=bad)
 

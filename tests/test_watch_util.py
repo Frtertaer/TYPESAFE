@@ -162,6 +162,26 @@ class EmitOrJqTests(unittest.TestCase):
             _watch.emit_or_jq(tick, "")
         self.assertEqual(json.loads(buf.getvalue()), tick)
 
+    def test_quiet_suppresses_jq_projection_on_clean_tick(self) -> None:
+        """--quiet must silence --jq projections on clean ticks, same as it
+        silences whole-tick output."""
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _watch.emit_or_jq({"a": 1}, "a", quiet=True, bad=False)
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_quiet_keeps_jq_projection_on_bad_tick(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _watch.emit_or_jq({"a": 1}, "a", quiet=True, bad=True)
+        self.assertEqual(buf.getvalue().strip(), "1")
+
 
 if __name__ == "__main__":
     unittest.main()

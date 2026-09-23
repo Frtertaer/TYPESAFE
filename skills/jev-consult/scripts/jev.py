@@ -1302,7 +1302,7 @@ def build_parser() -> argparse.ArgumentParser:
     selftest.set_defaults(func=cmd_self_test)
     env_cmd = sub.add_parser(
         "env",
-        help="Print the resolved env config JSON and exit (--jq KEY prints one field, rc 2 on unknown)",
+        help="Print the resolved env config JSON ({api_key_set presence flag — never the key —, policy, timeout_seconds, watch_*}) and exit (--jq KEY prints one field, rc 2 on unknown)",
     )
     env_cmd.add_argument(
         "--jq",

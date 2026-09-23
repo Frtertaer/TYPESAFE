@@ -340,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first failing tick.")
     parser.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the {ok,checks} payload (e.g. ok); unknown key exits 2")
-    parser.add_argument("--env", action="store_true", help="Print the resolved JEV_*/TYPESAFE_* env vars as JSON and exit (secret-looking names/values masked to <set>)")
+    parser.add_argument("--env", action="store_true", help="Print the resolved env config JSON: {env: {JEV_*/TYPESAFE_* masked dump}, count, watch_max, watch_secs, watch_quiet, policy} (secret-looking names/values masked to <set>)")
     parser.add_argument("--schema", action="store_true", help="Print the {ok,checks} payload key contract and check-name catalog (--json emits the object) and exit")
     parser.add_argument("--json", action="store_true", help="With --schema: emit the contract object instead of text rows (the normal payload is already JSON)")
     parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown report (verdict line + per-check table with hints) to PATH")

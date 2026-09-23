@@ -366,7 +366,7 @@ def main() -> int:
         default=0.0,
         help="Re-print the fill state as a {ts,miss,ask} JSON tick every S seconds (JEV_PEER_WATCH_MAX caps ticks).",
     )
-    parser.add_argument("--env", action="store_true", help="Print the resolved JEV_* env config JSON and exit (--jq KEY prints one field, rc 2 on unknown)")
+    parser.add_argument("--env", action="store_true", help="Print the resolved env config JSON ({fill_timeout_seconds, watch_max, watch_secs, watch_quiet, policy}) and exit (--jq KEY prints one field, rc 2 on unknown)")
     parser.add_argument("--jq", metavar="KEY", default="", help="With --status/--env: print just one dotted-path field of the report (e.g. miss); unknown key exits 2. With --watch: print just the named tick field(s) per pass, comma list.")
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")

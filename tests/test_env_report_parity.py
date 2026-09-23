@@ -117,6 +117,18 @@ class EnvReportParityTests(unittest.TestCase):
                 self.assertEqual(proc.returncode, 2, name + " bad --jq key must exit 2")
                 self.assertIn("has:", proc.stderr)
 
+    def test_help_names_report_fields(self) -> None:
+        """--env help must name at least one report field (self-documenting)."""
+        for name, required in ENV_SCRIPTS.items():
+            with self.subTest(script=name):
+                proc = _run(name, ["--help"])
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                help_text = proc.stdout.lower()
+                hits = [k for k in required if k.replace("_", "-") in help_text or k in help_text]
+                self.assertTrue(
+                    hits, "%s --help names no env report field" % name
+                )
+
     def test_scripts_without_env_flag_fail_cleanly(self) -> None:
         for path in sorted(SCRIPTS.glob("*.py")):
             if path.name in ENV_SCRIPTS or path.name in ("smoke.py", "_watch.py"):

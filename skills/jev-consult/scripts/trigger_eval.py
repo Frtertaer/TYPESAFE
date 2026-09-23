@@ -301,7 +301,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--env",
         action="store_true",
-        help="Print the resolved config (paths, margin, scorer) as JSON and exit.",
+        help="Print the resolved config ({cases, skill, scorer paths, margin, min_coverage, min_covers, desc_override, watch_*}) as JSON and exit.",
     )
     parser.add_argument(
         "--jq",

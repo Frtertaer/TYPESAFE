@@ -517,8 +517,16 @@ def main(argv: list[str] | None = None) -> int:
             {"path": str(path), **f} for path in paths for f in lint_skill(path)
         ]
         rows = [r for r in all_rows if not severity or r["severity"] == severity]
+        payload = {"findings": rows}
+        if out_path:
+            try:
+                _atomic_write(Path(out_path),
+                    _json.dumps(payload, indent=2) + "\n")
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                return 1
+            sys.stderr.write("wrote %d finding(s) to %s\n" % (len(rows), out_path))
         if jq_value:
-            payload = {"findings": rows}
             value, found = _watch.dig(payload, jq_value)
             if not found:
                 sys.stderr.write(
@@ -530,15 +538,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         def bad(r: dict) -> bool:
             return r["severity"] == "error" or (strict and r["severity"] == "warn")
-
-        if out_path:
-            try:
-                _atomic_write(Path(out_path), 
-                    _json.dumps({"findings": rows}, indent=2) + "\n")
-            except OSError as exc:
-                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
-                return 1
-            sys.stderr.write("wrote %d finding(s) to %s\n" % (len(rows), out_path))
         rc_now = 1 if any(bad(r) for r in all_rows) else 0
         if verdict_path:
             if not _watch.write_verdict(

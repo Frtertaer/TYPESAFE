@@ -1673,6 +1673,15 @@ def main(argv: list[str] | None = None) -> int:
             writer.writerow(row)
     else:
         watching_jq = bool(getattr(args, "watch", 0.0)) and getattr(args, "jq", "")
+        text = json.dumps(payload, indent=2) + "\n"
+        if not watching_jq and getattr(args, "out", ""):
+            out_path = Path(args.out)
+            try:
+                atomic_write_text(out_path, text)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                return 1
+            sys.stderr.write("wrote %s\n" % out_path)
         if getattr(args, "jq", "") and not watching_jq:
             cur = payload
             found = True
@@ -1690,18 +1699,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             sys.stdout.write(json.dumps(cur) + "\n")
             return 0
-        if not watching_jq:
-            text = json.dumps(payload, indent=2) + "\n"
-            if getattr(args, "out", ""):
-                out_path = Path(args.out)
-                try:
-                    atomic_write_text(out_path, text)
-                except OSError as exc:
-                    sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
-                    return 1
-                sys.stderr.write("wrote %s\n" % out_path)
-            else:
-                sys.stdout.write(text)
+        if not watching_jq and not getattr(args, "out", ""):
+            sys.stdout.write(text)
     if args.write_ask:
         write_ask(Path(args.write_ask), args.task, harness, picked)
     if args.sidecar:

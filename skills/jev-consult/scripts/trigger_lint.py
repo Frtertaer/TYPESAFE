@@ -407,6 +407,14 @@ def main(argv: list[str] | None = None) -> int:
                     "infos": finfo,
                 }
             )
+        if out_path:
+            try:
+                _atomic_write(Path(out_path),
+                    json.dumps(results, indent=2) + "\n", encoding="utf-8"
+                )
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                return 1
         if jq_value:
             value, found = _watch.dig(results, jq_value)
             if not found:
@@ -431,14 +439,6 @@ def main(argv: list[str] | None = None) -> int:
                     "  %d error(s), %d warning(s), %d info\n"
                     % (res["errors"], res["warnings"], res["infos"])
                 )
-        if out_path:
-            try:
-                _atomic_write(Path(out_path), 
-                    json.dumps(results, indent=2) + "\n", encoding="utf-8"
-                )
-            except OSError as exc:
-                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
-                return 1
         any_err = any(r["errors"] for r in results)
         any_find = any(
             (r["errors"] or r["warnings"] or r["infos"]) for r in results
@@ -530,6 +530,15 @@ def main(argv: list[str] | None = None) -> int:
         "warnings": n_warn,
         "infos": n_info,
     }
+    if out_path:
+        try:
+            _atomic_write(Path(out_path),
+                json.dumps(payload, indent=2)
+                + "\n")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+        sys.stderr.write("wrote %d finding(s) to %s\n" % (len(shown), out_path))
     if jq_value:
         value, found = _watch.dig(payload, jq_value)
         if not found:
@@ -540,15 +549,6 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         sys.stdout.write(json.dumps(value) + "\n")
         return 0
-    if out_path:
-        try:
-            _atomic_write(Path(out_path), 
-                json.dumps(payload, indent=2)
-                + "\n")
-        except OSError as exc:
-            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
-            return 1
-        sys.stderr.write("wrote %d finding(s) to %s\n" % (len(shown), out_path))
     if as_json:
         sys.stdout.write(
             json.dumps(payload, indent=2)

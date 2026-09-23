@@ -502,6 +502,13 @@ def main() -> int:
                 "ask_file_exists": ask_path.is_file(),
                 "task": task,
             }
+            if getattr(args, "out", ""):
+                try:
+                    atomic_write_text(
+                        Path(args.out), json.dumps(report, indent=2, sort_keys=True) + "\n"
+                    )
+                except OSError as exc:
+                    sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
             if args.jq:
                 cur = report
                 found = True

@@ -581,6 +581,14 @@ def main(argv: list[str] | None = None) -> int:
             results.append(
                 {"path": arg, "findings": fshown, "errors": ferr, "total": len(ffind)}
             )
+        if out_path:
+            try:
+                _atomic_write(Path(out_path),
+                    json.dumps(results, indent=2) + "\n", encoding="utf-8"
+                )
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                return 1
         if jq_value:
             value, found = _watch.dig(results, jq_value)
             if not found:
@@ -599,14 +607,6 @@ def main(argv: list[str] | None = None) -> int:
                 for f in res["findings"]:
                     sys.stdout.write(format_finding(f) + "\n")
                 sys.stdout.write("  %d error(s) of %d finding(s)\n" % (res["errors"], res["total"]))
-        if out_path:
-            try:
-                _atomic_write(Path(out_path), 
-                    json.dumps(results, indent=2) + "\n", encoding="utf-8"
-                )
-            except OSError as exc:
-                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
-                return 1
         any_err = any(r["errors"] for r in results)
         any_find = any(r["total"] for r in results)
         return 1 if any_err or (strict and any_find) else 0
@@ -687,15 +687,6 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write("fixed %s\n" % rule)
     findings = lint_request(request)
     shown = [f for f in findings if not severity or f["severity"] == severity]
-    if jq_value:
-        value, found = _watch.dig({"findings": shown}, jq_value)
-        if not found:
-            sys.stderr.write(
-                "bad --jq key %r (payload has: findings)\n" % jq_value
-            )
-            return 2
-        sys.stdout.write(json.dumps(value) + "\n")
-        return 0
     if out_path:
         try:
             _atomic_write(
@@ -706,6 +697,15 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
             return 1
         sys.stderr.write("wrote %d finding(s) to %s\n" % (len(shown), out_path))
+    if jq_value:
+        value, found = _watch.dig({"findings": shown}, jq_value)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: findings)\n" % jq_value
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+        return 0
     if as_json:
         sys.stdout.write(json.dumps({"findings": shown}, indent=2) + "\n")
     else:

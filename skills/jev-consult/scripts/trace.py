@@ -1122,9 +1122,6 @@ def cmd_stats(args: argparse.Namespace) -> int:
         },
     ):
         return 1
-    rc = emit_jq(out, getattr(args, "jq", ""))
-    if rc is not None:
-        return rc
     if getattr(args, "out", ""):
         try:
             _atomic_write(
@@ -1135,7 +1132,11 @@ def cmd_stats(args: argparse.Namespace) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
             return 1
         sys.stderr.write("wrote %s\n" % args.out)
-        return 0
+        if not getattr(args, "jq", ""):
+            return 0
+    rc = emit_jq(out, getattr(args, "jq", ""))
+    if rc is not None:
+        return rc
     emit(out)
     return 0
 

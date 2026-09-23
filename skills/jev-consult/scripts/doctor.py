@@ -555,6 +555,14 @@ def main(argv: list[str] | None = None) -> int:
                 check["hint"] = hint.replace("<agent>", check["agent"])
     shown = checks if not args.quiet else [c for c in checks if not c["ok"]]
     payload = {"ok": ok, "checks": shown}
+    text = json.dumps(payload, indent=2) + "\n"
+    if args.out:
+        try:
+            _atomic_write(Path(args.out), text)
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % args.out)
     if getattr(args, "jq", ""):
         node = payload
         found = True
@@ -597,15 +605,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
             return 1
         sys.stderr.write("wrote %s\n" % args.report)
-    text = json.dumps(payload, indent=2) + "\n"
     sys.stdout.write(text)
-    if args.out:
-        try:
-            _atomic_write(Path(args.out), text)
-        except OSError as exc:
-            sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
-            return 1
-        sys.stderr.write("wrote %s\n" % args.out)
     if args.verdict and not _write_verdict(checks):
         return 1
     return 0 if ok else 1

@@ -838,6 +838,15 @@ def main(argv: list[str] | None = None) -> int:
         "warnings": warns,
         "infos": infos,
     }
+    if out_path:
+        try:
+            _atomic_write(Path(out_path),
+                json.dumps(payload, indent=2)
+                + "\n")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+        sys.stderr.write("wrote %d finding(s) to %s\n" % (len(shown_rows), out_path))
     if jq_value:
         value, found = _watch.dig(payload, jq_value)
         if not found:
@@ -848,15 +857,6 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         sys.stdout.write(json.dumps(value) + "\n")
         return 0
-    if out_path:
-        try:
-            _atomic_write(Path(out_path), 
-                json.dumps(payload, indent=2)
-                + "\n")
-        except OSError as exc:
-            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
-            return 1
-        sys.stderr.write("wrote %d finding(s) to %s\n" % (len(shown_rows), out_path))
     if as_json:
         sys.stdout.write(
             json.dumps(payload, indent=2)

@@ -108,6 +108,48 @@ class LintSkillTests(unittest.TestCase):
             findings = skill_lint.lint_skill(path)
             self.assertNotIn("S009", {f["rule"] for f in findings})
 
+    def test_unmentioned_script_warns_s010(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(
+                tmp,
+                "x",
+                GOOD.format(name="x") + "\nRun `scripts/real.py` first.\n",
+            )
+            scripts = path.parent / "scripts"
+            scripts.mkdir()
+            (scripts / "real.py").write_text("# ok\n")
+            (scripts / "ghost.py").write_text("# never cited\n")
+            findings = skill_lint.lint_skill(path)
+            self.assertTrue(
+                any(
+                    f["rule"] == "S010" and "ghost.py" in f["message"]
+                    for f in findings
+                )
+            )
+
+    def test_s010_skips_private_vendored_and_mentioned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(
+                tmp,
+                "x",
+                GOOD.format(name="x") + "\nRuns helper.py inline.\n",
+            )
+            scripts = path.parent / "scripts"
+            scripts.mkdir()
+            (scripts / "helper.py").write_text("# cited by bare name\n")
+            (scripts / "_shared.py").write_text("# private module\n")
+            (scripts / "vendored.py").write_text(
+                "# [vendored] origin: elsewhere\n"
+            )
+            findings = skill_lint.lint_skill(path)
+            self.assertNotIn("S010", {f["rule"] for f in findings})
+
+    def test_no_scripts_dir_no_s010(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(tmp, "x", GOOD.format(name="x"))
+            findings = skill_lint.lint_skill(path)
+            self.assertNotIn("S010", {f["rule"] for f in findings})
+
     def test_quiet_suppresses_warn_lines(self):
         with tempfile.TemporaryDirectory() as tmp:
             warn_path = write_skill(tmp, "x", "---\nname: x\n---\n")

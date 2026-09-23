@@ -148,6 +148,25 @@ def lint_skill(path: Path) -> list[dict]:
                         "message": "cited scripts/%s not found" % script,
                     }
                 )
+        mentioned = set(re.findall(r"\b([A-Za-z0-9_-]+\.py)\b", text))
+        for script in sorted(p.name for p in scripts_dir.glob("*.py")):
+            if script.startswith("_") or script in mentioned:
+                continue
+            try:
+                head = (scripts_dir / script).read_text(
+                    encoding="utf-8-sig", errors="replace"
+                )[:2000]
+            except OSError:
+                continue
+            if "[vendored]" in head:
+                continue
+            findings.append(
+                {
+                    "rule": "S010",
+                    "severity": "warn",
+                    "message": "scripts/%s never mentioned in SKILL.md" % script,
+                }
+            )
     return findings
 
 
@@ -221,6 +240,7 @@ RULES = {
     "S007": "cited policy.json key does not exist in the sibling policy.json",
     "S008": "name is not lowercase-hyphenated",
     "S009": "cited scripts/*.py file does not exist in the sibling scripts/ dir",
+    "S010": "scripts/*.py file is never mentioned in SKILL.md (skips _* and [vendored] scripts)",
 }
 
 

@@ -130,6 +130,16 @@ def lint_skill(path: Path) -> list[dict]:
                         "message": "cited policy.json key %r not found" % key,
                     }
                 )
+            for key in sorted(policy_keys):
+                if not re.search(r"\b" + re.escape(key) + r"\b", text):
+                    findings.append(
+                        {
+                            "rule": "S011",
+                            "severity": "warn",
+                            "message": "policy.json key %r never mentioned"
+                            % key,
+                        }
+                    )
     scripts_dir = path.parent / "scripts"
     script_roots = [scripts_dir]
     if path.parent.parent.name == "skills":
@@ -241,6 +251,7 @@ RULES = {
     "S008": "name is not lowercase-hyphenated",
     "S009": "cited scripts/*.py file does not exist in the sibling scripts/ dir",
     "S010": "scripts/*.py file is never mentioned in SKILL.md (skips _* and [vendored] scripts)",
+    "S011": "policy.json key is never mentioned in SKILL.md",
 }
 
 

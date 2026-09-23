@@ -325,6 +325,40 @@ class LintSkillTests(unittest.TestCase):
             )
             self.assertEqual(skill_lint.lint_skill(path), [])
 
+    def test_unmentioned_policy_key_warns_s011(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = write_skill(root, "s", GOOD.format(name="s"))
+            path.write_text(
+                path.read_text(encoding="utf-8")
+                + "\nThe `version` key lives in policy.json.\n",
+                encoding="utf-8",
+            )
+            (root / "s" / "policy.json").write_text(
+                '{"version": 1, "extra_knob": true}', encoding="utf-8"
+            )
+            findings = skill_lint.lint_skill(path)
+            s011 = [f for f in findings if f["rule"] == "S011"]
+            self.assertEqual(len(s011), 1)
+            self.assertIn("extra_knob", s011[0]["message"])
+            self.assertNotIn("version", s011[0]["message"])
+
+    def test_all_policy_keys_mentioned_no_s011(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = write_skill(root, "s", GOOD.format(name="s"))
+            path.write_text(
+                path.read_text(encoding="utf-8") + "\n`version` is read.\n",
+                encoding="utf-8",
+            )
+            (root / "s" / "policy.json").write_text(
+                '{"version": 1}', encoding="utf-8"
+            )
+            self.assertEqual(
+                [f for f in skill_lint.lint_skill(path) if f["rule"] == "S011"],
+                [],
+            )
+
     def test_repo_skill_lints_clean(self):
         findings = skill_lint.lint_skill(
             ROOT / "skills" / "jev-consult" / "SKILL.md"

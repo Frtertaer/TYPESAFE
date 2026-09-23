@@ -71,6 +71,34 @@ class SmokeTests(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertEqual({s["name"] for s in out["steps"]}, {"policy", "trace"})
 
+    def test_jobs_runs_subset_in_step_order(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "trace,policy,decisions",
+             "--jobs", "3"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertTrue(out["ok"])
+        self.assertEqual(
+            [s["name"] for s in out["steps"]],
+            ["policy", "decisions", "trace"],
+        )
+
+    def test_jobs_env_presets_workers(self) -> None:
+        env = dict(os.environ, JEV_SMOKE_JOBS="2")
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "policy,trace"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertTrue(json.loads(proc.stdout)["ok"])
+
     def test_only_env_presets_steps(self) -> None:
         env = dict(os.environ, JEV_SMOKE_ONLY="policy,trace")
         proc = subprocess.run(

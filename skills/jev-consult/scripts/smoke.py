@@ -6926,6 +6926,13 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="Print just one dotted-path field of the results payload (e.g. ok); unknown key exits 2.",
     )
+    parser.add_argument(
+        "--jobs",
+        metavar="N",
+        type=int,
+        default=0,
+        help="Run steps on N worker threads (default 1 = serial; JEV_SMOKE_JOBS presets). Each step gets its own temp subdir; results keep STEPS order.",
+    )
     args = parser.parse_args(argv)
     names = {name for name, _ in STEPS}
     if args.list:
@@ -6935,6 +6942,14 @@ def main(argv: list[str] | None = None) -> int:
             for name in sorted(names):
                 sys.stdout.write(name + "\n")
         return 0
+    jobs = args.jobs
+    if jobs <= 0:
+        try:
+            jobs = int(os.environ.get("JEV_SMOKE_JOBS", "") or "1")
+        except ValueError:
+            jobs = 1
+    if jobs < 1:
+        jobs = 1
     repeat = args.repeat
     if repeat <= 0:
         try:
@@ -6960,26 +6975,59 @@ def main(argv: list[str] | None = None) -> int:
             env_timeout = 0.0
         if env_timeout > 0:
             STEP_TIMEOUT = env_timeout
+    def _attempt(fn, step_dir: Path) -> dict:
+        row = _step(getattr(fn, "__name__", "step"), False, "not run")
+        for attempt in range(repeat):
+            try:
+                row = fn(step_dir)
+            except Exception as exc:  # a crash is a failed step, not a crash
+                row = _step(getattr(fn, "__name__", "step"), False, "raised %r" % exc)
+            if not row["ok"] and repeat > 1:
+                row = dict(row)
+                row["detail"] = "attempt %d/%d: %s" % (
+                    attempt + 1, repeat, row["detail"]
+                )
+            if not row["ok"]:
+                break
+        return row
+
     def _run_steps() -> list[dict]:
         rows: list[dict] = []
+        chosen = [
+            (name, fn_name)
+            for name, fn_name in STEPS
+            if not wanted or name in wanted
+        ]
         with tempfile.TemporaryDirectory() as tmp_raw:
             tmp = Path(tmp_raw)
-            for name, fn_name in STEPS:
-                if wanted and name not in wanted:
-                    continue
-                fn = globals()[fn_name]
-                for attempt in range(repeat):
-                    try:
-                        row = fn(tmp)
-                    except Exception as exc:  # a crash is a failed step, not a crash
-                        row = _step(getattr(fn, "__name__", "step"), False, "raised %r" % exc)
-                    if not row["ok"] and repeat > 1:
-                        row = dict(row)
-                        row["detail"] = "attempt %d/%d: %s" % (
-                            attempt + 1, repeat, row["detail"]
-                        )
-                    if not row["ok"]:
-                        break
+            if jobs > 1 and len(chosen) > 1:
+                import concurrent.futures
+
+                done: dict[str, dict] = {}
+                with concurrent.futures.ThreadPoolExecutor(
+                    max_workers=jobs
+                ) as pool:
+                    futs = {}
+                    for name, fn_name in chosen:
+                        step_dir = tmp / name
+                        step_dir.mkdir()
+                        futs[
+                            pool.submit(
+                                _attempt, globals()[fn_name], step_dir
+                            )
+                        ] = name
+                    for fut in concurrent.futures.as_completed(futs):
+                        name = futs[fut]
+                        try:
+                            done[name] = fut.result()
+                        except Exception as exc:
+                            done[name] = _step(name, False, "raised %r" % exc)
+                        if args.fail_fast and not done[name]["ok"]:
+                            for other in futs:
+                                other.cancel()
+                return [done[name] for name, _ in chosen if name in done]
+            for name, fn_name in chosen:
+                row = _attempt(globals()[fn_name], tmp)
                 rows.append(row)
                 if args.fail_fast and not rows[-1]["ok"]:
                     break

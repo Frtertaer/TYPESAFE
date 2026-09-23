@@ -2927,5 +2927,63 @@ class NotesEditRangeTests(unittest.TestCase):
             self.assertIn("bad --edit range", err.getvalue())
 
 
+class NotesShasTests(unittest.TestCase):
+    def _trace(self, tmp: str) -> Path:
+        import io
+        from contextlib import redirect_stdout
+
+        path = Path(tmp) / "trace.json"
+        with redirect_stdout(io.StringIO()):
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            tr.main(["--file", str(path), "record", "--pick", "x", "--note", "one", "--harness", "h1"])
+            tr.main(["--file", str(path), "record", "--pick", "x", "--note", "two", "--harness", "h2"])
+        return path
+
+    def test_shas_lists_filtered(self) -> None:
+        import hashlib
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--shas"])
+            self.assertEqual(rc, 0)
+            rows = buf.getvalue().splitlines()
+            self.assertEqual(
+                rows,
+                [
+                    hashlib.sha256(b"one").hexdigest()[:12],
+                    hashlib.sha256(b"two").hexdigest()[:12],
+                ],
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--shas", "--harness", "h2"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(
+                buf.getvalue().splitlines(),
+                [hashlib.sha256(b"two").hexdigest()[:12]],
+            )
+
+    def test_shas_json(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--shas", "--json"]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(len(payload["shas"]), 2)
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

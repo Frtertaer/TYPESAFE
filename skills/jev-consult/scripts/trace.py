@@ -1138,6 +1138,15 @@ def cmd_notes(args: argparse.Namespace) -> int:
                 sys.stdout.write("%s %d\n" % (harness or "-", n))
         return 0
 
+    if getattr(args, "shas", False):
+        shas = [str(n.get("sha") or "") for n in notes]
+        if getattr(args, "json", False):
+            sys.stdout.write(json.dumps({"shas": shas}, ensure_ascii=False) + "\n")
+        else:
+            for sha in shas:
+                sys.stdout.write("%s\n" % (sha or "-"))
+        return 0
+
     if getattr(args, "rate", False):
         stamps = [
             float(n["ts"])
@@ -1686,6 +1695,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--grep", default="", help="Only notes whose text contains SUBSTR (case-insensitive; default JEV_TRACE_GREP)")
     notes_cmd.add_argument("--uniq", action="store_true", help="Dedupe notes by sha/text (first occurrence wins)")
     notes_cmd.add_argument("--by-harness", action="store_true", help="Print distinct note harnesses with counts, sorted desc (empty harness shown as '-')")
+    notes_cmd.add_argument("--shas", action="store_true", help="Print just the sha of each filtered note, one per line (--json emits {shas})")
     notes_cmd.add_argument("--rate", action="store_true", help="Print note-rate stats over the filtered notes: per-day UTC buckets plus notes_per_day")
     notes_cmd.add_argument("--gap", metavar="S", type=float, default=0.0, help="List consecutive-note gaps wider than S seconds ({index,gap_s,prev_text,text} rows; --json emits {gaps})")
     notes_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,notes} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")

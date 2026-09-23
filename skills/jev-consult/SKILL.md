@@ -200,6 +200,34 @@ One-glance index of every `JEV_*` / `TYPESAFE_API_KEY` / `HERMES_HOME` env var t
 | `JEV_TRIGGER_MIN_COVERAGE`, `JEV_TRIGGER_MIN_COVERS` | trigger_eval coverage gates |
 | `HERMES_HOME` | harness detection fallback to `hermes` |
 
+## Policy knobs
+
+Every threshold lives in `policy.json` (override with `JEV_POLICY=PATH`). The top-level keys:
+
+| key | default | meaning |
+| --- | --- | --- |
+| `role` | `decision_maker` | role tag sent on decision asks |
+| `coder_role` | `inspect_and_implement` | role tag on coding/inspection asks |
+| `question_soft_max` | `8` | preferred cap on questions per `ask` request |
+| `question_hard_max` | `32` | hard cap — requests over it are refused |
+| `choice_option_hard_max` | `255` | hard cap on options per choice question |
+| `confidence_floor` | `0.55` | minimum answer confidence to accept a pick |
+| `noul_yes` | `0.7` | noul score treated as "yes" (used by `compare --strict` guarded checks) |
+| `noul_no` | `0.3` | noul score treated as "no" |
+| `noul_unsure` | `0.5` | noul score near this is "unsure" (escalation input) |
+| `tight_gap` | `0.08` | top-2 option gap that still counts as a confident pick |
+| `never_ask` | `[tool_checkable_fact, ...]` | question classes never sent to Jev |
+| `require_hatch` | `true` | new questions must pass `question_lint` hatch criteria before use |
+| `escalate_if` | `{confidence_below, noul_near, choice_gap_below, irreversible}` | conditions that flip an answer to `escalate` |
+| `stop_words` | `[all, and, any, ...]` | tokens ignored by the IDF tokenizer |
+| `model` | `jev-latest` | model name sent on Jev API calls |
+| `version` | `3` | policy schema version (printed by `--version`) |
+| `catalogs` | `[skills.sh, ...]` | marketplace catalog list `inventory.py` reads |
+| `catalog_cache_seconds` | `900` | catalog fetch cache TTL |
+| `templates` | `{approach: {...}, ...}` | question templates for `jev.py scaffold`/`decide` |
+| `hallucination` | `{claim, ...}` | claim-text block used by the hallucination guard |
+| `progress` | `{rubric_version, points, ...}` | scoring rubric for `progress.py` review points |
+
 ## Flag map
 
 Residual `--flags` not spelled out in the prose above (test-pinned: every declared flag must appear here or in README.md):

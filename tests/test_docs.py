@@ -77,6 +77,19 @@ class DocFlagsTests(unittest.TestCase):
         )
         self.assertIsInstance(policy, dict)
 
+    def test_every_policy_key_is_documented(self) -> None:
+        """Every top-level policy.json key is named (backticked) in SKILL.md."""
+        policy = json.loads(
+            (ROOT / "skills" / "jev-consult" / "policy.json").read_text(encoding="utf-8")
+        )
+        skill = (ROOT / "skills" / "jev-consult" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        missing = sorted(k for k in policy if "`%s`" % k not in skill)
+        self.assertEqual(
+            missing, [], "policy.json keys absent from SKILL.md: %s" % missing
+        )
+
     def test_sidecar_fields_documented(self) -> None:
         """Every sidecar payload key written by inventory.py is named in SKILL.md."""
         skill = (ROOT / "skills" / "jev-consult" / "SKILL.md").read_text(

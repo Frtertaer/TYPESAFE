@@ -405,5 +405,78 @@ class HookE2ETests(unittest.TestCase):
             )
 
 
+class DryRunTests(unittest.TestCase):
+    """--dry-run keeps live spill dir untouched; spill goes under <dir>/dry/."""
+
+    def _fat_event(self) -> dict:
+        return {
+            "hook_event_name": "PostToolUse",
+            "toolResult": "HEAD" + ("n" * 40000) + "TAIL",
+        }
+
+    def test_handle_dry_run_spills_under_dry_subdir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_CONSULT_SPILL": tmp}):
+                out = HOOK.handle(self._fat_event(), dry_run=True)
+            live = [p for p in Path(tmp).iterdir() if p.is_file()]
+            self.assertEqual(live, [])
+            dry_files = list((Path(tmp) / "dry").glob("*.txt"))
+            self.assertEqual(len(dry_files), 1)
+            replaced = out["hookSpecificOutput"]["updatedToolOutput"]
+            self.assertIn(str(Path(tmp) / "dry"), replaced)
+
+    def test_handle_default_still_spills_live(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_CONSULT_SPILL": tmp}):
+                HOOK.handle(self._fat_event())
+            self.assertEqual(len(list(Path(tmp).glob("*.txt"))), 1)
+            self.assertFalse((Path(tmp) / "dry").exists())
+
+    def test_dry_run_disabled_spill_still_abridges(self) -> None:
+        with patch.dict(os.environ, {"JEV_CONSULT_SPILL": "0"}):
+            out = HOOK.handle(self._fat_event(), dry_run=True)
+        replaced = out["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertIn("chars omitted", replaced)
+        self.assertNotIn("full output saved:", replaced)
+
+    def test_cli_dry_run_and_simulate(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spill = Path(tmp) / "spill"
+            env = dict(os.environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env["JEV_CONSULT_LOG"] = "0"
+            env["JEV_CONSULT_SPILL"] = str(spill)
+            fat = "A" * 40000
+            event = json.dumps(
+                {"hook_event_name": "PostToolUse", "toolResult": fat}
+            )
+            proc = subprocess.run(
+                [sys.executable, str(HOOK_PATH), "--dry-run"],
+                input=event,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("hookSpecificOutput", proc.stdout)
+            self.assertTrue((spill / "dry").is_dir())
+            self.assertEqual(
+                [p for p in spill.iterdir() if p.is_file()], []
+            )
+            # without --dry-run the live dir gets the file
+            subprocess.run(
+                [sys.executable, str(HOOK_PATH)],
+                input=event,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=60,
+            )
+            self.assertTrue(any(p.suffix == ".txt" for p in spill.iterdir()))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -80,7 +80,12 @@ def replace_payload(original: Any, abridged: str) -> Any:
 LAST_SKIP: str = ""
 
 
-def handle(payload: dict[str, Any]) -> dict[str, Any]:
+def _dry_spill_dir() -> Path | None:
+    base = C.spill_dir_default()
+    return base / "dry" if base is not None else None
+
+
+def handle(payload: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
     global LAST_SKIP
     LAST_SKIP = ""
     event = str(payload.get("hook_event_name") or payload.get("hookEventName") or "")
@@ -98,7 +103,9 @@ def handle(payload: dict[str, Any]) -> dict[str, Any]:
     if is_error:
         LAST_SKIP = "tool result is an error"
         return {}
-    abridged = C.abridge_live(text, is_error=is_error)
+    abridged = C.abridge_live(
+        text, is_error=is_error, spill_dir=_dry_spill_dir() if dry_run else None
+    )
     if abridged is None:
         LAST_SKIP = "below live-fat threshold"
         return {}
@@ -128,7 +135,7 @@ def env_report() -> dict:
     }
 
 
-USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose] [--file PATH] [--simulate TEXT] [--verdict PATH] [--env [--jq KEY] [--out PATH]] [--self-test]\n\nReads one PostToolUse JSON event from stdin (or --file). When the tool result\nis longer than the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n--simulate TEXT runs a synthetic PostToolUse event with TEXT as the tool\nresult — a quick probe of the live-fat decision without crafting JSON.\n--self-test runs handle() on synthetic payloads and exits 1 on failure.\n--verdict PATH writes a slim {verdict: compacted|skip, reason} JSON after the\nhook run (fail-open on a bad path).\n--env prints the resolved hook config JSON ({live_fat, live_head, live_tail,\nspill_dir, spill_disabled, spill_max_files, spill_max_bytes, policy};\n--jq KEY prints one value; --out PATH also writes it, fail-open).\n'
+USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose] [--file PATH] [--simulate TEXT] [--dry-run] [--verdict PATH] [--env [--jq KEY] [--out PATH]] [--self-test]\n\nReads one PostToolUse JSON event from stdin (or --file). When the tool result\nis longer than the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n--dry-run resolves the same abridge decision but spills the omitted text\nunder <spill_dir>/dry/ instead of the live spill dir.\n--simulate TEXT runs a synthetic PostToolUse event with TEXT as the tool\nresult — a quick probe of the live-fat decision without crafting JSON.\n--self-test runs handle() on synthetic payloads and exits 1 on failure.\n--verdict PATH writes a slim {verdict: compacted|skip, reason} JSON after the\nhook run (fail-open on a bad path).\n--env prints the resolved hook config JSON ({live_fat, live_head, live_tail,\nspill_dir, spill_disabled, spill_max_files, spill_max_bytes, policy};\n--jq KEY prints one value; --out PATH also writes it, fail-open).\n'
 
 
 def _flag_value(argv: list, flag: str) -> str:
@@ -244,7 +251,10 @@ def main() -> int:
     if "--simulate" in sys.argv[1:]:
         idx = sys.argv[1:].index("--simulate")
         text = sys.argv[1:][idx + 1] if idx + 1 < len(sys.argv[1:]) else ""
-        out = handle({"hook_event_name": "PostToolUse", "toolResult": text})
+        out = handle(
+            {"hook_event_name": "PostToolUse", "toolResult": text},
+            dry_run="--dry-run" in sys.argv[1:],
+        )
         if verbose and not out and LAST_SKIP:
             sys.stderr.write("compact_hook: %s\n" % LAST_SKIP)
         return _emit(out, verdict_path, _run_verdict(out))
@@ -280,7 +290,7 @@ def main() -> int:
             {}, verdict_path, {"verdict": "skip", "reason": "payload is not an object"}
         )
     try:
-        out = handle(payload)
+        out = handle(payload, dry_run="--dry-run" in sys.argv[1:])
     except Exception:
         return _emit(
             {}, verdict_path, {"verdict": "skip", "reason": "handler error"}

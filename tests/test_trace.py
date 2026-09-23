@@ -3213,6 +3213,24 @@ class HistoryKindTests(unittest.TestCase):
                 rc = tr.main(["--file", str(path), "history", "--kind", "nope", "--count"])
             self.assertEqual(buf.getvalue().strip(), "0")
 
+    def test_kind_comma_list(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._mixed(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "history", "--kind", "kept,dropped", "--field", "pick"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().splitlines(), ["a", "b", "c"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--kind", " kept , dropped ", "--count"])
+            self.assertEqual(buf.getvalue().strip(), "3")
+
 
 class HistoryFirstTests(unittest.TestCase):
     def _three_picks(self, tmp: str) -> Path:

@@ -491,9 +491,11 @@ def cmd_history(args: argparse.Namespace) -> int:
                 if needle in str(h.get("pick") or "").lower()
                 or needle in str(h.get("kind") or "").lower()
             ]
-        want_kind = (getattr(args, "kind", "") or "").strip()
-        if want_kind:
-            items = [h for h in items if str(h.get("kind") or "") == want_kind]
+        want_kinds = {
+            k.strip() for k in (getattr(args, "kind", "") or "").split(",") if k.strip()
+        }
+        if want_kinds:
+            items = [h for h in items if str(h.get("kind") or "") in want_kinds]
         for bound, op in ((getattr(args, "since", None), ">="), (getattr(args, "before", None), "<=")):
             if bound is None:
                 continue
@@ -1902,7 +1904,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--reverse", action="store_true", help="List picks newest-first")
     hist_cmd.add_argument("--field", default="", help="Print only this field per pick (a.b digs into nested objects)")
     hist_cmd.add_argument("--kinds", action="store_true", help="Print distinct history kinds with counts, sorted desc (empty kind shown as '-')")
-    hist_cmd.add_argument("--kind", default="", help="Only picks with exactly this kind")
+    hist_cmd.add_argument("--kind", default="", help="Only picks with exactly this kind (comma list for several)")
     hist_cmd.add_argument("--uniq", action="store_true", help="Dedupe picks by pick+kind (first occurrence wins; applied before --limit)")
     hist_cmd.add_argument("--count", action="store_true", help="Print just the filtered pick count (--json emits {count})")
     hist_cmd.add_argument("--rate", action="store_true", help="Print pick-rate stats over the filtered history: per-day UTC buckets plus picks_per_day")

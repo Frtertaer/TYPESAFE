@@ -1021,6 +1021,99 @@ def cmd_notes(args: argparse.Namespace) -> int:
     if notes is None:
         return 2
 
+    if getattr(args, "by_harness", False):
+        counts: dict[str, int] = {}
+        for note in notes:
+            harness = str(note.get("harness") or "")
+            counts[harness] = counts.get(harness, 0) + 1
+        rows = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps({"by_harness": dict(rows)}, ensure_ascii=False, indent=2) + "\n"
+            )
+        else:
+            for harness, n in rows:
+                sys.stdout.write("%s %d\n" % (harness or "-", n))
+        return 0
+
+    if getattr(args, "rate", False):
+        stamps = [
+            float(n["ts"])
+            for n in notes
+            if isinstance(n.get("ts"), (int, float)) and not isinstance(n.get("ts"), bool)
+        ]
+        per_day: dict[str, int] = {}
+        for stamp in stamps:
+            day = datetime.fromtimestamp(stamp, tz=timezone.utc).strftime("%Y-%m-%d")
+            per_day[day] = per_day.get(day, 0) + 1
+        span_s = (max(stamps) - min(stamps)) if len(stamps) >= 2 else 0.0
+        days = max(1, int(span_s // 86400) + 1) if stamps else 0
+        data_out = {
+            "count": len(notes),
+            "stamped": len(stamps),
+            "first_ts": min(stamps) if stamps else None,
+            "last_ts": max(stamps) if stamps else None,
+            "span_s": round(span_s, 3),
+            "days": days,
+            "notes_per_day": round(len(stamps) / days, 3) if days else 0.0,
+            "per_day": dict(sorted(per_day.items())),
+        }
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps({"rate": data_out}, ensure_ascii=False, indent=2) + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "count %d\nstamped %d\nspan_s %s\ndays %d\nnotes_per_day %s\n"
+                % (
+                    data_out["count"],
+                    data_out["stamped"],
+                    data_out["span_s"],
+                    data_out["days"],
+                    data_out["notes_per_day"],
+                )
+            )
+            for day, n in sorted(per_day.items()):
+                sys.stdout.write("%s %d\n" % (day, n))
+        return 0
+
+    if getattr(args, "gap", 0.0) and args.gap > 0:
+        chronological = sorted(
+            notes,
+            key=lambda n: n.get("ts")
+            if isinstance(n.get("ts"), (int, float)) and not isinstance(n.get("ts"), bool)
+            else 0,
+        )
+        gaps = []
+        prev = None
+        for i, entry in enumerate(chronological):
+            ts = entry.get("ts")
+            if not (isinstance(ts, (int, float)) and not isinstance(ts, bool)):
+                continue
+            if prev is not None and float(ts) - float(prev["ts"]) > args.gap:
+                gaps.append(
+                    {
+                        "index": i,
+                        "prev_ts": prev["ts"],
+                        "ts": ts,
+                        "gap_s": round(float(ts) - float(prev["ts"]), 3),
+                        "prev_text": prev.get("text"),
+                        "text": entry.get("text"),
+                    }
+                )
+            prev = {"ts": ts, "text": entry.get("text")}
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps({"gaps": gaps}, ensure_ascii=False, indent=2) + "\n"
+            )
+        else:
+            for g in gaps:
+                sys.stdout.write(
+                    "%d %.3f %s -> %s\n"
+                    % (g["index"], g["gap_s"], g["prev_text"], g["text"])
+                )
+        return 0
+
     if getattr(args, "watch", 0.0) and args.watch > 0:
         import time as _time
 
@@ -1483,6 +1576,9 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--reverse", action="store_true", help="List notes newest-first")
     notes_cmd.add_argument("--grep", default="", help="Only notes whose text contains SUBSTR (case-insensitive; default JEV_TRACE_GREP)")
     notes_cmd.add_argument("--uniq", action="store_true", help="Dedupe notes by sha/text (first occurrence wins)")
+    notes_cmd.add_argument("--by-harness", action="store_true", help="Print distinct note harnesses with counts, sorted desc (empty harness shown as '-')")
+    notes_cmd.add_argument("--rate", action="store_true", help="Print note-rate stats over the filtered notes: per-day UTC buckets plus notes_per_day")
+    notes_cmd.add_argument("--gap", metavar="S", type=float, default=0.0, help="List consecutive-note gaps wider than S seconds ({index,gap_s,prev_text,text} rows; --json emits {gaps})")
     notes_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,notes} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     notes_cmd.add_argument("--jq", metavar="KEY", default="", help="With --watch: print just the named tick field(s) per pass, comma list")
     notes_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")

@@ -2417,5 +2417,115 @@ class DiffTests(unittest.TestCase):
             self.assertIn("bad --jq key", err.getvalue())
 
 
+class NotesModeTests(unittest.TestCase):
+    def _trace_with_notes(self, tmp: str) -> Path:
+        path = Path(tmp) / "trace.json"
+        tr.main(["--file", str(path), "init", "--plan", "P"])
+        tr.main(
+            [
+                "--file",
+                str(path),
+                "record",
+                "--pick",
+                "x",
+                "--note",
+                "n1",
+                "--harness",
+                "claude-code",
+            ]
+        )
+        tr.main(["--file", str(path), "record", "--pick", "x", "--note", "n2"])
+        tr.main(
+            [
+                "--file",
+                str(path),
+                "record",
+                "--pick",
+                "x",
+                "--note",
+                "n3",
+                "--harness",
+                "claude-code",
+            ]
+        )
+        return path
+
+    def _stamp_notes(self, path: Path, stamps: list[float]) -> None:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for note, stamp in zip(data["notes"], stamps):
+            note["ts"] = stamp
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+    def test_notes_by_harness_counts(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace_with_notes(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--by-harness"])
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertIn("claude-code 2", out)
+            self.assertIn("- 1", out)
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--by-harness", "--json"]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["by_harness"], {"claude-code": 2, "": 1})
+
+    def test_notes_rate_buckets_per_day(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace_with_notes(tmp)
+            base = 1700000000.0
+            self._stamp_notes(path, [base, base + 100, base + 90000])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--rate", "--json"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())["rate"]
+            self.assertEqual(payload["count"], 3)
+            self.assertEqual(payload["stamped"], 3)
+            self.assertEqual(payload["days"], 2)
+            self.assertEqual(len(payload["per_day"]), 2)
+            self.assertAlmostEqual(payload["notes_per_day"], 1.5)
+
+    def test_notes_gap_lists_wide_gaps(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace_with_notes(tmp)
+            self._stamp_notes(path, [100.0, 105.0, 400.0])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--gap", "60"])
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertIn("n2", out)
+            self.assertIn("n3", out)
+            self.assertNotIn("n1 ->", out)
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--gap", "60", "--json"]
+                )
+            self.assertEqual(rc, 0)
+            gaps = json.loads(buf.getvalue())["gaps"]
+            self.assertEqual(len(gaps), 1)
+            self.assertEqual(gaps[0]["prev_text"], "n2")
+            self.assertEqual(gaps[0]["text"], "n3")
+            self.assertEqual(gaps[0]["gap_s"], 295.0)
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

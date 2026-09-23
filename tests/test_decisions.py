@@ -2785,6 +2785,40 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0)
             self.assertEqual(json.loads(proc.stdout), [])
 
+    def test_verify_clean_log_ok(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "jev_status": "ok"},
+                    {"ts": 2, "jev_status": "none"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--verify")
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn("verify: ok entries=2", proc.stdout)
+
+    def test_verify_flags_regression_and_bad_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('{"ts": 5, "jev_status": "ok"}\n')
+                fh.write('{"ts": 4, "jev_status": "ok"}\n')
+                fh.write("not json\n")
+                fh.write('{"ts": 6}\n')
+            proc = self.run_cli("--file", str(path), "--verify")
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("problems=3", proc.stdout)
+            self.assertIn("line 2: ts regression", proc.stdout)
+            self.assertIn("line 3: unparseable", proc.stdout)
+            self.assertIn("line 4: missing jev_status", proc.stdout)
+            proc = self.run_cli("--file", str(path), "--verify", "--json")
+            report = json.loads(proc.stdout)
+            self.assertFalse(report["ok"])
+            self.assertEqual(report["bad_lines"], 1)
+            self.assertEqual(len(report["problems"]), 3)
+
     def test_missing_filters_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

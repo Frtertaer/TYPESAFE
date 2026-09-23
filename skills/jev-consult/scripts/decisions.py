@@ -67,6 +67,50 @@ def load_bad_lines(path: Path) -> list[tuple[int, str]]:
     return bad_rows
 
 
+def verify_log(path: Path) -> dict:
+    """Integrity check: parseable lines, ts present and non-decreasing,
+    jev_status present. Returns {ok, entries, bad_lines, problems}."""
+    problems: list[dict] = []
+    entries: list[dict] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {"ok": False, "entries": 0, "bad_lines": 0,
+                "problems": [{"line": 0, "issue": "unreadable"}]}
+    bad = 0
+    prev_ts: float | None = None
+    for lineno, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            item = json.loads(stripped)
+        except ValueError:
+            bad += 1
+            problems.append({"line": lineno, "issue": "unparseable"})
+            continue
+        if not isinstance(item, dict):
+            bad += 1
+            problems.append({"line": lineno, "issue": "not an object"})
+            continue
+        entries.append(item)
+        ts = item.get("ts")
+        if not isinstance(ts, (int, float)) or isinstance(ts, bool):
+            problems.append({"line": lineno, "issue": "missing ts"})
+        elif prev_ts is not None and ts < prev_ts:
+            problems.append({"line": lineno, "issue": "ts regression"})
+        else:
+            prev_ts = ts if prev_ts is None else max(prev_ts, ts)
+        if "jev_status" not in item:
+            problems.append({"line": lineno, "issue": "missing jev_status"})
+    return {
+        "ok": not problems,
+        "entries": len(entries),
+        "bad_lines": bad,
+        "problems": problems,
+    }
+
+
 def _percentile(values: list[float], q: float) -> float | None:
     if not values:
         return None
@@ -1002,6 +1046,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that reports removals.")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON to PATH — with --watch a {verdict, count, added, removed, ticks} payload refreshed every tick; without it a one-shot {verdict: ok|empty, count, ticks: 1} probe of the filtered entries.")
     parser.add_argument("--self-test", action="store_true", help="Parse a synthetic 3-entry log + 1 bad line; exit 1 when the counts do not match")
+    parser.add_argument("--verify", action="store_true", help="Chain check the raw log: unparseable lines, missing ts/jev_status, ts regressions; rc 1 on any problem")
     args = parser.parse_args(argv)
     if getattr(args, "self_test", False):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1044,6 +1089,23 @@ def main(argv: list[str] | None = None) -> int:
     if not path.is_file():
         sys.stderr.write("no decisions log at %s\n" % path)
         return 1
+    if getattr(args, "verify", False):
+        report = verify_log(path)
+        if args.json:
+            sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        else:
+            sys.stdout.write(
+                "verify: %s entries=%d bad_lines=%d problems=%d\n"
+                % (
+                    "ok" if report["ok"] else "FAIL",
+                    report["entries"],
+                    report["bad_lines"],
+                    len(report["problems"]),
+                )
+            )
+            for row in report["problems"][:20]:
+                sys.stdout.write("  line %d: %s\n" % (row["line"], row["issue"]))
+        return 0 if report["ok"] else 1
     entries, bad = load_entries(path)
     if getattr(args, "validate", False):
         bad_rows = []

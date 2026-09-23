@@ -1282,6 +1282,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--schema", action="store_true", help="Print the scan payload + item key contract and exit (--json emits the object)")
+    parser.add_argument("--env", action="store_true", help="Print the resolved env config JSON (task/limit/log/watch knobs, policy source) and exit (--jq KEY prints one field, rc 2 on unknown)")
     parser.add_argument("--json", action="store_true", help="With --schema: emit the schema object instead of text rows")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that reports added or removed items")
@@ -1339,6 +1340,33 @@ def main(argv: list[str] | None = None) -> int:
         help="Scan a temp-dir home with a synthetic catalog through the real machinery and exit 1 on failure.",
     )
     args = parser.parse_args(argv)
+    if args.env:
+        log_env = os.environ.get("JEV_CONSULT_LOG", "").strip()
+        try:
+            watch_secs = float(os.environ.get("JEV_INV_WATCH_SECS", "") or 0)
+        except ValueError:
+            watch_secs = 0.0
+        report = {
+            "task": args.task,
+            "limit": args.limit,
+            "log": "disabled" if log_env == "0" else (log_env or "default"),
+            "policy": os.environ.get("JEV_POLICY", "").strip() or "default",
+            "watch_max": _watch.cap("JEV_INV_WATCH_MAX", None),
+            "watch_secs": watch_secs,
+            "watch_quiet": _watch.quiet("JEV_INV_WATCH_QUIET", False),
+        }
+        if args.jq:
+            value, found = _watch.dig(report, args.jq)
+            if found:
+                sys.stdout.write(json.dumps(value) + "\n")
+                return 0
+            sys.stderr.write(
+                "bad --jq key %r (env has: %s)\n"
+                % (args.jq, ", ".join(sorted(report)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        return 0
     if args.schema:
         if args.json:
             sys.stdout.write(json.dumps(SCAN_SCHEMA_ROWS, indent=2) + "\n")

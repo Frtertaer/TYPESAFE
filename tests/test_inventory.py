@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -2252,6 +2255,50 @@ class ScanPerfTests(unittest.TestCase):
         self.assertIn("self-test: ok", proc.stdout)
         self.assertIn("scan_finds=ok", proc.stdout)
         self.assertIn("explicit_hit=ok", proc.stdout)
+
+
+class EnvReportTests(unittest.TestCase):
+    def test_env_prints_resolved_config(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = inv.main(["--env"])
+        self.assertEqual(rc, 0)
+        report = json.loads(buf.getvalue())
+        for key in ("task", "limit", "log", "policy", "watch_max", "watch_secs", "watch_quiet"):
+            self.assertIn(key, report)
+        self.assertEqual(report["policy"], "default")
+
+    def test_env_reflects_env_overrides(self) -> None:
+        env = {
+            "JEV_TASK": "deploy fix",
+            "JEV_LIMIT": "5",
+            "JEV_CONSULT_LOG": "0",
+            "JEV_INV_WATCH_MAX": "9",
+            "JEV_INV_WATCH_QUIET": "1",
+        }
+        buf = io.StringIO()
+        with patch.dict(os.environ, env):
+            with redirect_stdout(buf):
+                inv.main(["--env"])
+        report = json.loads(buf.getvalue())
+        self.assertEqual(report["task"], "deploy fix")
+        self.assertEqual(report["limit"], 5)
+        self.assertEqual(report["log"], "disabled")
+        self.assertEqual(report["watch_max"], 9)
+        self.assertTrue(report["watch_quiet"])
+
+    def test_env_jq_and_bad_key(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = inv.main(["--env", "--jq", "policy"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(buf.getvalue()), "default")
+        err = io.StringIO()
+        buf = io.StringIO()
+        with redirect_stdout(buf), patch.object(sys, "stderr", err):
+            rc = inv.main(["--env", "--jq", "nope"])
+        self.assertEqual(rc, 2)
+        self.assertIn("env has", err.getvalue())
 
 
 if __name__ == "__main__":

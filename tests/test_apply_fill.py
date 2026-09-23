@@ -865,5 +865,44 @@ class WriteAskAtomicTests(unittest.TestCase):
         for key, label in criteria.items():
             self.assertTrue(str(label).strip(), "empty label for %s" % key)
 
+class EnvReportApplyTests(unittest.TestCase):
+    def _env(self, argv=(), env_extra=None):
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            [sys.executable, str(SCRIPTS / "apply_fill.py"), "--env", *argv],
+            input="", capture_output=True, text=True, env=env, timeout=30,
+        )
+
+    def test_env_prints_resolved_config(self) -> None:
+        proc = self._env()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["fill_timeout_seconds"], 90.0)
+        self.assertEqual(report["policy"], "default")
+        self.assertIn("watch_max", report)
+
+    def test_env_reflects_env_overrides(self) -> None:
+        proc = self._env(env_extra={
+            "JEV_FILL_TIMEOUT": "15",
+            "JEV_APPLY_WATCH_QUIET": "1",
+            "JEV_APPLY_WATCH_MAX": "3",
+        })
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["fill_timeout_seconds"], 15.0)
+        self.assertTrue(report["watch_quiet"])
+        self.assertEqual(report["watch_max"], 3)
+
+    def test_env_jq_field_and_bad_key(self) -> None:
+        proc = self._env(["--jq", "policy"])
+        self.assertEqual(json.loads(proc.stdout.strip()), "default")
+        proc = self._env(["--jq", "nope"])
+        self.assertEqual(proc.returncode, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

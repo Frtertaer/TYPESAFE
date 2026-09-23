@@ -43,10 +43,26 @@ from inventory import (  # noqa: E402
     write_miss,
     write_sidecar,
 )
-from peer_fill import read_miss, run_jev  # noqa: E402
+from peer_fill import read_miss, run_jev, fill_timeout_seconds  # noqa: E402
 
 ASK_NAME = ".jev-apply-fill.request.json"
 SEARCH_LIMIT = 8
+
+
+def env_report() -> dict:
+    """Resolved apply_fill environment. Values only — never secrets."""
+    policy = os.environ.get("JEV_POLICY", "").strip()
+    try:
+        watch_secs = float(os.environ.get("JEV_APPLY_WATCH_SECS", "") or 0)
+    except ValueError:
+        watch_secs = 0.0
+    return {
+        "fill_timeout_seconds": fill_timeout_seconds(),
+        "watch_max": _watch.cap("JEV_APPLY_WATCH_MAX", None),
+        "watch_secs": watch_secs,
+        "watch_quiet": _watch.quiet("JEV_APPLY_WATCH_QUIET", False),
+        "policy": policy if policy else "default",
+    }
 # Emitted outcome words (first word of every emit() line + the two stdout-only
 # short-circuits); --schema lists them and the drift-guard test pins them.
 OUTCOMES = (
@@ -409,7 +425,8 @@ def main() -> int:
         action="store_true",
         help="Print the cwd fill state (miss present/age, ask file) as JSON and exit; --jq KEY prints one dotted-path field.",
     )
-    parser.add_argument("--jq", metavar="KEY", default="", help="With --status: print just one dotted-path field of the report (e.g. miss_age_s); unknown key exits 2. With --watch: print just the named tick field(s) per pass, comma list.")
+    parser.add_argument("--env", action="store_true", help="Print the resolved JEV_* env config JSON and exit (--jq KEY prints one field, rc 2 on unknown)")
+    parser.add_argument("--jq", metavar="KEY", default="", help="With --status/--env: print just one dotted-path field of the report (e.g. miss_age_s); unknown key exits 2. With --watch: print just the named tick field(s) per pass, comma list.")
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
@@ -445,6 +462,20 @@ def main() -> int:
                     "%s: %s (%s)\n"
                     % (key, row["type"], "required" if row["required"] else "optional")
                 )
+        return 0
+    if args.env:
+        report = env_report()
+        if args.jq:
+            value, found = _watch.dig(report, args.jq)
+            if found:
+                sys.stdout.write(json.dumps(value) + "\n")
+                return 0
+            sys.stderr.write(
+                "bad --jq key %r (env has: %s)\n"
+                % (args.jq, ", ".join(sorted(report)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
         return 0
     if args.self_test:
         checks: dict = {}

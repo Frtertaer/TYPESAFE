@@ -16,6 +16,8 @@ DOCS = [
     ROOT / "CLAUDE.md",
     ROOT / ".hermes.md",
     ROOT / "docs" / "for-agents.md",
+    ROOT / "skills" / "jev-consult" / "examples" / "README.md",
+    ROOT / "skills" / "jev-consult" / "references" / "harnesses.md",
 ]
 
 SCRIPT_RE = re.compile(r"\b([a-z][a-z0-9_/-]*)\.py\b")

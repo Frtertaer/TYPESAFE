@@ -900,9 +900,83 @@ class DoctorSchemaTests(unittest.TestCase):
             self.assertIsInstance(check["detail"], str)
             for key in check:
                 self.assertIn(
-                    key, ("agent", "check", "ok", "detail", "hint"),
+                    key, ("agent", "check", "ok", "detail", "hint", "suppressed"),
                     "undocumented check key %r" % key,
                 )
+
+
+class DoctorBaselineTests(unittest.TestCase):
+    def _empty_home(self, tmp: str) -> Path:
+        home = Path(tmp) / "home"
+        home.mkdir()
+        return home
+
+    def test_baseline_write_then_suppress_all(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._empty_home(tmp)
+            argv = ["--home", str(home), "--hermes-home", str(home / "h"), "--agents", "claude-code"]
+            rc, out, _ = run_main(argv, cwd=tmp)
+            self.assertEqual(rc, 1)
+            failing = [c for c in out["checks"] if not c["ok"]]
+            self.assertGreater(len(failing), 0)
+
+            base = Path(tmp) / "base.json"
+            rc, _, _ = run_main(argv + ["--baseline-write", str(base)], cwd=tmp)
+            self.assertEqual(rc, 1)  # snapshot alone does not suppress
+            stored = json.loads(base.read_text(encoding="utf-8"))["findings"]
+            self.assertEqual(len(stored), len(failing))
+
+            rc, out, _ = run_main(argv + ["--baseline", str(base)], cwd=tmp)
+            self.assertEqual(rc, 0)
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["suppressed"], len(failing))
+            marked = [c for c in out["checks"] if c.get("suppressed")]
+            self.assertEqual(len(marked), len(failing))
+
+    def test_baseline_partial_suppression_still_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._empty_home(tmp)
+            argv = ["--home", str(home), "--hermes-home", str(home / "h"), "--agents", "claude-code"]
+            rc, out, _ = run_main(argv, cwd=tmp)
+            self.assertEqual(rc, 1)
+            one = next(c for c in out["checks"] if not c["ok"])
+            base = Path(tmp) / "base.json"
+            base.write_text(
+                json.dumps({"findings": [{"agent": one["agent"], "check": one["check"]}]}),
+                encoding="utf-8",
+            )
+            rc, out, _ = run_main(argv + ["--baseline", str(base)], cwd=tmp)
+            self.assertEqual(rc, 1)
+            self.assertFalse(out["ok"])
+            self.assertEqual(out["suppressed"], 1)
+            self.assertTrue(check_of(out, one["check"], one["agent"])["suppressed"])
+
+    def test_baseline_missing_file_counts_everything(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._empty_home(tmp)
+            argv = ["--home", str(home), "--hermes-home", str(home / "h"), "--agents", "claude-code"]
+            rc, out, _ = run_main(
+                argv + ["--baseline", str(Path(tmp) / "absent.json")], cwd=tmp
+            )
+            self.assertEqual(rc, 1)
+            self.assertFalse(out["ok"])
+            self.assertEqual(out["suppressed"], 0)
+
+    def test_baseline_verdict_passes_when_all_suppressed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._empty_home(tmp)
+            argv = ["--home", str(home), "--hermes-home", str(home / "h"), "--agents", "claude-code"]
+            base = Path(tmp) / "base.json"
+            run_main(argv + ["--baseline-write", str(base)], cwd=tmp)
+            verdict = Path(tmp) / "v.json"
+            rc, out, _ = run_main(
+                argv + ["--baseline", str(base), "--verdict", str(verdict)], cwd=tmp
+            )
+            self.assertEqual(rc, 0)
+            doc = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(doc["verdict"], "pass")
+            self.assertEqual(doc["failed"], 0)
+            self.assertGreater(doc["suppressed"], 0)
 
 
 if __name__ == "__main__":

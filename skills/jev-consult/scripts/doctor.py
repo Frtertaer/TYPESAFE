@@ -58,7 +58,10 @@ DOCTOR_SCHEMA_ROWS = {
     "check.ok": {"required": True, "type": "boolean"},
     "check.detail": {"required": True, "type": "string, human-readable evidence"},
     "check.hint": {"required": False, "type": "string, remediation hint (failing checks only)"},
+    "check.suppressed": {"required": False, "type": "boolean, true when --baseline marked this failure known"},
 }
+
+BASELINE_FIELDS = ("agent", "check")
 
 HINTS = {
     "skill": "run python scripts/install.py --agents <agent>",
@@ -347,6 +350,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--schema", action="store_true", help="Print the {ok,checks} payload key contract and check-name catalog (--json emits the object) and exit")
     parser.add_argument("--json", action="store_true", help="With --schema: emit the contract object instead of text rows (the normal payload is already JSON)")
     parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown report (verdict line + per-check table with hints) to PATH")
+    parser.add_argument("--baseline", metavar="PATH", default="", help="Mark checks recorded as failing in PATH (written by --baseline-write) as suppressed: they still print but do not fail the run, watch ticks, or verdict")
+    parser.add_argument("--baseline-write", metavar="PATH", default="", help="Snapshot the currently failing checks to PATH for later --baseline runs")
     parser.add_argument("--self-test", action="store_true", help="Run every check against a synthetic empty HOME; exit 1 when no check fails")
     args = parser.parse_args(argv)
     if args.schema:
@@ -368,6 +373,20 @@ def main(argv: list[str] | None = None) -> int:
     home = Path(args.home) if args.home else user_home()
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home(home)
     only = {n.strip() for n in args.only.split(",") if n.strip()}
+    baseline_keys: set | None = None
+    if args.baseline:
+        baseline_keys = _watch.load_baseline(args.baseline, BASELINE_FIELDS)
+
+    def _apply_baseline(checks_now: list[dict]) -> int:
+        """Mark failing checks whose (agent, check) key is in the baseline."""
+        if baseline_keys is None:
+            return 0
+        n = 0
+        for c in checks_now:
+            if not c["ok"] and _watch.baseline_key(c, BASELINE_FIELDS) in baseline_keys:
+                c["suppressed"] = True
+                n += 1
+        return n
 
     if getattr(args, "env", False):
         secretish = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|AUTH|CREDENTIAL)", re.IGNORECASE)
@@ -440,12 +459,19 @@ def main(argv: list[str] | None = None) -> int:
     def _verdict_payload(checks_now: list[dict], ticks: int = 1) -> dict:
         agents: dict[str, bool] = {}
         for c in checks_now:
+            if c.get("suppressed"):
+                continue
             agents[c["agent"]] = agents.get(c["agent"], True) and c["ok"]
         return {
-            "verdict": "pass" if all(c["ok"] for c in checks_now) else "fail",
+            "verdict": "pass"
+            if all(c["ok"] or c.get("suppressed") for c in checks_now)
+            else "fail",
             "ticks": ticks,
             "checks": len(checks_now),
-            "failed": sum(1 for c in checks_now if not c["ok"]),
+            "failed": sum(
+                1 for c in checks_now if not c["ok"] and not c.get("suppressed")
+            ),
+            "suppressed": sum(1 for c in checks_now if c.get("suppressed")),
             "agents": agents,
         }
 
@@ -459,6 +485,10 @@ def main(argv: list[str] | None = None) -> int:
             payload["elapsed_s"] = elapsed_s
         return _watch.write_verdict(args.verdict, payload)
 
+    if baseline_keys is not None:
+        sys.stderr.write(
+            "baseline: loaded %d known failure(s)\n" % len(baseline_keys)
+        )
     if args.self_test:
         with tempfile.TemporaryDirectory() as tmp:
             thome = Path(tmp)
@@ -501,6 +531,25 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
         return 0 if ok else 1
+    if args.baseline_write:
+        failing = [
+            {"agent": c["agent"], "check": c["check"]}
+            for c in collect()
+            if not c["ok"]
+        ]
+        try:
+            _atomic_write(
+                Path(args.baseline_write),
+                json.dumps({"findings": failing}, indent=2) + "\n",
+            )
+        except OSError as exc:
+            sys.stderr.write(
+                "cannot write --baseline-write %s: %s\n" % (args.baseline_write, exc)
+            )
+            return 1
+        sys.stderr.write(
+            "wrote baseline %s (%d failing checks)\n" % (args.baseline_write, len(failing))
+        )
     if args.watch:
         import time as _time
         from datetime import datetime, timezone
@@ -515,12 +564,14 @@ def main(argv: list[str] | None = None) -> int:
         watch_t0 = _time.time()
         while True:
             cur = collect()
-            failed = sum(1 for c in cur if not c["ok"])
+            _apply_baseline(cur)
+            failed = sum(1 for c in cur if not c["ok"] and not c.get("suppressed"))
             ok = failed == 0
             last = {
                 "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "checks": len(cur),
                 "failed": failed,
+                "suppressed": sum(1 for c in cur if c.get("suppressed")),
                 "ok": ok,
                 "ok_changed": prev_ok is not None and ok != prev_ok,
                 "elapsed_s": round(_time.time() - watch_t0, 2),
@@ -549,14 +600,19 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0 if last["ok"] else 1
     checks = collect()
-    ok = all(c["ok"] for c in checks)
+    suppressed = _apply_baseline(checks)
+    if suppressed:
+        sys.stderr.write(
+            "baseline: suppressed %d known failure(s)\n" % suppressed
+        )
+    ok = all(c["ok"] or c.get("suppressed") for c in checks)
     for check in checks:
         if not check["ok"]:
             hint = _hint(check["check"])
             if hint:
                 check["hint"] = hint.replace("<agent>", check["agent"])
     shown = checks if not args.quiet else [c for c in checks if not c["ok"]]
-    payload = {"ok": ok, "checks": shown}
+    payload = {"ok": ok, "checks": shown, "suppressed": suppressed}
     text = json.dumps(payload, indent=2) + "\n"
     if args.out:
         try:
@@ -599,7 +655,7 @@ def main(argv: list[str] | None = None) -> int:
                 % (
                     c.get("check") or "",
                     c.get("agent") or "",
-                    "yes" if c.get("ok") else "NO",
+                    "yes" if c.get("ok") else ("suppressed" if c.get("suppressed") else "NO"),
                     c.get("hint") or "",
                 )
             )

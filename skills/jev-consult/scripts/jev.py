@@ -1062,6 +1062,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the jev-consult policy version and exit.",
     )
+    parser.add_argument(
+        "--schema",
+        action="store_true",
+        help="Print the request/response key contract and exit (--json emits the object)",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="With --schema: emit the schema object instead of text rows",
+    )
     sub = parser.add_subparsers(dest="command")
     ask = sub.add_parser("ask", help="POST state+questions, print answers and decision")
     ask.add_argument("file", help="JSON file or - for stdin")
@@ -1255,9 +1265,45 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# Response-side key contract (the request side reuses question_lint.REQUEST_SCHEMA_ROWS).
+RESPONSE_SCHEMA_ROWS = {
+    "response.model": {"required": False, "type": "string, the Jev model that answered"},
+    "response.answers": {"required": True, "type": "object{qid: answer}, one per request question"},
+    "response.usage": {"required": False, "type": "object{input_tokens, output_tokens} non-negative ints"},
+    "response.warnings": {"required": False, "type": "list[string], server-side warnings"},
+    "answer.type": {"required": True, "type": "choice|noul|score, must equal request question.type"},
+    "answer.choice": {"required": False, "type": "string option key (choice answers, must be in criteria)"},
+    "answer.noul": {"required": False, "type": "number 0..1 (noul answers)"},
+    "answer.score": {"required": False, "type": "finite number (score answers)"},
+    "answer.confidence": {"required": False, "type": "float 0..1 (required for choice/score)"},
+    "answer.probabilities": {"required": False, "type": "object{option: p} keys=criteria, sum to 1 (choice answers)"},
+}
+
+
+def schema_rows() -> dict:
+    rows = {
+        "request." + key: dict(row)
+        for key, row in getattr(question_lint, "REQUEST_SCHEMA_ROWS", {}).items()
+    }
+    rows["request.model"] = {"required": False, "type": "string, Jev model override (policy default otherwise)"}
+    rows.update(RESPONSE_SCHEMA_ROWS)
+    return rows
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.schema:
+        rows = schema_rows()
+        if args.json:
+            sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+        else:
+            for key, row in rows.items():
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (key, row["type"], "required" if row["required"] else "optional")
+                )
+        return 0
     if args.version:
         try:
             version = load_policy(args.policy).get("version", "?")

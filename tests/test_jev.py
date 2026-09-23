@@ -1570,5 +1570,55 @@ class AskTimeoutTests(unittest.TestCase):
         self.assertEqual(calls, [60])
 
 
+class SchemaTests(unittest.TestCase):
+    """--schema ties the printed contract to the real validator."""
+
+    def test_schema_rows_mirror_question_lint_and_validate(self) -> None:
+        rows = jev.schema_rows()
+        # request.* mirrors question_lint.REQUEST_SCHEMA_ROWS verbatim
+        for key, meta in jev.question_lint.REQUEST_SCHEMA_ROWS.items():
+            self.assertIn("request." + key, rows)
+            self.assertEqual(rows["request." + key]["required"], meta["required"])
+        # response side: a well-formed response passes the validator and its
+        # keys are a subset of the documented answer.* contract
+        questions = {
+            "q1": {"type": "choice", "criteria": {"a": "A", "b": "B"}},
+            "q2": {"type": "noul"},
+            "q3": {"type": "score"},
+        }
+        response = {
+            "model": "m",
+            "answers": {
+                "q1": {"type": "choice", "choice": "a", "confidence": 0.9,
+                       "probabilities": {"a": 0.7, "b": 0.3}},
+                "q2": {"type": "noul", "noul": 1},
+                "q3": {"type": "score", "score": 4, "confidence": 0.5},
+            },
+            "usage": {"input_tokens": 1, "output_tokens": 2},
+        }
+        out = jev.validate_response(response, questions)
+        self.assertEqual(out["model"], "m")
+        allowed_answer = {
+            k.split(".", 1)[1] for k in rows if k.startswith("answer.")
+        }
+        for answer in response["answers"].values():
+            self.assertEqual(set(answer) - allowed_answer, set())
+
+    def test_schema_flag_text_and_json(self) -> None:
+        buf = io.StringIO()
+        with patch.object(sys, "stdout", buf):
+            rc = jev.main(["--schema"])
+        self.assertEqual(rc, 0)
+        self.assertIn("request.questions:", buf.getvalue())
+        self.assertIn("response.answers:", buf.getvalue())
+
+        buf = io.StringIO()
+        with patch.object(sys, "stdout", buf):
+            rc = jev.main(["--schema", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertIn("response.answers", rows)
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

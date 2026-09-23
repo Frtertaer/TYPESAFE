@@ -24,6 +24,7 @@ Never print `TYPESAFE_API_KEY`. Never auto-install marketplace items.
 ## How to call
 
 ```text
+python skills/jev-consult/scripts/jev.py --schema  # prints the request/response key contract (request.* mirrors question_lint's schema plus request.model; answer.* rows describe the per-question answer record); --json emits the object
 python skills/jev-consult/scripts/jev.py ask request.json --trace
 python skills/jev-consult/scripts/jev.py scaffold keep_vs_change --out request.json --plan "<task>"  # --lint runs question_lint on the new request inline (findings to stderr, rc 1 on errors)
 python skills/jev-consult/scripts/jev.py lint request.json  # `--jq KEY` prints one field of the lint payload (findings|errors|warnings|infos; rc 2 on unknown); standalone question_lint.py adds --severity LEVEL (error|warn|info), --explain RULE prints the J-rule's meaning and --rules lists the whole catalog (both rc 2 on unknown; --json emits a list), --self-test lints a synthetic compound-noul request and exits 1 when no findings fire, and FILE... lints several requests (per-file sections, --json list; --watch/--fix single-file only); `--jq KEY` digs the findings payload (numeric parts index the per-file list; rc 2 on unknown)

@@ -31,7 +31,7 @@ python -m unittest discover -s tests      # прогон всей suite
 | `AGENTS.md` / `CLAUDE.md` / `.hermes.md` | Инструкции агенту из коробки |
 | `skills/jev-consult/SKILL.md` | Скилл |
 | `skills/jev-consult/policy.json` | Единственный файл порогов и шаблонов |
-| `skills/jev-consult/scripts/jev.py` | CLI без зависимостей: `ask` / `scaffold` / `decide` / `lint` / `ping` (`ask --trace` подмешивает план) |
+| `skills/jev-consult/scripts/jev.py` | CLI без зависимостей: `ask` / `scaffold` / `decide` / `lint` / `ping` (`ask --trace` подмешивает план); `--schema` печатает контракт request/response |
 | `skills/jev-consult/scripts/question_lint.py` | Статический линт формулировок вопросов J001–J021 (вызывается из `jev lint`); `--schema` печатает контракт ключей request.json |
 | `skills/jev-consult/scripts/inventory.py` | Скан установленных skills/plugins/MCP, шортлист; `--schema` печатает контракт ключей payload/item |
 | `skills/jev-consult/scripts/inventory_hook.py` | IDF-шортлист, затем один Jev-пикер (fail-open, ничего не ставит) |

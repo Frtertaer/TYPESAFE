@@ -12,7 +12,7 @@ SCRIPTS_DIR = ROOT / "skills" / "jev-consult" / "scripts"
 # Every script exposing a --schema flag (or trace.py's `schema` subcommand) must
 # print the key contract: text rows "key: type (required|optional)" and, with
 # --json, a {key: {"required": bool, "type": str}} object.
-FLAG_SCHEMA = ("compare.py", "decisions.py", "inventory.py", "policy_lint.py", "progress.py", "question_lint.py", "skill_lint.py", "trigger_eval.py")
+FLAG_SCHEMA = ("compare.py", "decisions.py", "inventory.py", "jev.py", "policy_lint.py", "progress.py", "question_lint.py", "skill_lint.py", "trigger_eval.py")
 SUBCOMMAND_SCHEMA = {"trace.py": "schema"}
 
 

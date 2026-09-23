@@ -1772,7 +1772,92 @@ def main(argv: list[str] | None = None) -> int:
         metavar="DIR",
         help="Compact every *.json/*.jsonl transcript in DIR; one JSON line per file on stdout.",
     )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Compact a synthetic transcript with a stub asker (no Jev) and check the stats/min-messages paths; exit 1 on failure.",
+    )
     args = parser.parse_args(argv)
+    if args.self_test:
+        checks: dict = {}
+        try:
+            def _stub(state: dict, questions: dict) -> dict:
+                return {
+                    "answers": {
+                        name: {"type": "noul", "noul": 0.1}
+                        for name in questions
+                    }
+                }
+
+            transcript = [
+                {"role": "user", "text": "self-test task"},
+                {
+                    "role": "assistant",
+                    "toolUses": [
+                        {
+                            "tool_use_id": "st1",
+                            "tool": "read_file",
+                            "input": {"file_path": "/tmp/a.py"},
+                        },
+                        {
+                            "tool_use_id": "st2",
+                            "tool": "read_file",
+                            "input": {"file_path": "/tmp/b.py"},
+                        },
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "toolResults": [
+                        {"tool_use_id": "st1", "text": "x" * 4000},
+                        {"tool_use_id": "st2", "text": "y" * 4000},
+                    ],
+                },
+            ]
+            result = compact(
+                transcript,
+                _stub,
+                {"preserve_recent": 0, "no_spill": True},
+            )
+            stats = result.get("stats") or {}
+            checks["drops_calls"] = (
+                stats.get("resultsDropped", 0) + stats.get("callsDropped", 0)
+            ) >= 1
+            checks["shrinks"] = (
+                stats.get("charsAfter", 0) < stats.get("charsBefore", 0)
+            )
+            checks["not_fallback"] = stats.get("fallback") is False
+            small = compact(
+                [{"role": "user", "text": "tiny"}],
+                _stub,
+                {"min_messages": 5},
+            )
+            checks["min_messages_skip"] = (
+                (small.get("stats") or {}).get("skipped") == "min_messages"
+            )
+        except Exception:
+            checks = {"raised": False}
+        ok = bool(checks) and all(checks.values())
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {"self_test": "ok" if ok else "FAIL", "checks": checks},
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "self-test: %s %s\n"
+                % (
+                    "ok" if ok else "FAIL",
+                    " ".join(
+                        "%s=%s" % (k, "ok" if v else "FAIL")
+                        for k, v in sorted(checks.items())
+                    ),
+                )
+            )
+        return 0 if ok else 1
     if args.version:
         policy_path = Path(__file__).resolve().parent.parent / "policy.json"
         try:

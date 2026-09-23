@@ -657,6 +657,18 @@ class CompactTests(unittest.TestCase):
     def test_history_drop_is_not_default(self):
         self.assertEqual(C.main(["missing.json"]), 2)
 
+    def test_self_test_runs_offline(self):
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = C.main(["--self-test", "--json"])
+        self.assertEqual(rc, 0)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["self_test"], "ok")
+        self.assertTrue(all(out["checks"].values()))
+
 
 def _call(**kw):
     base = dict(

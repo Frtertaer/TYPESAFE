@@ -27,6 +27,7 @@ def load(path: Path, name: str):
 
 INV = load(ROOT / "skills" / "jev-consult" / "scripts" / "inventory.py", "jev_inventory")
 HOOK = load(ROOT / "skills" / "jev-consult" / "scripts" / "inventory_hook.py", "jev_inventory_hook")
+DEC = load(ROOT / "skills" / "jev-consult" / "scripts" / "decisions.py", "jev_decisions")
 INSTALL = load(ROOT / "scripts" / "install.py", "jev_install_tools")
 FIXTURE = ROOT / "tests" / "fixtures" / "inventory-harness"
 
@@ -84,6 +85,28 @@ class InventoryHookTests(unittest.TestCase):
             note = out["hookSpecificOutput"]["additionalContext"]
             self.assertEqual(note.count("- skill"), 1)
             self.assertGreater(HOOK.LAST_DECISION["shortlist_n"], 1)
+
+    def test_last_decision_matches_schema(self) -> None:
+        """Emitted entries must match decisions.py ENTRY_SCHEMA_ROWS exactly."""
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            HOOK.handle(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "Add JWT access tokens in Python",
+                    "cwd": tmp,
+                },
+                items=items,
+                harness="claude-code",
+                pick_fn=skip_pick,
+            )
+        entry = HOOK.LAST_DECISION
+        required = {
+            key for key, row in DEC.ENTRY_SCHEMA_ROWS.items() if row["required"]
+        }
+        known = set(DEC.ENTRY_SCHEMA_ROWS)
+        self.assertEqual(required - set(entry), set())
+        self.assertEqual(set(entry) - known, set())
 
     def test_last_decision_records_shortlist_score_avg(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)

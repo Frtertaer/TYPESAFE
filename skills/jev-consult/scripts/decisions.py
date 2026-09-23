@@ -42,6 +42,42 @@ def _parse_jsonl(text: str) -> tuple[list[dict], int]:
     return entries, bad
 
 
+# The decisions.jsonl entry contract. Two writers: routing entries from
+# inventory_hook.LAST_DECISION carry every required key; fill entries from
+# apply_fill/catalog_fill carry only ts/harness/jev_status/fill/outcome/
+# prompt_head. --schema prints rows like the other pack scripts: `key: type
+# (required|optional)` text rows, or the object with --json.
+ENTRY_SCHEMA_ROWS = {
+    "ts": {"required": True, "type": "number, epoch seconds"},
+    "harness": {"required": True, "type": "string, emitting harness"},
+    "prompt_sha": {"required": True, "type": "string, 12-hex sha256 prefix of the prompt"},
+    "prompt_head": {"required": True, "type": "string, first 160 redacted chars"},
+    "prompt_tail": {"required": True, "type": "string, last 80 redacted chars"},
+    "prompt_len": {"required": True, "type": "int, unredacted prompt length"},
+    "prompt_truncated": {"required": True, "type": "bool"},
+    "n_catalog": {"required": True, "type": "int, catalog size at emit time"},
+    "shortlist_n": {"required": True, "type": "int, shortlisted skill count"},
+    "shortlist": {"required": True, "type": "list[string], shortlisted skill ids"},
+    "explicit": {"required": True, "type": "bool, env-forced winner"},
+    "jev_status": {"required": True, "type": "string, routing outcome (idf|skip|winner|miss|budget|none|...)"},
+    "reason": {"required": True, "type": "string, why this status"},
+    "question": {"required": True, "type": "string|null, Jev question asked"},
+    "need": {"required": True, "type": "object|null, Jev ask payload"},
+    "probabilities": {"required": True, "type": "object{option: p}, Jev softmax"},
+    "shortlist_score_avg": {"required": True, "type": "number, mean IDF score of picks"},
+    "winner": {"required": True, "type": "{kind, name}|null, applied pick"},
+    "strong_pick": {"required": True, "type": "bool"},
+    "latency_ms": {"required": True, "type": "number|null, Jev call latency"},
+    "budget_ms": {"required": True, "type": "int, configured hook budget"},
+    "over_budget": {"required": True, "type": "bool, latency exceeded budget"},
+    "stale_sidecar": {"required": True, "type": "bool, a stale sidecar was auto-pruned"},
+    "sidecar_age_s": {"required": True, "type": "int|null, age of the pruned sidecar"},
+    "note": {"required": False, "type": "string, extra note tag (written only when set)"},
+    "fill": {"required": False, "type": "string, fill writer (apply|catalog) — fill entries only"},
+    "outcome": {"required": False, "type": "string, first word of the fill result — fill entries only"},
+}
+
+
 def load_entries(path: Path) -> tuple[list[dict], int]:
     try:
         text = path.read_text(encoding="utf-8")
@@ -1007,6 +1043,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Rewrite the log dropping unparseable lines (keeps all well-formed entries)",
     )
     parser.add_argument("--json", action="store_true", help="Machine-readable stats")
+    parser.add_argument(
+        "--schema", action="store_true",
+        help="Print the decisions.jsonl entry key contract and exit (--json emits the object)",
+    )
     parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown stats report (totals, status/harness/winners tables) to PATH")
     parser.add_argument(
         "--csv",
@@ -1077,6 +1117,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--self-test", action="store_true", help="Parse a synthetic 3-entry log + 1 bad line; exit 1 when the counts do not match")
     parser.add_argument("--verify", action="store_true", help="Chain check the raw log: unparseable lines, missing ts/jev_status, ts regressions; rc 1 on any problem")
     args = parser.parse_args(argv)
+    if getattr(args, "schema", False):
+        if args.json:
+            sys.stdout.write(json.dumps(ENTRY_SCHEMA_ROWS, indent=2) + "\n")
+        else:
+            for key in ENTRY_SCHEMA_ROWS:
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (key, ENTRY_SCHEMA_ROWS[key]["type"], "required" if ENTRY_SCHEMA_ROWS[key]["required"] else "optional")
+                )
+        return 0
     if getattr(args, "self_test", False):
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / "decisions.jsonl"

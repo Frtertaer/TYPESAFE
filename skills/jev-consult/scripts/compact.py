@@ -2013,7 +2013,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--index-check",
         action="store_true",
-        help="Report index.jsonl drift vs the files on disk ({stale,unindexed,ok}; rc 1 on stale rows, 2 when no dir resolves).",
+        help="Report index.jsonl drift vs the files on disk ({stale,unindexed,ok}; rc 1 on stale rows, 2 when no dir resolves; --include-dry also checks the dry/ sibling index)",
     )
     parser.add_argument(
         "--md",
@@ -2345,6 +2345,17 @@ def main(argv: list[str] | None = None) -> int:
         if report["dir"] is None:
             sys.stderr.write("--index-check: no spill dir resolved\n")
             return 2
+        if getattr(args, "include_dry", False):
+            dry_dir = directory / "dry" if directory is not None else (
+                spill_dir_default() / "dry" if spill_dir_default() is not None else None
+            )
+            dry = check_spill_index(dry_dir)
+            if dry["dir"] is not None:
+                report["dry"] = {
+                    "stale": dry["stale"],
+                    "unindexed": dry["unindexed"],
+                }
+                report["ok"] = report["ok"] and dry["ok"]
         if args.json:
             sys.stdout.write(json.dumps(report, indent=2) + "\n")
         else:
@@ -2352,6 +2363,12 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write("stale: %s\n" % name)
             for name in report["unindexed"]:
                 sys.stdout.write("unindexed: %s\n" % name)
+            dry_report = report.get("dry")
+            if dry_report is not None:
+                for name in dry_report["stale"]:
+                    sys.stdout.write("dry stale: %s\n" % name)
+                for name in dry_report["unindexed"]:
+                    sys.stdout.write("dry unindexed: %s\n" % name)
             sys.stdout.write(
                 "%d stale index rows, %d unindexed files\n"
                 % (len(report["stale"]), len(report["unindexed"]))

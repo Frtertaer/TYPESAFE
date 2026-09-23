@@ -2351,6 +2351,32 @@ class IndexCheckTests(unittest.TestCase):
                 )
             self.assertEqual(rc, 2)
 
+    def test_include_dry_merges_dry_index(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            dry = target / "dry"
+            dry.mkdir(parents=True)
+            (target / "a.txt").write_text("x", encoding="utf-8")
+            (dry / "b.txt").write_text("y", encoding="utf-8")
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                C.main(["--reindex-spill", str(dry)])
+            (dry / "b.txt").unlink()
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(
+                    [
+                        "--index-check",
+                        "--spill-dir", str(target),
+                        "--include-dry",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(rc, 1)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["dry"]["stale"], ["b.txt"])
+            self.assertFalse(payload["ok"])
+
 
 class KeepTextTests(unittest.TestCase):
     def setUp(self):

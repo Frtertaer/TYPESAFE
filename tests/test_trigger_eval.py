@@ -281,6 +281,27 @@ class TriggerEvalTests(unittest.TestCase):
                 rc = te.main(["--json", "--jq", "cases.0"])
         self.assertEqual(rc, 2)
 
+    def test_self_test_passes_and_json(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--self-test"])
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", buf.getvalue())
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--self-test", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["self_test"], "ok")
+        self.assertGreater(payload["score"], 0)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(
+                ["--self-test", "--desc", "unrelated tomato soup recipe text"]
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("self-test: FAIL", buf.getvalue())
+
     def test_min_coverage_gates_hit_rate(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

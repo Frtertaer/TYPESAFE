@@ -31,6 +31,7 @@ DEFAULT_CASES = REPO_ROOT / "tests" / "fixtures" / "jev-consult.trigger-cases.js
 VENDORED_SCORER = (
     REPO_ROOT / "vendor" / "awesome-llm-apps-skill-evals" / "run_trigger_evals.py"
 )
+SELF_TEST_PROMPT = "Decide which approach to use and pick the best architecture."
 
 
 def _load_scorer(path: Path):
@@ -288,6 +289,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Override the scorer's margin factor (default 1.15) for the verdict.",
     )
     parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Score a fixed known-good prompt and exit 1 when it scores 0.",
+    )
+    parser.add_argument(
         "--env",
         action="store_true",
         help="Print the resolved config (paths, margin, scorer) as JSON and exit.",
@@ -405,6 +411,38 @@ def main(argv: list[str] | None = None) -> int:
         else:
             sys.stdout.write("score=%.3f\n" % score)
         return 0
+    if args.self_test:
+        if not VENDORED_SCORER.is_file():
+            sys.stderr.write("missing vendored scorer (%s)\n" % VENDORED_SCORER)
+            return 2
+        scorer = _load_scorer(VENDORED_SCORER)
+        try:
+            score = scorer.score(
+                scorer.tokens(SELF_TEST_PROMPT),
+                scorer.tokens(
+                    args.desc if args.desc else scorer.description_of(args.skill)
+                ),
+            )
+        except OSError as exc:
+            sys.stderr.write("trigger_eval failed: %s\n" % exc)
+            return 2
+        ok = score > 0
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "self_test": "ok" if ok else "FAIL",
+                        "prompt": SELF_TEST_PROMPT,
+                        "score": score,
+                    }
+                )
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "self-test: %s score=%.3f\n" % ("ok" if ok else "FAIL", score)
+            )
+        return 0 if ok else 1
     try:
         result = evaluate(
             Path(args.cases),

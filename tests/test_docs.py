@@ -77,6 +77,22 @@ class DocFlagsTests(unittest.TestCase):
         )
         self.assertIsInstance(policy, dict)
 
+    def test_sidecar_fields_documented(self) -> None:
+        """Every sidecar payload key written by inventory.py is named in SKILL.md."""
+        skill = (ROOT / "skills" / "jev-consult" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        # keys emitted by write_sidecar / write_miss / hook extra
+        fields = {
+            "harness", "task", "written_at", "names", "items",
+            "note_sha", "empty",
+        }
+        missing = [f for f in sorted(fields) if "`%s`" % f not in skill]
+        self.assertEqual(missing, [], "sidecar fields absent from SKILL.md")
+        # both filenames named too
+        for fname in (".jev-tools.json", ".jev-tools-miss.json"):
+            self.assertIn(fname, skill, fname)
+
     def test_readme_lists_every_user_facing_script(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         missing = []

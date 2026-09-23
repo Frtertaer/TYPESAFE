@@ -578,6 +578,20 @@ def jq_lookup(obj, path: str):
     return cur, True
 
 
+def _all_hatch(answers: dict, policy: dict[str, Any]) -> bool:
+    """True when every choice-type answer is a hatch pick (none/other)."""
+    hatch = set(
+        policy_get(policy, ("choice", "hatch_ids"), default=["none", "other"])
+    )
+    saw_choice = False
+    for ans in answers.values():
+        if isinstance(ans, dict) and ans.get("type") == "choice":
+            saw_choice = True
+            if str(ans.get("choice") or "") not in hatch:
+                return False
+    return saw_choice
+
+
 def cmd_ask(args: argparse.Namespace) -> int:
     policy = load_policy(args.policy)
     request = read_json_arg(args.file)
@@ -609,17 +623,27 @@ def cmd_ask(args: argparse.Namespace) -> int:
             }
         )
         return 0
-    result = post_systemone(
-        state,
-        questions,
-        policy,
-        model=request.get("model"),
-        timeout=args.timeout or env_timeout() or 60,
-        retries=max(0, args.retries),
-    )
-    answers = result.get("answers") or {}
-    if not isinstance(answers, dict):
-        raise SystemExit("Jev answers must be an object")
+    retry_none = max(0, getattr(args, "retry_none", 0) or 0)
+    attempt = 0
+    while True:
+        result = post_systemone(
+            state,
+            questions,
+            policy,
+            model=request.get("model"),
+            timeout=args.timeout or env_timeout() or 60,
+            retries=max(0, args.retries),
+        )
+        answers = result.get("answers") or {}
+        if not isinstance(answers, dict):
+            raise SystemExit("Jev answers must be an object")
+        attempt += 1
+        if attempt > retry_none or not _all_hatch(answers, policy):
+            break
+        sys.stderr.write(
+            "ask: all choice answers are hatch picks (attempt %d); retrying\n"
+            % attempt
+        )
     decision = decide(
         answers,
         policy,
@@ -632,6 +656,8 @@ def cmd_ask(args: argparse.Namespace) -> int:
         "usage": result.get("usage"),
         "warnings": warnings,
     }
+    if retry_none:
+        payload["ask_attempts"] = attempt
     if getattr(args, "out", "") and not write_out(args.out, payload):
         return 1
     jq_key = getattr(args, "jq", "") or ""
@@ -1188,6 +1214,13 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         default="",
         help="Also write the full response JSON to PATH.",
+    )
+    ask.add_argument(
+        "--retry-none",
+        metavar="N",
+        type=int,
+        default=0,
+        help="Re-ask up to N extra times when every choice answer is a hatch pick (none/other); response gains ask_attempts",
     )
     ask.set_defaults(func=cmd_ask)
     decide_cmd = sub.add_parser("decide", help="Apply policy to an answers object")

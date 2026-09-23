@@ -1270,6 +1270,149 @@ class JevInternalsTests(unittest.TestCase):
             self.assertEqual(payload["answers"]["q"]["choice"], "a")
             self.assertIn("decision", payload)
 
+    def test_cmd_ask_retry_none_retries_hatch_picks(self) -> None:
+        none_resp = {
+            "model": "m1",
+            "answers": {"q": {"type": "choice", "choice": "none"}},
+        }
+        real_resp = {
+            "model": "m1",
+            "answers": {"q": {"type": "choice", "choice": "a"}},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "r.json"
+            out = Path(tmp) / "out.json"
+            req.write_text(
+                json.dumps(
+                    {
+                        "state": {"task": "t"},
+                        "questions": {
+                            "q": {
+                                "type": "choice",
+                                "instructions": "pick",
+                                "criteria": {"a": "pick a", "b": "pick b"},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(
+                jev, "post_systemone", side_effect=[none_resp, real_resp]
+            ) as post, patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", io.StringIO()
+            ) as err:
+                jev.main(
+                    ["ask", str(req), "--retry-none", "3", "--out", str(out)]
+                )
+            self.assertEqual(post.call_count, 2)
+            self.assertIn("hatch picks (attempt 1)", err.getvalue())
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(payload["answers"]["q"]["choice"], "a")
+            self.assertEqual(payload["ask_attempts"], 2)
+
+    def test_cmd_ask_retry_none_caps_at_n_plus_one(self) -> None:
+        none_resp = {
+            "model": "m1",
+            "answers": {"q": {"type": "choice", "choice": "none"}},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "r.json"
+            out = Path(tmp) / "out.json"
+            req.write_text(
+                json.dumps(
+                    {
+                        "state": {"task": "t"},
+                        "questions": {
+                            "q": {
+                                "type": "choice",
+                                "instructions": "pick",
+                                "criteria": {"a": "x", "b": "y"},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(
+                jev, "post_systemone", return_value=none_resp
+            ) as post, patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", io.StringIO()
+            ):
+                jev.main(
+                    ["ask", str(req), "--retry-none", "2", "--out", str(out)]
+                )
+            self.assertEqual(post.call_count, 3)
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(payload["ask_attempts"], 3)
+
+    def test_cmd_ask_no_retry_flag_single_call_no_attempts_key(self) -> None:
+        none_resp = {
+            "model": "m1",
+            "answers": {"q": {"type": "choice", "choice": "none"}},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "r.json"
+            out = Path(tmp) / "out.json"
+            req.write_text(
+                json.dumps(
+                    {
+                        "state": {"task": "t"},
+                        "questions": {
+                            "q": {
+                                "type": "choice",
+                                "instructions": "pick",
+                                "criteria": {"a": "x", "b": "y"},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(
+                jev, "post_systemone", return_value=none_resp
+            ) as post, patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", io.StringIO()
+            ):
+                jev.main(["ask", str(req), "--out", str(out)])
+            self.assertEqual(post.call_count, 1)
+            self.assertNotIn(
+                "ask_attempts", json.loads(out.read_text(encoding="utf-8"))
+            )
+
+    def test_cmd_ask_retry_none_ignores_noul_answers(self) -> None:
+        noul_resp = {
+            "model": "m1",
+            "answers": {"q": {"type": "noul", "noul": 0.5}},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "r.json"
+            out = Path(tmp) / "out.json"
+            req.write_text(
+                json.dumps(
+                    {
+                        "state": {"task": "t"},
+                        "questions": {
+                            "q": {
+                                "type": "noul",
+                                "instructions": "how sure",
+                                "criteria": {"t": "yes", "f": "no"},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(
+                jev, "post_systemone", return_value=noul_resp
+            ) as post, patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", io.StringIO()
+            ):
+                jev.main(
+                    ["ask", str(req), "--retry-none", "5", "--out", str(out)]
+                )
+            self.assertEqual(post.call_count, 1)
+
     def test_cmd_lint_jq_prints_one_field(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "r.json"

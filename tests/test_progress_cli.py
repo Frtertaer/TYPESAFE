@@ -326,6 +326,35 @@ class LintTests(unittest.TestCase):
             self.assertFalse((base / ".devin").exists())
 
 
+class JqTests(unittest.TestCase):
+    def test_self_test_jq_prints_field(self) -> None:
+        code, out = run_cli(["self-test", "--jq", "self_test"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), '"ok"')
+
+    def test_lint_jq_prints_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path, policy_path = LintTests()._write_pair(Path(tmp))
+            code, out = run_cli(
+                ["--policy", str(policy_path), "lint", str(plan_path), "--jq", "items"]
+            )
+            self.assertEqual(code, 0)
+            self.assertEqual(out.strip(), "1")
+
+    def test_jq_bad_key_rc2(self) -> None:
+        err = io.StringIO()
+        with redirect_stderr(err):
+            code, out = run_cli(["self-test", "--jq", "bogus"])
+        self.assertEqual(code, 2)
+        self.assertIn("bad --jq key", err.getvalue())
+        self.assertEqual(out, "")
+
+    def test_jq_digs_nested(self) -> None:
+        code, out = run_cli(["self-test", "--jq", "stage"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), '"self_test"')
+
+
 class SchemaTests(unittest.TestCase):
     def test_schema_prints_plan_contract(self) -> None:
         code, out = run_cli(["--schema"])

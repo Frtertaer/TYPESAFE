@@ -54,7 +54,27 @@ def build_parser():
     commands.add_parser("self-test", help="Initialize a scratch ledger with a stub evidence collector and read it back")
     lint_p = commands.add_parser("lint", help="Dry-validate a plan against a policy with the same checks as init; writes nothing")
     lint_p.add_argument("plan", help="Stage-plan JSON file")
+    for name in commands.choices:
+        commands.choices[name].add_argument(
+            "--jq", metavar="KEY", default="",
+            help="Print just this dotted-path field of the result payload (rc 2 on unknown key)",
+        )
     return parser
+
+
+def _emit_jq(payload, jq):
+    """When --jq is set, print just that dotted field and return an rc; else None."""
+    if not jq:
+        return None
+    value, found = _watch.dig(payload, jq)
+    if not found:
+        sys.stderr.write(
+            "bad --jq key %r (payload has: %s)\n"
+            % (jq, ", ".join(sorted(payload)))
+        )
+        return 2
+    sys.stdout.write(json.dumps(value, ensure_ascii=False) + "\n")
+    return 0
 
 
 # The init plan contract, mirroring validate_plan in progress_core. --schema
@@ -153,7 +173,11 @@ def main(argv=None):
             except ProgressError as exc:
                 sys.stdout.write(json.dumps({"lint": "invalid", "code": exc.code, "message": str(exc)}) + "\n")
                 return 1
-            sys.stdout.write(json.dumps({"lint": "ok", "stage": plan_doc["id"], "items": len(plan_doc["items"]), "checks": len(plan_doc["checks"])}, indent=2) + "\n")
+            result = {"lint": "ok", "stage": plan_doc["id"], "items": len(plan_doc["items"]), "checks": len(plan_doc["checks"])}
+            rc = _emit_jq(result, args.jq)
+            if rc is not None:
+                return rc
+            sys.stdout.write(json.dumps(result, indent=2) + "\n")
             return 0
         repo = Path(args.repo).resolve()
         database = Path(args.db).resolve() if args.db else repo / ".devin" / "progress.sqlite3"
@@ -180,6 +204,9 @@ def main(argv=None):
     except ProgressError as exc:
         sys.stdout.write(json.dumps({"error": {"code": exc.code, "message": str(exc)}}) + "\n")
         return 2
+    rc = _emit_jq(result, getattr(args, "jq", ""))
+    if rc is not None:
+        return rc
     sys.stdout.write(json.dumps(result, indent=2) + "\n")
     return 0
 

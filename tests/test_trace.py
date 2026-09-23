@@ -2849,5 +2849,83 @@ class HistoryUniqTests(unittest.TestCase):
             self.assertEqual(len(json.loads(buf.getvalue())), 5)
 
 
+class NotesEditRangeTests(unittest.TestCase):
+    def _trace(self, tmp: str) -> Path:
+        import io
+        from contextlib import redirect_stdout
+
+        path = Path(tmp) / "trace.json"
+        with redirect_stdout(io.StringIO()):
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            for i in range(3):
+                tr.main(
+                    [
+                        "--file",
+                        str(path),
+                        "record",
+                        "--pick",
+                        "x",
+                        "--note",
+                        "n%d" % (i + 1),
+                    ]
+                )
+        return path
+
+    def test_edit_range_rewrites_all(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--edit", "2-3", "bulk"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertIn("notes 2-3 updated", err.getvalue())
+            data = json.loads(path.read_text(encoding="utf-8"))
+            texts = [n["text"] for n in data["notes"]]
+            self.assertEqual(texts, ["n1", "bulk", "bulk"])
+            shas = {n["sha"] for n in data["notes"][1:]}
+            self.assertEqual(len(shas), 1)
+            import hashlib
+
+            self.assertIn(
+                hashlib.sha256(b"bulk").hexdigest()[:12], shas
+            )
+
+    def test_edit_range_reversed_and_oob(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--edit", "3-2", "swapped"]
+                )
+            self.assertEqual(rc, 0)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                [n["text"] for n in data["notes"]], ["n1", "swapped", "swapped"]
+            )
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--edit", "2-9", "x"]
+                )
+            self.assertEqual(rc, 2)
+            self.assertIn("out of range", err.getvalue())
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--edit", "a-b", "x"]
+                )
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --edit range", err.getvalue())
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

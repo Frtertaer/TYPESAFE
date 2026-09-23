@@ -1031,20 +1031,43 @@ def cmd_notes(args: argparse.Namespace) -> int:
         notes = data["notes"]
     edit = getattr(args, "edit", None)
     if edit:
-        try:
-            idx = int(edit[0])
-        except (TypeError, ValueError):
-            sys.stderr.write("bad --edit index: %s\n" % edit[0])
+        spec = str(edit[0]).strip()
+        lo = hi = 0
+        if "-" in spec.lstrip("-"):
+            parts = spec.split("-", 1)
+            try:
+                lo, hi = int(parts[0]), int(parts[1])
+            except (TypeError, ValueError):
+                sys.stderr.write("bad --edit range: %s\n" % edit[0])
+                return 2
+            if lo > hi:
+                lo, hi = hi, lo
+        else:
+            try:
+                lo = hi = int(spec)
+            except (TypeError, ValueError):
+                sys.stderr.write("bad --edit index: %s\n" % edit[0])
+                return 2
+        if (
+            lo < 1
+            or hi > len(notes)
+            or any(not isinstance(notes[i - 1], dict) for i in range(lo, hi + 1))
+        ):
+            sys.stderr.write(
+                "--edit %s out of range (%d notes)\n" % (spec, len(notes))
+            )
             return 2
-        if idx < 1 or idx > len(notes) or not isinstance(notes[idx - 1], dict):
-            sys.stderr.write("--edit %d out of range (%d notes)\n" % (idx, len(notes)))
-            return 2
-        target = notes[idx - 1]
-        target["text"] = edit[1]
-        target["sha"] = hashlib.sha256(edit[1].encode("utf-8")).hexdigest()[:12]
+        new_sha = hashlib.sha256(edit[1].encode("utf-8")).hexdigest()[:12]
+        for i in range(lo, hi + 1):
+            notes[i - 1]["text"] = edit[1]
+            notes[i - 1]["sha"] = new_sha
         try:
             save(data, path)
-            sys.stderr.write("note %d updated\n" % idx)
+            sys.stderr.write(
+                "note %d updated\n" % lo
+                if lo == hi
+                else "notes %d-%d updated\n" % (lo, hi)
+            )
         except OSError as exc:
             sys.stderr.write("edit failed: %s\n" % exc)
             return 1
@@ -1653,7 +1676,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")
     notes_cmd.add_argument("--limit", type=int, help="Show only the last N notes")
     notes_cmd.add_argument("--prune", type=int, help="Rewrite the trace keeping only the last N notes")
-    notes_cmd.add_argument("--edit", nargs=2, metavar=("I", "TEXT"), help="Rewrite note I (1-based, into the unfiltered list) with TEXT — keeps ts/iso/harness, recomputes sha; rc 2 out of range")
+    notes_cmd.add_argument("--edit", nargs=2, metavar=("I", "TEXT"), help="Rewrite note I (1-based, into the unfiltered list) — or every note in range I-J — with TEXT; keeps ts/iso/harness, recomputes sha; rc 2 out of range")
     notes_cmd.add_argument("--since", default=None, help="Only notes with ts >= epoch seconds or ISO8601")
     notes_cmd.add_argument("--before", default=None, help="Only notes with ts <= epoch seconds or ISO8601")
     notes_cmd.add_argument("--harness", default="", help="Only notes tagged with this harness")

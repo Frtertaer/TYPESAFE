@@ -2578,6 +2578,28 @@ class ShowJqTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(json.loads(buf.getvalue()), "P")
 
+    def test_show_jq_comma_list_emits_object(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "show", "--jq", "plan,last_pick"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(
+                json.loads(buf.getvalue()), {"plan": "P", "last_pick": "x"}
+            )
+            buf = io.StringIO()
+            err = io.StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = tr.main(["--file", str(path), "show", "--jq", "plan,nope"])
+            self.assertEqual(rc, 2)
+            self.assertIn("'nope'", err.getvalue())
+
 
 class EmitJqTests(unittest.TestCase):
     """--jq digs the emitted {path, trace} payload on mutating subcommands."""
@@ -2663,6 +2685,59 @@ class EmitJqTests(unittest.TestCase):
             rc = tr.main(["self-test", "--jq", "self_test"])
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(buf.getvalue()), "ok")
+
+    def test_emit_jq_comma_list_emits_object(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._init(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    [
+                        "--file",
+                        str(path),
+                        "bump",
+                        "--jq",
+                        "trace.attempt_count,trace.plan",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(
+                json.loads(buf.getvalue()),
+                {"trace.attempt_count": 1, "trace.plan": "P"},
+            )
+            buf = io.StringIO()
+            err = io.StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = tr.main(
+                    ["--file", str(path), "bump", "--jq", "trace.plan,bogus"]
+                )
+            self.assertEqual(rc, 2)
+            self.assertIn("'bogus'", err.getvalue())
+
+    def test_stats_jq_comma_list(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._init(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    [
+                        "--file",
+                        str(path),
+                        "stats",
+                        "--jq",
+                        "attempt_count,history",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(
+                json.loads(buf.getvalue()), {"attempt_count": 0, "history": 0}
+            )
 
 
 class SetDryRunTests(unittest.TestCase):

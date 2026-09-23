@@ -209,22 +209,33 @@ def record(trace: dict[str, Any], pick: str, kind: str = "") -> dict[str, Any]:
 
 
 def emit(payload: Any, jq: str = "") -> int:
-    """Print payload JSON; with jq, print just that dotted field (rc 2 on miss)."""
+    """Print payload JSON; with jq, print just that dotted field (rc 2 on miss).
+    A comma list `a,b` digs every field and emits them as an object."""
     if jq:
-        if isinstance(payload, dict):
-            value, found = jq_lookup(payload, jq)
-        else:
-            value, found = None, False
-        if not found:
+        fields = [f.strip() for f in jq.split(",") if f.strip()]
+        values: dict[str, Any] = {}
+        missing = ""
+        for field in fields:
+            if isinstance(payload, dict):
+                value, found = jq_lookup(payload, field)
+            else:
+                value, found = None, False
+            if not found:
+                missing = field
+                break
+            values[field] = value
+        if missing or not fields:
+            bad = missing or jq
             sys.stderr.write(
                 "bad --jq key %r (payload has: %s)\n"
                 % (
-                    jq,
+                    bad,
                     ", ".join(sorted(payload)) if isinstance(payload, dict) else "-",
                 )
             )
             return 2
-        sys.stdout.write(json.dumps(value, ensure_ascii=False) + "\n")
+        out = values[fields[0]] if len(fields) == 1 else values
+        sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
         return 0
     json.dump(payload, sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
@@ -250,14 +261,24 @@ def cmd_show(args: argparse.Namespace) -> int:
     data = load(path)
     exists = path.is_file()
     if getattr(args, "jq", ""):
-        value, found = _watch.dig(data, args.jq)
-        if not found:
+        fields = [f.strip() for f in args.jq.split(",") if f.strip()]
+        values: dict[str, Any] = {}
+        missing = ""
+        for field in fields:
+            value, found = _watch.dig(data, field)
+            if not found:
+                missing = field
+                break
+            values[field] = value
+        if missing or not fields:
+            bad = missing or args.jq
             sys.stderr.write(
                 "bad --jq key %r (trace has: %s)\n"
-                % (args.jq, ", ".join(sorted(data)) if isinstance(data, dict) else "-")
+                % (bad, ", ".join(sorted(data)) if isinstance(data, dict) else "-")
             )
             return 2
-        sys.stdout.write(json.dumps(value, ensure_ascii=False) + "\n")
+        out = values[fields[0]] if len(fields) == 1 else values
+        sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
         return 0
     key = getattr(args, "key", "")
     if key:
@@ -709,17 +730,28 @@ def jq_lookup(obj, path: str):
 
 
 def emit_jq(payload: dict, jq: str) -> int | None:
-    """When --jq is set, print just that dotted field and return an rc; else None."""
+    """When --jq is set, print just that dotted field and return an rc; else None.
+    A comma list `a,b` digs every field and emits them as an object."""
     if not jq:
         return None
-    value, found = jq_lookup(payload, jq)
-    if not found:
+    fields = [f.strip() for f in jq.split(",") if f.strip()]
+    values: dict[str, Any] = {}
+    missing = ""
+    for field in fields:
+        value, found = jq_lookup(payload, field)
+        if not found:
+            missing = field
+            break
+        values[field] = value
+    if missing or not fields:
+        bad = missing or jq
         sys.stderr.write(
             "bad --jq key %r (payload has: %s)\n"
-            % (jq, ", ".join(sorted(payload)))
+            % (bad, ", ".join(sorted(payload)))
         )
         return 2
-    sys.stdout.write(json.dumps(value, ensure_ascii=False) + "\n")
+    out = values[fields[0]] if len(fields) == 1 else values
+    sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
     return 0
 
 
@@ -746,14 +778,24 @@ def cmd_env(args: argparse.Namespace) -> int:
         "watch_quiet": _watch.quiet("JEV_TRACE_WATCH_QUIET", False),
     }
     if getattr(args, "jq", ""):
-        node, found = _watch.dig(report, args.jq)
-        if not found:
+        fields = [f.strip() for f in args.jq.split(",") if f.strip()]
+        values: dict[str, Any] = {}
+        missing = ""
+        for field in fields:
+            node, found = _watch.dig(report, field)
+            if not found:
+                missing = field
+                break
+            values[field] = node
+        if missing or not fields:
+            bad = missing or args.jq
             sys.stderr.write(
                 "bad --jq key %r (env has: %s)\n"
-                % (args.jq, ", ".join(sorted(report)))
+                % (bad, ", ".join(sorted(report)))
             )
             return 2
-        sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+        out = values[fields[0]] if len(fields) == 1 else values
+        sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
         return 0
     text = json.dumps(report, indent=2, sort_keys=True) + "\n"
     sys.stdout.write(text)

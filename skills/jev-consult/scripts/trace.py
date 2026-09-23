@@ -900,6 +900,16 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 else:
                     payload["checked"] += 1
             payload["ok"] = not payload["bad"]
+    if getattr(args, "verdict", ""):
+        _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "ok" if payload["ok"] else "fail",
+                "notes": payload["notes"],
+                "checked": payload["checked"],
+                "bad": len(payload["bad"]),
+            },
+        )
     rc = emit_jq(payload, getattr(args, "jq", ""))
     if rc is not None:
         return rc
@@ -1449,6 +1459,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify_cmd.add_argument("--json", action="store_true", help="Emit the verify report as JSON")
     verify_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the verify payload (rc 2 on unknown key)")
     verify_cmd.add_argument("--out", metavar="PATH", default="", help="Also write the verify payload JSON to PATH")
+    verify_cmd.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict: ok|fail, notes, checked, bad} JSON to PATH")
     verify_cmd.set_defaults(func=cmd_verify)
     schema_cmd = sub.add_parser(
         "schema", help="Print the .jev-trace.json key contract and exit"

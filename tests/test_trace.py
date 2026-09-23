@@ -347,10 +347,25 @@ class TraceTests(unittest.TestCase):
                 rc = tr.main(["--file", str(path), "verify", "--out", str(out_f)])
             self.assertEqual(rc, 0)
             self.assertTrue(json.loads(out_f.read_text(encoding="utf-8"))["ok"])
+            verdict_f = Path(tmp) / "v.json"
+            with redirect_stdout(StringIO()):
+                rc = tr.main(["--file", str(path), "verify", "--verdict", str(verdict_f)])
+            self.assertEqual(rc, 0)
+            slim = json.loads(verdict_f.read_text(encoding="utf-8"))
+            self.assertEqual(slim["verdict"], "ok")
+            self.assertEqual(slim["checked"], 1)
             buf = StringIO()
             with redirect_stdout(buf), redirect_stderr(StringIO()):
                 rc = tr.main(["--file", str(path), "verify", "--jq", "nope"])
             self.assertEqual(rc, 2)
+            # --jq failure still wrote a verdict (verdict precedes jq return)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["notes"][0]["text"] = "tampered"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                rc = tr.main(["--file", str(path), "verify", "--verdict", str(verdict_f), "--jq", "nope"])
+            self.assertEqual(rc, 2)
+            self.assertEqual(json.loads(verdict_f.read_text(encoding="utf-8"))["verdict"], "fail")
 
     def test_record_note_stamps_sha(self) -> None:
         import hashlib

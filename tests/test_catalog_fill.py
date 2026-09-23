@@ -6,6 +6,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -280,6 +281,114 @@ class CatalogFillTests(unittest.TestCase):
             self.assertIn("jwt-auth", buf.getvalue())
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
 
+    def test_status_prints_cwd_state_and_jq(self) -> None:
+        import io
+        import time as _t
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            miss_path = base / FILL.MISS_NAME
+            miss_path.write_text(
+                json.dumps({"task": "jwt setup", "written_at": _t.time() - 30}),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(
+                sys, "argv", ["catalog_fill.py", "--cwd", str(base), "--status"]
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            report = json.loads(buf.getvalue())
+            self.assertTrue(report["miss"])
+            self.assertEqual(report["task"], "jwt setup")
+            self.assertFalse(report["ask"])
+            self.assertIsNotNone(report["miss_age_s"])
+            buf = io.StringIO()
+            with patch.object(
+                sys,
+                "argv",
+                ["catalog_fill.py", "--cwd", str(base), "--status", "--jq", "task"],
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "jwt setup")
+
+    def test_status_empty_cwd(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            buf = io.StringIO()
+            with patch.object(
+                sys, "argv", ["catalog_fill.py", "--cwd", str(base), "--status"]
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            report = json.loads(buf.getvalue())
+            self.assertFalse(report["miss"])
+            self.assertFalse(report["ask"])
+            self.assertIsNone(report["miss_age_s"])
+
+    def test_list_verdict_writes_oneshot(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            verdict = base / "v.json"
+            hits = [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--harness",
+                    "claude-code",
+                    "--cwd",
+                    str(base),
+                    "--list",
+                    "--verdict",
+                    str(verdict),
+                ],
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "hits")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertEqual(payload["hits"], 1)
+
+    def test_list_verdict_none_when_no_hits(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            verdict = base / "v.json"
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=[]), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--harness",
+                    "claude-code",
+                    "--cwd",
+                    str(base),
+                    "--list",
+                    "--verdict",
+                    str(verdict),
+                ],
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "none")
+            self.assertEqual(payload["ticks"], 1)
+
     def test_list_json_emits_array(self) -> None:
         import io
 
@@ -309,6 +418,265 @@ class CatalogFillTests(unittest.TestCase):
                 rows, [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
             )
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
+
+    def test_watch_fail_fast_breaks_on_first_hit(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hits = [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                FILL, "read_catalog_cache", return_value=hits
+            ), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--cwd",
+                    str(base),
+                    "--watch",
+                    "0.01",
+                    "--fail-fast",
+                ],
+            ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "5"}), patch(
+                "sys.stdout", buf
+            ):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 1)
+            self.assertEqual(ticks[0]["hits"], 1)
+
+    def test_watch_emits_hits_ticks(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hits = [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                FILL, "read_catalog_cache", return_value=hits
+            ), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--cwd",
+                    str(base),
+                    "--watch",
+                    "0.01",
+                ],
+            ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "2"}), patch(
+                "sys.stdout", buf
+            ), patch("sys.stderr", io.StringIO()) as err:
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(t["hits"] == 1 and t["cached"] for t in ticks))
+            stderr_lines = [
+                l for l in err.getvalue().splitlines() if l.startswith("watch tick=")
+            ]
+            self.assertEqual(len(stderr_lines), 2)
+            self.assertIn("hits=1", stderr_lines[0])
+            self.assertIn("cached=True", stderr_lines[0])
+            self.assertFalse((base / INV.SIDECAR_NAME).exists())
+
+    def test_watch_tick_reports_cache_age(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            buf = io.StringIO()
+            with patch.object(
+                FILL, "search_hits", return_value=[{"name": "jwt"}]
+            ), patch.object(
+                FILL, "read_catalog_cache", return_value=[{"name": "jwt"}]
+            ), patch.object(
+                FILL, "catalog_cache_age", return_value=12.34
+            ), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task", "jwt",
+                    "--cwd", str(base),
+                    "--watch", "0.01",
+                ],
+            ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "1"}), patch(
+                "sys.stdout", buf
+            ):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            ticks = [json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")]
+            self.assertEqual(ticks[0]["cache_age_s"], 12.3)
+
+    def test_watch_tick_cache_age_none_when_no_cache(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            buf = io.StringIO()
+            with patch.object(
+                FILL, "search_hits", return_value=[]
+            ), patch.object(
+                FILL, "read_catalog_cache", return_value=None
+            ), patch.object(
+                FILL, "catalog_cache_age", return_value=None
+            ), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task", "jwt",
+                    "--cwd", str(base),
+                    "--watch", "0.01",
+                ],
+            ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "1"}), patch(
+                "sys.stdout", buf
+            ):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            ticks = [json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")]
+            self.assertIsNone(ticks[0]["cache_age_s"])
+
+    def test_catalog_cache_age_reads_written_at(self) -> None:
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cache.json"
+            FILL.write_catalog_cache("jwt", [{"name": "x"}], path=path)
+            age = FILL.catalog_cache_age("jwt", path=path)
+            self.assertIsNotNone(age)
+            self.assertGreaterEqual(age, 0)
+            self.assertIsNone(FILL.catalog_cache_age("other", path=path))
+
+    def test_catalog_cache_age_stale_entry_still_reports(self) -> None:
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cache.json"
+            path.write_text(
+                json.dumps({"jwt": {"written_at": int(time.time()) - 9999, "hits": []}}),
+                encoding="utf-8",
+            )
+            age = FILL.catalog_cache_age("jwt", path=path)
+            self.assertIsNotNone(age)
+            self.assertGreaterEqual(age, 9999)
+            self.assertIsNone(FILL.catalog_cache_age("jwt", path=Path(tmp) / "missing.json"))
+
+    def test_watch_verdict_writes_final_state(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            verdict = base / "v.json"
+            with patch.object(
+                FILL, "search_hits", return_value=[{"name": "jwt"}]
+            ), patch.object(
+                FILL, "read_catalog_cache", return_value=[{"name": "jwt"}]
+            ), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--cwd",
+                    str(base),
+                    "--watch",
+                    "0.01",
+                    "--verdict",
+                    str(verdict),
+                ],
+            ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "1"}), patch(
+                "sys.stdout", io.StringIO()
+            ):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "hits")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertEqual(payload["hits"], 1)
+            self.assertTrue(payload["cached"])
+
+    def test_watch_verdict_none_when_no_hits(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            verdict = base / "v.json"
+            with patch.object(FILL, "search_hits", return_value=[]), patch.object(
+                FILL, "read_catalog_cache", return_value=None
+            ), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--cwd",
+                    str(base),
+                    "--watch",
+                    "0.01",
+                    "--verdict",
+                    str(verdict),
+                ],
+            ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "1"}), patch(
+                "sys.stdout", io.StringIO()
+            ):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "none")
+            self.assertEqual(payload["hits"], 0)
+            self.assertFalse(payload["cached"])
+
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            out = base / "ticks.jsonl"
+            with patch.object(FILL, "search_hits", return_value=[]), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--cwd",
+                    str(base),
+                    "--watch",
+                    "0.01",
+                    "--out",
+                    str(out),
+                ],
+            ), patch.dict(os.environ, {"JEV_CATALOG_WATCH_MAX": "2"}), patch(
+                "sys.stdout", io.StringIO()
+            ):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("hits" in t and "cached" in t for t in lines))
 
     def test_json_no_task_emits_object(self) -> None:
         import io
@@ -546,6 +914,40 @@ class CatalogCacheTests(unittest.TestCase):
             self.assertEqual(len(data), FILL.CACHE_MAX_QUERIES)
             self.assertNotIn("q0", data)
 
+    def test_clear_cache_removes_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cache.json"
+            FILL.write_catalog_cache("jwt", [{"name": "x"}], path=path)
+            self.assertTrue(FILL.clear_catalog_cache("jwt", path=path))
+            self.assertIsNone(FILL.read_catalog_cache("jwt", path=path))
+            self.assertFalse(FILL.clear_catalog_cache("jwt", path=path))
+            self.assertFalse(FILL.clear_catalog_cache("jwt", path=Path(tmp) / "missing.json"))
+
+    def test_clear_flag_uses_normalized_query(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache.json"
+            task = "JWT auth Tokens"
+            FILL.write_catalog_cache(FILL.cache_query(task), [{"name": "x"}], path=cache)
+            buf = io.StringIO()
+            with patch.object(FILL, "catalog_cache_path", return_value=cache), patch.object(
+                sys, "argv", ["catalog_fill.py", "--task", task, "--clear"]
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "cleared")
+            self.assertEqual(json.loads(cache.read_text(encoding="utf-8")), {})
+
+    def test_clear_flag_reports_no_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache.json"
+            buf = io.StringIO()
+            with patch.object(FILL, "catalog_cache_path", return_value=cache), patch.object(
+                sys, "argv", ["catalog_fill.py", "--task", "jwt", "--clear", "--json"]
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue())["cleared"], False)
+
 
 class CatalogFillE2ETests(unittest.TestCase):
     """Subprocess: fail-open tags, no network."""
@@ -621,6 +1023,109 @@ class CatalogFillE2ETests(unittest.TestCase):
             self.assertEqual(entries[0]["fill"], "catalog")
             self.assertEqual(entries[0]["outcome"], "blocked")
 
+
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(
+                os.environ,
+                JEV_CATALOG_WATCH_MAX="2",
+                JEV_CONSULT_LOG="0",
+                USERPROFILE=str(tmp),
+                HOME=str(tmp),
+            )
+            env.pop("TYPESAFE_API_KEY", None)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "catalog_fill.py"),
+                    "--task", "x",
+                    "--cwd", str(tmp),
+                    "--watch", "0.01",
+                    "--jq", "hits",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.splitlines(), ["0", "0"])
+
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import io
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hits = [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                sys, "argv",
+                ["catalog_fill.py", "--task", "jwt", "--cwd", str(base),
+                 "--watch", "0.02"],
+            ), patch.dict(
+                os.environ,
+                {"JEV_CATALOG_WATCH_MAX": "0", "JEV_CATALOG_WATCH_SECS": "0.05"},
+            ), patch("sys.stdout", buf), patch("sys.stderr", io.StringIO()):
+                start = _time.time()
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertLess(_time.time() - start, 2.0)
+            ticks = [
+                l for l in buf.getvalue().splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
+class WriteAskAtomicTests(unittest.TestCase):
+    def test_write_catalog_ask_atomic_no_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "ask.json"
+            hits = [{"id": "1", "name": "x", "identifier": "cat/x"}]
+            FILL.write_catalog_ask(out, "task", "claude", hits)
+            names = sorted(p.name for p in Path(tmp).iterdir())
+            self.assertEqual(names, ["ask.json"])
+            data = json.loads(out.read_text(encoding="utf-8"))
+            self.assertIn("questions", data)
+
+    def test_catalog_cache_write_atomic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache.json"
+            FILL.write_catalog_cache("q", [{"id": "1"}], path=cache)
+            names = sorted(p.name for p in Path(tmp).iterdir())
+            self.assertEqual(names, ["cache.json"])
+
+    def test_ask_payload_is_lint_clean_choice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "ask.json"
+            hits = [
+                {"id": "1", "name": "x", "identifier": "cat/x", "description": "X"},
+                {"id": "2", "name": "y", "identifier": "cat/y"},
+            ]
+            FILL.write_catalog_ask(out, "task", "claude", hits)
+            data = json.loads(out.read_text(encoding="utf-8"))
+        q = data["questions"]["load_tools"]
+        self.assertEqual(q["type"], "choice")
+        self.assertIn("none", q["criteria"])
+        self.assertEqual(len([k for k in q["criteria"] if k != "none"]), 2)
+
+    def test_self_test_runs_cache_machinery(self) -> None:
+        import subprocess
+
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS / "catalog_fill.py"), "--self-test"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("self-test: ok", proc.stdout)
+        self.assertIn("cache_roundtrip=ok", proc.stdout)
+        self.assertIn("blocked_drop=ok", proc.stdout)
 
 if __name__ == "__main__":
     unittest.main()

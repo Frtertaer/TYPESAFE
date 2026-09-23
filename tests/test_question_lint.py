@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -128,6 +128,26 @@ class LintQuestionTests(unittest.TestCase):
         self.assertIn(("J011", "error"), rules(findings))
         self.assertNotIn(("J012", "warn"), rules(findings))
 
+    def test_j015_info_on_too_few_options(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which option should the coder pick for this task?",
+                "criteria": {},
+            },
+        )
+        self.assertIn(("J015", "info"), rules(findings))
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which option should the coder pick for this task?",
+                "criteria": {"a": "pick a", "b": "pick b"},
+            },
+        )
+        self.assertNotIn(("J015", "info"), rules(findings))
+
     def test_j014_identical_true_false_is_error(self) -> None:
         findings = question_lint.lint_question(
             "q",
@@ -194,6 +214,41 @@ class LintCliTests(unittest.TestCase):
         path = Path(tmp) / "req.json"
         path.write_text(json.dumps(request), encoding="utf-8")
         return path
+
+    def test_multi_paths_lint_each_request(self) -> None:
+        good = {"state": {"task": "x"}, "questions": {"q": noul("Ship the fix?")}}
+        bad = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Is it not true that the fix cannot ship?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            p1 = Path(tmp) / "a.json"
+            p1.write_text(json.dumps(good), encoding="utf-8")
+            p2 = Path(tmp) / "b.json"
+            p2.write_text(json.dumps(bad), encoding="utf-8")
+            import io
+            from contextlib import redirect_stdout
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = question_lint.main([str(p1), str(p2)])
+            self.assertEqual(rc, 1)
+            out = buf.getvalue()
+            self.assertIn(str(p1) + ":", out)
+            self.assertIn(str(p2) + ":", out)
+            self.assertIn("J002", out)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = question_lint.main([str(p1), str(p1)])
+            self.assertEqual(rc, 0)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = question_lint.main([str(p1), str(p2), "--json"])
+            self.assertEqual(rc, 1)
+            rows = json.loads(buf.getvalue())
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["errors"], 0)
+            self.assertEqual(rows[1]["errors"], 1)
 
     def test_lint_cli_error_returns_1(self) -> None:
         request = {
@@ -303,6 +358,63 @@ class LintCliTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(proc.returncode, 2)
+
+    def test_out_writes_findings_json(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {
+                "a": noul("Should the coder not proceed?"),
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, request)
+            out_path = Path(tmp) / "findings.json"
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--out", str(out_path)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("wrote", proc.stderr)
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertIn("findings", payload)
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--out"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 2)
+
+    def test_severity_env_default(self) -> None:
+        import os as _os
+
+        request = {
+            "state": {"task": "x"},
+            "questions": {
+                "a": noul("Should the coder not proceed?"),
+                "b": noul("Is it not true that the fix cannot ship?"),
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, request)
+            env = dict(_os.environ, JEV_QLINT_SEVERITY="warn")
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path)],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertIn("J001", proc.stdout)
+            self.assertNotIn("J002", proc.stdout)
+            # CLI flag beats env
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--severity", "error"],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertIn("J002", proc.stdout)
+            self.assertNotIn("J001", proc.stdout)
 
     def test_quiet_still_prints_errors(self) -> None:
         request = {
@@ -645,6 +757,178 @@ class StandaloneCliTests(unittest.TestCase):
         self.assertIn("warn", proc.stdout)
         self.assertNotIn("fixed J", proc.stderr)
 
+    def test_watch_emits_ticks(self) -> None:
+        import os as _os
+
+        request = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Is it not true?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            env = dict(_os.environ, JEV_QLINT_WATCH_MAX="2")
+            proc = subprocess.run(
+                [sys.executable, str(self.QLINT_PATH), str(path), "--watch", "0.01"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+        self.assertEqual(proc.returncode, 0)
+        ticks = [
+            json.loads(l)
+            for l in proc.stdout.splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertTrue(all("errors" in t for t in ticks))
+        self.assertTrue(all("warnings" in t and "infos" in t for t in ticks))
+        stderr_lines = [
+            l for l in proc.stderr.splitlines() if l.startswith("watch tick=")
+        ]
+        self.assertEqual(len(stderr_lines), 2)
+        self.assertIn("findings=", stderr_lines[0])
+        self.assertIn("errors=", stderr_lines[0])
+
+    def test_watch_fail_fast_breaks_on_error_tick(self) -> None:
+        import os as _os
+
+        bad = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Is it not true? Isn't it wrong?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            badp = Path(tmp) / "bad.json"
+            badp.write_text(json.dumps(bad), encoding="utf-8")
+            env = dict(_os.environ, JEV_QLINT_WATCH_MAX="5")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(self.QLINT_PATH),
+                    str(badp),
+                    "--watch",
+                    "0.01",
+                    "--fail-fast",
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+        self.assertEqual(proc.returncode, 1)
+        ticks = [
+            json.loads(l)
+            for l in proc.stdout.splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 1)
+
+    def test_watch_rc_reflects_last_lint(self) -> None:
+        import os as _os
+
+        bad = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Is it not true? Isn't it wrong?")},
+        }
+        good = {"state": {"task": "x"}, "questions": {"q": noul("Pick an approach.")}}
+        with tempfile.TemporaryDirectory() as tmp:
+            badp = Path(tmp) / "bad.json"
+            badp.write_text(json.dumps(bad), encoding="utf-8")
+            env = dict(_os.environ, JEV_QLINT_WATCH_MAX="1")
+            proc = subprocess.run(
+                [sys.executable, str(self.QLINT_PATH), str(badp), "--watch", "0.01"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 1)
+            goodp = Path(tmp) / "good.json"
+            goodp.write_text(json.dumps(good), encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(self.QLINT_PATH), str(goodp), "--watch", "0.01"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+
+    def test_watch_verdict_writes_final_state(self) -> None:
+        import os as _os
+
+        request = {"state": {"task": "x"}, "questions": {"q": noul("Pick one.")}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            verdict = Path(tmp) / "v.json"
+            env = dict(_os.environ, JEV_QLINT_WATCH_MAX="2")
+            proc = subprocess.run(
+                [
+                    sys.executable, str(self.QLINT_PATH), str(path),
+                    "--watch", "0.01", "--verdict", str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pass")
+            self.assertEqual(payload["ticks"], 2)
+            self.assertEqual(payload["errors"], 0)
+
+    def test_nonwatch_verdict_writes_single_shot(self) -> None:
+        request = {"state": {"task": "x"}, "questions": {"q": noul("Pick one.")}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            verdict = Path(tmp) / "v.json"
+            proc = subprocess.run(
+                [
+                    sys.executable, str(self.QLINT_PATH), str(path),
+                    "--verdict", str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pass")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertEqual(payload["errors"], 0)
+
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        import os as _os
+
+        request = {"state": {"task": "x"}, "questions": {"q": noul("Pick one.")}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            out = Path(tmp) / "ticks.jsonl"
+            env = dict(_os.environ, JEV_QLINT_WATCH_MAX="2")
+            proc = subprocess.run(
+                [
+                    sys.executable, str(self.QLINT_PATH), str(path),
+                    "--watch", "0.01", "--out", str(out),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("findings" in t for t in lines))
+
 
 class LintStateEdgeTests(unittest.TestCase):
     def test_dict_state_over_limit_is_j020(self) -> None:
@@ -704,6 +988,165 @@ class ApplyFixesTests(unittest.TestCase):
         self.assertEqual(criteria["other"], "other")
         self.assertEqual(criteria["mine"], "keep")
 
+    def test_explain_prints_rule_description(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = question_lint.main(["--explain", "J012"])
+        self.assertEqual(rc, 0)
+        self.assertIn("J012:", buf.getvalue())
+        self.assertIn("overlap", buf.getvalue())
+
+    def test_explain_unknown_rule_rc2(self) -> None:
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            rc = question_lint.main(["--explain", "J999"])
+        self.assertEqual(rc, 2)
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            rc = question_lint.main(["--explain"])
+        self.assertEqual(rc, 2)
+
+    def test_self_test_finds_j010(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = question_lint.main(["--self-test"])
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", buf.getvalue())
+        self.assertIn("J010", buf.getvalue())
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = question_lint.main(["--self-test", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["self_test"], "ok")
+        self.assertIn("J010", payload["rules"])
+
+    def test_rules_lists_every_rule_sorted(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = question_lint.main(["--rules"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), len(question_lint.RULES))
+        self.assertIn("J001:", lines[0])
+
+    def test_rules_json_shape(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = question_lint.main(["--rules", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertEqual(
+            sorted(r["rule"] for r in rows), sorted(question_lint.RULES)
+        )
+        self.assertTrue(all(r["description"] for r in rows))
+
+
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        import os as _os
+
+        request = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Should the coder proceed with the plan?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(_os.environ, {"JEV_QLINT_WATCH_MAX": "2"}):
+                with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+                    rc = question_lint.main(
+                        [str(path), "--watch", "0.01", "--jq", "errors"]
+                    )
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().splitlines(), ["0", "0"])
+
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import os as _os
+        import time as _time
+
+        request = {
+            "state": {"task": "x"},
+            "questions": {"q": noul("Is it not true?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            env = dict(
+                _os.environ,
+                JEV_QLINT_WATCH_MAX="0",
+                JEV_QLINT_WATCH_SECS="0.05",
+            )
+            start = _time.time()
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPTS / "question_lint.py"), str(path), "--watch", "0.02"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+                timeout=30,
+            )
+            self.assertLess(_time.time() - start, 10.0)
+            ticks = [
+                l for l in proc.stdout.splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
+    def test_choice_without_none_warns_j016(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which of these should the coder use?",
+                "criteria": {"a": "option a", "b": "option b"},
+            },
+        )
+        self.assertIn(("J016", "warn"), rules(findings))
+
+    def test_choice_with_none_is_clean_j016(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which of these should the coder use?",
+                "criteria": {"a": "option a", "none": "none of these"},
+            },
+        )
+        self.assertNotIn(("J016", "warn"), rules(findings))
+
+    def test_duplicate_option_descriptions_warn_j017(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which of these should the coder use?",
+                "criteria": {
+                    "a": "the fast path",
+                    "b": "  The Fast Path  ",
+                    "none": "none of these",
+                },
+            },
+        )
+        self.assertIn(("J017", "warn"), rules(findings))
+        msg = [f for f in findings if f["rule"] == "J017"][0]["message"]
+        self.assertIn("'a'", msg)
+        self.assertIn("'b'", msg)
+
+    def test_distinct_option_descriptions_clean_j017(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which of these should the coder use?",
+                "criteria": {
+                    "a": "the fast path",
+                    "b": "the safe path",
+                    "none": "none of these",
+                },
+            },
+        )
+        self.assertNotIn(("J017", "warn"), rules(findings))
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

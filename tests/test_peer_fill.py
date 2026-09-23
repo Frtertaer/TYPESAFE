@@ -6,6 +6,7 @@ import importlib.util
 import json
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -76,6 +77,27 @@ class PeerFillTests(unittest.TestCase):
             self.assertFalse((home / ".claude" / "skills" / "ascii-art").exists())
             sidecar = json.loads((cwd / INV.SIDECAR_NAME).read_text(encoding="utf-8"))
             self.assertEqual(sidecar["names"][0]["name"], "jwt-auth")
+
+    def test_self_test_roundtrips_miss_and_sidecar(self) -> None:
+        import subprocess
+
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS / "peer_fill.py"), "--self-test", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["self_test"], "ok")
+        self.assertEqual(
+            out["checks"],
+            {
+                "fresh_miss": True,
+                "stale_miss_pruned": True,
+                "sidecar_roundtrip": True,
+            },
+        )
 
     def test_list_prints_peer_items(self) -> None:
         import io
@@ -437,6 +459,225 @@ class PeerFillTests(unittest.TestCase):
 
 
 class PeerFillInternalsTests(unittest.TestCase):
+    def test_watch_emits_fill_state_ticks(self) -> None:
+        import io
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / INV.MISS_NAME).write_text(
+                json.dumps({"task": "jwt flow", "written_at": int(time.time())}),
+                encoding="utf-8",
+            )
+            env = dict(__import__("os").environ)
+            env["JEV_PEER_WATCH_MAX"] = "2"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--cwd",
+                    str(cwd),
+                    "--watch",
+                    "0.01",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+            ticks = [
+                json.loads(l) for l in proc.stdout.splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(t["miss"] for t in ticks))
+            self.assertTrue(all(t["miss_task"] == "jwt flow" for t in ticks))
+            self.assertFalse(any(t["ask"] for t in ticks))
+            stderr_lines = [
+                l for l in proc.stderr.splitlines() if l.startswith("watch tick=")
+            ]
+            self.assertEqual(len(stderr_lines), 2)
+            self.assertIn("miss=True", stderr_lines[0])
+            self.assertIn("ask=False", stderr_lines[0])
+
+    def test_watch_fail_fast_breaks_on_miss(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / INV.MISS_NAME).write_text(
+                json.dumps({"task": "jwt flow", "written_at": int(time.time())}),
+                encoding="utf-8",
+            )
+            env = dict(__import__("os").environ)
+            env["JEV_PEER_WATCH_MAX"] = "5"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--cwd",
+                    str(cwd),
+                    "--watch",
+                    "0.01",
+                    "--fail-fast",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+            ticks = [
+                json.loads(l) for l in proc.stdout.splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 1)
+            self.assertTrue(ticks[0]["miss"])
+
+    def test_watch_verdict_writes_fill_state(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / INV.MISS_NAME).write_text(
+                json.dumps({"task": "jwt flow", "written_at": int(time.time())}),
+                encoding="utf-8",
+            )
+            verdict = cwd / "v.json"
+            env = dict(__import__("os").environ)
+            env["JEV_PEER_WATCH_MAX"] = "2"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--cwd",
+                    str(cwd),
+                    "--watch",
+                    "0.01",
+                    "--verdict",
+                    str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pending")
+            self.assertEqual(payload["ticks"], 2)
+            self.assertTrue(payload["miss"])
+            self.assertEqual(payload["miss_task"], "jwt flow")
+            self.assertFalse(payload["ask"])
+
+    def test_watch_verdict_clean_when_no_files(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            verdict = cwd / "v.json"
+            env = dict(__import__("os").environ)
+            env["JEV_PEER_WATCH_MAX"] = "1"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--cwd",
+                    str(cwd),
+                    "--watch",
+                    "0.01",
+                    "--verdict",
+                    str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "clean")
+            self.assertFalse(payload["miss"])
+
+    def test_nonwatch_verdict_pending_with_miss(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / INV.MISS_NAME).write_text(
+                json.dumps({"task": "jwt flow", "written_at": int(time.time())}),
+                encoding="utf-8",
+            )
+            verdict = cwd / "v.json"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--cwd",
+                    str(cwd),
+                    "--verdict",
+                    str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pending")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertTrue(payload["miss"])
+            self.assertEqual(payload["miss_task"], "jwt flow")
+
+    def test_nonwatch_verdict_clean(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            verdict = cwd / "v.json"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--cwd",
+                    str(cwd),
+                    "--verdict",
+                    str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "clean")
+            self.assertEqual(payload["ticks"], 1)
+
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            out = cwd / "ticks.jsonl"
+            env = dict(__import__("os").environ)
+            env["JEV_PEER_WATCH_MAX"] = "2"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--cwd",
+                    str(cwd),
+                    "--watch",
+                    "0.01",
+                    "--out",
+                    str(out),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("miss" in t and "ask" in t for t in lines))
+
     def test_item_for_pick(self) -> None:
         candidates = [
             {"id": "skill_jwt_auth", "name": "jwt-auth"},
@@ -536,6 +777,31 @@ class PeerFillInternalsTests(unittest.TestCase):
 
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("jev", 90)):
             self.assertIsNone(FILL.run_jev(Path("ask.json")))
+
+    def test_fill_timeout_env_override(self) -> None:
+        import os
+
+        self.assertEqual(FILL.fill_timeout_seconds(), 90.0)
+        with patch.dict(os.environ, {"JEV_FILL_TIMEOUT": "12.5"}):
+            self.assertEqual(FILL.fill_timeout_seconds(), 12.5)
+        with patch.dict(os.environ, {"JEV_FILL_TIMEOUT": "bogus"}):
+            self.assertEqual(FILL.fill_timeout_seconds(), 90.0)
+        with patch.dict(os.environ, {"JEV_FILL_TIMEOUT": "-3"}):
+            self.assertEqual(FILL.fill_timeout_seconds(), 90.0)
+        captured = {}
+
+        class FakeProc:
+            returncode = 0
+            stdout = "{}"
+
+        def fake_run(argv, **kw):
+            captured.update(kw)
+            return FakeProc()
+
+        with patch.dict(os.environ, {"JEV_FILL_TIMEOUT": "7"}):
+            with patch("subprocess.run", side_effect=fake_run):
+                FILL.run_jev(Path("ask.json"))
+        self.assertEqual(captured.get("timeout"), 7.0)
 
 
 class ReadMissPruneTests(unittest.TestCase):
@@ -667,6 +933,152 @@ class PeerFillE2ETests(unittest.TestCase):
             self.assertEqual(entries[0]["fill"], "peer")
             self.assertEqual(entries[0]["outcome"], "no_peer")
 
+    def test_status_reports_fill_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(["--status", "--cwd", tmp], tmp, tmp)
+            report = json.loads(out)
+            self.assertFalse(report["miss"])
+            self.assertFalse(report["ask_file_exists"])
+            self.assertEqual(report["cwd"], str(Path(tmp).resolve()))
+            (Path(tmp) / ".jev-peer-fill.request.json").write_text(
+                "{}", encoding="utf-8"
+            )
+            (Path(tmp) / ".jev-tools-miss.json").write_text(
+                json.dumps(
+                    {"task": "jwt", "harness": "codex", "written_at": time.time()}
+                ),
+                encoding="utf-8",
+            )
+            out = self._run(["--status", "--cwd", tmp], tmp, tmp)
+            report = json.loads(out)
+            self.assertTrue(report["miss"])
+            self.assertEqual(report["miss_task"], "jwt")
+            self.assertTrue(report["ask_file_exists"])
+
+    def test_status_jq_prints_one_field(self) -> None:
+        import os
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".jev-tools-miss.json").write_text(
+                json.dumps({"task": "jwt", "harness": "codex", "written_at": time.time()}),
+                encoding="utf-8",
+            )
+            env = dict(os.environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env["JEV_CONSULT_LOG"] = "0"
+            env["USERPROFILE"] = tmp
+            env["HOME"] = tmp
+            proc = subprocess.run(
+                [sys.executable, str(self.SCRIPT), "--status", "--cwd", tmp, "--jq", "miss_task"],
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout), "jwt")
+            proc = subprocess.run(
+                [sys.executable, str(self.SCRIPT), "--status", "--cwd", tmp, "--jq", "nope"],
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("bad --jq key", proc.stderr)
+
+
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        import os
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            env = dict(
+                os.environ,
+                JEV_PEER_WATCH_MAX="2",
+                JEV_CONSULT_LOG="0",
+                USERPROFILE=str(cwd),
+                HOME=str(cwd),
+            )
+            env.pop("TYPESAFE_API_KEY", None)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--watch", "0.01",
+                    "--cwd", str(cwd),
+                    "--jq", "miss",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.splitlines(), ["false", "false"])
+
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import subprocess
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(
+                __import__("os").environ,
+                JEV_PEER_WATCH_MAX="0",
+                JEV_PEER_WATCH_SECS="0.05",
+            )
+            start = _time.time()
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "peer_fill.py"),
+                    "--cwd", tmp,
+                    "--watch", "0.02",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertLess(_time.time() - start, 10.0)
+            ticks = [
+                l for l in proc.stdout.splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
+class WriteAskAtomicTests(unittest.TestCase):
+    def test_write_ask_atomic_no_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "ask.json"
+            items = [{"id": "x", "name": "x", "kind": "skill"}]
+            FILL.write_peer_ask(out, "task", "claude", items)
+            names = sorted(p.name for p in Path(tmp).iterdir())
+            self.assertEqual(names, ["ask.json"])
+            data = json.loads(out.read_text(encoding="utf-8"))
+            self.assertIn("questions", data)
+
+    def test_ask_payload_is_lint_clean_choice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "ask.json"
+            items = [
+                {"id": "a", "name": "a", "source_harness": "hermes", "description": "A"},
+                {"name": "b", "source_harness": "codex"},
+            ]
+            FILL.write_peer_ask(out, "task", "claude", items)
+            data = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(data["state"]["harness"], "claude")
+        q = data["questions"]["load_tools"]
+        self.assertEqual(q["type"], "choice")
+        self.assertIn("none", q["criteria"])
+        self.assertIn("a", q["criteria"])
+        self.assertIn("b", q["criteria"])
 
 if __name__ == "__main__":
     unittest.main()

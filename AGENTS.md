@@ -1,5 +1,3 @@
-
-
 <!-- jev-consult:start -->
 # jev-consult
 
@@ -24,7 +22,6 @@ After clone, one command wires user-scope Hermes / Claude Code / Codex / Grok Bu
 python scripts/install.py
 ```
 <!-- jev-consult:end -->
-
 ## Verification for contribution review
 
 The progress feature is opt-in; its scoring policy is in `skills/jev-consult/policy.json`, not in hooks. Run `python -m unittest discover -s tests -p test_progress.py -v` for the core, `python -m unittest discover -s tests -p test_progress_cli.py -v` for CLI integration, and `python skills/jev-consult/scripts/policy_lint.py --strict` for configuration. The full offline suite is `python -m unittest discover -s tests`. Never treat contribution credits as a percentage of project readiness.

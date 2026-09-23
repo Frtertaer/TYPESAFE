@@ -7,6 +7,7 @@ status mix, explicit/strong-pick rates, need_skill mean, latency percentiles.
 import argparse
 import csv
 import datetime
+import io
 import json
 import os
 import sys
@@ -18,6 +19,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import _watch  # noqa: E402
 import inventory
 
 
@@ -67,6 +69,50 @@ def load_bad_lines(path: Path) -> list[tuple[int, str]]:
         if not isinstance(item, dict):
             bad_rows.append((lineno, stripped))
     return bad_rows
+
+
+def verify_log(path: Path) -> dict:
+    """Integrity check: parseable lines, ts present and non-decreasing,
+    jev_status present. Returns {ok, entries, bad_lines, problems}."""
+    problems: list[dict] = []
+    entries: list[dict] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {"ok": False, "entries": 0, "bad_lines": 0,
+                "problems": [{"line": 0, "issue": "unreadable"}]}
+    bad = 0
+    prev_ts: float | None = None
+    for lineno, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            item = json.loads(stripped)
+        except ValueError:
+            bad += 1
+            problems.append({"line": lineno, "issue": "unparseable"})
+            continue
+        if not isinstance(item, dict):
+            bad += 1
+            problems.append({"line": lineno, "issue": "not an object"})
+            continue
+        entries.append(item)
+        ts = item.get("ts")
+        if not isinstance(ts, (int, float)) or isinstance(ts, bool):
+            problems.append({"line": lineno, "issue": "missing ts"})
+        elif prev_ts is not None and ts < prev_ts:
+            problems.append({"line": lineno, "issue": "ts regression"})
+        else:
+            prev_ts = ts if prev_ts is None else max(prev_ts, ts)
+        if "jev_status" not in item:
+            problems.append({"line": lineno, "issue": "missing jev_status"})
+    return {
+        "ok": not problems,
+        "entries": len(entries),
+        "bad_lines": bad,
+        "problems": problems,
+    }
 
 
 def _percentile(values: list[float], q: float) -> float | None:
@@ -235,29 +281,33 @@ def time_str(ts: object) -> str:
 def filter_status(entries: list[dict], status: str | None) -> list[dict]:
     if not status:
         return entries
+    wanted = {part.strip() for part in status.split(",") if part.strip()}
     return [
         item
         for item in entries
-        if str(item.get("jev_status") or "unknown") == status
+        if str(item.get("jev_status") or "unknown") in wanted
     ]
 
 
 def filter_harness(entries: list[dict], harness: str | None) -> list[dict]:
     if not harness:
         return entries
-    return [item for item in entries if str(item.get("harness") or "") == harness]
+    wanted = {part.strip() for part in harness.split(",") if part.strip()}
+    return [item for item in entries if str(item.get("harness") or "") in wanted]
 
 
 def filter_outcome(entries: list[dict], outcome: str | None) -> list[dict]:
     if not outcome:
         return entries
-    return [item for item in entries if str(item.get("outcome") or "") == outcome]
+    wanted = {part.strip() for part in outcome.split(",") if part.strip()}
+    return [item for item in entries if str(item.get("outcome") or "") in wanted]
 
 
 def filter_fill(entries: list[dict], fill: str | None) -> list[dict]:
     if not fill:
         return entries
-    return [item for item in entries if str(item.get("fill") or "") == fill]
+    wanted = {part.strip() for part in fill.split(",") if part.strip()}
+    return [item for item in entries if str(item.get("fill") or "") in wanted]
 
 
 def filter_field(entries: list[dict], spec: str | None) -> list[dict]:
@@ -304,6 +354,268 @@ def group_by(entries: list[dict], field: str) -> dict[str, int]:
             value = str(value)
         counts[value] = counts.get(value, 0) + 1
     return counts
+
+
+MISS_STATUSES = {"none", "idf", "empty", "error"}
+
+
+def _entry_ts(item: dict) -> float | None:
+    ts = item.get("ts")
+    if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+        return float(ts)
+    return None
+
+
+def is_miss_entry(item: dict) -> bool:
+    if str(item.get("jev_status") or "") not in MISS_STATUSES:
+        return False
+    if item.get("jev_pick") or item.get("winner"):
+        return False
+    return True
+
+
+def fill_gaps(entries: list[dict], now: float | None = None) -> list[dict]:
+    """Per-harness miss events (no winner) with no later same-prompt fill.
+
+    Rows gain ``oldest_open_ts`` (earliest ts among still-open misses, or
+    None) and ``age_s`` (``now`` minus that ts) so triage can sort by
+    staleness; ``now`` is injectable for deterministic tests.
+    """
+    fills = [
+        item
+        for item in entries
+        if str(item.get("jev_status") or "") == "fill"
+    ]
+    groups: dict[str, dict] = {}
+    for item in entries:
+        if not is_miss_entry(item):
+            continue
+        harness = str(item.get("harness") or "unknown")
+        group = groups.setdefault(
+            harness,
+            {
+                "harness": harness,
+                "misses": 0,
+                "filled": 0,
+                "open": 0,
+                "examples": [],
+                "oldest_open_ts": None,
+            },
+        )
+        group["misses"] += 1
+        head = str(item.get("prompt_head") or "")[:120]
+        ts = _entry_ts(item)
+        hit = False
+        for fill in fills:
+            if str(fill.get("harness") or "unknown") != harness:
+                continue
+            if str(fill.get("prompt_head") or "")[:120] != head:
+                continue
+            fts = _entry_ts(fill)
+            if ts is None or fts is None or fts >= ts:
+                hit = True
+                break
+        if hit:
+            group["filled"] += 1
+        else:
+            group["open"] += 1
+            if ts is not None and (
+                group["oldest_open_ts"] is None or ts < group["oldest_open_ts"]
+            ):
+                group["oldest_open_ts"] = ts
+            if head and len(group["examples"]) < 3:
+                group["examples"].append(head[:60])
+    if now is None:
+        now = time.time()
+    rows = list(groups.values())
+    for row in rows:
+        oldest = row["oldest_open_ts"]
+        row["age_s"] = round(now - oldest, 1) if oldest is not None else None
+        row["fill_rate"] = round(row["filled"] / row["misses"], 3) if row["misses"] else None
+    return sorted(rows, key=lambda g: (-g["open"], g["harness"]))
+
+
+def format_fill_gaps(rows: list[dict]) -> str:
+    if not rows:
+        return "no miss entries"
+    lines = ["harness        misses  filled  open   rate    age_s      examples"]
+    for row in rows:
+        age = row.get("age_s")
+        rate = row.get("fill_rate")
+        lines.append(
+            "%-14s %-7d %-7d %-6d %-7s %-10s %s"
+            % (
+                row["harness"],
+                row["misses"],
+                row["filled"],
+                row["open"],
+                "-" if rate is None else "%.3f" % rate,
+                "-" if age is None else "%.1f" % age,
+                "; ".join(row["examples"]),
+            )
+        )
+    return "\n".join(lines)
+
+
+def evidence_report(entries: list[dict], now: float | None = None) -> dict:
+    """Compact routing-evidence block for PRs and reviews."""
+    statuses: dict[str, int] = {}
+    harnesses: dict[str, int] = {}
+    winners: dict[str, int] = {}
+    ts_min: float | None = None
+    ts_max: float | None = None
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("jev_status") or "unknown")
+        statuses[status] = statuses.get(status, 0) + 1
+        harness = str(item.get("harness") or "?")
+        harnesses[harness] = harnesses.get(harness, 0) + 1
+        winner = item.get("winner")
+        if isinstance(winner, dict) and winner.get("name"):
+            key = "%s:%s" % (winner.get("kind") or "?", winner["name"])
+            winners[key] = winners.get(key, 0) + 1
+        ts = item.get("ts")
+        if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+            ts_min = ts if ts_min is None else min(ts_min, ts)
+            ts_max = ts if ts_max is None else max(ts_max, ts)
+    gaps = fill_gaps(entries, now=now)
+    open_by_harness = {row["harness"]: row["open"] for row in gaps if row["open"]}
+
+    def _sorted(d: dict[str, int]) -> dict[str, int]:
+        return dict(sorted(d.items(), key=lambda kv: (-kv[1], kv[0])))
+
+    def _iso(ts: float | None) -> str | None:
+        if ts is None:
+            return None
+        return (
+            datetime.datetime.fromtimestamp(float(ts), tz=datetime.timezone.utc)
+            .strftime("%Y-%m-%d %H:%M:%SZ")
+        )
+
+    return {
+        "entries": len(entries),
+        "span": [_iso(ts_min), _iso(ts_max)],
+        "statuses": _sorted(statuses),
+        "harnesses": _sorted(harnesses),
+        "winners": _sorted(winners),
+        "open_misses": sum(open_by_harness.values()),
+        "open_misses_by_harness": _sorted(open_by_harness),
+    }
+
+
+def format_evidence(data: dict) -> str:
+    def _kv(d: dict[str, int]) -> str:
+        return ", ".join("%s %d" % kv for kv in d.items()) or "none"
+
+    span = data.get("span") or [None, None]
+    span_txt = " .. ".join(x or "?" for x in span)
+    lines = [
+        "## Jev routing evidence",
+        "",
+        "- entries: %d (%s)" % (data.get("entries") or 0, span_txt),
+        "- statuses: " + _kv(data.get("statuses") or {}),
+        "- winners: " + _kv(data.get("winners") or {}),
+        "- open misses: %d%s"
+        % (
+            data.get("open_misses") or 0,
+            " (%s)" % _kv(data.get("open_misses_by_harness") or {})
+            if data.get("open_misses")
+            else "",
+        ),
+    ]
+    return "\n".join(lines)
+
+
+def quiet_gaps(entries: list[dict], min_seconds: float) -> list[dict]:
+    """Quiet periods: consecutive timestamps (sorted) more than min_seconds apart."""
+    stamps = sorted(
+        ts for ts in (_entry_ts(item) for item in entries) if ts is not None
+    )
+    gaps = []
+    for prev, cur in zip(stamps, stamps[1:]):
+        delta = cur - prev
+        if delta > min_seconds:
+            gaps.append({"from_ts": prev, "to_ts": cur, "seconds": delta})
+    return gaps
+
+
+def status_streaks(entries: list[dict]) -> list[dict]:
+    """Per harness: current and longest runs of consecutive same jev_status."""
+    by_harness: dict[str, list[dict]] = {}
+    for item in entries:
+        by_harness.setdefault(str(item.get("harness") or "-"), []).append(item)
+    rows: list[dict] = []
+    for harness in sorted(by_harness):
+        items = sorted(
+            by_harness[harness],
+            key=lambda i: (_entry_ts(i) is None, _entry_ts(i) or 0.0),
+        )
+        best_status, best_n = "", 0
+        cur_status, cur_n = "", 0
+        for it in items:
+            st = str(it.get("jev_status") or "-")
+            if st == cur_status:
+                cur_n += 1
+            else:
+                if cur_n > best_n:
+                    best_status, best_n = cur_status, cur_n
+                cur_status, cur_n = st, 1
+        if cur_n > best_n:
+            best_status, best_n = cur_status, cur_n
+        rows.append(
+            {
+                "harness": harness,
+                "entries": len(items),
+                "current_status": cur_status,
+                "current_streak": cur_n,
+                "best_status": best_status,
+                "best_streak": best_n,
+            }
+        )
+    return sorted(rows, key=lambda r: (-r["best_streak"], r["harness"]))
+
+
+def format_streaks(rows: list[dict]) -> str:
+    if not rows:
+        return "no entries"
+    lines = ["harness  entries  cur           best"]
+    for row in rows:
+        lines.append(
+            "%-8s %-8d %-13s %s"
+            % (
+                row["harness"],
+                row["entries"],
+                "%sx%d" % (row["current_status"], row["current_streak"]),
+                "%sx%d" % (row["best_status"], row["best_streak"]),
+            )
+        )
+    return "\n".join(lines)
+
+
+def _iso_full(ts: float | None) -> str | None:
+    if ts is None:
+        return None
+    return (
+        datetime.datetime.fromtimestamp(float(ts), tz=datetime.timezone.utc)
+        .strftime("%Y-%m-%d %H:%M:%SZ")
+    )
+
+
+def format_gaps(gaps: list[dict]) -> str:
+    if not gaps:
+        return "no quiet periods"
+    lines = ["seconds     from                 to"]
+    for gap in gaps:
+        lines.append(
+            "%-11d %-20s %s"
+            % (
+                int(gap["seconds"]),
+                _iso_full(gap["from_ts"]) or "?",
+                _iso_full(gap["to_ts"]) or "?",
+            )
+        )
+    return "\n".join(lines)
 
 
 def _ts_arg(raw: str) -> float | None:
@@ -395,7 +707,22 @@ def prune_entries(path: Path, apply_filters, retries: int = 8) -> dict | None:
     return None
 
 
+def _atomic_write(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def main(argv: list[str] | None = None) -> int:
+    if _watch.maybe_version(sys.argv[1:] if argv is None else argv):
+        return 0
     parser = argparse.ArgumentParser(
         description="Stats over ~/.cache/jev-consult/decisions.jsonl."
     )
@@ -427,11 +754,114 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--since", default=os.environ.get("JEV_DECISIONS_SINCE", ""), help="Only entries with ts >= epoch seconds or ISO8601")
     parser.add_argument("--until", default=os.environ.get("JEV_DECISIONS_UNTIL", ""), help="Only entries with ts <= epoch seconds or ISO8601")
+    parser.add_argument(
+        "--since-last",
+        dest="since_last",
+        metavar="STATUS",
+        nargs="?",
+        const="ok",
+        default="",
+        help="Only entries logged after the newest entry whose jev_status is STATUS (default: ok).",
+    )
+    parser.add_argument(
+        "--until-last",
+        dest="until_last",
+        metavar="STATUS",
+        nargs="?",
+        const="ok",
+        default="",
+        help="Only entries logged before the newest entry whose jev_status is STATUS (default: ok) — the complement of --since-last.",
+    )
     parser.add_argument("--harness", default=os.environ.get("JEV_DECISIONS_HARNESS", ""), help="Only entries for this harness")
     parser.add_argument("--status", default=os.environ.get("JEV_DECISIONS_STATUS", ""), help="Only entries with this jev_status")
     parser.add_argument("--outcome", default=os.environ.get("JEV_DECISIONS_OUTCOME", ""), help="Only entries with this outcome (e.g. human, blocked)")
     parser.add_argument("--fill", default=os.environ.get("JEV_DECISIONS_FILL", ""), help="Only entries with this fill kind (apply, catalog, peer)")
     parser.add_argument("--field", default=os.environ.get("JEV_DECISIONS_FIELD", ""), help="Generic filter: KEY=VALUE equality on any entry field (a.b digs into nested objects)")
+    parser.add_argument("--prompt", default=os.environ.get("JEV_DECISIONS_PROMPT", ""), help="Only entries whose prompt_head/prompt_tail contain this substring (case-insensitive)")
+    parser.add_argument("--reason", default=os.environ.get("JEV_DECISIONS_REASON", ""), help="Only entries whose reason field contains this substring (case-insensitive)")
+    parser.add_argument("--grep", default=os.environ.get("JEV_DECISIONS_GREP", ""), help="Only entries where any string field contains this substring (case-insensitive, one nesting level deep)")
+    env_min_need = os.environ.get("JEV_DECISIONS_MIN_NEED", "").strip()
+    try:
+        env_min_need = float(env_min_need) if env_min_need else None
+    except ValueError:
+        env_min_need = None
+    parser.add_argument("--min-need", type=float, default=env_min_need, help="Only entries with numeric need >= F")
+    env_min_lat = os.environ.get("JEV_DECISIONS_MIN_LATENCY", "").strip()
+    try:
+        env_min_lat = float(env_min_lat) if env_min_lat else None
+    except ValueError:
+        env_min_lat = None
+    parser.add_argument("--min-latency", type=float, default=env_min_lat, help="Only entries with numeric latency_ms >= MS")
+    parser.add_argument("--winner", default=os.environ.get("JEV_DECISIONS_WINNER", ""), help="Only entries whose winner name or kind:name equals NAME")
+    env_explicit = os.environ.get("JEV_DECISIONS_EXPLICIT", "").strip().lower() in ("1", "true", "yes")
+    parser.add_argument("--explicit", action="store_true", default=env_explicit, help="Only entries with explicit=true")
+    parser.add_argument("--question", default=os.environ.get("JEV_DECISIONS_QUESTION", ""), help="Only entries with this question kind (e.g. load_tools, explicit, env, dedupe)")
+    env_dedupe = os.environ.get("JEV_DECISIONS_DEDUPE", "").strip().lower() in ("1", "true", "yes")
+    parser.add_argument("--dedupe-only", dest="dedupe_only", action="store_true", default=env_dedupe, help="Only entries with dedupe=true")
+    env_stale = os.environ.get("JEV_DECISIONS_STALE", "").strip().lower() in ("1", "true", "yes")
+    parser.add_argument("--stale", action="store_true", default=env_stale, help="Only entries with stale_sidecar=true")
+    parser.add_argument("--sha", default=os.environ.get("JEV_DECISIONS_SHA", ""), help="Only entries whose prompt_sha starts with PREFIX")
+    env_max_need = os.environ.get("JEV_DECISIONS_MAX_NEED", "")
+    try:
+        env_max_need = float(env_max_need) if env_max_need else None
+    except ValueError:
+        env_max_need = None
+    parser.add_argument("--max-need", type=float, default=env_max_need, help="Only entries with numeric need <= F")
+    env_max_lat = os.environ.get("JEV_DECISIONS_MAX_LATENCY", "")
+    try:
+        env_max_lat = float(env_max_lat) if env_max_lat else None
+    except ValueError:
+        env_max_lat = None
+    parser.add_argument("--max-latency", type=float, default=env_max_lat, help="Only entries with numeric latency_ms <= MS")
+    env_over_budget = os.environ.get("JEV_DECISIONS_OVER_BUDGET", "").strip().lower() in ("1", "true", "yes")
+    parser.add_argument("--over-budget", dest="over_budget", action="store_true", default=env_over_budget, help="Only entries with over_budget=true")
+    env_strong = os.environ.get("JEV_DECISIONS_STRONG", "").strip().lower() in ("1", "true", "yes")
+    parser.add_argument("--strong", action="store_true", default=env_strong, help="Only entries with strong_pick=true")
+    env_min_score = os.environ.get("JEV_DECISIONS_MIN_SCORE", "")
+    try:
+        env_min_score = float(env_min_score) if env_min_score else None
+    except ValueError:
+        env_min_score = None
+    parser.add_argument("--min-score", type=float, default=env_min_score, help="Only entries with numeric shortlist_score_avg >= F")
+    env_min_cat = os.environ.get("JEV_DECISIONS_MIN_CATALOG", "")
+    try:
+        env_min_cat = float(env_min_cat) if env_min_cat else None
+    except ValueError:
+        env_min_cat = None
+    parser.add_argument("--min-catalog", type=float, default=env_min_cat, help="Only entries with numeric n_catalog >= N")
+    parser.add_argument("--reverse", action="store_true", help="Print listed entries newest-first (--out/--jsonl/--csv/--md/--jq/--tail/--first)")
+    env_min_sl = os.environ.get("JEV_DECISIONS_MIN_SHORTLIST", "")
+    try:
+        env_min_sl = float(env_min_sl) if env_min_sl else None
+    except ValueError:
+        env_min_sl = None
+    parser.add_argument("--min-shortlist", type=float, default=env_min_sl, help="Only entries with numeric shortlist_n >= N")
+    env_min_plen = os.environ.get("JEV_DECISIONS_MIN_PROMPT_LEN", "")
+    try:
+        env_min_plen = float(env_min_plen) if env_min_plen else None
+    except ValueError:
+        env_min_plen = None
+    parser.add_argument("--min-prompt-len", type=float, default=env_min_plen, help="Only entries with numeric prompt_len >= N")
+    parser.add_argument(
+        "--where",
+        action="append",
+        metavar="KEY=VAL",
+        default=None,
+        help="Keep entries whose KEY field (dotted dig) string-equals VAL; repeatable",
+    )
+    parser.add_argument(
+        "--where-not",
+        action="append",
+        metavar="KEY=VAL",
+        default=None,
+        help="Drop entries whose KEY field (dotted dig) string-equals VAL; repeatable",
+    )
+    parser.add_argument(
+        "--missing",
+        metavar="FIELD",
+        default=os.environ.get("JEV_DECISIONS_MISSING", ""),
+        help="Only entries lacking FIELD (dotted dig resolves to None)",
+    )
     parser.add_argument(
         "--statuses",
         action="store_true",
@@ -468,6 +898,34 @@ def main(argv: list[str] | None = None) -> int:
         help="Print counts of dedupe true/false, sorted desc",
     )
     parser.add_argument(
+        "--daily",
+        action="store_true",
+        help="Print per-day entry counts (UTC YYYY-MM-DD), sorted desc",
+    )
+    parser.add_argument(
+        "--daily-status",
+        dest="daily_status",
+        action="store_true",
+        help="Print a per-day x per-status matrix: rows 'YYYY-MM-DD STATUS N' sorted day-desc then count-desc (--json emits {daily_status: {day: {status: n}}})",
+    )
+    parser.add_argument(
+        "--evidence",
+        action="store_true",
+        help="Print a routing-evidence block (statuses/winners/open misses) for PRs; --json emits it as JSON",
+    )
+    parser.add_argument(
+        "--gap",
+        metavar="S",
+        type=float,
+        default=None,
+        help="List quiet periods: consecutive entries more than S seconds apart (--json emits {gaps: [...]})",
+    )
+    parser.add_argument(
+        "--streaks",
+        action="store_true",
+        help="Print per-harness current/longest runs of consecutive same jev_status (--json emits {streaks: [...]})",
+    )
+    parser.add_argument(
         "--count",
         action="store_true",
         help="Print only the number of entries matching the filters",
@@ -479,9 +937,59 @@ def main(argv: list[str] | None = None) -> int:
         help="Count entries grouped by FIELD (a.b digs into nested objects)",
     )
     parser.add_argument(
+        "--jq-where-contains",
+        metavar="SUB",
+        default="",
+        help="With --jq: keep only extracted values containing SUB.",
+    )
+    parser.add_argument(
+        "--jq",
+        metavar="FIELD",
+        default="",
+        help="Print the FIELD value of each entry, one per line (a.b digs into nested objects; comma-separated fields print tab-separated columns)",
+    )
+    parser.add_argument(
+        "--uniq",
+        action="store_true",
+        default=os.environ.get("JEV_DECISIONS_UNIQ", "").strip().lower() in ("1", "true", "yes"),
+        help="With --jq: print each value only once (first occurrence wins)",
+    )
+    parser.add_argument(
+        "--jq-first",
+        action="store_true",
+        help="With --jq: print only the first extracted value",
+    )
+    parser.add_argument(
+        "--jq-last",
+        action="store_true",
+        help="With --jq: print only the last extracted value",
+    )
+    parser.add_argument(
         "--errors",
         action="store_true",
-        help="Print the unparseable jsonl lines with line numbers",
+        help="Print the unparseable jsonl lines with line numbers (rc 1 when any)",
+    )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Print parseable entries missing a numeric ts or a non-empty jev_status (index + reason)",
+    )
+    parser.add_argument(
+        "--fill-gaps",
+        action="store_true",
+        help="Per-harness report of miss entries (no winner) never followed by a fill for the same prompt",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="With --fill-gaps: exit 1 when any harness has open misses",
+    )
+    parser.add_argument(
+        "--max-open",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --fill-gaps: exit 1 when total open misses exceed N (--strict is --max-open 0)",
     )
     parser.add_argument(
         "--prune",
@@ -491,9 +999,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="With --prune: report what would be dropped without rewriting the log",
+        help="With --prune/--drop-bad: report what would be dropped without rewriting the log",
+    )
+    parser.add_argument(
+        "--drop-bad",
+        action="store_true",
+        help="Rewrite the log dropping unparseable lines (keeps all well-formed entries)",
     )
     parser.add_argument("--json", action="store_true", help="Machine-readable stats")
+    parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown stats report (totals, status/harness/winners tables) to PATH")
     parser.add_argument(
         "--csv",
         action="store_true",
@@ -509,7 +1023,93 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print filtered entries as raw JSON lines (for piping)",
     )
+    parser.add_argument(
+        "--last",
+        action="store_true",
+        default=os.environ.get("JEV_DECISIONS_LAST", "").strip().lower() in ("1", "true", "yes"),
+        help="Print only the newest matching entry as JSON",
+    )
+    parser.add_argument(
+        "--oldest",
+        action="store_true",
+        default=os.environ.get("JEV_DECISIONS_OLDEST", "").strip().lower() in ("1", "true", "yes"),
+        help="Print only the oldest matching entry as JSON",
+    )
+    parser.add_argument(
+        "--nth",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Print only the Nth matching entry (1-based, after --reverse) as JSON",
+    )
+    parser.add_argument(
+        "--skip",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Drop the first N matching entries (after filters, before --first/--tail/--jq)",
+    )
+    parser.add_argument(
+        "--sample",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Emit N randomly picked matching entries as JSON lines (honors --reverse; combines with --out/--jsonl/--csv/--md)",
+    )
+    parser.add_argument(
+        "--out",
+        metavar="PATH",
+        default="",
+        help="Write the filtered entries as JSONL to PATH instead of printing",
+    )
+    parser.add_argument(
+        "--watch",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Re-read the log every S seconds and print a {\"ts\",\"count\"} JSON tick",
+    )
+    parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
+    parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that reports removals.")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON to PATH — with --watch a {verdict, count, added, removed, ticks} payload refreshed every tick; without it a one-shot {verdict: ok|empty, count, ticks: 1} probe of the filtered entries.")
+    parser.add_argument("--self-test", action="store_true", help="Parse a synthetic 3-entry log + 1 bad line; exit 1 when the counts do not match")
+    parser.add_argument("--verify", action="store_true", help="Chain check the raw log: unparseable lines, missing ts/jev_status, ts regressions; rc 1 on any problem")
     args = parser.parse_args(argv)
+    if getattr(args, "self_test", False):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            with open(log, "w", encoding="utf-8") as fh:
+                for i in range(3):
+                    fh.write(
+                        json.dumps(
+                            {
+                                "ts": 1700000000.0 + i,
+                                "jev_status": "ok" if i else "none",
+                                "harness": "hermes",
+                                "prompt_head": "t%d" % i,
+                            }
+                        )
+                        + "\n"
+                    )
+                fh.write("not json\n")
+            entries_st, bad_st = load_entries(log)
+        stats = summarize(entries_st, bad_st)
+        ok = stats["total"] == 3 and stats["bad_lines"] == 1
+        payload = {
+            "self_test": "ok" if ok else "FAIL",
+            "total": stats["total"],
+            "bad_lines": stats["bad_lines"],
+        }
+        if args.json:
+            sys.stdout.write(json.dumps(payload) + "\n")
+        else:
+            sys.stdout.write(
+                "self-test: %s total=%d bad=%d\n"
+                % (payload["self_test"], payload["total"], payload["bad_lines"])
+            )
+        return 0 if ok else 1
     file_arg = args.file or os.environ.get("JEV_DECISIONS", "").strip()
     path = Path(file_arg) if file_arg else inventory.decisions_log_path()
     if path is None:
@@ -518,7 +1118,62 @@ def main(argv: list[str] | None = None) -> int:
     if not path.is_file():
         sys.stderr.write("no decisions log at %s\n" % path)
         return 1
+    if getattr(args, "verify", False):
+        report = verify_log(path)
+        if args.json:
+            sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        else:
+            sys.stdout.write(
+                "verify: %s entries=%d bad_lines=%d problems=%d\n"
+                % (
+                    "ok" if report["ok"] else "FAIL",
+                    report["entries"],
+                    report["bad_lines"],
+                    len(report["problems"]),
+                )
+            )
+            for row in report["problems"][:20]:
+                sys.stdout.write("  line %d: %s\n" % (row["line"], row["issue"]))
+        return 0 if report["ok"] else 1
     all_entries, bad = load_entries(path)
+    if getattr(args, "validate", False):
+        bad_rows = []
+        for index, item in enumerate(all_entries):
+            problems = []
+            if not isinstance(item.get("ts"), (int, float)) or isinstance(item.get("ts"), bool):
+                problems.append("ts")
+            if not str(item.get("jev_status") or "").strip():
+                problems.append("jev_status")
+            if problems:
+                bad_rows.append((index, ",".join(problems)))
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    [
+                        {"index": index, "missing": why.split(",")}
+                        for index, why in bad_rows
+                    ],
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            for index, why in bad_rows:
+                sys.stdout.write("entry[%d] missing %s\n" % (index, why))
+            sys.stdout.write(
+                "%d invalid entr%s\n" % (len(bad_rows), "y" if len(bad_rows) == 1 else "ies")
+            )
+        return 1 if bad_rows else 0
+    if getattr(args, "drop_bad", False):
+        if getattr(args, "dry_run", False):
+            sys.stderr.write("dry-run: would drop %d bad line(s)\n" % bad)
+        elif bad:
+            try:
+                prune_entries(path, lambda items: items)
+                sys.stderr.write("dropped %d bad line(s)\n" % bad)
+            except OSError as exc:
+                sys.stderr.write("drop-bad failed: %s\n" % exc)
+                return 1
     try:
         since = _ts_arg(args.since)
         until = _ts_arg(args.until)
@@ -528,44 +1183,433 @@ def main(argv: list[str] | None = None) -> int:
     days = args.days if args.days > 0 else (7.0 if args.week else 0.0)
     if days > 0:
         since = time.time() - days * 86400
-
-    def apply_filters(items: list[dict]) -> list[dict]:
-        out = items
+    missing_field = getattr(args, "missing", "") or ""
+    def _filtered(items):
         if since is not None:
-            out = filter_since(out, since)
+            items = filter_since(items, since)
         if until is not None:
-            out = filter_until(out, until)
+            items = filter_until(items, until)
+        if getattr(args, "since_last", ""):
+            bound = None
+            for item in items:
+                ts = item.get("ts")
+                if (
+                    str(item.get("jev_status") or "") == args.since_last
+                    and isinstance(ts, (int, float))
+                    and not isinstance(ts, bool)
+                ):
+                    bound = ts if bound is None else max(bound, ts)
+            if bound is None:
+                items = []
+            else:
+                items = [
+                    item
+                    for item in items
+                    if isinstance(item.get("ts"), (int, float))
+                    and not isinstance(item.get("ts"), bool)
+                    and float(item["ts"]) > bound
+                ]
+        if getattr(args, "until_last", ""):
+            bound = None
+            for item in items:
+                ts = item.get("ts")
+                if (
+                    str(item.get("jev_status") or "") == args.until_last
+                    and isinstance(ts, (int, float))
+                    and not isinstance(ts, bool)
+                ):
+                    bound = ts if bound is None else max(bound, ts)
+            if bound is not None:
+                items = [
+                    item
+                    for item in items
+                    if isinstance(item.get("ts"), (int, float))
+                    and not isinstance(item.get("ts"), bool)
+                    and float(item["ts"]) < bound
+                ]
         if args.harness:
-            out = filter_harness(out, args.harness)
+            items = filter_harness(items, args.harness)
         if args.status:
-            out = filter_status(out, args.status)
+            items = filter_status(items, args.status)
         if args.outcome:
-            out = filter_outcome(out, args.outcome)
+            items = filter_outcome(items, args.outcome)
         if args.fill:
-            out = filter_fill(out, args.fill)
+            items = filter_fill(items, args.fill)
         if args.field:
-            out = filter_field(out, args.field)
-        return out
+            items = filter_field(items, args.field)
+        if args.max_need is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("need"), (int, float))
+                and not isinstance(item.get("need"), bool)
+                and item["need"] <= args.max_need
+            ]
+        if args.min_need is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("need"), (int, float))
+                and not isinstance(item.get("need"), bool)
+                and float(item.get("need")) >= args.min_need
+            ]
+        if getattr(args, "explicit", False):
+            items = [item for item in items if item.get("explicit") is True]
+        if getattr(args, "dedupe_only", False):
+            items = [item for item in items if item.get("dedupe") is True]
+        if getattr(args, "stale", False):
+            items = [item for item in items if item.get("stale_sidecar") is True]
+        if getattr(args, "over_budget", False):
+            items = [item for item in items if item.get("over_budget") is True]
+        if getattr(args, "strong", False):
+            items = [item for item in items if item.get("strong_pick") is True]
+        if getattr(args, "min_prompt_len", None) is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("prompt_len"), (int, float))
+                and not isinstance(item.get("prompt_len"), bool)
+                and float(item.get("prompt_len")) >= args.min_prompt_len
+            ]
+        if getattr(args, "min_shortlist", None) is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("shortlist_n"), (int, float))
+                and not isinstance(item.get("shortlist_n"), bool)
+                and float(item.get("shortlist_n")) >= args.min_shortlist
+            ]
+        if getattr(args, "min_catalog", None) is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("n_catalog"), (int, float))
+                and not isinstance(item.get("n_catalog"), bool)
+                and float(item.get("n_catalog")) >= args.min_catalog
+            ]
+        if getattr(args, "min_score", None) is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("shortlist_score_avg"), (int, float))
+                and not isinstance(item.get("shortlist_score_avg"), bool)
+                and float(item.get("shortlist_score_avg")) >= args.min_score
+            ]
+        if args.sha:
+            want_sha = args.sha.strip().lower()
+            items = [
+                item
+                for item in items
+                if str(item.get("prompt_sha") or "").lower().startswith(want_sha)
+            ]
+        if args.question:
+            want_q = args.question.strip().lower()
+            items = [
+                item
+                for item in items
+                if str(item.get("question") or "").lower() == want_q
+            ]
+        if args.winner:
+            wants = {part.strip().lower() for part in args.winner.split(",") if part.strip()}
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("winner"), dict)
+                and (
+                    str(item["winner"].get("name") or "").lower() in wants
+                    or "%s:%s"
+                    % (
+                        str(item["winner"].get("kind") or "").lower(),
+                        str(item["winner"].get("name") or "").lower(),
+                    )
+                    in wants
+                )
+            ]
+        if args.max_latency is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("latency_ms"), (int, float))
+                and not isinstance(item.get("latency_ms"), bool)
+                and float(item.get("latency_ms")) <= args.max_latency
+            ]
+        if args.min_latency is not None:
+            items = [
+                item
+                for item in items
+                if isinstance(item.get("latency_ms"), (int, float))
+                and not isinstance(item.get("latency_ms"), bool)
+                and float(item.get("latency_ms")) >= args.min_latency
+            ]
+        for pair in args.where or []:
+            if "=" not in pair:
+                continue
+            wkey, wval = pair.split("=", 1)
+            wkey = wkey.strip()
+            wvals = {part.strip().lower() for part in wval.split(",") if part.strip()} or {""}
+            items = [
+                item
+                for item in items
+                if str(_dig(item, wkey) if _dig(item, wkey) is not None else "").lower() in wvals
+            ]
+        if missing_field:
+            missing_keys = [part.strip() for part in missing_field.split(",") if part.strip()]
+            items = [
+                item
+                for item in items
+                if any(_dig(item, key) is None for key in missing_keys)
+            ]
+        for pair in getattr(args, "where_not", None) or []:
+            if "=" not in pair:
+                continue
+            wkey, wval = pair.split("=", 1)
+            wkey = wkey.strip()
+            wvals = {part.strip().lower() for part in wval.split(",") if part.strip()} or {""}
+            items = [
+                item
+                for item in items
+                if str(_dig(item, wkey) if _dig(item, wkey) is not None else "").lower() not in wvals
+            ]
+        if args.prompt:
+            needle = args.prompt.lower()
+            items = [
+                item
+                for item in items
+                if needle in str(item.get("prompt_head") or "").lower()
+                or needle in str(item.get("prompt_tail") or "").lower()
+            ]
+        if args.reason:
+            needle = args.reason.lower()
+            items = [
+                item
+                for item in items
+                if needle in str(item.get("reason") or "").lower()
+            ]
+        if args.grep:
+            needle = args.grep.lower()
 
-    entries = apply_filters(all_entries)
+            def _haystack(item: dict) -> str:
+                parts = []
+                for v in item.values():
+                    if isinstance(v, str):
+                        parts.append(v)
+                    elif isinstance(v, dict):
+                        parts.extend(x for x in v.values() if isinstance(x, str))
+                return " ".join(parts).lower()
+
+            items = [item for item in items if needle in _haystack(item)]
+        skip = getattr(args, "skip", 0) or 0
+        if skip > 0:
+            items = items[skip:]
+        return items
+    entries = _filtered(all_entries)
+    if getattr(args, "evidence", False):
+        data = evidence_report(entries)
+        rendered = (
+            json.dumps(data, indent=2) + "\n" if args.json else format_evidence(data) + "\n"
+        )
+        if args.out:
+            out_path = Path(args.out)
+            try:
+                _atomic_write(out_path, rendered)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                return 1
+            sys.stderr.write("wrote evidence to %s\n" % out_path)
+            return 0
+        sys.stdout.write(rendered)
+        return 0
+    if getattr(args, "gap", None) is not None:
+        gaps = quiet_gaps(entries, float(args.gap))
+        if args.json:
+            sys.stdout.write(json.dumps({"gaps": gaps}, indent=2) + "\n")
+        else:
+            sys.stdout.write(format_gaps(gaps) + "\n")
+        return 0
+    if getattr(args, "streaks", False):
+        rows = status_streaks(entries)
+        if args.json:
+            sys.stdout.write(json.dumps({"streaks": rows}, indent=2) + "\n")
+        else:
+            sys.stdout.write(format_streaks(rows) + "\n")
+        return 0
+    if getattr(args, "fill_gaps", False):
+        rows = fill_gaps(entries)
+        if args.json:
+            sys.stdout.write(json.dumps({"fill_gaps": rows}, indent=2) + "\n")
+        else:
+            sys.stdout.write(format_fill_gaps(rows) + "\n")
+        open_total = sum(row["open"] for row in rows)
+        max_open = getattr(args, "max_open", None)
+        gate_fail = open_total > 0 if getattr(args, "strict", False) else False
+        if max_open is not None and open_total > max_open:
+            sys.stderr.write(
+                "max-open: %d open miss%s exceeds %d\n"
+                % (open_total, "es" if open_total != 1 else "", max_open)
+            )
+            return 1
+        if gate_fail:
+            sys.stderr.write(
+                "strict: %d open miss%s across %d harness%s\n"
+                % (
+                    open_total,
+                    "es" if open_total != 1 else "",
+                    len(rows),
+                    "es" if len(rows) != 1 else "",
+                )
+            )
+            return 1
+        return 0
+    if getattr(args, "watch", 0) > 0:
+        max_ticks = _watch.cap("JEV_DECISIONS_WATCH_MAX", args.max_ticks)
+        ticks = 0
+        dead = _watch.deadline("JEV_DECISIONS_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        prev_keys: set | None = None
+        total_added = 0
+        total_removed = 0
+        tick: dict = {}
+        verdict_ok = True
+        watch_t0 = time.time()
+
+        def _write_verdict() -> bool:
+            return _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "removed" if tick.get("removed") else "ok",
+                    "count": tick.get("count", 0),
+                    "newest_ts": tick.get("newest_ts"),
+                    "added": total_added,
+                    "removed": total_removed,
+                    "ticks": ticks,
+                    "elapsed_s": round(time.time() - watch_t0, 2),
+                    "delta_pct": tick.get("delta_pct"),
+                },
+            )
+
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
+            cur_keys = {
+                str(e.get("sha") or e.get("ts") or json.dumps(e, sort_keys=True, default=str))
+                for e in entries
+                if isinstance(e, dict)
+            }
+            newest_ts = max(
+                (
+                    e["ts"]
+                    for e in entries
+                    if isinstance(e, dict) and isinstance(e.get("ts"), (int, float))
+                ),
+                default=None,
+            )
+            tick = {
+                "ts": int(time.time()),
+                "count": len(entries),
+                "newest_ts": newest_ts,
+                "elapsed_s": round(time.time() - watch_t0, 2),
+            }
+            if prev_keys is not None:
+                tick["added"] = len(cur_keys - prev_keys)
+                tick["removed"] = len(prev_keys - cur_keys)
+                prev_count = len(prev_keys)
+                if prev_count:
+                    tick["delta_pct"] = round(
+                        100.0 * (len(entries) - prev_count) / prev_count, 1
+                    )
+                else:
+                    tick["delta_pct"] = None
+            total_added += int(tick.get("added", 0))
+            total_removed += int(tick.get("removed", 0))
+            if args.jq:
+                for field in [f.strip() for f in args.jq.split(",") if f.strip()]:
+                    sys.stdout.write(json.dumps(_dig(tick, field)) + "\n")
+            else:
+                _watch.emit(tick, getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_DECISIONS_WATCH_QUIET", args.quiet), bad=bool(tick.get("added") or tick.get("removed")))
+            prev_keys = cur_keys
+            ticks += 1
+            sys.stderr.write(
+                "watch tick=%d count=%d added=%d removed=%d\n"
+                % (
+                    ticks,
+                    tick["count"],
+                    tick.get("added", 0),
+                    tick.get("removed", 0),
+                )
+            )
+            if args.verdict and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
+            if getattr(args, "fail_fast", False) and tick.get("removed"):
+                break
+            time.sleep(args.watch)
+            try:
+                fresh, _bad = load_entries(path)
+                entries = _filtered(fresh)
+            except Exception:
+                pass
+        if args.verdict and verdict_ok and not _write_verdict():
+            return 1
+        return 1 if tick.get("removed") else 0
+
+    if args.verdict:
+        if not _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "ok" if entries else "empty",
+                "ticks": 1,
+                "count": len(entries),
+            },
+        ):
+            return 1
+
     if args.prune:
         if since is None and until is None and not (
-            args.harness or args.status or args.outcome or args.fill or args.field
+            args.harness
+            or args.status
+            or args.outcome
+            or args.fill
+            or args.field
+            or args.prompt
+            or args.reason
+            or args.grep
+            or args.min_need is not None
+            or args.min_latency is not None
+            or args.winner
+            or getattr(args, "explicit", False)
+            or getattr(args, "dedupe_only", False)
+            or getattr(args, "stale", False)
+            or args.question
+            or args.sha
+            or args.max_need is not None
+            or args.max_latency is not None
+            or getattr(args, "over_budget", False)
+            or getattr(args, "strong", False)
+            or getattr(args, "min_score", None) is not None
+            or getattr(args, "min_catalog", None) is not None
+            or getattr(args, "min_shortlist", None) is not None
+            or getattr(args, "min_prompt_len", None) is not None
+            or args.where
+            or getattr(args, "where_not", None)
+            or missing_field
         ):
             sys.stderr.write(
-                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, or --field\n"
+                "--prune requires --days, --since, --until, --harness, --status, --outcome, --fill, --field, --min-need, --min-latency, --winner, --explicit, --question, --dedupe-only, --stale, --sha, --max-need, --max-latency, --over-budget, --strong, --min-score, --min-catalog, --min-shortlist, --min-prompt-len, --where, --where-not, --missing, or --prompt (--reverse does not affect --prune)\n"
             )
             return 2
         total, total_bad = load_entries(path)
         if getattr(args, "dry_run", False):
-            kept_now = apply_filters(total)
-            sys.stderr.write(
-                "dry-run: would prune %d of %d entries (kept %d, dropped %d bad line(s))\n"
-                % (len(total) - len(kept_now), len(total), len(kept_now), total_bad)
-            )
+            if args.json:
+                args._prune_dry_run = {
+                    "would_prune": len(total) - len(entries),
+                    "total": len(total),
+                    "kept": len(entries),
+                    "bad_lines": total_bad,
+                }
+            else:
+                sys.stderr.write(
+                    "dry-run: would prune %d of %d entries (kept %d, dropped %d bad line(s))\n"
+                    % (len(total) - len(entries), len(total), len(entries), total_bad)
+                )
         else:
             try:
-                result = prune_entries(path, apply_filters)
+                result = prune_entries(path, _filtered)
             except OSError as exc:
                 sys.stderr.write("prune failed: %s\n" % exc)
                 return 1
@@ -579,11 +1623,79 @@ def main(argv: list[str] | None = None) -> int:
                 % (result["dropped"], result["total"], result["kept"], result["bad"])
             )
     if args.errors:
-        for lineno, raw in load_bad_lines(path):
-            sys.stdout.write("%d: %s\n" % (lineno, raw[:200]))
-        return 0
+        bad_rows = load_bad_lines(path)
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    [{"line": lineno, "raw": raw[:200]} for lineno, raw in bad_rows],
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            for lineno, raw in bad_rows:
+                sys.stdout.write("%d: %s\n" % (lineno, raw[:200]))
+        return 1 if bad_rows else 0
     if args.count:
         sys.stdout.write("%d\n" % len(entries))
+        return 0
+    if args.jq:
+        jq_fields = [part.strip() for part in args.jq.split(",") if part.strip()]
+        ordered = entries[::-1] if getattr(args, "reverse", False) else entries
+        if len(jq_fields) > 1:
+            values = [tuple(_dig(item, field) for field in jq_fields) for item in ordered]
+        else:
+            values = [_dig(item, args.jq) for item in ordered]
+        if getattr(args, "uniq", False):
+            seen = set()
+            uniq_values = []
+            for value in values:
+                key = value if isinstance(value, str) else json.dumps(list(value) if isinstance(value, tuple) else value, sort_keys=True)
+                if key in seen:
+                    continue
+                seen.add(key)
+                uniq_values.append(value)
+            values = uniq_values
+        if args.jq_where_contains:
+            needle = args.jq_where_contains
+            filtered = []
+            for value in values:
+                haystack = (
+                    value
+                    if isinstance(value, str)
+                    else json.dumps(
+                        list(value) if isinstance(value, tuple) else value,
+                        sort_keys=True,
+                    )
+                )
+                if needle in haystack:
+                    filtered.append(value)
+            values = filtered
+        if getattr(args, "jq_first", False):
+            values = values[:1]
+        if getattr(args, "jq_last", False):
+            values = values[-1:]
+        if args.json:
+            out_values = [list(v) if isinstance(v, tuple) else v for v in values]
+            sys.stdout.write(json.dumps({"field": args.jq, "values": out_values}, indent=2) + "\n")
+        else:
+            for value in values:
+                if isinstance(value, tuple):
+                    cells = []
+                    for cell in value:
+                        if cell is None:
+                            cells.append("null")
+                        elif isinstance(cell, str):
+                            cells.append(cell)
+                        else:
+                            cells.append(json.dumps(cell, sort_keys=True))
+                    sys.stdout.write("\t".join(cells) + "\n")
+                elif value is None:
+                    sys.stdout.write("null\n")
+                elif isinstance(value, str):
+                    sys.stdout.write(value + "\n")
+                else:
+                    sys.stdout.write(json.dumps(value, sort_keys=True) + "\n")
         return 0
     if args.group_by:
         rows = sorted(group_by(entries, args.group_by).items(), key=lambda kv: (-kv[1], kv[0]))
@@ -603,9 +1715,50 @@ def main(argv: list[str] | None = None) -> int:
         or args.fills
         or args.fields
         or args.dedupes
+        or args.daily
+        or args.daily_status
     ):
         counts: dict[str, int] = {}
-        if args.winners:
+        if args.daily_status:
+            matrix: dict[str, dict[str, int]] = {}
+            for item in entries:
+                ts = item.get("ts")
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+                    day = datetime.datetime.fromtimestamp(
+                        float(ts), tz=datetime.timezone.utc
+                    ).strftime("%Y-%m-%d")
+                else:
+                    day = "unknown"
+                status = str(item.get("jev_status") or "unknown")
+                bucket = matrix.setdefault(day, {})
+                bucket[status] = bucket.get(status, 0) + 1
+            rows = [
+                (day, status, n)
+                for day, bucket in matrix.items()
+                for status, n in bucket.items()
+            ]
+            rows.sort(key=lambda r: (-r[2], r[1]))
+            rows.sort(key=lambda r: r[0], reverse=True)
+            rows.sort(key=lambda r: r[0] == "unknown")
+            if args.top > 0:
+                rows = rows[: args.top]
+            if args.json:
+                sys.stdout.write(json.dumps({"daily_status": matrix}, indent=2) + "\n")
+            else:
+                for day, status, n in rows:
+                    sys.stdout.write("%s %s %d\n" % (day, status, n))
+            return 0
+        if args.daily:
+            for item in entries:
+                ts = item.get("ts")
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+                    day = datetime.datetime.fromtimestamp(
+                        float(ts), tz=datetime.timezone.utc
+                    ).strftime("%Y-%m-%d")
+                else:
+                    day = "unknown"
+                counts[day] = counts.get(day, 0) + 1
+        elif args.winners:
             for item in entries:
                 winner = item.get("winner")
                 if isinstance(winner, dict) and winner.get("name"):
@@ -640,13 +1793,41 @@ def main(argv: list[str] | None = None) -> int:
             for value, n in rows:
                 sys.stdout.write("%s %d\n" % (value, n))
         return 0
-    if args.jsonl:
-        for item in entries:
+    emit_entries = entries[::-1] if getattr(args, "reverse", False) else entries
+    sample_n = getattr(args, "sample", 0) or 0
+    if sample_n > 0:
+        import random as _random
+
+        emit_entries = _random.sample(
+            emit_entries, min(sample_n, len(emit_entries))
+        )
+    if getattr(args, "last", False):
+        if emit_entries:
+            sys.stdout.write(json.dumps(entries[-1], indent=2, sort_keys=True) + "\n")
+        return 0
+    if getattr(args, "oldest", False):
+        if emit_entries:
+            sys.stdout.write(json.dumps(entries[0], indent=2, sort_keys=True) + "\n")
+        return 0
+    if getattr(args, "nth", 0):
+        if args.nth < 1 or args.nth > len(emit_entries):
+            sys.stderr.write(
+                "--nth %d out of range (%d entries)\n" % (args.nth, len(emit_entries))
+            )
+            return 2
+        sys.stdout.write(json.dumps(emit_entries[args.nth - 1], indent=2, sort_keys=True) + "\n")
+        return 0
+    if sample_n > 0 and not (args.out or args.jsonl or args.csv or args.md):
+        for item in emit_entries:
             sys.stdout.write(json.dumps(item, sort_keys=True) + "\n")
         return 0
-    if args.csv or args.md:
+
+    def _cell(value: str) -> str:
+        return value.replace("|", "\\|").replace("\n", " ")
+
+    def _rows():
         rows = []
-        for item in entries:
+        for item in emit_entries:
             winner = item.get("winner")
             winner_name = winner.get("name") if isinstance(winner, dict) else ""
             rows.append(
@@ -662,28 +1843,101 @@ def main(argv: list[str] | None = None) -> int:
                 ]
             )
         header = ["ts", "harness", "jev_status", "winner", "dedupe", "fill", "outcome", "prompt_head"]
+        return header, rows
+
+    def _md_text(header, rows) -> str:
+        out = ["| " + " | ".join(header) + " |", "|" + " --- |" * len(header)]
+        out.extend("| " + " | ".join(_cell(cell) for cell in row) + " |" for row in rows)
+        return "\n".join(out) + "\n"
+
+    if args.out:
+        out_path = Path(args.out)
+        try:
+            if args.csv:
+                header, rows = _rows()
+                buf = io.StringIO()
+                writer = csv.writer(buf, lineterminator="\n")
+                writer.writerow(header)
+                writer.writerows(rows)
+                _atomic_write(out_path, buf.getvalue())
+            elif args.md:
+                header, rows = _rows()
+                _atomic_write(out_path, _md_text(header, rows))
+            else:
+                _atomic_write(
+                    out_path,
+                    "".join(
+                        json.dumps(item, sort_keys=True) + "\n"
+                        for item in emit_entries
+                    ),
+                )
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+        sys.stderr.write("wrote %d entries to %s\n" % (len(entries), out_path))
+        return 0
+    if args.jsonl:
+        for item in emit_entries:
+            sys.stdout.write(json.dumps(item, sort_keys=True) + "\n")
+        return 0
+    if args.csv or args.md:
+        header, rows = _rows()
         if args.csv:
             writer = csv.writer(sys.stdout, lineterminator="\n")
             writer.writerow(header)
             writer.writerows(rows)
         else:
-            def _cell(value: str) -> str:
-                return value.replace("|", "\\|").replace("\n", " ")
-
-            sys.stdout.write("| " + " | ".join(header) + " |\n")
-            sys.stdout.write("|" + " --- |" * len(header) + "\n")
-            for row in rows:
-                sys.stdout.write("| " + " | ".join(_cell(c) for c in row) + " |\n")
+            sys.stdout.write(_md_text(header, rows))
         return 0
     stats = summarize(entries, bad)
     stats["filtered"] = len(entries)
     stats["since"] = since
     stats["until"] = until
+    if getattr(args, "_prune_dry_run", None):
+        stats["prune_dry_run"] = args._prune_dry_run
+    if getattr(args, "report", ""):
+        rep = [
+            "# decisions report",
+            "",
+            "- entries: %(total)d (filtered: %(filtered)d, bad lines: %(bad_lines)d)" % stats,
+            "- window: %s -> %s" % (stats.get("first_iso") or "-", stats.get("last_iso") or "-"),
+            "- explicit: %d  strong_pick: %d" % (stats["explicit"], stats["strong_pick"]),
+            "",
+            "## by status",
+            "",
+            "| status | count |",
+            "| --- | --- |",
+        ]
+        rep += ["| %s | %d |" % (k, v) for k, v in sorted(stats["by_status"].items())]
+        rep += ["", "## by harness", "", "| harness | count |", "| --- | --- |"]
+        rep += ["| %s | %d |" % (k, v) for k, v in sorted(stats["by_harness"].items())]
+        if stats["top_winners"]:
+            rep += ["", "## top winners", "", "| winner | count |", "| --- | --- |"]
+            rep += ["| %s | %d |" % (k, v) for k, v in stats["top_winners"].items()]
+        need = stats["need_skill"]
+        lat = stats["latency_ms"]
+        rep += [
+            "",
+            "## latency / need",
+            "",
+            "- need_skill: n=%d mean=%s p50=%s p90=%s"
+            % (need["n"], need["mean"], need["p50"], need["p90"]),
+            "- latency_ms: n=%d mean=%s p50=%s p90=%s max=%s"
+            % (lat["n"], lat["mean"], lat["p50"], lat["p90"], lat["max"]),
+        ]
+        try:
+            _atomic_write(Path(args.report), "\n".join(rep) + "\n")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % args.report)
     if args.json:
         sys.stdout.write(json.dumps(stats, indent=2) + "\n")
     else:
         sys.stdout.write(format_stats(stats) + "\n")
     shown = entries[: args.first] if args.first > 0 else entries[-args.tail :]
+    if getattr(args, "reverse", False):
+        shown = shown[::-1]
     if args.first > 0 or args.tail > 0:
         for item in shown:
             sys.stdout.write(format_entry(item) + "\n")

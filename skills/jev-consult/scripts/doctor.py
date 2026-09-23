@@ -13,8 +13,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
+import tempfile
 from pathlib import Path
+
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+import _watch  # noqa: E402
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
@@ -35,6 +43,7 @@ HINTS = {
     "hooks": "create .claude/settings.json with a hooks block or run python scripts/install.py --agents claude-code",
     "api_key": "set TYPESAFE_API_KEY in the environment or a .env file",
     "policy": "restore skills/jev-consult/policy.json",
+    "hooks_json": "fix or delete the malformed hooks file; it blocks hook registration",
 }
 
 
@@ -73,6 +82,19 @@ def _load_json(path: Path) -> object:
         return None
 
 
+def _json_validity_check(agent: str, name: str, path: Path) -> dict:
+    """ok when the file is absent or parses as JSON; fails on malformed JSON."""
+    if not path.is_file():
+        return _check(agent, name, True, "absent %s" % path)
+    try:
+        json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except ValueError as exc:
+        return _check(agent, name, False, "invalid JSON in %s: %s" % (path, exc))
+    except OSError as exc:
+        return _check(agent, name, False, "unreadable %s: %s" % (path, exc))
+    return _check(agent, name, True, "valid")
+
+
 def _skill_check(agent: str, skill_dirs: list[Path]) -> dict:
     for parent in skill_dirs:
         if (parent / "jev-consult" / "SKILL.md").is_file():
@@ -99,8 +121,11 @@ def check_hermes(home: Path, hermes: Path) -> list[dict]:
 
 
 def check_claude(home: Path) -> list[dict]:
-    out = [_skill_check("claude-code", [home / ".claude" / "skills"])]
     settings = home / ".claude" / "settings.json"
+    out = [
+        _skill_check("claude-code", [home / ".claude" / "skills"]),
+        _json_validity_check("claude-code", "hooks_json", settings),
+    ]
     data = _load_json(settings)
     if data is None:
         out.append(_check("claude-code", "hooks", False, "missing/invalid " + str(settings)))
@@ -132,6 +157,7 @@ def check_grok(home: Path) -> list[dict]:
         ("jev-tools.json", "UserPromptSubmit", TOOLS_MARK),
     ):
         path = home / ".grok" / "hooks" / name
+        out.append(_json_validity_check("grok", "hooks_json", path))
         data = _load_json(path)
         ok = _has_hook_entry((data or {}).get("hooks") if isinstance(data, dict) else None, event, mark)
         out.append(_check("grok", name, ok, event))
@@ -143,6 +169,7 @@ def check_codex(home: Path) -> list[dict]:
         _skill_check("codex", [home / ".codex" / "skills", home / ".agents" / "skills"])
     ]
     hooks_path = home / ".codex" / "hooks.json"
+    out.append(_json_validity_check("codex", "hooks_json", hooks_path))
     data = _load_json(hooks_path)
     hooks = data.get("hooks") if isinstance(data, dict) else None
     out.append(
@@ -204,12 +231,47 @@ def check_common(home: Path, hermes: Path) -> list[dict]:
     return out
 
 
+def _atomic_write(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def main(argv: list[str] | None = None) -> int:
+    if _watch.maybe_version(sys.argv[1:] if argv is None else argv):
+        return 0
     parser = argparse.ArgumentParser(description="Check a jev-consult install. Read-only.")
     parser.add_argument("--agents", default=",".join(ALLOWED))
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
     parser.add_argument("--quiet", action="store_true", help="Report only failing checks")
+    parser.add_argument(
+        "--only",
+        default="",
+        help="Comma-separated check names to run (e.g. skills,hooks_json); default: all.",
+    )
+    parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH (with --watch: append each tick line)")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON ({verdict, ticks, checks, failed, agents}) to PATH when finished (with --watch, refreshed every tick; ticks counts passes).")
+    parser.add_argument(
+        "--watch",
+        type=float,
+        metavar="SECONDS",
+        help="Re-run the checks every S seconds, emitting a status tick per pass (JEV_DOCTOR_WATCH_MAX caps ticks).",
+    )
+    parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
+    parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first failing tick.")
+    parser.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the {ok,checks} payload (e.g. ok); unknown key exits 2")
+    parser.add_argument("--env", action="store_true", help="Print the resolved JEV_*/TYPESAFE_* env vars as JSON and exit (secret-looking names/values masked to <set>)")
+    parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown report (verdict line + per-check table with hints) to PATH")
+    parser.add_argument("--self-test", action="store_true", help="Run every check against a synthetic empty HOME; exit 1 when no check fails")
     args = parser.parse_args(argv)
     agents = [a.strip() for a in args.agents.split(",") if a.strip()]
     bad = [a for a in agents if a not in ALLOWED]
@@ -218,15 +280,170 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     home = Path(args.home) if args.home else user_home()
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home(home)
-    checks: list[dict] = check_common(home, hermes)
-    if "hermes" in agents:
-        checks += check_hermes(home, hermes)
-    if "claude-code" in agents:
-        checks += check_claude(home)
-    if "grok" in agents:
-        checks += check_grok(home)
-    if "codex" in agents:
-        checks += check_codex(home)
+    only = {n.strip() for n in args.only.split(",") if n.strip()}
+
+    if getattr(args, "env", False):
+        secretish = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|AUTH|CREDENTIAL)", re.IGNORECASE)
+        blob = re.compile(
+            r"apikey_[A-Za-z0-9]{20,}_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_-]{20,}"
+        )
+        env: dict[str, str] = {}
+        for name in sorted(os.environ):
+            if not (name.startswith("JEV_") or name.startswith("TYPESAFE_")):
+                continue
+            value = os.environ[name]
+            env[name] = (
+                "<set>"
+                if (value and (secretish.search(name) or blob.search(value)))
+                else value
+            )
+        payload = {"env": env, "count": len(env)}
+        if getattr(args, "jq", ""):
+            node: object = payload
+            found = True
+            for part in args.jq.split("."):
+                if isinstance(node, dict) and part in node:
+                    node = node[part]
+                else:
+                    found = False
+                    break
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (payload has: %s)\n"
+                    % (args.jq, ", ".join(sorted(payload)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+            return 0
+        sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        return 0
+
+    def collect() -> list[dict]:
+        checks: list[dict] = check_common(home, hermes)
+        if "hermes" in agents:
+            checks += check_hermes(home, hermes)
+        if "claude-code" in agents:
+            checks += check_claude(home)
+        if "grok" in agents:
+            checks += check_grok(home)
+        if "codex" in agents:
+            checks += check_codex(home)
+        if only:
+            checks = [c for c in checks if c["check"] in only]
+        return checks
+
+    def _verdict_payload(checks_now: list[dict], ticks: int = 1) -> dict:
+        agents: dict[str, bool] = {}
+        for c in checks_now:
+            agents[c["agent"]] = agents.get(c["agent"], True) and c["ok"]
+        return {
+            "verdict": "pass" if all(c["ok"] for c in checks_now) else "fail",
+            "ticks": ticks,
+            "checks": len(checks_now),
+            "failed": sum(1 for c in checks_now if not c["ok"]),
+            "agents": agents,
+        }
+
+    def _write_verdict(
+        checks_now: list[dict], ticks: int = 1, elapsed_s=None
+    ) -> bool:
+        if not args.verdict:
+            return True
+        payload = _verdict_payload(checks_now, ticks)
+        if elapsed_s is not None:
+            payload["elapsed_s"] = elapsed_s
+        return _watch.write_verdict(args.verdict, payload)
+
+    if args.self_test:
+        with tempfile.TemporaryDirectory() as tmp:
+            thome = Path(tmp)
+            thermes = thome / ".hermes"
+            checks = (
+                check_common(thome, thermes)
+                + check_hermes(thome, thermes)
+                + check_claude(thome)
+                + check_grok(thome)
+                + check_codex(thome)
+            )
+        failed = sum(1 for c in checks if not c["ok"])
+        ok = failed > 0
+        if args.jq == "":
+            if args.quiet and ok:
+                return 0
+            sys.stdout.write(
+                "self-test: %s failed=%d/%d\n"
+                % ("ok" if ok else "FAIL", failed, len(checks))
+            )
+        else:
+            payload = {
+                "self_test": "ok" if ok else "FAIL",
+                "checks": len(checks),
+                "failed": failed,
+            }
+            node: object = payload
+            found = True
+            for part in args.jq.split("."):
+                if isinstance(node, dict) and part in node:
+                    node = node[part]
+                else:
+                    found = False
+                    break
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (payload has: %s)\n"
+                    % (args.jq, ", ".join(sorted(payload)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+        return 0 if ok else 1
+    if args.watch:
+        import time as _time
+        from datetime import datetime, timezone
+
+        max_ticks = _watch.cap("JEV_DOCTOR_WATCH_MAX", args.max_ticks)
+        dead = _watch.deadline("JEV_DOCTOR_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        count = 0
+        last: dict = {}
+        last_checks: list[dict] = []
+        verdict_ok = True
+        prev_ok: bool | None = None
+        watch_t0 = _time.time()
+        while True:
+            cur = collect()
+            failed = sum(1 for c in cur if not c["ok"])
+            ok = failed == 0
+            last = {
+                "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "checks": len(cur),
+                "failed": failed,
+                "ok": ok,
+                "ok_changed": prev_ok is not None and ok != prev_ok,
+                "elapsed_s": round(_time.time() - watch_t0, 2),
+            }
+            prev_ok = ok
+            _watch.emit_or_jq(last, getattr(args, "jq", ""), args.out, quiet=_watch.quiet("JEV_DOCTOR_WATCH_QUIET", args.quiet), bad=not last["ok"])
+            last_checks = cur
+            count += 1
+            sys.stderr.write(
+                "watch tick=%d ok=%s failed=%d\n" % (count, last["ok"], failed)
+            )
+            if verdict_ok and not _write_verdict(
+                last_checks, count, elapsed_s=round(_time.time() - watch_t0, 2)
+            ):
+                verdict_ok = False  # warn once, stop retrying
+            if args.fail_fast and not ok:
+                break
+            if max_ticks and count >= max_ticks:
+                break
+            if dead and _time.time() >= dead:
+                break
+            _time.sleep(args.watch)
+        if args.verdict and verdict_ok and not _write_verdict(
+            last_checks, count, elapsed_s=round(_time.time() - watch_t0, 2)
+        ):
+            return 1
+        return 0 if last["ok"] else 1
+    checks = collect()
     ok = all(c["ok"] for c in checks)
     for check in checks:
         if not check["ok"]:
@@ -234,7 +451,60 @@ def main(argv: list[str] | None = None) -> int:
             if hint:
                 check["hint"] = hint.replace("<agent>", check["agent"])
     shown = checks if not args.quiet else [c for c in checks if not c["ok"]]
-    sys.stdout.write(json.dumps({"ok": ok, "checks": shown}, indent=2) + "\n")
+    payload = {"ok": ok, "checks": shown}
+    if getattr(args, "jq", ""):
+        node = payload
+        found = True
+        for part in args.jq.split("."):
+            if isinstance(node, dict) and part in node:
+                node = node[part]
+            else:
+                found = False
+                break
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (args.jq, ", ".join(sorted(payload)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+        return 0
+    if getattr(args, "report", ""):
+        rep = [
+            "# doctor report",
+            "",
+            "verdict: %s" % ("pass" if ok else "fail"),
+            "",
+            "| check | agent | ok | hint |",
+            "| --- | --- | --- | --- |",
+        ]
+        for c in shown:
+            rep.append(
+                "| %s | %s | %s | %s |"
+                % (
+                    c.get("check") or "",
+                    c.get("agent") or "",
+                    "yes" if c.get("ok") else "NO",
+                    c.get("hint") or "",
+                )
+            )
+        try:
+            _atomic_write(Path(args.report), "\n".join(rep) + "\n")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % args.report)
+    text = json.dumps(payload, indent=2) + "\n"
+    sys.stdout.write(text)
+    if args.out:
+        try:
+            _atomic_write(Path(args.out), text)
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % args.out)
+    if args.verdict and not _write_verdict(checks):
+        return 1
     return 0 if ok else 1
 
 

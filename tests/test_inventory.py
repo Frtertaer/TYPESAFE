@@ -170,6 +170,629 @@ class InventoryTests(unittest.TestCase):
         self.assertIn("https://skills.sh", out)
         self.assertIn("smithery", out)
 
+    def test_roots_reports_dirs_and_counts(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            skill_dir = home / ".claude" / "skills" / "alpha"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: alpha\ndescription: fixture\n---\n", encoding="utf-8"
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    ["--harness", "claude-code", "--home", str(home), "--roots"]
+                )
+        self.assertEqual(code, 0)
+        report = json.loads(buf.getvalue())
+        self.assertEqual(report["harness"], "claude-code")
+        self.assertEqual(len(report["skills"]), 1)
+        self.assertTrue(report["skills"][0]["exists"])
+        self.assertEqual(report["skills"][0]["items"], 1)
+        self.assertTrue(str(report["skills"][0]["path"]).endswith(".claude\\skills") or str(report["skills"][0]["path"]).endswith(".claude/skills"))
+        self.assertEqual(len(report["mcp_files"]), 2)
+        self.assertFalse(report["mcp_files"][0]["exists"])
+
+    def test_roots_missing_dirs_report_zero(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    ["--harness", "grok", "--home", str(Path(tmp) / "empty"), "--roots"]
+                )
+        self.assertEqual(code, 0)
+        report = json.loads(buf.getvalue())
+        self.assertEqual(report["harness"], "grok")
+        self.assertFalse(report["skills"][0]["exists"])
+        self.assertEqual(report["skills"][0]["items"], 0)
+        self.assertEqual(report["plugins"], [])
+        self.assertEqual(report["mcp_files"], [])
+
+    def _seed_home(self, tmp: str, *names: str) -> Path:
+        home = Path(tmp)
+        for name in names:
+            skill_dir = home / ".claude" / "skills" / name
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: %s\ndescription: fixture %s\n---\n" % (name, name),
+                encoding="utf-8",
+            )
+        return home
+
+    def test_item_prints_matching_record(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._seed_home(tmp, "alpha", "beta")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "claude-code",
+                        "--home",
+                        str(home),
+                        "--item",
+                        "beta",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        record = json.loads(buf.getvalue())
+        self.assertEqual(record["name"], "beta")
+        self.assertEqual(record["kind"], "skill")
+
+    def test_item_kind_prefixed_and_case_insensitive(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._seed_home(tmp, "Alpha")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "claude-code",
+                        "--home",
+                        str(home),
+                        "--item",
+                        "skill:alpha",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(buf.getvalue())["name"], "Alpha")
+
+    def test_item_missing_exits_2(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._seed_home(tmp, "alpha")
+            buf = StringIO()
+            err = StringIO()
+            with redirect_stdout(buf), redirect_stderr(err):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "claude-code",
+                        "--home",
+                        str(home),
+                        "--item",
+                        "nope",
+                    ]
+                )
+        self.assertEqual(code, 2)
+        self.assertIn("no item named", err.getvalue())
+
+    def _seed_hermes(self, tmp: str, *names: str) -> Path:
+        home = Path(tmp) / ".hermes"
+        for name in names:
+            skill_dir = home / "skills" / name
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: %s\ndescription: fixture %s\n---\n" % (name, name),
+                encoding="utf-8",
+            )
+        return home
+
+    def test_dupes_reports_cross_harness_name(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._seed_home(tmp, "shared", "solo")
+            hermes = self._seed_hermes(tmp, "shared", "other")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--dupes",
+                        "--home",
+                        str(home),
+                        "--hermes-home",
+                        str(hermes),
+                    ]
+                )
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["dupes"][0]["name"], "shared")
+        self.assertEqual(payload["dupes"][0]["count"], 2)
+        self.assertIn("claude-code", payload["dupes"][0]["harnesses"])
+        self.assertIn("hermes", payload["dupes"][0]["harnesses"])
+
+    def test_dupes_empty_when_names_unique(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._seed_home(tmp, "alpha", "beta")
+            hermes = self._seed_hermes(tmp, "gamma")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--dupes",
+                        "--home",
+                        str(home),
+                        "--hermes-home",
+                        str(hermes),
+                    ]
+                )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(buf.getvalue())["count"], 0)
+
+    def test_dupes_scoped_to_explicit_harness(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._seed_home(tmp, "shared")
+            hermes = self._seed_hermes(tmp, "shared")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--dupes",
+                        "--harness",
+                        "claude-code",
+                        "--home",
+                        str(home),
+                        "--hermes-home",
+                        str(hermes),
+                    ]
+                )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(buf.getvalue())["count"], 0)
+
+    def test_item_all_returns_every_kind_match(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = self._seed_hermes(tmp, "shared", "other")
+            (hermes / "config.yaml").write_text(
+                "mcp_servers:\n  shared:\n    command: py\n", encoding="utf-8"
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(hermes),
+                        "--item-all",
+                        "shared",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(sorted(r["kind"] for r in rows), ["mcp", "skill"])
+
+    def test_item_all_rc2_on_absent(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stderr
+
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = self._seed_hermes(tmp, "shared")
+            err = StringIO()
+            with redirect_stderr(err):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(hermes),
+                        "--item-all",
+                        "nonexistent",
+                    ]
+                )
+        self.assertEqual(code, 2)
+        self.assertIn("nonexistent", err.getvalue())
+
+    def test_watch_ticks_emit_jsonl(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        buf = StringIO()
+        err = StringIO()
+        from contextlib import redirect_stderr
+
+        with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+            with redirect_stdout(buf), redirect_stderr(err):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(FIXTURE),
+                        "--watch",
+                        "0.01",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        lines = buf.getvalue().splitlines()
+        ticks = [json.loads(l) for l in lines[1:] if l.startswith('{"ts"')]
+        self.assertEqual(len(ticks), 2)
+        stderr_lines = [
+            l for l in err.getvalue().splitlines() if l.startswith("watch tick=")
+        ]
+        self.assertEqual(len(stderr_lines), 2)
+        self.assertIn("shortlist=", stderr_lines[0])
+        self.assertIn("added=0", stderr_lines[0])
+        self.assertIn("removed=0", stderr_lines[0])
+        self.assertIn("counts", ticks[0])
+        self.assertGreater(ticks[0]["counts"]["skill"], 0)
+        self.assertIn("shortlist", ticks[0])
+
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "inv.jsonl"
+            buf = StringIO()
+            with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness",
+                            "hermes",
+                            "--hermes-home",
+                            str(FIXTURE),
+                            "--watch",
+                            "0.01",
+                            "--out",
+                            str(out),
+                        ]
+                    )
+            self.assertEqual(code, 0)
+            text = out.read_text(encoding="utf-8")
+            ticks = [
+                json.loads(l)
+                for l in text.splitlines()
+                if l.startswith('{"ts"')
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all("counts" in t and "shortlist" in t for t in ticks))
+            self.assertTrue(text.lstrip().startswith("{"))
+
+    def test_watch_ticks_report_added_removed(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        results = [
+            [{"id": "a", "kind": "skill", "name": "a"}],
+            [{"id": "b", "kind": "skill", "name": "b"},
+             {"id": "c", "kind": "plugin", "name": "c"}],
+        ]
+
+        def fake_scan(harness, home=None, hermes=None):
+            if results:
+                return results.pop(0)
+            return []
+
+        buf = StringIO()
+        with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+            with patch.object(inv, "scan", side_effect=fake_scan):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness",
+                            "hermes",
+                            "--hermes-home",
+                            str(FIXTURE),
+                            "--watch",
+                            "0.01",
+                        ]
+                    )
+        self.assertEqual(code, 0)
+        ticks = [
+            json.loads(l)
+            for l in buf.getvalue().splitlines()
+            if l.startswith('{"ts"')
+        ]
+        self.assertEqual(len(ticks), 2)
+        # schema-stable ticks: added/removed keys always present
+        self.assertEqual(ticks[0]["added"], [])
+        self.assertEqual(ticks[0]["removed"], [])
+        self.assertEqual(ticks[1]["added"], [])
+        self.assertEqual(ticks[1]["removed"], ["b", "c"])
+
+    def test_watch_tick_reports_found_delta(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        results = [
+            [{"id": "a", "kind": "skill", "name": "a"}],
+            [{"id": "a", "kind": "skill", "name": "a"},
+             {"id": "b", "kind": "skill", "name": "b"},
+             {"id": "c", "kind": "skill", "name": "c"}],
+            [{"id": "a", "kind": "skill", "name": "a"}],
+        ]
+
+        def fake_scan(harness, home=None, hermes=None):
+            if results:
+                return results.pop(0)
+            return [{"id": "a", "kind": "skill", "name": "a"}]
+
+        buf = StringIO()
+        with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+            with patch.object(inv, "scan", side_effect=fake_scan):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness",
+                            "hermes",
+                            "--hermes-home",
+                            str(FIXTURE),
+                            "--watch",
+                            "0.01",
+                        ]
+                    )
+        self.assertEqual(code, 0)
+        ticks = [
+            json.loads(l)
+            for l in buf.getvalue().splitlines()
+            if l.startswith('{"ts"')
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertIsNone(ticks[0]["found_delta"])
+        self.assertEqual(ticks[1]["found_delta"], -2)
+
+    def test_nonwatch_verdict_writes_scan_summary(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--harness", "hermes",
+                        "--hermes-home", str(FIXTURE),
+                        "--verdict", str(verdict),
+                    ]
+                )
+            self.assertEqual(code, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "ok")
+            self.assertGreater(payload["scanned"], 0)
+            self.assertIn("counts", payload)
+            self.assertIn("shortlisted", payload)
+
+    def test_nonwatch_verdict_empty_when_no_items(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            buf = StringIO()
+            with patch.object(inv, "scan", return_value=[]):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness", "hermes",
+                            "--hermes-home", str(FIXTURE),
+                            "--verdict", str(verdict),
+                        ]
+                    )
+            self.assertEqual(code, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "empty")
+            self.assertEqual(payload["scanned"], 0)
+
+    def test_watch_verdict_writes_stable_when_unchanged(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            buf = StringIO()
+            with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "1"}):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness", "hermes",
+                            "--hermes-home", str(FIXTURE),
+                            "--watch", "0.01",
+                            "--verdict", str(verdict),
+                        ]
+                    )
+            self.assertEqual(code, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "stable")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertEqual(payload["added"], [])
+            self.assertEqual(payload["removed"], [])
+            self.assertIn("skill", payload["counts"])
+
+    def test_watch_verdict_reports_changed_ids(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        results = [
+            [{"id": "a", "kind": "skill", "name": "a"}],
+            [{"id": "a", "kind": "skill", "name": "a"}],
+            [{"id": "b", "kind": "skill", "name": "b"}],
+        ]
+
+        def fake_scan(harness, home=None, hermes=None):
+            if results:
+                return results.pop(0)
+            return []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            buf = StringIO()
+            with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+                with patch.object(inv, "scan", side_effect=fake_scan):
+                    with redirect_stdout(buf):
+                        code = inv.main(
+                            [
+                                "--harness", "hermes",
+                                "--hermes-home", str(FIXTURE),
+                                "--watch", "0.01",
+                                "--verdict", str(verdict),
+                            ]
+                        )
+            self.assertEqual(code, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "changed")
+            self.assertEqual(payload["ticks"], 2)
+            self.assertEqual(payload["added"], ["b"])
+            self.assertEqual(payload["removed"], ["a"])
+
+    def test_watch_verdict_refreshed_every_tick(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            buf = StringIO()
+            real_write = Path.write_text
+            calls = []
+
+            def counting_write(self, *a, **kw):
+                calls.append(str(self))
+                return real_write(self, *a, **kw)
+
+            with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+                with patch.object(Path, "write_text", counting_write):
+                    with redirect_stdout(buf):
+                        code = inv.main(
+                            [
+                                "--harness", "hermes",
+                                "--hermes-home", str(FIXTURE),
+                                "--watch", "0.01",
+                                "--verdict", str(verdict),
+                            ]
+                        )
+            self.assertEqual(code, 0)
+            verdict_writes = [c for c in calls if c == str(verdict) + ".tmp"]
+            self.assertGreaterEqual(len(verdict_writes), 2)
+
+    def test_diff_reports_added_removed_names(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        items = [
+            {"id": "s1", "kind": "skill", "name": "a"},
+            {"id": "m1", "kind": "mcp", "name": "c"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            old = Path(tmp) / "old.json"
+            old.write_text(
+                json.dumps({"installed_names": ["skill:a", "plugin:b"]}),
+                encoding="utf-8",
+            )
+            buf = StringIO()
+            with patch.object(inv, "scan", return_value=items):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness",
+                            "hermes",
+                            "--hermes-home",
+                            str(FIXTURE),
+                            "--diff",
+                            str(old),
+                        ]
+                    )
+            self.assertEqual(code, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["added"], ["mcp:c"])
+            self.assertEqual(out["removed"], ["plugin:b"])
+
+    def test_diff_falls_back_to_shortlist_ids(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        items = [{"id": "x", "kind": "skill", "name": "x"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            old = Path(tmp) / "old.json"
+            old.write_text(
+                json.dumps({"shortlist": [{"id": "x"}, {"id": "y"}]}),
+                encoding="utf-8",
+            )
+            buf = StringIO()
+            with patch.object(inv, "scan", return_value=items):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness",
+                            "hermes",
+                            "--hermes-home",
+                            str(FIXTURE),
+                            "--include",
+                            "x",
+                            "--diff",
+                            str(old),
+                        ]
+                    )
+            self.assertEqual(code, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["added"], [])
+            self.assertEqual(out["removed"], ["y"])
+
+    def test_diff_missing_file_rc1(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--diff",
+                    "no-such-file-12345.json",
+                ]
+            )
+        self.assertEqual(code, 1)
+
     def test_cli_json_shortlist(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout
@@ -193,6 +816,39 @@ class InventoryTests(unittest.TestCase):
         names = [item["name"] for item in payload["shortlist"]]
         self.assertIn("jwt-auth", names)
         self.assertNotIn("ascii-art", names)
+
+    def test_cli_jq_prints_one_field(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--jq",
+                    "counts.skill",
+                ]
+            )
+        self.assertEqual(code, 0)
+        self.assertIsInstance(json.loads(buf.getvalue()), int)
+        err = StringIO()
+        with redirect_stderr(err):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--jq",
+                    "nope.missing",
+                ]
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("bad --jq key", err.getvalue())
 
     def test_cli_csv_shortlist(self) -> None:
         import csv as _csv
@@ -220,6 +876,161 @@ class InventoryTests(unittest.TestCase):
         names = [row[2] for row in rows[1:]]
         self.assertIn("jwt-auth", names)
         self.assertNotIn("ascii-art", names)
+
+    def test_cli_grep_filters_items(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--grep",
+                    "jwt",
+                    "--task",
+                    "jwt tokens",
+                    "--limit",
+                    "8",
+                ]
+            )
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        names = [item["name"] for item in payload["shortlist"]]
+        self.assertIn("jwt-auth", names)
+        self.assertNotIn("ascii-art", names)
+        self.assertEqual(payload["counts"]["skill"], 1)
+
+    def test_cli_grep_lists_matches_without_task(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--grep",
+                    "jwt",
+                ]
+            )
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        names = [item["name"] for item in payload["shortlist"]]
+        self.assertEqual(names, ["jwt-auth"])
+
+    def test_cli_paths_prints_item_paths(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--task",
+                    "jwt tokens",
+                    "--paths",
+                ]
+            )
+        self.assertEqual(code, 0)
+        lines = [ln.strip() for ln in buf.getvalue().splitlines() if ln.strip()]
+        self.assertTrue(lines)
+        self.assertTrue(any("jwt-auth" in ln for ln in lines))
+
+    def test_cli_id_prints_matching_item(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--id",
+                    "jwt-auth",
+                ]
+            )
+        self.assertEqual(code, 0)
+        item = json.loads(buf.getvalue())
+        self.assertEqual(item["name"], "jwt-auth")
+        err = StringIO()
+        with redirect_stdout(StringIO()), redirect_stderr(err):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--id",
+                    "nope-missing",
+                ]
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("nope-missing", err.getvalue())
+
+    def test_cli_out_writes_payload_file(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "payload.json"
+            with redirect_stdout(StringIO()):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(FIXTURE),
+                        "--task",
+                        "jwt tokens",
+                        "--limit",
+                        "8",
+                        "--out",
+                        str(out_path),
+                    ]
+                )
+            self.assertEqual(code, 0)
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            names = [item["name"] for item in payload["shortlist"]]
+            self.assertIn("jwt-auth", names)
+
+    def test_cli_names_prints_bare_ids(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--task",
+                    "jwt tokens",
+                    "--limit",
+                    "8",
+                    "--names",
+                ]
+            )
+        self.assertEqual(code, 0)
+        lines = [l for l in buf.getvalue().splitlines() if l.strip()]
+        self.assertIn("skill_jwt_auth", lines)
+        self.assertTrue(all(" " not in l for l in lines))
+        self.assertNotIn("{", buf.getvalue())
 
     def test_cli_kind_filter(self) -> None:
         from io import StringIO
@@ -266,6 +1077,30 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(payload["task"], "jwt tokens")
         names = [item["name"] for item in payload["shortlist"]]
         self.assertIn("jwt-auth", names)
+
+    def test_cli_explain_adds_matched_tokens(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--task",
+                    "jwt tokens",
+                    "--limit",
+                    "8",
+                    "--explain",
+                ]
+            )
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        by_name = {item["name"]: item for item in payload["shortlist"]}
+        self.assertIn("jwt", by_name["jwt-auth"]["matched"])
 
     def _write_skill(self, tmp: str, name: str, frontmatter: str) -> Path:
         skill = Path(tmp) / name
@@ -688,6 +1523,28 @@ class TtlEnvOverrideTests(unittest.TestCase):
             prior = {"written_at": time_mod.time() - 99999}
             self.assertFalse(inv.sidecar_fresh(prior))
 
+    def test_dedupe_ttl_env_override(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        self.assertEqual(inv.hook_dedupe_ttl_seconds(), 0.0)
+        with patch.dict(os.environ, {"JEV_HOOK_DEDUPE_TTL": "45"}):
+            self.assertEqual(inv.hook_dedupe_ttl_seconds(), 45.0)
+        with patch.dict(os.environ, {"JEV_HOOK_DEDUPE_TTL": "bogus"}):
+            self.assertEqual(
+                inv.hook_dedupe_ttl_seconds(),
+                inv._policy_float_key("dedupe_ttl_seconds", 0.0),
+            )
+
+
+class SidecarAgeTests(unittest.TestCase):
+    def test_age_seconds(self) -> None:
+        self.assertEqual(inv.sidecar_age_seconds({"written_at": 100.0}, now=140.0), 40.0)
+        self.assertEqual(inv.sidecar_age_seconds({"written_at": 140.0}, now=100.0), 0.0)
+        self.assertIsNone(inv.sidecar_age_seconds({}, now=100.0))
+        self.assertIsNone(inv.sidecar_age_seconds({"written_at": "x"}, now=100.0))
+        self.assertIsNone(inv.sidecar_age_seconds({"written_at": True}, now=100.0))
+
 
 class JevTimeoutEnvTests(unittest.TestCase):
     def test_env_override_wins(self) -> None:
@@ -706,6 +1563,28 @@ class JevTimeoutEnvTests(unittest.TestCase):
                 inv.hook_jev_timeout_seconds(),
                 inv._policy_float_key("hook_jev_timeout_seconds", 8.0),
             )
+
+    def test_env_invalid_warns_on_stderr(self) -> None:
+        import io
+        import os
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_TIMEOUT": "bogus"}):
+            with patch("sys.stderr", buf):
+                inv.hook_jev_timeout_seconds()
+        self.assertIn("bad JEV_HOOK_TIMEOUT", buf.getvalue())
+
+    def test_env_valid_no_warning(self) -> None:
+        import io
+        import os
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_TIMEOUT": "3"}):
+            with patch("sys.stderr", buf):
+                inv.hook_jev_timeout_seconds()
+        self.assertNotIn("JEV_HOOK_TIMEOUT", buf.getvalue())
 
     def test_env_negative_ignored(self) -> None:
         import os
@@ -820,6 +1699,521 @@ class HookRetriesEnvTests(unittest.TestCase):
 
         with patch.dict(os.environ, {"JEV_HOOK_RETRIES": "bogus"}):
             self.assertGreaterEqual(inv.hook_jev_retries(), 0)
+
+    def test_cli_show_reports_issues_on_malformed_sidecar(self) -> None:
+        import tempfile
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            path.write_text(json.dumps({"names": [{"name": "x"}]}), encoding="utf-8")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--show", str(path)])
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertFalse(payload["valid"])
+        self.assertTrue(any("written_at" in issue for issue in payload["issues"]))
+        self.assertTrue(any("entry 0 missing kind" == issue for issue in payload["issues"]))
+
+    def test_cli_show_valid_sidecar(self) -> None:
+        import tempfile
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "written_at": 1234,
+                        "names": [{"kind": "skill", "name": "x"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                code = inv.main(["--show", str(path)])
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["valid"])
+        self.assertEqual(payload["issues"], [])
+
+    def test_cli_jsonl_emits_one_item_per_line(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness", "hermes",
+                    "--hermes-home", str(FIXTURE),
+                    "--task", "jwt",
+                    "--jsonl",
+                ]
+            )
+        self.assertEqual(code, 0)
+        rows = [json.loads(line) for line in buf.getvalue().strip().splitlines()]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], "skill_jwt_auth")
+        self.assertEqual(rows[0]["name"], "jwt-auth")
+
+    def test_cli_kinds_prints_per_kind_counts(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                ["--harness", "hermes", "--hermes-home", str(FIXTURE), "--kinds"]
+            )
+        self.assertEqual(code, 0)
+        rows = dict(
+            line.split() for line in buf.getvalue().strip().splitlines()
+        )
+        self.assertEqual(sum(int(v) for v in rows.values()), 6)
+        self.assertIn("skill", rows)
+
+    def test_cli_count_prints_picked_over_scanned(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness",
+                    "hermes",
+                    "--hermes-home",
+                    str(FIXTURE),
+                    "--task",
+                    "jwt tokens",
+                    "--count",
+                ]
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(buf.getvalue().strip(), "1/6")
+
+
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+        from unittest.mock import patch
+
+        buf = StringIO()
+        err = StringIO()
+        with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+            with redirect_stdout(buf), redirect_stderr(err):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(FIXTURE),
+                        "--watch",
+                        "0.01",
+                        "--jq",
+                        "counts",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        lines = buf.getvalue().splitlines()
+        dicts = [json.loads(l) for l in lines if l.startswith("{")]
+        self.assertEqual(len(dicts), 2)
+        self.assertTrue(all("ts" not in d for d in dicts))
+        self.assertTrue(all("skill" in d for d in dicts))
+
+class WatchFailFastTests(unittest.TestCase):
+    def test_watch_fail_fast_breaks_on_first_delta_tick(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+        from unittest.mock import patch
+
+        results = [
+            [{"id": "a", "kind": "skill", "name": "a"}],  # initial payload scan
+            [{"id": "a", "kind": "skill", "name": "a"}],  # tick 1: baseline
+            [{"id": "b", "kind": "skill", "name": "b"}],  # tick 2: delta -> break
+            [{"id": "b", "kind": "skill", "name": "b"}],
+            [{"id": "b", "kind": "skill", "name": "b"}],
+            [{"id": "b", "kind": "skill", "name": "b"}],
+        ]
+
+        def fake_scan(harness, home=None, hermes=None):
+            if results:
+                return results.pop(0)
+            return []
+
+        buf = StringIO()
+        err = StringIO()
+        with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "5"}):
+            with patch.object(inv, "scan", side_effect=fake_scan):
+                with redirect_stdout(buf), redirect_stderr(err):
+                    code = inv.main(
+                        [
+                            "--harness",
+                            "hermes",
+                            "--hermes-home",
+                            str(FIXTURE),
+                            "--watch",
+                            "0.01",
+                            "--fail-fast",
+                        ]
+                    )
+        self.assertEqual(code, 0)
+        ticks = [
+            json.loads(l)
+            for l in buf.getvalue().splitlines()
+            if l.startswith('{"ts"')
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertEqual(ticks[1]["added"], ["b"])
+        self.assertEqual(ticks[1]["removed"], ["a"])
+        stderr_lines = [
+            l for l in err.getvalue().splitlines() if l.startswith("watch tick=")
+        ]
+        self.assertEqual(len(stderr_lines), 2)
+
+# -*- coding: utf-8 -*-
+
+
+class UnicodeRoundTripTests(unittest.TestCase):
+    U_PROMPT = "dobav JWT tokens: привет, こんにちは, مرحبا"
+    U_WINNER = "ß-auth ☃"
+
+    def test_append_decision_utf8_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            entry = {
+                "sha": "c0ffee",
+                "ts": 1,
+                "jev_status": "ok",
+                "prompt": self.U_PROMPT,
+                "winner": self.U_WINNER,
+            }
+            inv.append_decision(entry, path)
+            raw = path.read_bytes()
+            self.assertIn("привет".encode("utf-8"), raw)
+            line = json.loads(raw.decode("utf-8"))
+            self.assertEqual(line["winner"], self.U_WINNER)
+            spec = importlib.util.spec_from_file_location(
+                "jev_decisions", ROOT / "skills" / "jev-consult" / "scripts" / "decisions.py"
+            )
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            entries, _ = mod.load_entries(path)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["prompt"], self.U_PROMPT)
+
+    def test_write_sidecar_utf8_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            picked = [
+                {
+                    "id": "x1",
+                    "kind": "skill",
+                    "name": "ё-search",
+                    "description": "Unicode  description ☃",
+                    "path": "skills/ё-search",
+                }
+            ]
+            inv.write_sidecar(path, "hermes", "найди مرحبا", picked)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["task"], "найди مرحبا")
+            self.assertEqual(payload["items"][0]["name"], "ё-search")
+            self.assertEqual(
+                payload["names"], [{"kind": "skill", "name": "ё-search"}]
+            )
+
+    def test_append_decision_bad_dir_fails_open(self) -> None:
+        path = Path("N:\no\such\dir") / "d.jsonl"
+        inv.append_decision({"sha": "x"}, path)
+
+
+
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import time as _time
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+        from unittest.mock import patch
+
+        buf = StringIO()
+        err = StringIO()
+        with patch.dict(
+            os.environ,
+            {"JEV_INV_WATCH_MAX": "0", "JEV_INV_WATCH_SECS": "0.05"},
+        ):
+            start = _time.time()
+            with redirect_stdout(buf), redirect_stderr(err):
+                code = inv.main(
+                    [
+                        "--harness", "hermes",
+                        "--hermes-home", str(FIXTURE),
+                        "--watch", "0.02",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        self.assertLess(_time.time() - start, 2.0)
+        ticks = [
+            l for l in buf.getvalue().splitlines() if l.startswith('{"ts"')
+        ]
+        self.assertLessEqual(len(ticks), 10)
+        self.assertGreaterEqual(len(ticks), 1)
+
+class WatchJqNestedTests(unittest.TestCase):
+    def test_watch_jq_digs_nested_tick_field(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+        from unittest.mock import patch
+
+        buf = StringIO()
+        err = StringIO()
+        with patch.dict(os.environ, {"JEV_INV_WATCH_MAX": "2"}):
+            with redirect_stdout(buf), redirect_stderr(err):
+                code = inv.main(
+                    [
+                        "--harness", "hermes",
+                        "--hermes-home", str(FIXTURE),
+                        "--watch", "0.01",
+                        "--jq", "counts.skill,counts.mcp",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        lines = [l for l in buf.getvalue().splitlines() if l.strip()]
+        self.assertEqual(len(lines), 4)
+        for line in lines:
+            self.assertTrue(line.isdigit() or line == "null", line)
+
+
+class ConcurrentAppendTests(unittest.TestCase):
+    def test_concurrent_append_decision_keeps_all_lines(self) -> None:
+        import threading
+
+        n_threads, n_writes = 8, 25
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            barrier = threading.Barrier(n_threads)
+
+            def worker(tid: int) -> None:
+                barrier.wait()
+                for i in range(n_writes):
+                    inv.append_decision(
+                        {"sha": "t%di%d" % (tid, i), "ts": i, "jev_status": "ok"},
+                        path,
+                    )
+
+            threads = [threading.Thread(target=worker, args=(t,)) for t in range(n_threads)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), n_threads * n_writes)
+            seen = set()
+            for line in lines:
+                row = json.loads(line)
+                self.assertNotIn(row["sha"], seen)
+                seen.add(row["sha"])
+            self.assertEqual(len(seen), n_threads * n_writes)
+
+
+class AtomicWriteTests(unittest.TestCase):
+    def test_write_sidecar_leaves_no_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            inv.write_sidecar(path, "hermes", "task", [])
+            self.assertTrue(path.is_file())
+            self.assertEqual([p.name for p in Path(tmp).iterdir()], [".jev-tools.json"])
+
+    def test_write_miss_leaves_no_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools-miss.json"
+            inv.write_miss(path, "hermes", "task")
+            self.assertTrue(path.is_file())
+            self.assertEqual(
+                [p.name for p in Path(tmp).iterdir()], [".jev-tools-miss.json"]
+            )
+
+    def test_write_miss_schema_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools-miss.json"
+            inv.write_miss(path, "hermes", "jwt task")
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                sorted(data), ["empty", "harness", "task", "written_at"]
+            )
+            self.assertEqual(data["harness"], "hermes")
+            self.assertEqual(data["task"], "jwt task")
+            self.assertIs(data["empty"], True)
+            self.assertIsInstance(data["written_at"], int)
+
+    def test_write_miss_truncates_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools-miss.json"
+            inv.write_miss(path, "hermes", "x" * 700)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(len(data["task"]), 500)
+
+    def test_write_ask_leaves_no_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-ask.json"
+            picked = [{"kind": "skill", "name": "x", "id": "s1"}]
+            inv.write_ask(path, "task", "hermes", picked)
+            self.assertTrue(path.is_file())
+            self.assertEqual(
+                [p.name for p in Path(tmp).iterdir()], [".jev-ask.json"]
+            )
+
+    def test_atomic_write_failure_leaves_no_partial(self) -> None:
+        from unittest.mock import patch as _patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            with _patch.object(inv.os, "replace", side_effect=OSError("boom")):
+                with self.assertRaises(OSError):
+                    inv.write_sidecar(path, "hermes", "task", [])
+            self.assertFalse(path.exists())
+            self.assertFalse((Path(tmp) / ".jev-tools.json.tmp").exists())
+
+
+class SidecarSchemaTests(unittest.TestCase):
+    PICKED = [
+        {
+            "id": "skill:jwt",
+            "kind": "skill",
+            "name": "jwt",
+            "description": "JWT helpers",
+            "path": "skills/jwt",
+        },
+        {"id": "mcp:pg", "kind": "mcp", "name": "pg", "description": "", "path": ""},
+    ]
+
+    def test_sidecar_schema_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            inv.write_sidecar(path, "claude-code", "task", self.PICKED)
+            data = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(set(data), {"harness", "task", "written_at", "names", "items"})
+        self.assertEqual(data["harness"], "claude-code")
+        self.assertIsInstance(data["written_at"], int)
+        self.assertEqual(len(data["names"]), 2)
+        for row in data["names"]:
+            self.assertEqual(set(row), {"kind", "name"})
+        items = {i["name"]: i for i in data["items"]}
+        self.assertEqual(items["jwt"]["id"], "skill:jwt")
+        self.assertEqual(items["jwt"]["description"], "JWT helpers")
+        self.assertNotIn("description", items["pg"])  # empty desc dropped
+        self.assertNotIn("path", items["pg"])
+
+    def test_sidecar_items_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jev-tools.json"
+            inv.write_sidecar(path, "grok", "t", self.PICKED)
+            items = inv.sidecar_items(json.loads(path.read_text(encoding="utf-8")))
+            self.assertEqual([i["name"] for i in items], ["jwt", "pg"])
+
+    def test_sidecar_items_from_legacy_names_only(self) -> None:
+        payload = {"names": [{"kind": "skill", "name": "x"}]}
+        items = inv.sidecar_items(payload)
+        self.assertEqual(items, [{"kind": "skill", "name": "x"}])
+        self.assertEqual(inv.sidecar_items({}), [])
+        self.assertEqual(inv.sidecar_items("junk"), [])
+
+
+class LogPermissionTests(unittest.TestCase):
+    """append_decision creates the log dir 0700 and the file 0600 —
+    the routing log records prompts, so it must not be world-readable."""
+
+    def test_creates_dir_0700_file_0600(self) -> None:
+        import stat
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "sub" / "decisions.jsonl"
+            modes = {}
+            real_open = os.open
+            real_chmod = os.chmod
+
+            def spy_open(path, flags, mode=0o777):
+                modes["file"] = mode
+                return real_open(path, flags, mode)
+
+            def spy_chmod(path, mode):
+                modes["dir"] = mode
+                return real_chmod(path, mode)
+
+            with patch.object(inv.os, "open", spy_open), patch.object(
+                inv.os, "chmod", spy_chmod
+            ):
+                inv.append_decision({"ts": 1, "harness": "h"}, log)
+            self.assertEqual(modes.get("file"), 0o600)
+            self.assertEqual(modes.get("dir"), 0o700)
+            self.assertTrue(log.exists())
+            if os.name == "posix":
+                self.assertEqual(
+                    stat.S_IMODE(log.stat().st_mode) & 0o077, 0
+                )
+
+    def test_append_failure_is_silent(self) -> None:
+        # fail-open: a read-only target must not raise
+        with tempfile.TemporaryDirectory() as tmp:
+            blocked = Path(tmp) / "nope" / "x" / "decisions.jsonl"
+            (Path(tmp) / "nope").mkdir()
+            # a file where the dir should be → mkdir fails
+            (Path(tmp) / "nope" / "x").write_text("file")
+            inv.append_decision({"ts": 1}, blocked)  # must not raise
+
+
+class ScanPerfTests(unittest.TestCase):
+    """Regression tripwire: scanning a large install tree must not blow up.
+    Generous bound — catches O(n^2) reads, not micro-optimizations."""
+
+    def test_scan_and_shortlist_400_skills(self) -> None:
+        import time as time_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            skills_dir = Path(tmp) / ".claude" / "skills"
+            for i in range(400):
+                d = skills_dir / ("skill-%03d" % i)
+                d.mkdir(parents=True)
+                (d / "SKILL.md").write_text(
+                    "---\nname: skill-%03d\ndescription: skill %d does tok%d things\n---\n"
+                    % (i, i, i % 50),
+                    encoding="utf-8",
+                )
+            t0 = time_mod.perf_counter()
+            items = inv.scan("claude-code", home=Path(tmp))
+            scan_s = time_mod.perf_counter() - t0
+            self.assertEqual(len(items), 400)
+            self.assertLess(scan_s, 15.0, "scan too slow: %.1fs" % scan_s)
+            t0 = time_mod.perf_counter()
+            picked = inv.shortlist(items, "007", 6, [])
+            short_s = time_mod.perf_counter() - t0
+            self.assertEqual([i["name"] for i in picked], ["skill-007"])
+            self.assertLess(short_s, 15.0, "shortlist too slow: %.1fs" % short_s)
+
+    def test_self_test_scans_synthetic_catalog(self) -> None:
+        import subprocess
+
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "skills" / "jev-consult" / "scripts" / "inventory.py"),
+                "--self-test",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("self-test: ok", proc.stdout)
+        self.assertIn("scan_finds=ok", proc.stdout)
+        self.assertIn("explicit_hit=ok", proc.stdout)
 
 
 if __name__ == "__main__":

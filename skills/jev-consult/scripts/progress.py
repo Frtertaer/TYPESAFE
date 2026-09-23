@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import _watch
 from progress_core import Ledger, ProgressError, read_json
 
 
@@ -45,10 +48,64 @@ def build_parser():
     review.add_argument("--reason", required=True)
     review.add_argument("--reviewer", required=True)
     review.add_argument("--approve-finish", action="store_true", help="Record explicit completion approval; checks and Jev must still permit finishing")
+    commands.add_parser("self-test", help="Initialize a scratch ledger with a stub evidence collector and read it back")
     return parser
 
 
+class _StubEvidence:
+    """Deterministic collector so `self-test` needs no real Git worktree."""
+
+    def snapshot(self, settings):
+        return {"revision": "0" * 40, "tree": "0" * 40, "platform": sys.platform, "config": {}}
+
+    def descendant(self, baseline, revision, settings):
+        return True
+
+    def checks(self, definitions, names, settings, revision):
+        return [
+            {
+                "id": name,
+                "exit_code": 0,
+                "timed_out": False,
+                "output_sha256": hashlib.sha256(name.encode()).hexdigest(),
+                "output_bytes": 0,
+            }
+            for name in names
+        ]
+
+    def diff(self, baseline, revision, settings, paths):
+        return ""
+
+
+def _self_test(args) -> dict:
+    """Exercise initialize/status on a temporary ledger; never contacts Jev."""
+    policy_path = Path(args.policy) if args.policy else Path(__file__).resolve().parent.parent / "policy.json"
+    plan = {
+        "id": "self_test",
+        "goal": "Exercise initialize and status without touching a real ledger",
+        "checks": {"smoke": ["{python}", "-c", "pass"]},
+        "required_checks": ["smoke"],
+        "items": [
+            {
+                "id": "boot",
+                "description": "self-test item",
+                "checks": ["smoke"],
+                "paths": ["skills/jev-consult/scripts/progress.py"],
+            }
+        ],
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        ledger = Ledger(Path(tmp) / "progress.sqlite3", Path(tmp), evidence=_StubEvidence())
+        summary = ledger.initialize(plan, read_json(policy_path))
+        status = ledger.status(plan["id"])
+    if not isinstance(summary, dict) or not isinstance(status, dict):
+        raise ProgressError("INVALID_EVIDENCE", "self-test readback malformed")
+    return {"self_test": "ok", "stage": plan["id"]}
+
+
 def main(argv=None):
+    if _watch.maybe_version(sys.argv[1:] if argv is None else argv):
+        return 0
     args = build_parser().parse_args(argv)
     try:
         repo = Path(args.repo).resolve()
@@ -69,6 +126,8 @@ def main(argv=None):
             result = ledger.invalidate(args.stage, args.item, args.reason)
         elif args.command == "restore":
             result = ledger.restore(args.stage, args.item, args.reason, args.reviewer)
+        elif args.command == "self-test":
+            result = _self_test(args)
         else:
             result = ledger.review(args.stage, args.reason, args.reviewer, approve_finish=args.approve_finish)
     except ProgressError as exc:

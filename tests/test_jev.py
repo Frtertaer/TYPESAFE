@@ -154,6 +154,44 @@ class DecideTests(unittest.TestCase):
         bad = jev.decide(answers, self.policy, irreversible=True)
         self.assertEqual(bad["action"], "escalate")
 
+    def test_escalate_if_irreversible_false_disables_choice_escalate(self) -> None:
+        policy = dict(self.policy)
+        policy["escalate_if"] = dict(self.policy.get("escalate_if") or {})
+        policy["escalate_if"]["irreversible"] = False
+        answers = {
+            "where": {
+                "type": "choice",
+                "choice": "refactor",
+                "confidence": 0.7,
+                "probabilities": {"refactor": 0.51, "rewrite": 0.49},
+            }
+        }
+        decision = jev.decide(answers, policy, irreversible=True)
+        self.assertEqual(decision["action"], "proceed")
+
+    def test_escalate_if_irreversible_false_disables_noul_escalate(self) -> None:
+        policy = dict(self.policy)
+        policy["escalate_if"] = dict(self.policy.get("escalate_if") or {})
+        policy["escalate_if"]["irreversible"] = False
+        answers = {"touch": {"type": "noul", "noul": 0.5}}
+        decision = jev.decide(answers, policy, irreversible=True)
+        self.assertEqual(decision["action"], "proceed")
+
+    def test_escalate_if_irreversible_true_keeps_escalate(self) -> None:
+        policy = dict(self.policy)
+        policy["escalate_if"] = dict(self.policy.get("escalate_if") or {})
+        policy["escalate_if"]["irreversible"] = True
+        answers = {
+            "where": {
+                "type": "choice",
+                "choice": "refactor",
+                "confidence": 0.7,
+                "probabilities": {"refactor": 0.51, "rewrite": 0.49},
+            }
+        }
+        decision = jev.decide(answers, policy, irreversible=True)
+        self.assertEqual(decision["action"], "escalate")
+
     def test_v3_tight_gap_used_not_nested_015(self) -> None:
         answers = {
             "where": {
@@ -396,6 +434,16 @@ class PolicyTests(unittest.TestCase):
             self.assertIn(key, policy.get("must_ask", []))
         self.assertIn("on_track", policy.get("templates", {}))
         self.assertIn("load_tools", policy.get("templates", {}))
+        self.assertIn("risky", policy.get("templates", {}))
+
+    def test_scaffold_risky_builds_noul_question(self) -> None:
+        import jev
+
+        policy = jev.load_policy()
+        req = jev.scaffold_request(policy, ["risky"], {"note": "x"})
+        q = req["questions"]["risky"]
+        self.assertEqual(q["type"], "noul")
+        self.assertTrue(q["instructions"].rstrip().endswith("?"))
 
     def test_skill_says_jev_decides(self) -> None:
         text = (ROOT / "skills" / "jev-consult" / "SKILL.md").read_text(encoding="utf-8")
@@ -478,6 +526,23 @@ class ScaffoldTests(unittest.TestCase):
             self.assertIn("keep_vs_change", data["questions"])
             self.assertEqual(data["state"]["plan"], "ship pack")
 
+    def test_cmd_scaffold_lint_reports_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "req.json"
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = jev.main(
+                    [
+                        "scaffold", "approach", "--out", str(out),
+                        "--option", "approach=a:do a thing",
+                        "--option", "approach=b:do b thing",
+                        "--lint",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertIn("lint J012", err.getvalue())
+            self.assertTrue(out.is_file())
+
     def test_guard_no_decision_action(self) -> None:
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         skill = (ROOT / "skills" / "jev-consult" / "SKILL.md").read_text(encoding="utf-8")
@@ -515,6 +580,8 @@ class _FakeOpener:
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
+        if hasattr(outcome, "read") and hasattr(outcome, "__enter__"):
+            return outcome
         return _FakeResponse(outcome)
 
 
@@ -622,6 +689,38 @@ class PostSystemoneTests(unittest.TestCase):
             ), patch("urllib.request.build_opener", return_value=opener):
                 jev.post_systemone({"task": "t"}, self.QUESTIONS, {}, retries=1)
         self.assertEqual(opener.calls, 1)
+
+    def test_network_error_is_clean_systemexit(self) -> None:
+        opener = _FakeOpener(
+            [urllib.error.URLError("name or service not known")]
+        )
+        env = {"TYPESAFE_API_KEY": "dummy-test-key-not-a-real-secret"}
+        with self.assertRaises(SystemExit) as ctx:
+            with patch.dict(os.environ, env), patch.object(
+                jev, "load_api_key", return_value=env["TYPESAFE_API_KEY"]
+            ), patch("urllib.request.build_opener", return_value=opener):
+                jev.post_systemone({"task": "t"}, self.QUESTIONS, {}, retries=0)
+        self.assertIn("Jev network error", str(ctx.exception))
+
+    def test_non_json_body_is_clean_systemexit(self) -> None:
+        class _Raw(_FakeResponse):
+            def __init__(self, raw: bytes) -> None:
+                self._raw = raw
+
+        for body in (b"<html>upstream error</html>", b"\xff\xfe not utf8"):
+            with self.subTest(body=body[:16]):
+                opener = _FakeOpener([_Raw(body)])
+                env = {"TYPESAFE_API_KEY": "dummy-test-key-not-a-real-secret"}
+                with self.assertRaises(SystemExit) as ctx:
+                    with patch.dict(os.environ, env), patch.object(
+                        jev, "load_api_key", return_value=env["TYPESAFE_API_KEY"]
+                    ), patch(
+                        "urllib.request.build_opener", return_value=opener
+                    ):
+                        jev.post_systemone(
+                            {"task": "t"}, self.QUESTIONS, {}, retries=0
+                        )
+                self.assertIn("Jev response was not JSON", str(ctx.exception))
 
     def test_secret_in_state_blocked_before_http(self) -> None:
         opener = _FakeOpener([self.GOOD])
@@ -796,6 +895,21 @@ class JevInternalsTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("0 error(s)", buf.getvalue())
 
+    def test_cmd_self_test_roundtrips_offline(self) -> None:
+        buf = io.StringIO()
+        with patch.object(sys, "stdout", buf):
+            rc = jev.main(["self-test"])
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", buf.getvalue())
+
+        buf = io.StringIO()
+        with patch.object(sys, "stdout", buf):
+            rc = jev.main(["self-test", "--json"])
+        self.assertEqual(rc, 0)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["self_test"], "ok")
+        self.assertTrue(all(out["checks"].values()))
+
     def test_cmd_lint_errors(self) -> None:
         request = {
             "state": {"task": "t"},
@@ -824,6 +938,304 @@ class JevInternalsTests(unittest.TestCase):
             rc = jev.main(["ping"])
         self.assertEqual(rc, 0)
         self.assertIn("ok model=m1 noul=0.95", buf.getvalue())
+
+    def test_cmd_ping_verdict_writes_slim_json(self) -> None:
+        fake = {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.95}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            buf = io.StringIO()
+            with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+                sys, "stdout", buf
+            ):
+                rc = jev.main(["ping", "--verdict", str(verdict)])
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["model"], "m1")
+            self.assertEqual(payload["noul"], 0.95)
+            self.assertIn("ms", payload)
+
+    def test_ping_timeout_env_and_flag(self) -> None:
+        calls = []
+
+        def fake_post(state, questions, policy, model=None, timeout=60, retries=1):
+            calls.append(timeout)
+            return {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
+
+        buf = io.StringIO()
+        with patch.object(jev, "post_systemone", side_effect=fake_post), patch.object(
+            sys, "stdout", buf
+        ), patch.dict(os.environ, {"JEV_TIMEOUT": "7.5"}):
+            rc = jev.main(["ping"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls, [7.5])
+        calls.clear()
+        with patch.object(jev, "post_systemone", side_effect=fake_post), patch.object(
+            sys, "stdout", buf
+        ), patch.dict(os.environ, {"JEV_TIMEOUT": "bogus"}):
+            rc = jev.main(["ping", "--timeout", "3"])
+        self.assertEqual(calls, [3])
+
+    def test_ping_retries_flag_passed_to_post(self) -> None:
+        calls = []
+
+        def fake_post(state, questions, policy, model=None, timeout=60, retries=1):
+            calls.append(retries)
+            return {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
+
+        with patch.object(jev, "post_systemone", side_effect=fake_post), patch.object(
+            sys, "stdout", io.StringIO()
+        ):
+            rc = jev.main(["ping", "--retries", "4"])
+            rc2 = jev.main(["ping"])
+        self.assertEqual((rc, rc2), (0, 0))
+        self.assertEqual(calls, [4, 1])
+
+    def test_ping_jq_prints_one_field(self) -> None:
+        fake = {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
+        buf = io.StringIO()
+        with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+            sys, "stdout", buf
+        ):
+            rc = jev.main(["ping", "--jq", "model"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(buf.getvalue()), "m1")
+        with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+            sys, "stdout", io.StringIO()
+        ), patch.object(sys, "stderr", io.StringIO()):
+            rc = jev.main(["ping", "--jq", "nope"])
+        self.assertEqual(rc, 2)
+
+    def test_ping_out_writes_slim_json(self) -> None:
+        fake = {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "p.json"
+            buf = io.StringIO()
+            with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+                sys, "stdout", buf
+            ), patch.object(sys, "stderr", io.StringIO()):
+                rc = jev.main(["ping", "--out", str(out)])
+            self.assertEqual(rc, 0)
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["model"], "m1")
+
+    def test_ping_watch_emits_ticks_capped(self) -> None:
+        fake = {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
+        buf = io.StringIO()
+        err = io.StringIO()
+        with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+            sys, "stdout", buf
+        ), patch.object(sys, "stderr", err):
+            rc = jev.main(["ping", "--watch", "0.01", "--max-ticks", "3"])
+        self.assertEqual(rc, 0)
+        ticks = [
+            json.loads(line)
+            for line in buf.getvalue().splitlines()
+            if line.startswith('{"ts"')
+        ]
+        self.assertEqual(len(ticks), 3)
+        self.assertTrue(all(t["ok"] and t["model"] == "m1" for t in ticks))
+        self.assertIn("watch tick=3", err.getvalue())
+
+    def test_ping_watch_failed_tick_exits_1_when_capped(self) -> None:
+        def boom(*_a, **_k):
+            raise SystemExit("Jev network error: refused")
+
+        buf = io.StringIO()
+        with patch.object(jev, "post_systemone", side_effect=boom), patch.object(
+            sys, "stdout", buf
+        ), patch.object(sys, "stderr", io.StringIO()):
+            rc = jev.main(["ping", "--watch", "0.01", "--max-ticks", "2"])
+        self.assertEqual(rc, 1)
+        ticks = [
+            json.loads(line)
+            for line in buf.getvalue().splitlines()
+            if line.startswith('{"ts"')
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertFalse(ticks[0]["ok"])
+        self.assertIn("refused", ticks[0]["error"])
+
+    def test_ping_watch_fail_fast_and_verdict(self) -> None:
+        def boom(*_a, **_k):
+            raise SystemExit("down")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            out = Path(tmp) / "t.jsonl"
+            with patch.object(jev, "post_systemone", side_effect=boom), patch.object(
+                sys, "stdout", io.StringIO()
+            ), patch.object(sys, "stderr", io.StringIO()):
+                rc = jev.main(
+                    [
+                        "ping",
+                        "--watch",
+                        "0.01",
+                        "--fail-fast",
+                        "--out",
+                        str(out),
+                        "--verdict",
+                        str(verdict),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "down")
+            self.assertEqual(payload["ticks"], 1)
+            lines = out.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(lines), 1)
+            self.assertFalse(json.loads(lines[0])["ok"])
+
+    def test_ping_watch_max_env_caps(self) -> None:
+        fake = {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
+        buf = io.StringIO()
+        with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+            sys, "stdout", buf
+        ), patch.object(sys, "stderr", io.StringIO()), patch.dict(
+            os.environ, {"JEV_PING_WATCH_MAX": "2"}
+        ):
+            rc = jev.main(["ping", "--watch", "0.01"])
+        self.assertEqual(rc, 0)
+        ticks = [
+            line
+            for line in buf.getvalue().splitlines()
+            if line.startswith('{"ts"')
+        ]
+        self.assertEqual(len(ticks), 2)
+
+    def test_cmd_decide_out_writes_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "d.json"
+            out = Path(tmp) / "out.json"
+            path.write_text(
+                json.dumps({"answers": {"q": {"type": "noul", "noul": 0.9}}}),
+                encoding="utf-8",
+            )
+            with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", io.StringIO()
+            ):
+                rc = jev.main(["decide", str(path), "--out", str(out)])
+            self.assertEqual(rc, 0)
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(payload["decision"]["action"], "proceed")
+
+    def test_cmd_ask_out_writes_response(self) -> None:
+        fake = {
+            "model": "m1",
+            "answers": {
+                "q": {"type": "choice", "choice": "a", "confidence": 0.9}
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "r.json"
+            out = Path(tmp) / "out.json"
+            req.write_text(
+                json.dumps(
+                    {
+                        "state": {"task": "t"},
+                        "questions": {
+                            "q": {
+                                "type": "choice",
+                                "instructions": "pick",
+                                "criteria": {"a": "pick a", "b": "pick b"},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+                sys, "stdout", io.StringIO()
+            ), patch.object(sys, "stderr", io.StringIO()):
+                rc = jev.main(["ask", str(req), "--out", str(out)])
+            self.assertEqual(rc, 0)
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(payload["answers"]["q"]["choice"], "a")
+            self.assertIn("decision", payload)
+
+    def test_cmd_lint_jq_prints_one_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "r.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "questions": {
+                            "q": {
+                                "type": "choice",
+                                "instructions": "How many files are there?",
+                                "criteria": {"a": "one", "b": "two", "none": "none of these"},
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = jev.main(["lint", str(path), "--jq", "warnings"])
+            self.assertEqual(json.loads(buf.getvalue()), 1)
+            self.assertEqual(rc, 0)
+            with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", io.StringIO()
+            ) as err:
+                rc = jev.main(["lint", str(path), "--jq", "nope"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --jq key", err.getvalue())
+
+    def test_ping_json_emits_object(self) -> None:
+        def fake_post(state, questions, policy, model=None, timeout=60, retries=1):
+            return {"model": "m9", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
+
+        buf = io.StringIO()
+        with patch.object(jev, "post_systemone", side_effect=fake_post), patch.object(
+            sys, "stdout", buf
+        ):
+            rc = jev.main(["ping", "--json"])
+        self.assertEqual(rc, 0)
+        out = json.loads(buf.getvalue())
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["model"], "m9")
+        self.assertEqual(out["noul"], 0.9)
+        self.assertIsInstance(out["ms"], int)
+
+    def test_malformed_policy_is_clean_systemexit(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad.json"
+            bad.write_text("{bad json", encoding="utf-8")
+            with self.assertRaises(SystemExit) as ctx:
+                jev.load_policy(str(bad))
+            self.assertIn("not JSON", str(ctx.exception))
+            arr = Path(tmp) / "arr.json"
+            arr.write_text("[]", encoding="utf-8")
+            with self.assertRaises(SystemExit) as ctx:
+                jev.load_policy(str(arr))
+            self.assertIn("must be an object", str(ctx.exception))
+            with self.assertRaises(SystemExit) as ctx:
+                jev.load_policy(str(Path(tmp) / "nope.json"))
+            self.assertIn("unreadable", str(ctx.exception))
+
+    def test_jev_policy_env_overrides_path(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = Path(tmp) / "policy.json"
+            custom.write_text(json.dumps({"version": 999}), encoding="utf-8")
+            with patch.dict(os.environ, {"JEV_POLICY": str(custom)}):
+                self.assertEqual(jev.load_policy()["version"], 999)
+            with patch.dict(os.environ, {"JEV_POLICY": ""}):
+                self.assertNotEqual(jev.load_policy().get("version"), 999)
+
+    def test_env_timeout_helper(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("JEV_TIMEOUT", None)
+            self.assertIsNone(jev.env_timeout())
+        with patch.dict(os.environ, {"JEV_TIMEOUT": "0"}):
+            self.assertIsNone(jev.env_timeout())
+        with patch.dict(os.environ, {"JEV_TIMEOUT": "2.5"}):
+            self.assertEqual(jev.env_timeout(), 2.5)
 
     def test_main_requires_command(self) -> None:
         with self.assertRaises(SystemExit):
@@ -873,6 +1285,63 @@ class JevInternalsTests(unittest.TestCase):
             self.assertTrue(out["dry"])
             self.assertEqual(out["state"]["task"], "t")
             self.assertIn("q", out["questions"])
+
+    def test_cmd_ask_jq_prints_one_field(self) -> None:
+        req_obj = {
+            "state": {"task": "t"},
+            "questions": {
+                "q": {
+                    "type": "choice",
+                    "instructions": "pick one",
+                    "criteria": {"a": "x", "b": "y"},
+                }
+            },
+        }
+        fake = {
+            "model": "m1",
+            "answers": {"q": {"type": "choice", "choice": "a", "confidence": 0.9}},
+            "usage": {"n": 1},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "req.json"
+            req.write_text(json.dumps(req_obj), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+                sys, "stdout", buf
+            ):
+                rc = jev.main(["ask", str(req), "--jq", "answers.q.choice"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "a")
+            buf = io.StringIO()
+            with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+                sys, "stdout", buf
+            ):
+                rc = jev.main(["ask", str(req), "--jq", "decision.action"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "proceed")
+            with patch.object(jev, "post_systemone", return_value=fake), patch.object(
+                sys, "stdout", io.StringIO()
+            ), patch.object(sys, "stderr", io.StringIO()):
+                rc = jev.main(["ask", str(req), "--jq", "nope.deep"])
+            self.assertEqual(rc, 2)
+
+    def test_cmd_decide_jq_prints_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "d.json"
+            path.write_text(
+                json.dumps({"answers": {"q": {"type": "noul", "noul": 0.9}}}),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = jev.main(["decide", str(path), "--jq", "decision.action"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "proceed")
+            with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", io.StringIO()
+            ):
+                rc = jev.main(["decide", str(path), "--jq", "nope"])
+            self.assertEqual(rc, 2)
 
     def test_lint_json_emits_findings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -946,6 +1415,73 @@ class JevInternalsTests(unittest.TestCase):
             self.assertEqual(rc, jev.ASK_ESCALATE_EXIT)
             self.assertIn("cannot write", err.getvalue())
 
+    def test_ask_verdict_writes_outcome_json(self) -> None:
+        def fake_post(state, questions, policy, model=None, timeout=60, retries=1):
+            return {
+                "model": "m1",
+                "answers": {
+                    "q": {"choice": "a", "confidence": 0.99, "probabilities": {"a": 0.99, "b": 0.01}}
+                },
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "req.json"
+            req.write_text(
+                json.dumps(
+                    {
+                        "state": {"task": "t"},
+                        "questions": {
+                            "q": {
+                                "type": "choice",
+                                "instructions": "pick one",
+                                "criteria": {"a": "x", "b": "y"},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            verdict = Path(tmp) / "v.json"
+            buf = io.StringIO()
+            with patch.object(jev, "post_systemone", side_effect=fake_post), patch.object(
+                sys, "stdout", buf
+            ):
+                rc = jev.main(["ask", str(req), "--verdict", str(verdict)])
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertIn(payload["verdict"], ("proceed", "escalate"))
+            self.assertEqual(payload["verdict"], "proceed" if rc == 0 else "escalate")
+            self.assertEqual(payload["picks"], {"q": "a"})
+            self.assertIn("action", payload)
+            self.assertFalse((Path(tmp) / "v.json.tmp").exists())
+
+    def test_decide_verdict_writes_action_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "a.json"
+            payload.write_text(
+                json.dumps(
+                    {
+                        "answers": {
+                            "q": {
+                                "choice": "a",
+                                "confidence": 0.99,
+                                "probabilities": {"a": 0.99, "b": 0.01},
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            verdict = Path(tmp) / "v.json"
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = jev.main(
+                    ["decide", str(payload), "--verdict", str(verdict)]
+                )
+            out = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertIn(out["verdict"], ("proceed", "escalate"))
+            self.assertEqual(out["verdict"], "proceed" if rc == 0 else "escalate")
+            self.assertIn("action", out)
+
     def test_ask_dry_never_posts(self) -> None:
         def _boom(*a, **k):
             raise AssertionError("post called")
@@ -961,6 +1497,77 @@ class JevInternalsTests(unittest.TestCase):
                 with patch.object(sys, "stdout", buf):
                     rc = jev.main(["ask", str(req), "--dry"])
             self.assertEqual(rc, 0)
+
+
+class AskTimeoutTests(unittest.TestCase):
+    REQ = {
+        "state": {"task": "t"},
+        "questions": {
+            "q": {
+                "type": "choice",
+                "instructions": "pick one",
+                "criteria": {"a": "x", "b": "y"},
+            }
+        },
+    }
+    FAKE = {
+        "model": "m1",
+        "answers": {"q": {"type": "choice", "choice": "a", "confidence": 0.9}},
+    }
+
+    def _ask_with_timeout(self, argv_extra: list, env: dict) -> list:
+        calls = []
+
+        def fake_post(state, questions, policy, model=None, timeout=60, retries=1):
+            calls.append(timeout)
+            return dict(self.FAKE)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "req.json"
+            req.write_text(json.dumps(self.REQ), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(jev, "post_systemone", side_effect=fake_post), patch.object(
+                sys, "stdout", buf
+            ), patch.dict(os.environ, env):
+                rc = jev.main(["ask", str(req)] + argv_extra)
+        self.assertEqual(rc, 0, buf.getvalue())
+        return calls
+
+    def test_ask_timeout_env(self) -> None:
+        self.assertEqual(
+            self._ask_with_timeout([], {"JEV_TIMEOUT": "9.5"}), [9.5]
+        )
+
+    def test_ask_timeout_flag_wins_over_env(self) -> None:
+        self.assertEqual(
+            self._ask_with_timeout(["--timeout", "2"], {"JEV_TIMEOUT": "9.5"}),
+            [2],
+        )
+
+    def test_ask_retries_flag_passed_to_post(self) -> None:
+        calls = []
+
+        def fake_post(state, questions, policy, model=None, timeout=60, retries=1):
+            calls.append(retries)
+            return dict(self.FAKE)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "req.json"
+            req.write_text(json.dumps(self.REQ), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(
+                jev, "post_systemone", side_effect=fake_post
+            ), patch.object(sys, "stdout", buf):
+                rc = jev.main(["ask", str(req), "--retries", "3"])
+                rc2 = jev.main(["ask", str(req)])
+        self.assertEqual((rc, rc2), (0, 0), buf.getvalue())
+        self.assertEqual(calls, [3, 1])
+
+    def test_ask_timeout_defaults_60(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("JEV_TIMEOUT", None)
+            calls = self._ask_with_timeout([], {})
+        self.assertEqual(calls, [60])
 
 
 if __name__ == "__main__":

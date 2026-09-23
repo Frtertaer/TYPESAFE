@@ -27,6 +27,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+import _watch  # noqa: E402
+
 STATE_CONTEXT = (
     "A coding assistant conversation is being compacted to free context. "
     "`history` is the whole conversation so far, oldest first; tool outputs "
@@ -48,6 +54,10 @@ MIN_REDUCTION = 0.25
 MAX_CALLS_PER_BATCH = 16
 PATH_KEYS = ("file_path", "path", "filename", "target")
 TOKEN_PIECES = re.compile(r"[A-Za-z]+|\d+|[^ \t\n\r\f\vA-Za-z\d]")
+# spill references are emitted as "full output saved: PATH …]" (abridged
+# marker) or "; full output saved: PATH; re-run ...]" (metadata trailer) —
+# capture the path up to whitespace, ';', ']', or the ellipsis char.
+SPILL_REF = re.compile(r"full output saved: ([^\s;\]\u2026]+)")
 DUMP = {"separators": (",", ":"), "ensure_ascii": False}
 
 
@@ -87,6 +97,38 @@ LIVE_HEAD = 6000
 LIVE_TAIL = 2000
 SPILL_MAX_FILES = 200
 SPILL_MAX_BYTES = 256 * 1024 * 1024
+SPILL_INDEX_NAME = "index.jsonl"
+
+
+def _spill_index_path(target: Path) -> Path:
+    return target / SPILL_INDEX_NAME
+
+
+def _spill_index_append(target: Path, name: str, size: int) -> None:
+    try:
+        with _spill_index_path(target).open("a", encoding="utf-8") as fh:
+            fh.write(
+                json.dumps({"ts": time.time(), "name": name, "bytes": size}) + "\n"
+            )
+    except OSError:
+        pass
+
+
+def _spill_index_rows(target: Path) -> dict[str, dict]:
+    rows: dict[str, dict] = {}
+    try:
+        lines = _spill_index_path(target).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return rows
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        name = row.get("name")
+        if isinstance(name, str):
+            rows[name] = row
+    return rows
 
 
 def spill_dir_default() -> Path | None:
@@ -96,6 +138,26 @@ def spill_dir_default() -> Path | None:
     if override:
         return Path(override)
     return Path.home() / ".cache" / "jev-consult" / "spill"
+
+
+def _atomic_write_surrogate(path: Path, text: str) -> None:
+    """Write spill content via a pid-tmp + chmod 0600 + os.replace.
+
+    Uses surrogateescape so tool output carrying lone surrogates still
+    round-trips; the pid in the tmp name keeps concurrent spillers apart."""
+    tmp = path.with_name(path.stem + ".tmp.%d" % os.getpid())
+    try:
+        tmp.write_text(text, encoding="utf-8", errors="surrogateescape")
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
 
 
 def spill(text: str, spill_dir: Path | None = None) -> Path | None:
@@ -113,20 +175,10 @@ def spill(text: str, spill_dir: Path | None = None) -> Path | None:
         path = target / (digest + ".txt")
         if path.exists():
             path.touch()
+            _spill_index_append(target, path.name, path.stat().st_size)
         else:
-            tmp = target / (digest + ".tmp.%d" % os.getpid())
-            try:
-                tmp.write_text(text, encoding="utf-8", errors="surrogateescape")
-                try:
-                    os.chmod(tmp, 0o600)
-                except OSError:
-                    pass
-                os.replace(tmp, path)
-            finally:
-                try:
-                    tmp.unlink()
-                except OSError:
-                    pass
+            _atomic_write_surrogate(path, text)
+            _spill_index_append(target, path.name, path.stat().st_size)
         entries: list[tuple[float, int, Path]] = []
         total_size = 0
         for candidate in target.iterdir():
@@ -135,6 +187,8 @@ def spill(text: str, spill_dir: Path | None = None) -> Path | None:
             except OSError:
                 continue
             if not stat.S_ISREG(info.st_mode):
+                continue
+            if candidate.name == SPILL_INDEX_NAME:
                 continue
             entries.append((info.st_mtime, info.st_size, candidate))
             total_size += info.st_size
@@ -951,12 +1005,14 @@ def decide_call(
     return {**base, "action": "drop_call", "reason": "call_dropped"}
 
 
-def truncated_result_text(text: str, is_error: bool, head_chars: int) -> str:
+def truncated_result_text(
+    text: str, is_error: bool, head_chars: int, spill_enabled: bool = True
+) -> str:
     if len(text) <= head_chars + 120:
         return text
     head = "%s\n" % text[:head_chars] if head_chars > 0 else ""
     extra = " (error)" if is_error else ""
-    saved = spill(text)
+    saved = spill(text) if spill_enabled else None
     if saved is not None:
         extra += "; full output saved: %s" % saved
     return "%s[fast-jev-compaction truncated %s chars of this tool result%s; re-run the tool if needed]" % (
@@ -971,6 +1027,7 @@ def apply_decisions(
     decisions: list[dict[str, Any]],
     calls: list[ToolCall],
     head_chars: int,
+    spill_enabled: bool = True,
 ) -> list[dict[str, Any]]:
     by_id = {call.id: call for call in calls}
     actions: dict[str, str] = {}
@@ -999,6 +1056,7 @@ def apply_decisions(
                 tool.get("text") or "",
                 bool(tool.get("isError")),
                 head_chars,
+                spill_enabled,
             )
             if (tool.get("text") or "") == text:
                 return tool
@@ -1022,6 +1080,7 @@ def apply_decisions(
                 result.get("text") or "",
                 bool(result.get("isError")),
                 head_chars,
+                spill_enabled,
             )
             if text == (result.get("text") or ""):
                 return result
@@ -1089,6 +1148,30 @@ def compact(
     keep_threshold = float(opts.get("keep_threshold") if opts.get("keep_threshold") is not None else KEEP_THRESHOLD)
     head_chars = int(opts.get("truncate_head_chars") if opts.get("truncate_head_chars") is not None else TRUNCATE_HEAD_CHARS)
     messages = [normalize_message(item) for item in messages]
+    min_messages = int(opts.get("min_messages") or 0)
+    if min_messages > 0 and len(messages) < min_messages:
+        chars = sum(message_chars(message) for message in messages)
+        return {
+            "messages": messages,
+            "decisions": [],
+            "stats": {
+                "messagesBefore": len(messages),
+                "messagesAfter": len(messages),
+                "charsBefore": chars,
+                "charsAfter": chars,
+                "calls": 0,
+                "kept": 0,
+                "resultsDropped": 0,
+                "callsDropped": 0,
+                "pinned": 0,
+                "stateTokens": 0,
+                "stateStage": "",
+                "requests": 0,
+                "ms": int((time.time() - started) * 1000),
+                "fallback": False,
+                "skipped": "min_messages",
+            },
+        }
     calls = collect_tool_calls(messages, preserve, keep_first)
     pin_errors_and_trace(calls, opts.get("trace"))
     keep_re = None
@@ -1144,7 +1227,10 @@ def compact(
         )
         for call in calls
     ]
-    kept = apply_decisions(messages, decisions, calls, head_chars)
+    kept = apply_decisions(
+        messages, decisions, calls, head_chars,
+        spill_enabled=not opts.get("no_spill"),
+    )
     return {
         "messages": kept,
         "decisions": decisions,
@@ -1176,7 +1262,8 @@ def compact_or_keep(
     min_reduction = float(opts.pop("min_reduction") if "min_reduction" in opts else MIN_REDUCTION)
     original = [normalize_message(item) for item in messages]
     result = compact(original, asker, opts)
-    if min_reduction > 0 and reduction_ratio(result) < min_reduction:
+    result["stats"]["reduction"] = reduction_ratio(result)
+    if min_reduction > 0 and result["stats"]["reduction"] < min_reduction:
         result["messages"] = original
         result["stats"]["charsAfter"] = result["stats"]["charsBefore"]
         result["stats"]["messagesAfter"] = len(original)
@@ -1195,7 +1282,7 @@ def load_jev():
 
 def jev_asker(state: dict[str, Any], questions: dict[str, Any]) -> dict[str, Any]:
     jev = load_jev()
-    policy = jev.load_policy(str(Path(__file__).resolve().parent.parent / "policy.json"))
+    policy = jev.load_policy()
     return jev.post_systemone(state, questions, policy)
 
 
@@ -1226,8 +1313,14 @@ def cmd_compact(args: argparse.Namespace) -> int:
         "keep_first": args.keep_first,
         "truncate_head_chars": args.truncate_head_chars,
         "min_reduction": args.min_reduction,
+        "min_messages": args.min_messages,
         "keep_text": args.keep_text or os.environ.get("JEV_KEEP_TEXT", ""),
         "trace": load_trace(args.trace),
+        "no_spill": bool(
+            getattr(args, "dry_run", False)
+            or getattr(args, "check", False)
+            or getattr(args, "preview", False)
+        ),
     }
     asker: Asker
     if args.fake:
@@ -1239,26 +1332,208 @@ def cmd_compact(args: argparse.Namespace) -> int:
             return {"answers": answers}
     else:
         asker = jev_asker
+    if getattr(args, "watch", None):
+        import time as _time
+
+        max_ticks = _watch.cap("JEV_COMPACT_WATCH_MAX", args.max_ticks)
+        ticks = 0
+        dead = _watch.deadline("JEV_COMPACT_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        cur: dict[str, Any] = {}
+        verdict_ok = True
+
+        def _write_verdict() -> bool:
+            return _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "fallback" if cur.get("stats", {}).get("fallback") else "ok",
+                    "ticks": ticks,
+                    "reduction": cur.get("stats", {}).get("reduction"),
+                    "fallback": bool(cur.get("stats", {}).get("fallback")),
+                    "elapsed_s": round(_time.time() - watch_t0, 2),
+                },
+            )
+
+        watch_t0 = time.time()
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
+            if args.file != "-":
+                try:
+                    messages = parse_transcript(Path(args.file).read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    pass
+            cur = compact_or_keep(messages, asker, options)
+            stats = cur.get("stats") or {}
+            tick = {
+                "ts": int(_time.time()),
+                "elapsed_s": round(_time.time() - watch_t0, 2),
+                "messagesBefore": stats.get("messagesBefore"),
+                "messagesAfter": stats.get("messagesAfter"),
+                "charsBefore": stats.get("charsBefore"),
+                "charsAfter": stats.get("charsAfter"),
+                "reduction": stats.get("reduction"),
+                "fallback": bool(stats.get("fallback")),
+            }
+            _watch.emit_or_jq(tick, getattr(args, "jq", ""), getattr(args, "out", "") or None, quiet=_watch.quiet("JEV_COMPACT_WATCH_QUIET", args.quiet), bad=tick["fallback"])
+            ticks += 1
+            sys.stderr.write(
+                "watch tick=%d reduction=%s fallback=%s\n"
+                % (ticks, tick["reduction"], tick["fallback"])
+            )
+            if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
+            if getattr(args, "fail_fast", False) and tick["fallback"]:
+                break
+            _time.sleep(args.watch)
+        if getattr(args, "verdict", "") and verdict_ok and not _write_verdict():
+            return 1
+        return 1 if cur.get("stats", {}).get("fallback") else 0
     try:
         result = compact_or_keep(messages, asker, options)
     except (RuntimeError, ValueError) as exc:
         sys.stderr.write("compact failed: %s\n" % exc)
         return 1
+    if getattr(args, "verdict", ""):
+        stats = result.get("stats") if isinstance(result, dict) else {}
+        stats = stats if isinstance(stats, dict) else {}
+        if not _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "fallback" if stats.get("fallback") else "ok",
+                "ticks": 1,
+                "reduction": stats.get("reduction"),
+                "fallback": bool(stats.get("fallback")),
+            },
+        ):
+            return 1
+    if getattr(args, "check", False):
+        stats = result.get("stats") or {}
+        ratio = stats.get("reduction", reduction_ratio(result))
+        ok = not stats.get("fallback")
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "check": "ok" if ok else "FAIL",
+                        "reduction": ratio,
+                        "min_reduction": args.min_reduction,
+                        "rc": 0 if ok else 1,
+                    }
+                )
+                + "\n"
+            )
+        elif ok:
+            sys.stdout.write("check: ok reduction %.3f\n" % ratio)
+        else:
+            sys.stdout.write(
+                "check: FAIL reduction %.3f below --min-reduction %s\n"
+                % (ratio, args.min_reduction)
+            )
+        return 0 if ok else 1
     if getattr(args, "dry_run", False):
         result["messages"] = messages
         stats = result.setdefault("stats", {})
         stats["messagesAfter"] = stats.get("messagesBefore")
         stats["charsAfter"] = stats.get("charsBefore")
         stats["dry_run"] = True
-    text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps(
+                    {"dry_run": True, "stats": stats}, indent=2, ensure_ascii=False
+                )
+                + "\n"
+            )
+            return 0
+    if getattr(args, "preview", False):
+        plan = [
+            {
+                "id": item.get("id"),
+                "tool": item.get("tool"),
+                "action": item.get("action"),
+                "reason": item.get("reason"),
+            }
+            for item in (result.get("decisions") or [])
+            if isinstance(item, dict)
+        ]
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "preview": True,
+                    "plan": plan,
+                    "stats": result.get("stats") or {},
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+        return 0
+    if getattr(args, "jq", ""):
+        node = result
+        found = True
+        for part in args.jq.split("."):
+            if isinstance(node, dict) and part in node:
+                node = node[part]
+            else:
+                found = False
+                break
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (args.jq, ", ".join(sorted(result)) if isinstance(result, dict) else "")
+            )
+            return 2
+        sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+        return 0
+    if getattr(args, "md", False):
+        stats = result.get("stats") if isinstance(result, dict) else {}
+        stats = stats if isinstance(stats, dict) else {}
+        lines = [
+            "# compact result",
+            "",
+            "- messages: %s -> %s"
+            % (stats.get("messagesBefore"), stats.get("messagesAfter")),
+            "- chars: %s -> %s (reduction %s)"
+            % (
+                stats.get("charsBefore"),
+                stats.get("charsAfter"),
+                stats.get("reduction"),
+            ),
+            "- calls: %s kept, %s dropped; results dropped: %s; pinned: %s"
+            % (
+                stats.get("kept"),
+                stats.get("callsDropped"),
+                stats.get("resultsDropped"),
+                stats.get("pinned"),
+            ),
+            "- state: stage=%s tokens=%s"
+            % (stats.get("stateStage") or "-", stats.get("stateTokens")),
+            "- fallback: %s  ms: %s"
+            % (bool(stats.get("fallback")), stats.get("ms")),
+        ]
+        spill = result.get("spill") if isinstance(result, dict) else None
+        if isinstance(spill, dict) and spill.get("files"):
+            lines.append("- spill files: %d" % len(spill["files"]))
+        text = "\n".join(lines) + "\n"
+    else:
+        text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     if args.output:
         try:
-            Path(args.output).write_text(text, encoding="utf-8")
+            _atomic_write(Path(args.output), text)
         except OSError as exc:
             sys.stderr.write("output write failed: %s\n" % exc)
             return 1
     else:
         sys.stdout.write(text)
+    report_path = getattr(args, "report", "") or ""
+    if report_path:
+        stats = result.get("stats") if isinstance(result, dict) else {}
+        try:
+            _atomic_write(
+                Path(report_path),
+                json.dumps(stats or {}, indent=2, ensure_ascii=False) + "\n",
+            )
+        except OSError as exc:
+            sys.stderr.write("cannot write report %s: %s\n" % (report_path, exc))
+            return 1
     if getattr(args, "stats_json", False):
         stats = result.get("stats") if isinstance(result, dict) else {}
         sys.stderr.write(json.dumps(stats or {}, ensure_ascii=False) + "\n")
@@ -1281,6 +1556,22 @@ def cmd_compact(args: argparse.Namespace) -> int:
                 pct,
             )
         )
+    if getattr(args, "explain", False):
+        decisions = result.get("decisions") if isinstance(result, dict) else None
+        for d in decisions or []:
+            if not isinstance(d, dict):
+                continue
+            sys.stderr.write(
+                "explain: %s %s action=%s reason=%s keepCall=%s keepResult=%s\n"
+                % (
+                    d.get("id"),
+                    d.get("tool"),
+                    d.get("action"),
+                    d.get("reason"),
+                    d.get("keepCall"),
+                    d.get("keepResult"),
+                )
+            )
     return 0
 
 
@@ -1290,6 +1581,7 @@ def list_spill(directory: Path | None = None) -> list[tuple[Path, int, float]]:
     if target is None or not target.is_dir():
         return []
     rows: list[tuple[Path, int, float]] = []
+    indexed = _spill_index_rows(target)
     for candidate in sorted(target.iterdir()):
         try:
             info = candidate.stat()
@@ -1297,7 +1589,15 @@ def list_spill(directory: Path | None = None) -> list[tuple[Path, int, float]]:
             continue
         if not stat.S_ISREG(info.st_mode):
             continue
-        rows.append((candidate, info.st_size, info.st_mtime))
+        if candidate.name == SPILL_INDEX_NAME:
+            continue
+        row = indexed.get(candidate.name)
+        if row is not None and isinstance(row.get("bytes"), int):
+            rows.append(
+                (candidate, int(row["bytes"]), float(row.get("ts") or info.st_mtime))
+            )
+        else:
+            rows.append((candidate, info.st_size, info.st_mtime))
     return rows
 
 
@@ -1317,6 +1617,8 @@ def prune_spill(
             info = candidate.stat()
         except OSError:
             continue
+        if candidate.name == SPILL_INDEX_NAME:
+            continue
         if not stat.S_ISREG(info.st_mode) or info.st_mtime > cutoff:
             continue
         try:
@@ -1325,6 +1627,19 @@ def prune_spill(
             continue
         removed.append(candidate)
     return removed
+
+
+def _atomic_write(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1350,6 +1665,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         env_first = 0
     parser.add_argument("--keep-first", type=int, default=max(0, env_first), help="Always keep the first N messages pinned")
+    parser.add_argument("--min-messages", type=int, default=0, help="Return the transcript untouched when it has fewer than N messages (stats.skipped = 'min_messages')")
     try:
         env_head = int(os.environ.get("JEV_TRUNCATE_HEAD", "") or TRUNCATE_HEAD_CHARS)
     except ValueError:
@@ -1364,6 +1680,12 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run",
         action="store_true",
         help="Compute decisions and stats but emit the original messages unchanged.",
+    )
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="Emit the drop plan (per-call action and reason) without writing "
+        "output files or spill; nothing is applied.",
     )
     parser.add_argument(
         "--keep-text",
@@ -1381,16 +1703,76 @@ def main(argv: list[str] | None = None) -> int:
         help="Do not call Jev; drop every non-pinned result (for tests).",
     )
     parser.add_argument(
+        "--watch",
+        type=float,
+        metavar="SECONDS",
+        help="Re-read the transcript file and re-run compaction every S seconds, emitting a stats tick per pass (JEV_COMPACT_WATCH_MAX caps ticks).",
+    )
+    parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
+    parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that fell back to the original transcript")
+    parser.add_argument("--verdict", default="", metavar="PATH", help="Write a slim {verdict: ok|fallback, ticks, reduction, fallback} JSON to PATH — refreshed every --watch tick; without --watch a one-shot probe after the run.")
+    parser.add_argument(
         "--prune-spill",
         type=float,
         metavar="SECONDS",
         help="Unlink spill files older than SECONDS in the spill dir (or --spill-dir) and exit.",
     )
-    parser.add_argument("--spill-dir", help="Override spill directory for --prune-spill/--list-spill.")
+    parser.add_argument("--spill-dir", help="Override spill directory for --prune-spill/--list-spill/--spill-stats.")
+    parser.add_argument(
+        "--out",
+        default="",
+        metavar="PATH",
+        help="With --list-spill/--prune-spill: write the listing to PATH instead of stdout.",
+    )
     parser.add_argument(
         "--list-spill",
         action="store_true",
         help="List spill files (name, bytes, mtime) and exit.",
+    )
+    parser.add_argument(
+        "--spill-stats",
+        action="store_true",
+        help="Print spill-dir totals ({dir,count,bytes,oldest_ts,newest_ts}) and exit.",
+    )
+    parser.add_argument(
+        "--verify-spill",
+        metavar="FILE",
+        default="",
+        help="Verify 'full output saved: PATH' references in FILE exist (rc 1 on missing).",
+    )
+    parser.add_argument(
+        "--orphan-spill",
+        metavar="FILE",
+        default="",
+        help="List spill files not referenced by FILE (uses --spill-dir for the dir).",
+    )
+    parser.add_argument(
+        "--md",
+        action="store_true",
+        help="Emit a markdown summary of the compaction stats instead of the JSON payload (-o writes the markdown to the file too)",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit --verify-spill/--orphan-spill results as JSON.",
+    )
+    parser.add_argument(
+        "--jq",
+        metavar="KEY",
+        default="",
+        help="Print just this dotted-path field of the compaction result JSON (e.g. stats.charsBefore); unknown key exits 2.",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Dry check: exit 1 when the transcript would compact below the --min-reduction gate; prints only a check line.",
+    )
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="Print one stderr line per tool-call decision (id tool action reason scores).",
     )
     parser.add_argument(
         "--stats",
@@ -1403,6 +1785,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the stats dict as JSON to stderr after the result.",
     )
     parser.add_argument(
+        "--report",
+        metavar="PATH",
+        default="",
+        help="Write the stats dict as JSON to PATH after the run.",
+    )
+    parser.add_argument(
         "--version",
         action="store_true",
         help="Print the jev-consult policy version and exit.",
@@ -1412,7 +1800,92 @@ def main(argv: list[str] | None = None) -> int:
         metavar="DIR",
         help="Compact every *.json/*.jsonl transcript in DIR; one JSON line per file on stdout.",
     )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Compact a synthetic transcript with a stub asker (no Jev) and check the stats/min-messages paths; exit 1 on failure.",
+    )
     args = parser.parse_args(argv)
+    if args.self_test:
+        checks: dict = {}
+        try:
+            def _stub(state: dict, questions: dict) -> dict:
+                return {
+                    "answers": {
+                        name: {"type": "noul", "noul": 0.1}
+                        for name in questions
+                    }
+                }
+
+            transcript = [
+                {"role": "user", "text": "self-test task"},
+                {
+                    "role": "assistant",
+                    "toolUses": [
+                        {
+                            "tool_use_id": "st1",
+                            "tool": "read_file",
+                            "input": {"file_path": "/tmp/a.py"},
+                        },
+                        {
+                            "tool_use_id": "st2",
+                            "tool": "read_file",
+                            "input": {"file_path": "/tmp/b.py"},
+                        },
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "toolResults": [
+                        {"tool_use_id": "st1", "text": "x" * 4000},
+                        {"tool_use_id": "st2", "text": "y" * 4000},
+                    ],
+                },
+            ]
+            result = compact(
+                transcript,
+                _stub,
+                {"preserve_recent": 0, "no_spill": True},
+            )
+            stats = result.get("stats") or {}
+            checks["drops_calls"] = (
+                stats.get("resultsDropped", 0) + stats.get("callsDropped", 0)
+            ) >= 1
+            checks["shrinks"] = (
+                stats.get("charsAfter", 0) < stats.get("charsBefore", 0)
+            )
+            checks["not_fallback"] = stats.get("fallback") is False
+            small = compact(
+                [{"role": "user", "text": "tiny"}],
+                _stub,
+                {"min_messages": 5},
+            )
+            checks["min_messages_skip"] = (
+                (small.get("stats") or {}).get("skipped") == "min_messages"
+            )
+        except Exception:
+            checks = {"raised": False}
+        ok = bool(checks) and all(checks.values())
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {"self_test": "ok" if ok else "FAIL", "checks": checks},
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "self-test: %s %s\n"
+                % (
+                    "ok" if ok else "FAIL",
+                    " ".join(
+                        "%s=%s" % (k, "ok" if v else "FAIL")
+                        for k, v in sorted(checks.items())
+                    ),
+                )
+            )
+        return 0 if ok else 1
     if args.version:
         policy_path = Path(__file__).resolve().parent.parent / "policy.json"
         try:
@@ -1421,19 +1894,144 @@ def main(argv: list[str] | None = None) -> int:
             version = "?"
         sys.stdout.write("jev-consult (policy v%s)\n" % version)
         return 0
+    if args.verify_spill:
+        try:
+            text = Path(args.verify_spill).read_text(encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("--verify-spill failed: %s\n" % exc)
+            return 2
+        refs = SPILL_REF.findall(text)
+        missing = [ref for ref in refs if not Path(ref).is_file()]
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "refs": refs,
+                        "missing": missing,
+                        "ok": not missing,
+                    },
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            for ref in refs:
+                sys.stdout.write(
+                    "%s %s\n" % ("ok" if Path(ref).is_file() else "missing", ref)
+                )
+            sys.stdout.write("%d refs, %d missing\n" % (len(refs), len(missing)))
+        return 1 if missing else 0
+    if args.orphan_spill:
+        try:
+            text = Path(args.orphan_spill).read_text(encoding="utf-8")
+        except OSError as exc:
+            sys.stderr.write("--orphan-spill failed: %s\n" % exc)
+            return 2
+        referenced = set(SPILL_REF.findall(text))
+        directory = Path(args.spill_dir) if args.spill_dir else None
+        orphans = [
+            path for path, _size, _mtime in list_spill(directory)
+            if str(path) not in referenced
+        ]
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {"orphans": [str(path) for path in orphans], "count": len(orphans)},
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            for path in orphans:
+                sys.stdout.write("orphan: %s\n" % path)
+            sys.stdout.write("%d orphans\n" % len(orphans))
+        return 0
+    if getattr(args, "spill_stats", False):
+        directory = Path(args.spill_dir) if args.spill_dir else None
+        rows = list_spill(directory)
+        stats = {
+            "dir": str(directory or spill_dir_default() or ""),
+            "count": len(rows),
+            "bytes": sum(size for _path, size, _mtime in rows),
+            "oldest_ts": min((mtime for _p, _s, mtime in rows), default=None),
+            "newest_ts": max((mtime for _p, _s, mtime in rows), default=None),
+        }
+        if args.json:
+            text = json.dumps(stats, indent=2) + "\n"
+        else:
+            text = (
+                "dir %s\ncount %d\nbytes %d\noldest_ts %s\nnewest_ts %s\n"
+                % (
+                    stats["dir"],
+                    stats["count"],
+                    stats["bytes"],
+                    int(stats["oldest_ts"]) if stats["oldest_ts"] is not None else "-",
+                    int(stats["newest_ts"]) if stats["newest_ts"] is not None else "-",
+                )
+            )
+        if args.out:
+            try:
+                _atomic_write(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("--out failed: %s\n" % exc)
+                return 1
+            sys.stderr.write("wrote %s\n" % args.out)
+        else:
+            sys.stdout.write(text)
+        return 0
     if args.list_spill:
         directory = Path(args.spill_dir) if args.spill_dir else None
         rows = list_spill(directory)
-        for path, size, mtime in rows:
-            sys.stdout.write("%s %d %d\n" % (path, size, int(mtime)))
-        sys.stdout.write("%d spill files\n" % len(rows))
+        if args.json:
+            text = json.dumps(
+                {
+                    "files": [
+                        {
+                            "path": str(path),
+                            "size": size,
+                            "mtime": int(mtime),
+                        }
+                        for path, size, mtime in rows
+                    ],
+                    "count": len(rows),
+                },
+                indent=2,
+            ) + "\n"
+        else:
+            text = "".join(
+                "%s %d %d\n" % (path, size, int(mtime)) for path, size, mtime in rows
+            ) + "%d spill files\n" % len(rows)
+        if args.out:
+            try:
+                _atomic_write(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("--out failed: %s\n" % exc)
+                return 1
+            sys.stderr.write("wrote %s\n" % args.out)
+        else:
+            sys.stdout.write(text)
         return 0
     if args.prune_spill is not None:
         directory = Path(args.spill_dir) if args.spill_dir else None
         removed = prune_spill(directory, args.prune_spill)
-        for path in removed:
-            sys.stdout.write("pruned: %s\n" % path)
-        sys.stdout.write("pruned %d spill files\n" % len(removed))
+        if args.json:
+            text = json.dumps(
+                {"pruned": [str(path) for path in removed], "count": len(removed)},
+                indent=2,
+            ) + "\n"
+        else:
+            text = "".join("pruned: %s\n" % path for path in removed) + (
+                "pruned %d spill files\n" % len(removed)
+            )
+        if args.out:
+            try:
+                _atomic_write(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("--out failed: %s\n" % exc)
+                return 1
+            sys.stderr.write("wrote %s\n" % args.out)
+        else:
+            sys.stdout.write(text)
         return 0
     if args.dir:
         batch = Path(args.dir)
@@ -1450,6 +2048,10 @@ def main(argv: list[str] | None = None) -> int:
                 if p.is_file() and p.suffix.lower() in (".json", ".jsonl")
             ]
         )
+        total_in = 0
+        total_out = 0
+        n_ok = 0
+        rows: list[dict] = []
         for p in files:
             row = {"file": p.name}
             try:
@@ -1461,6 +2063,7 @@ def main(argv: list[str] | None = None) -> int:
                     "keep_first": args.keep_first,
                     "truncate_head_chars": args.truncate_head_chars,
                     "min_reduction": args.min_reduction,
+                    "min_messages": args.min_messages,
                     "keep_text": args.keep_text or os.environ.get("JEV_KEEP_TEXT", ""),
                     "trace": load_trace(args.trace),
                 }
@@ -1478,11 +2081,36 @@ def main(argv: list[str] | None = None) -> int:
                 row["messages_out"] = stats.get("messagesAfter")
                 row["chars_in"] = stats.get("charsBefore")
                 row["chars_out"] = stats.get("charsAfter")
+                n_ok += 1
+                if isinstance(row["chars_in"], (int, float)):
+                    total_in += row["chars_in"]
+                if isinstance(row["chars_out"], (int, float)):
+                    total_out += row["chars_out"]
             except (Exception, SystemExit) as exc:
                 row["ok"] = False
                 row["error"] = str(exc)[:200]
-            sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
-        sys.stdout.write("batch: %d file(s)\n" % len(files))
+            if getattr(args, "json", False):
+                rows.append(row)
+            else:
+                sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
+        if getattr(args, "json", False):
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "files": rows,
+                        "count": len(files),
+                        "ok": n_ok,
+                        "chars_in": total_in,
+                        "chars_out": total_out,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "batch: %d file(s), %d ok, %d -> %d chars\n" % (len(files), n_ok, total_in, total_out)
+            )
         return 0
     if args.file is None:
         parser.error("file is required unless --prune-spill or --dir is given")

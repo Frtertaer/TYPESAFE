@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import copy
 import hashlib
 from collections import Counter
@@ -16,6 +17,12 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
+
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+import _watch
 
 ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 REVISION_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -1396,3 +1403,21 @@ class Ledger:
             }
             self._append(db, stage_id, "review", data)
             return _summarize(stage, self._events(db, stage, committed=False))
+
+
+def main(argv=None):
+    """Library module: --version/--help only, no standalone commands."""
+    argv = sys.argv[1:] if argv is None else argv
+    if _watch.maybe_version(argv):
+        return 0
+    parser = argparse.ArgumentParser(
+        description="progress_core is the ledger/evidence engine imported by "
+        "progress.py and policy_lint.py; it has no standalone commands."
+    )
+    parser.parse_args(argv)
+    parser.print_help()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

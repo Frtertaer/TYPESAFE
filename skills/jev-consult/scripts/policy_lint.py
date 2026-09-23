@@ -11,13 +11,16 @@ not inside a hook at runtime.
 Findings: {"rule", "severity", "path", "message", "fix"},
 severity in ("error", "warn", "info").
 
-    python policy_lint.py [path/to/policy.json] [--strict]
+    python policy_lint.py [path/to/policy.json] [--strict] [--fix] [--dry-run]
 Exit 0 when no errors (warnings are fine), 1 on any error,
-2 when the file cannot be parsed at all.
+2 when the file cannot be parsed at all. --fix rewrites the file in
+place, dropping unknown top-level / escalate_if keys (P011/P010);
+--dry-run reports what --fix would change without writing.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -25,6 +28,8 @@ from pathlib import Path
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
+
+import _watch  # noqa: E402
 
 DEFAULT_POLICY = Path(__file__).resolve().parent.parent / "policy.json"
 
@@ -61,10 +66,14 @@ ESCALATE_PROB_FIELDS = ("confidence_below", "noul_near", "choice_gap_below")
 POSITIVE_INT_FIELDS = ("version", "question_soft_max", "question_hard_max", "choice_option_hard_max")
 NONNEG_NUM_FIELDS = (
     "catalog_cache_seconds",
+    "dedupe_ttl_seconds",
     "hook_budget_seconds",
     "hook_jev_retries",
     "hook_jev_timeout_seconds",
+    "hook_max_prompt_chars",
+    "hook_payload_max_bytes",
     "sidecar_ttl_seconds",
+    "smoke_perf_budget_seconds",
 )
 NONEMPTY_STR_FIELDS = ("model", "endpoint", "default", "role", "coder_role")
 ESCALATE_BOOL_FIELDS = ("irreversible",)
@@ -72,13 +81,63 @@ KNOWN_ESCALATE_KEYS = ESCALATE_PROB_FIELDS + ESCALATE_BOOL_FIELDS
 KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "catalog_cache_seconds",
     "catalogs",
+    "dedupe_ttl_seconds",
     "hallucination",
     "hook_budget_seconds",
     "hook_jev_retries",
     "hook_jev_timeout_seconds",
+    "hook_max_prompt_chars",
+    "hook_payload_max_bytes",
     "progress",
+    "smoke_perf_budget_seconds",
     "stop_words",
 )
+
+
+RULES = {
+    "P000": "policy file is not a JSON object",
+    "P001": "missing required key; jev.py reads it and a fallback fires silently without it",
+    "P002": "field has the wrong type or is out of range (probability in [0,1], positive int, non-empty string, boolean)",
+    "P003": "a section that must be an object is not (escalate_if, templates)",
+    "P004": "threshold ordering violated (noul_no < noul_unsure < noul_yes, confidence_floor < strong_pick, soft_max <= hard_max, bands inside bands)",
+    "P005": "duplicate thresholds disagree (escalate_if.confidence_below vs confidence_floor, choice_gap_below vs tight_gap)",
+    "P006": "a kind is listed in both must_ask and never_ask",
+    "P007": "template is malformed (not an object, missing instructions, instructions not a non-empty string)",
+    "P008": "template instructions do not end with '?' or carry a bad type",
+    "P009": "choice criteria malformed (not an object, single non-hatch option, bad option ids, empty meanings, require_hatch with no hatch option, dead criteria on noul/score)",
+    "P010": "unknown escalate_if key; typo guard (auto-fixed by --fix)",
+    "P011": "unknown top-level key or non-https endpoint; typo guard (auto-fixed by --fix)",
+    "P012": "a must_ask kind has no template to send",
+    "P013": "template not listed in must_ask; the trigger layer never auto-asks it",
+    "P014": "require_hatch is off and a closed choice list (2+ options) has no none/other escape hatch",
+}
+
+
+def schema_rows() -> dict:
+    """Key -> {required, type} for every KNOWN_TOP_KEYS entry (sorted)."""
+    rows = {k: {"required": False, "type": "any"} for k in KNOWN_TOP_KEYS}
+    for key in REQUIRED_KEYS:
+        rows[key]["required"] = True
+    for key in PROB_FIELDS:
+        rows[key]["type"] = "prob [0,1]"
+    for key in POSITIVE_INT_FIELDS:
+        rows[key]["type"] = "positive int"
+    for key in NONNEG_NUM_FIELDS:
+        rows[key]["type"] = "nonneg number"
+    for key in NONEMPTY_STR_FIELDS:
+        rows[key]["type"] = "nonempty string"
+    rows["must_ask"]["type"] = "list[str]"
+    rows["never_ask"]["type"] = "list[str]"
+    rows["escalate_if"]["type"] = (
+        "object{confidence_below,noul_near,choice_gap_below,irreversible}"
+    )
+    rows["templates"]["type"] = "object{kind: {instructions}}"
+    rows["require_hatch"]["type"] = "boolean"
+    rows["catalogs"]["type"] = "list[{name,url}]"
+    rows["stop_words"]["type"] = "list[str]"
+    rows["hallucination"]["type"] = "object{claim}"
+    rows["progress"]["type"] = "object{points,review_points,max_*}"
+    return {k: rows[k] for k in sorted(rows)}
 
 
 def _num(value) -> bool:
@@ -318,6 +377,14 @@ def lint_policy(policy) -> list[dict]:
                             "require_hatch is on but no hatch option (%s)" % "/".join(sorted(hatch_ids)),
                             "a closed option list must let Jev say 'none of these'",
                         )
+                    elif not require_hatch and len(criteria) >= 2 and not (hatch_ids & set(criteria)):
+                        add(
+                            "P014",
+                            "warn",
+                            path + ".criteria",
+                            "require_hatch is off and this closed list has no hatch option",
+                            "if the opt-out is deliberate, fine; otherwise add 'none'/'other'",
+                        )
             elif qtype in ("noul", "score") and isinstance(criteria, dict) and criteria:
                 add(
                     "P009",
@@ -353,6 +420,22 @@ def lint_policy(policy) -> list[dict]:
     return findings
 
 
+def fix_policy(policy) -> list[str]:
+    """Drop unknown keys (P011 top-level, P010 escalate_if); returns rule ids applied."""
+    applied: list[str] = []
+    if not isinstance(policy, dict):
+        return applied
+    for key in [k for k in policy if k not in KNOWN_TOP_KEYS]:
+        del policy[key]
+        applied.append("P011")
+    escalate = policy.get("escalate_if")
+    if isinstance(escalate, dict):
+        for key in [k for k in escalate if k not in KNOWN_ESCALATE_KEYS]:
+            del escalate[key]
+            applied.append("P010")
+    return applied
+
+
 def format_finding(finding: dict) -> str:
     return "%s %s %s: %s" % (
         finding["severity"].upper(),
@@ -382,11 +465,36 @@ def diff_policy(a: dict, b: dict) -> list[str]:
     return lines
 
 
+def _atomic_write(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+USAGE = 'Usage: python policy_lint.py [POLICY.json ...] [flags]\nStatic checks for policy.json (required keys, ranges, ordering, template).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --diff            print a unified diff after --fix\n  --show            print the effective policy JSON and exit\n  --severity S      preset severity floor (error|warn|info; JEV_PLINT_SEVERITY)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the known policy.json key/type table (--json emits an object)\n  --quiet           print only errors/warnings count\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad policy dict; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if _watch.maybe_version(argv):
+        return 0
+    if "-h" in argv or "--help" in argv:
+        sys.stdout.write(USAGE)
+        return 0
     strict = "--strict" in argv
     show = "--show" in argv
     quiet = "--quiet" in argv
+    as_json = "--json" in argv
+    fail_fast = "--fail-fast" in argv
+    do_fix = "--fix" in argv
+    dry_run = "--dry-run" in argv
     severity = ""
     if "--severity" in argv:
         i = argv.index("--severity")
@@ -398,6 +506,72 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("bad --severity %r (want error|warn|info)\n" % severity)
             return 2
         del argv[i : i + 2]
+    else:
+        env_sev = os.environ.get("JEV_PLINT_SEVERITY", "").strip().lower()
+        if env_sev in ("error", "warn", "info"):
+            severity = env_sev
+    if "--explain" in argv:
+        i = argv.index("--explain")
+        if i + 1 >= len(argv):
+            sys.stderr.write("--explain needs a RULE value\n")
+            return 2
+        rule = argv[i + 1].strip().upper()
+        if rule not in RULES:
+            sys.stderr.write(
+                "unknown rule %r (rules: %s)\n" % (rule, ", ".join(sorted(RULES)))
+            )
+            return 2
+        sys.stdout.write("%s: %s\n" % (rule, RULES[rule]))
+        return 0
+    if "--self-test" in argv:
+        found = sorted({f["rule"] for f in lint_policy({"version": 1})})
+        ok = bool(found)
+        if as_json:
+            sys.stdout.write(
+                json.dumps({"self_test": "ok" if ok else "FAIL", "rules": found})
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "self-test: %s rules=%s\n" % ("ok" if ok else "FAIL", ",".join(found))
+            )
+        return 0 if ok else 1
+    if "--rules" in argv:
+        if "--json" in argv:
+            sys.stdout.write(
+                json.dumps(
+                    [{"rule": r, "description": RULES[r]} for r in sorted(RULES)],
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            for r in sorted(RULES):
+                sys.stdout.write("%s: %s\n" % (r, RULES[r]))
+        return 0
+    if "--schema" in argv:
+        rows = schema_rows()
+        if "--json" in argv:
+            sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+        else:
+            for key in rows:
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (
+                        key,
+                        rows[key]["type"],
+                        "required" if rows[key]["required"] else "optional",
+                    )
+                )
+        return 0
+    out_path = ""
+    if "--out" in argv:
+        i = argv.index("--out")
+        if i + 1 >= len(argv):
+            sys.stderr.write("--out needs a PATH value\n")
+            return 2
+        out_path = argv[i + 1].strip()
+        del argv[i : i + 2]
     diff_path = None
     if "--diff" in argv:
         i = argv.index("--diff")
@@ -406,13 +580,136 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         diff_path = argv[i + 1]
         del argv[i : i + 2]
-    argv = [a for a in argv if a not in {"--strict", "--show", "--quiet"}]
+    watch_seconds = 0.0
+    if "--watch" in argv:
+        i = argv.index("--watch")
+        if i + 1 >= len(argv):
+            sys.stderr.write("--watch needs a SECONDS value\n")
+            return 2
+        try:
+            watch_seconds = float(argv[i + 1])
+        except ValueError:
+            sys.stderr.write("bad --watch %r (seconds)\n" % argv[i + 1])
+            return 2
+        del argv[i : i + 2]
+    jq_value = ""
+    if "--jq" in argv:
+        i = argv.index("--jq")
+        if i + 1 >= len(argv):
+            sys.stderr.write("--jq needs a KEY value\n")
+            return 2
+        jq_value = argv[i + 1]
+        argv = argv[:i] + argv[i + 2 :]
+    max_ticks_arg = 0
+    if "--max-ticks" in argv:
+        i = argv.index("--max-ticks")
+        if i + 1 >= len(argv):
+            sys.stderr.write("--max-ticks needs an N value\n")
+            return 2
+        try:
+            max_ticks_arg = int(argv[i + 1])
+        except ValueError:
+            sys.stderr.write("bad --max-ticks %r (integer)\n" % argv[i + 1])
+            return 2
+        del argv[i : i + 2]
+    watch_max_arg = 0.0
+    if "--watch-max" in argv:
+        idx = argv.index("--watch-max")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--watch-max needs a SECONDS value\n")
+            return 2
+        try:
+            watch_max_arg = float(argv[idx + 1])
+        except ValueError:
+            sys.stderr.write("bad --watch-max %r (seconds)\n" % argv[idx + 1])
+            return 2
+        del argv[idx : idx + 2]
+    verdict_path = ""
+    if "--verdict" in argv:
+        idx = argv.index("--verdict")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--verdict needs a PATH value\n")
+            return 2
+        verdict_path = argv[idx + 1]
+        del argv[idx : idx + 2]
+    argv = [
+        a
+        for a in argv
+        if a
+        not in {"--strict", "--show", "--quiet", "--json", "--fail-fast", "--fix", "--dry-run"}
+    ]
+    if len(argv) > 1:
+        if do_fix:
+            sys.stderr.write("--fix does not support multiple paths\n")
+            return 2
+        results = []
+        for arg in argv:
+            fpath = Path(arg)
+            try:
+                fpol = json.loads(fpath.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (fpath, exc))
+                return 2
+            ffind = lint_policy(fpol)
+            ferr = sum(1 for f in ffind if f["severity"] == "error")
+            fwarn = sum(1 for f in ffind if f["severity"] == "warn")
+            finfo = sum(1 for f in ffind if f["severity"] == "info")
+            fshown = [
+                f
+                for f in ffind
+                if (not severity or f["severity"] == severity)
+                and (not quiet or f["severity"] == "error")
+            ]
+            results.append(
+                {
+                    "path": str(fpath),
+                    "findings": fshown,
+                    "errors": ferr,
+                    "warnings": fwarn,
+                    "infos": finfo,
+                }
+            )
+        if as_json:
+            sys.stdout.write(json.dumps(results, indent=2) + "\n")
+        else:
+            for res in results:
+                sys.stdout.write("%s:\n" % res["path"])
+                for finding in res["findings"]:
+                    sys.stdout.write(format_finding(finding) + "\n")
+                sys.stdout.write(
+                    "  %d error(s), %d warning(s), %d info\n"
+                    % (res["errors"], res["warnings"], res["infos"])
+                )
+        if out_path:
+            try:
+                _atomic_write(Path(out_path), 
+                    json.dumps(results, indent=2) + "\n", encoding="utf-8"
+                )
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                return 1
+        any_err = any(r["errors"] for r in results)
+        any_warn = any(r["warnings"] for r in results)
+        return 1 if any_err or (strict and any_warn) else 0
     path = Path(argv[0]) if argv else DEFAULT_POLICY
     try:
         policy = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (path, exc))
         return 2
+    if do_fix:
+        applied = fix_policy(policy)
+        if applied and not dry_run:
+            try:
+                _atomic_write(
+                    path, json.dumps(policy, indent=2, ensure_ascii=False) + "\n"
+                )
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (path, exc))
+                return 1
+        verb = "would fix" if dry_run else "fixed"
+        for rule in sorted(set(applied)):
+            sys.stderr.write("%s %s x%d\n" % (verb, rule, applied.count(rule)))
     if diff_path is not None:
         try:
             other = json.loads(Path(diff_path).read_text(encoding="utf-8"))
@@ -431,21 +728,125 @@ def main(argv: list[str] | None = None) -> int:
     if show:
         sys.stdout.write(json.dumps({"path": str(path), "policy": policy}, indent=2) + "\n")
         return 0
+    if watch_seconds > 0:
+        import time as _time
+
+        max_ticks = _watch.cap("JEV_PLINT_WATCH_MAX", max_ticks_arg)
+        ticks = 0
+        dead = _watch.deadline("JEV_PLINT_WATCH_SECS", watch_max_arg)
+        tick: dict = {}
+        verdict_ok = True
+
+        def _write_verdict(rc_now: int) -> bool:
+            return _watch.write_verdict(
+                verdict_path,
+                {
+                    "verdict": "fail" if rc_now else "pass",
+                    "ticks": ticks,
+                    "findings": tick.get("findings", 0),
+                    "errors": tick.get("errors", 0),
+                    "warnings": tick.get("warnings", 0),
+                    "infos": tick.get("infos", 0),
+                    "elapsed_s": round(_time.time() - watch_t0, 2),
+                },
+            )
+
+        watch_t0 = _time.time()
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
+            rows = lint_policy(policy)
+            tick = {
+                "ts": int(_time.time()),
+                "findings": len(rows),
+                "errors": sum(1 for r in rows if r["severity"] == "error"),
+                "warnings": sum(1 for r in rows if r["severity"] == "warn"),
+                "infos": sum(1 for r in rows if r["severity"] == "info"),
+            }
+            _watch.emit_or_jq(tick, jq_value, out_path, quiet=_watch.quiet("JEV_PLINT_WATCH_QUIET", quiet), bad=tick["errors"] or (strict and tick["findings"]))
+            ticks += 1
+            sys.stderr.write(
+                "watch tick=%d findings=%d errors=%d\n"
+                % (ticks, tick["findings"], tick["errors"])
+            )
+            if verdict_path and verdict_ok:
+                rc_now = 1 if (tick["errors"] or (strict and tick["findings"])) else 0
+                if not _write_verdict(rc_now):
+                    verdict_ok = False  # warn once, stop retrying
+            if fail_fast and (tick["errors"] or (strict and tick["findings"])):
+                break
+            _time.sleep(watch_seconds)
+            try:
+                policy = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
+        rc = 1 if (tick.get("errors", 0) or (strict and tick.get("findings", 0))) else 0
+        if verdict_path and verdict_ok and not _write_verdict(rc):
+            return 1
+        return rc
     findings = lint_policy(policy)
-    for finding in findings:
-        if severity and finding["severity"] != severity:
-            continue
-        if quiet and finding["severity"] != "error":
-            continue
-        sys.stdout.write(format_finding(finding) + "\n")
+    shown_rows = [
+        f
+        for f in findings
+        if (not severity or f["severity"] == severity)
+        and (not quiet or f["severity"] == "error")
+    ]
     errors = sum(1 for f in findings if f["severity"] == "error")
     warns = sum(1 for f in findings if f["severity"] == "warn")
     infos = sum(1 for f in findings if f["severity"] == "info")
-    if not quiet:
+    payload = {
+        "path": str(path),
+        "findings": shown_rows,
+        "errors": errors,
+        "warnings": warns,
+        "infos": infos,
+    }
+    if jq_value:
+        value, found = _watch.dig(payload, jq_value)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (jq_value, ", ".join(sorted(payload)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+        return 0
+    if out_path:
+        try:
+            _atomic_write(Path(out_path), 
+                json.dumps(payload, indent=2)
+                + "\n")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+        sys.stderr.write("wrote %d finding(s) to %s\n" % (len(shown_rows), out_path))
+    if as_json:
+        sys.stdout.write(
+            json.dumps(payload, indent=2)
+            + "\n"
+        )
+    else:
+        for finding in findings:
+            if severity and finding["severity"] != severity:
+                continue
+            if quiet and finding["severity"] != "error":
+                continue
+            sys.stdout.write(format_finding(finding) + "\n")
+    if not quiet and not as_json:
         sys.stdout.write("policy_lint: %d error(s), %d warning(s), %d info\n" % (errors, warns, infos))
-    if errors or (strict and warns):
-        return 1
-    return 0
+    rc = 1 if (errors or (strict and warns)) else 0
+    if verdict_path:
+        if not _watch.write_verdict(
+            verdict_path,
+            {
+                "verdict": "fail" if rc else "pass",
+                "ticks": 1,
+                "findings": len(findings),
+                "errors": errors,
+                "warnings": warns,
+                "infos": infos,
+            },
+        ):
+            return 1
+    return rc
 
 
 if __name__ == "__main__":

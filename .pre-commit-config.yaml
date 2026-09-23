@@ -1,0 +1,32 @@
+# Optional: `pre-commit install` wires these local checks.
+# All hooks are repo-local Python — no installs, no network, stdlib only.
+repos:
+  - repo: local
+    hooks:
+      - id: policy-lint
+        name: policy_lint policy.json
+        entry: python skills/jev-consult/scripts/policy_lint.py
+        args: [skills/jev-consult/policy.json]
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: trigger-lint
+        name: trigger_lint trigger-cases fixture
+        entry: python skills/jev-consult/scripts/trigger_lint.py
+        args: [tests/fixtures/jev-consult.trigger-cases.json]
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: question-lint-examples
+        name: question_lint shipped request examples (errors only)
+        entry: python skills/jev-consult/scripts/question_lint.py
+        args: [--severity, error]
+        files: ^skills/jev-consult/examples/.*\.request\.json$
+        language: system
+      - id: skill-lint
+        name: skill_lint SKILL.md
+        entry: python skills/jev-consult/scripts/skill_lint.py
+        args: [skills/jev-consult/SKILL.md]
+        language: system
+        pass_filenames: false
+        always_run: true

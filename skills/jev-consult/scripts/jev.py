@@ -10,6 +10,7 @@ import math
 import os
 import re
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -29,6 +30,11 @@ try:
     import policy_lint
 except ImportError:
     policy_lint = None
+
+try:
+    import _watch
+except ImportError:
+    _watch = None
 
 
 def policy_warnings(policy: dict[str, Any]) -> list[str]:
@@ -61,11 +67,19 @@ def skill_root() -> Path:
 
 
 def load_policy(path: str | None = None) -> dict[str, Any]:
-    policy_path = Path(path) if path else skill_root() / "policy.json"
-    with policy_path.open(encoding="utf-8") as handle:
-        data = json.load(handle)
+    env_path = os.environ.get("JEV_POLICY", "")
+    policy_path = (
+        Path(path) if path else Path(env_path) if env_path else skill_root() / "policy.json"
+    )
+    try:
+        with policy_path.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+    except OSError as exc:
+        raise SystemExit("policy.json unreadable: %s" % exc) from None
+    except json.JSONDecodeError as exc:
+        raise SystemExit("policy.json is not JSON: %s" % exc) from None
     if not isinstance(data, dict):
-        raise ValueError("policy.json must be an object")
+        raise SystemExit("policy.json must be an object")
     return data
 
 
@@ -270,6 +284,18 @@ def validate_response(parsed: dict, questions: dict) -> dict:
     return result
 
 
+def env_timeout() -> float | None:
+    """JEV_TIMEOUT seconds override; None when unset/invalid/non-positive."""
+    raw = os.environ.get("JEV_TIMEOUT", "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
 def post_systemone(
     state: Any,
     questions: dict[str, Any],
@@ -304,7 +330,7 @@ def post_systemone(
     while True:
         try:
             with opener.open(request, timeout=timeout) as response:
-                body = response.read().decode("utf-8")
+                body = response.read().decode("utf-8", errors="replace")
             break
         except urllib.error.HTTPError as err:
             if 300 <= err.code < 400:
@@ -320,7 +346,7 @@ def post_systemone(
     try:
         parsed = json.loads(body)
     except ValueError as exc:
-        raise SystemExit("Jev response invalid: not JSON (%s)" % exc) from None
+        raise SystemExit("Jev response was not JSON (%s)" % exc) from None
     return validate_response(parsed, questions)
 
 
@@ -385,6 +411,9 @@ def decide(
     noul_escalate = bool(
         policy_get(policy, ("noul", "escalate_uncertain_if_irreversible"), default=True)
     )
+    escalate_irrev = bool(
+        policy_get(policy, ("escalate_if", "irreversible"), default=True)
+    )
 
     for qid, answer in answers.items():
         if not isinstance(answer, dict):
@@ -426,7 +455,7 @@ def decide(
                     "%s: top-two gap %.3f; using max probability (%s)"
                     % (qid, gap, picked)
                 )
-                if irreversible:
+                if irreversible and escalate_irrev:
                     action = "escalate"
             else:
                 notes.append("%s: %s (max probability)" % (qid, picked))
@@ -449,7 +478,7 @@ def decide(
                     "%s: uncertain noul=%.3f (0.5 means equally yes/no, not medium)"
                     % (qid, probability)
                 )
-                if irreversible and noul_escalate:
+                if irreversible and noul_escalate and escalate_irrev:
                     action = "escalate"
         elif qtype == "score":
             try:
@@ -511,6 +540,44 @@ def emit(payload: dict[str, Any]) -> None:
     sys.stdout.write("\n")
 
 
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def write_out(path: str, payload: dict[str, Any]) -> bool:
+    """Write the payload JSON to PATH; warn + False on error."""
+    try:
+        _atomic_write(
+            Path(path),
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        )
+    except OSError as exc:
+        sys.stderr.write("cannot write %s: %s\n" % (path, exc))
+        return False
+    sys.stderr.write("wrote %s\n" % path)
+    return True
+
+
+def jq_lookup(obj, path: str):
+    """Dotted-path lookup; (value, True) or (None, False) when any part misses."""
+    cur = obj
+    for part in path.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            return None, False
+    return cur, True
+
+
 def cmd_ask(args: argparse.Namespace) -> int:
     policy = load_policy(args.policy)
     request = read_json_arg(args.file)
@@ -542,7 +609,14 @@ def cmd_ask(args: argparse.Namespace) -> int:
             }
         )
         return 0
-    result = post_systemone(state, questions, policy, model=request.get("model"))
+    result = post_systemone(
+        state,
+        questions,
+        policy,
+        model=request.get("model"),
+        timeout=args.timeout or env_timeout() or 60,
+        retries=max(0, args.retries),
+    )
     answers = result.get("answers") or {}
     if not isinstance(answers, dict):
         raise SystemExit("Jev answers must be an object")
@@ -551,15 +625,44 @@ def cmd_ask(args: argparse.Namespace) -> int:
         policy,
         irreversible=bool(request.get("irreversible", False)),
     )
-    emit(
-        {
-            "model": result.get("model"),
-            "answers": answers,
-            "decision": decision,
-            "usage": result.get("usage"),
-            "warnings": warnings,
-        }
-    )
+    payload = {
+        "model": result.get("model"),
+        "answers": answers,
+        "decision": decision,
+        "usage": result.get("usage"),
+        "warnings": warnings,
+    }
+    if getattr(args, "out", "") and not write_out(args.out, payload):
+        return 1
+    jq_key = getattr(args, "jq", "") or ""
+    if jq_key:
+        value, found = jq_lookup(payload, jq_key)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (jq_key, ", ".join(sorted(payload)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+    else:
+        emit(payload)
+    verdict_path = getattr(args, "verdict", "") or ""
+    if verdict_path and _watch is not None:
+        picks = {}
+        for qid, ans in answers.items():
+            if isinstance(ans, dict) and ans.get("choice") is not None:
+                picks[qid] = ans.get("choice")
+        _watch.write_verdict(
+            verdict_path,
+            {
+                "verdict": "proceed"
+                if decision["action"] == "proceed"
+                else "escalate",
+                "action": decision["action"],
+                "picks": picks,
+                "warnings": len(warnings),
+            },
+        )
     if decision["action"] != "proceed":
         return ASK_ESCALATE_EXIT
     return 0
@@ -575,7 +678,32 @@ def cmd_decide(args: argparse.Namespace) -> int:
         raise SystemExit("answers must be an object")
     irreversible = bool(payload.get("irreversible", args.irreversible))
     decision = decide(answers, policy, irreversible=irreversible)
-    emit({"decision": decision, "warnings": policy_warnings(policy)})
+    payload = {"decision": decision, "warnings": policy_warnings(policy)}
+    if getattr(args, "out", "") and not write_out(args.out, payload):
+        return 1
+    jq_key = getattr(args, "jq", "") or ""
+    if jq_key:
+        value, found = jq_lookup(payload, jq_key)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (jq_key, ", ".join(sorted(payload)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+    else:
+        emit(payload)
+    verdict_path = getattr(args, "verdict", "") or ""
+    if verdict_path and _watch is not None:
+        _watch.write_verdict(
+            verdict_path,
+            {
+                "verdict": "proceed"
+                if decision["action"] == "proceed"
+                else "escalate",
+                "action": decision["action"],
+            },
+        )
     if decision["action"] != "proceed":
         return ASK_ESCALATE_EXIT
     return 0
@@ -595,7 +723,23 @@ def cmd_lint(args: argparse.Namespace) -> int:
     errors = sum(1 for f in findings if f["severity"] == "error")
     warns = sum(1 for f in findings if f["severity"] == "warn")
     infos = sum(1 for f in findings if f["severity"] == "info")
-    if getattr(args, "json", False):
+    jq_key = getattr(args, "jq", "") or ""
+    if jq_key:
+        payload = {
+            "findings": findings,
+            "errors": errors,
+            "warnings": warns,
+            "infos": infos,
+        }
+        value, found = jq_lookup(payload, jq_key)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (jq_key, ", ".join(sorted(payload)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+    elif getattr(args, "json", False):
         emit(
             {
                 "findings": findings,
@@ -615,8 +759,8 @@ def cmd_lint(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_ping(args: argparse.Namespace) -> int:
-    policy = load_policy(args.policy)
+def _ping_once(policy: dict[str, Any], args: argparse.Namespace) -> dict:
+    started = time.time()
     result = post_systemone(
         state="ping from jev-consult CLI; connectivity check, not a coding decision",
         questions={
@@ -630,10 +774,105 @@ def cmd_ping(args: argparse.Namespace) -> int:
             }
         },
         policy=policy,
+        timeout=args.timeout or env_timeout() or 60,
+        retries=max(0, args.retries),
     )
     answer = (result.get("answers") or {}).get("ok") or {}
+    return {
+        "ok": True,
+        "model": result.get("model"),
+        "noul": answer.get("noul"),
+        "ms": int((time.time() - started) * 1000),
+    }
+
+
+def cmd_ping(args: argparse.Namespace) -> int:
+    policy = load_policy(args.policy)
+    watch = getattr(args, "watch", 0.0) or 0.0
+    if watch > 0 and _watch is not None:
+        max_ticks = _watch.cap("JEV_PING_WATCH_MAX", getattr(args, "max_ticks", 0))
+        dead = _watch.deadline("JEV_PING_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        quiet = _watch.quiet("JEV_PING_WATCH_QUIET", getattr(args, "quiet", False))
+        verdict_path = getattr(args, "verdict", "") or ""
+        ticks = 0
+        last_ok = True
+        verdict_ok = True
+        watch_t0 = time.time()
+
+        def _write_verdict() -> bool:
+            return _watch.write_verdict(
+                verdict_path,
+                {
+                    "verdict": "up" if last_ok else "down",
+                    "ticks": ticks,
+                    "ok": last_ok,
+                    "elapsed_s": round(time.time() - watch_t0, 2),
+                },
+            )
+
+        while (max_ticks <= 0 or ticks < max_ticks) and (
+            not dead or time.time() < dead
+        ):
+            now = time.time()
+            try:
+                slim_tick = _ping_once(policy, args)
+                tick = {
+                    "ts": int(now),
+                    "ok": True,
+                    "model": slim_tick.get("model"),
+                    "noul": slim_tick.get("noul"),
+                    "ms": slim_tick.get("ms"),
+                    "elapsed_s": round(now - watch_t0, 2),
+                }
+            except SystemExit as err:
+                tick = {
+                    "ts": int(now),
+                    "ok": False,
+                    "error": str(err.code)[:160],
+                    "elapsed_s": round(now - watch_t0, 2),
+                }
+            last_ok = bool(tick.get("ok"))
+            _watch.emit_or_jq(
+                tick,
+                getattr(args, "jq", ""),
+                getattr(args, "out", ""),
+                quiet=quiet,
+                bad=not last_ok,
+            )
+            ticks += 1
+            sys.stderr.write("watch tick=%d ok=%s\n" % (ticks, last_ok))
+            if verdict_path and verdict_ok and not _write_verdict():
+                verdict_ok = False
+            if getattr(args, "fail_fast", False) and not last_ok:
+                break
+            time.sleep(watch)
+        if verdict_path and verdict_ok and not _write_verdict():
+            return 1
+        if max_ticks and not last_ok:
+            return 1
+        return 0
+    slim = _ping_once(policy, args)
+    verdict_path = getattr(args, "verdict", "") or ""
+    if verdict_path and _watch is not None:
+        _watch.write_verdict(verdict_path, slim)
+    if getattr(args, "out", "") and not write_out(args.out, slim):
+        return 1
+    jq_key = getattr(args, "jq", "") or ""
+    if jq_key:
+        value, found = jq_lookup(slim, jq_key)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (jq_key, ", ".join(sorted(slim)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+        return 0
+    if getattr(args, "json", False):
+        sys.stdout.write(json.dumps(slim) + "\n")
+        return 0
     sys.stdout.write(
-        "ok model=%s noul=%s\n" % (result.get("model"), answer.get("noul"))
+        "ok model=%s noul=%s\n" % (slim.get("model"), slim.get("noul"))
     )
     return 0
 
@@ -720,6 +959,56 @@ def scaffold_request(
     return {"state": state, "questions": questions}
 
 
+def cmd_self_test(args: argparse.Namespace) -> int:
+    """Offline sanity: scaffold a request, round-trip it through disk, lint it."""
+    checks: dict[str, bool] = {}
+    try:
+        policy = load_policy(args.policy)
+        checks["policy_templates"] = bool(policy.get("templates"))
+        payload = scaffold_request(
+            policy,
+            ["approach"],
+            {"task": "self-test", "plan": "self-test"},
+            {"approach": {"selftest": "self-test option"}},
+        )
+        questions = payload.get("questions") or {}
+        checks["scaffold"] = "approach" in questions
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "req.json"
+            _atomic_write(req, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+            back = read_json_arg(str(req))
+        checks["roundtrip"] = back == payload
+        if question_lint is None:
+            checks["lint_clean"] = False
+        else:
+            findings = question_lint.lint_request(
+                back,
+                max_options=int(
+                    policy_get(policy, "choice_option_hard_max", default=255)
+                ),
+            )
+            checks["lint_clean"] = not any(
+                f.get("severity") == "error" for f in findings
+            )
+    except Exception:
+        checks = {"raised": False}
+    ok = bool(checks) and all(checks.values())
+    if args.json:
+        emit({"self_test": "ok" if ok else "FAIL", "checks": checks})
+    else:
+        sys.stdout.write(
+            "self-test: %s %s\n"
+            % (
+                "ok" if ok else "FAIL",
+                " ".join(
+                    "%s=%s" % (k, "ok" if v else "FAIL")
+                    for k, v in sorted(checks.items())
+                ),
+            )
+        )
+    return 0 if ok else 1
+
+
 def cmd_scaffold(args: argparse.Namespace) -> int:
     policy = load_policy(args.policy)
     if getattr(args, "list", False):
@@ -747,10 +1036,19 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
     try:
         if out.parent != Path(""):
             out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        _atomic_write(out, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     except OSError as exc:
         sys.stderr.write("scaffold: cannot write %s: %s\n" % (out, exc))
         return ASK_ESCALATE_EXIT
+    if getattr(args, "lint", False) and question_lint is not None:
+        findings = question_lint.lint_request(payload)
+        for finding in findings:
+            sys.stderr.write(
+                "lint %s %s: %s\n"
+                % (finding["rule"], finding["qid"], finding["message"])
+            )
+        if any(f["severity"] == "error" for f in findings):
+            return ASK_ESCALATE_EXIT
     return 0
 
 
@@ -779,13 +1077,61 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Validate and print the resolved request; no API call, no key needed.",
     )
+    ask.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help="HTTP timeout seconds (default JEV_TIMEOUT env or 60)",
+    )
+    ask.add_argument(
+        "--retries",
+        type=int,
+        default=1,
+        help="extra attempts on HTTP 429/5xx (default 1)",
+    )
+    ask.add_argument(
+        "--verdict",
+        metavar="PATH",
+        default="",
+        help="Write a slim {verdict: proceed|escalate, action, picks, warnings} JSON to PATH after the ask (atomic via .tmp+rename).",
+    )
+    ask.add_argument(
+        "--jq",
+        metavar="KEY",
+        default="",
+        help="Print just one dotted-path field of the response (e.g. answers.approach.choice); unknown key exits 2.",
+    )
+    ask.add_argument(
+        "--out",
+        metavar="PATH",
+        default="",
+        help="Also write the full response JSON to PATH.",
+    )
     ask.set_defaults(func=cmd_ask)
     decide_cmd = sub.add_parser("decide", help="Apply policy to an answers object")
+    decide_cmd.add_argument(
+        "--verdict",
+        metavar="PATH",
+        default="",
+        help="Write a slim {verdict: proceed|escalate, action} JSON to PATH (atomic via .tmp+rename).",
+    )
     decide_cmd.add_argument("file", help="JSON file or - for stdin")
     decide_cmd.add_argument(
         "--irreversible",
         action="store_true",
         help="Treat the pending action as hard to undo",
+    )
+    decide_cmd.add_argument(
+        "--jq",
+        metavar="KEY",
+        default="",
+        help="Print just one dotted-path field (e.g. decision.action); unknown key exits 2.",
+    )
+    decide_cmd.add_argument(
+        "--out",
+        metavar="PATH",
+        default="",
+        help="Also write the decision payload JSON to PATH.",
     )
     decide_cmd.set_defaults(func=cmd_decide)
     lint_cmd = sub.add_parser(
@@ -798,8 +1144,80 @@ def build_parser() -> argparse.ArgumentParser:
     lint_cmd.add_argument(
         "--json", action="store_true", help="Machine-readable findings"
     )
+    lint_cmd.add_argument(
+        "--jq",
+        metavar="KEY",
+        default="",
+        help="Print just one dotted-path field of the lint payload (e.g. errors); unknown key exits 2.",
+    )
     lint_cmd.set_defaults(func=cmd_lint)
     ping = sub.add_parser("ping", help="Live connectivity check; prints model and noul only")
+    ping.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help="HTTP timeout seconds (default JEV_TIMEOUT env or 60)",
+    )
+    ping.add_argument(
+        "--retries",
+        type=int,
+        default=1,
+        help="extra attempts on HTTP 429/5xx (default 1)",
+    )
+    ping.add_argument(
+        "--json",
+        action="store_true",
+        help="Print {ok, model, noul, ms} as a JSON object",
+    )
+    ping.add_argument(
+        "--verdict",
+        metavar="PATH",
+        default="",
+        help="Write a slim {ok, model, noul, ms} JSON to PATH (atomic via .tmp+rename).",
+    )
+    ping.add_argument(
+        "--jq",
+        metavar="KEY",
+        default="",
+        help="Print just one field of the slim payload (ok|model|noul|ms); unknown key exits 2.",
+    )
+    ping.add_argument(
+        "--out",
+        metavar="PATH",
+        default="",
+        help="Also write the slim {ok, model, noul, ms} JSON to PATH.",
+    )
+    ping.add_argument(
+        "--watch",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Re-ping every S seconds, emitting a {ts,ok,model,noul,ms,elapsed_s} tick per pass (failed pings emit {ts,ok:false,error,elapsed_s})",
+    )
+    ping.add_argument(
+        "--max-ticks",
+        metavar="N",
+        type=int,
+        default=0,
+        help="With --watch: stop after N ticks (overrides JEV_PING_WATCH_MAX)",
+    )
+    ping.add_argument(
+        "--watch-max",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="With --watch: stop after S elapsed seconds (JEV_PING_WATCH_SECS also caps)",
+    )
+    ping.add_argument(
+        "--quiet",
+        action="store_true",
+        help="With --watch: print only failing ticks to stdout (--out still logs all)",
+    )
+    ping.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="With --watch: stop after the first failed ping tick",
+    )
     ping.set_defaults(func=cmd_ping)
     scaffold = sub.add_parser(
         "scaffold",
@@ -818,7 +1236,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="ID=key:label extra choice option (repeatable)",
     )
+    scaffold.add_argument(
+        "--lint",
+        action="store_true",
+        help="Run question_lint on the scaffolded request; findings to stderr, rc 1 on errors",
+    )
     scaffold.set_defaults(func=cmd_scaffold)
+    selftest = sub.add_parser(
+        "self-test",
+        help="Offline scaffold+lint round-trip in a temp dir; exit 1 on failure",
+    )
+    selftest.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the self-test payload as JSON.",
+    )
+    selftest.set_defaults(func=cmd_self_test)
     return parser
 
 

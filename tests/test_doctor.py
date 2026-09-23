@@ -85,6 +85,54 @@ class DoctorTests(unittest.TestCase):
         self.assertFalse(out["ok"])
         self.assertFalse(check_of(out, "api_key")["ok"])
 
+    def test_self_test_finds_failures_on_empty_home(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(["--self-test"], cwd=tmp)
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", text)
+        self.assertIn("failed=", text)
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, failed, _ = run_main(["--self-test", "--jq", "failed"], cwd=tmp)
+        self.assertEqual(rc, 0)
+        self.assertIsInstance(failed, int)
+        self.assertGreater(failed, 0)
+
+    def test_jq_prints_one_field_of_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run_main(
+                ["--home", tmp, "--hermes-home", str(Path(tmp) / "h"), "--jq", "ok"],
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 0)
+            self.assertIs(out, False)
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with patch.object(sys, "stderr", buf):
+                rc, out, _ = run_main(
+                    ["--home", tmp, "--hermes-home", str(Path(tmp) / "h"), "--jq", "nope"],
+                    cwd=tmp,
+                )
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --jq key", buf.getvalue())
+
+    def test_report_writes_markdown_check_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "doctor.md"
+            rc, _, _ = run_main(
+                [
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--report", str(report),
+                ],
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 1)
+            text = report.read_text(encoding="utf-8")
+            self.assertIn("# doctor report", text)
+            self.assertIn("verdict: fail", text)
+            self.assertIn("| api_key |", text)
+            self.assertIn("| NO |", text)
+
     def test_full_install_ok(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"
@@ -188,6 +236,34 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertTrue(check_of(out, "skill", "codex")["ok"])
 
+    def test_hooks_json_validity_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            hermes = Path(tmp) / "hermes"
+            codex_dir = home / ".codex"
+            codex_dir.mkdir(parents=True)
+            (codex_dir / "hooks.json").write_text("{not json", encoding="utf-8")
+            rc, out, _ = run_main(
+                ["--home", str(home), "--hermes-home", str(hermes), "--agents", "codex"],
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 1)
+            c = check_of(out, "hooks_json", "codex")
+            self.assertFalse(c["ok"])
+            self.assertIn("invalid JSON", c["detail"])
+            (codex_dir / "hooks.json").write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+            rc, out, _ = run_main(
+                ["--home", str(home), "--hermes-home", str(hermes), "--agents", "codex"],
+                cwd=tmp,
+            )
+            self.assertEqual(check_of(out, "hooks_json", "codex")["detail"], "valid")
+            (codex_dir / "hooks.json").unlink()
+            rc, out, _ = run_main(
+                ["--home", str(home), "--hermes-home", str(hermes), "--agents", "codex"],
+                cwd=tmp,
+            )
+            self.assertTrue(check_of(out, "hooks_json", "codex")["ok"])
+
     def test_grok_missing_tools_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
@@ -211,12 +287,123 @@ class DoctorTests(unittest.TestCase):
         rc, out, _ = run_main(["--agents", "hermes", "--home", "x", "--hermes-home", "y"])
         self.assertTrue(check_of(out, "policy")["ok"])
 
+    def test_only_filters_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run_main(
+                [
+                    "--home",
+                    tmp,
+                    "--hermes-home",
+                    str(Path(tmp) / "h"),
+                    "--only",
+                    "api_key",
+                ],
+                cwd=tmp,
+            )
+        self.assertEqual(rc, 1)
+        self.assertEqual([c["check"] for c in out["checks"]], ["api_key"])
+
+    def test_only_unknown_name_empty_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run_main(
+                [
+                    "--home",
+                    tmp,
+                    "--hermes-home",
+                    str(Path(tmp) / "h"),
+                    "--only",
+                    "nonexistent_check",
+                ],
+                cwd=tmp,
+            )
+        self.assertEqual(rc, 0)
+        self.assertEqual(out["checks"], [])
+
     def test_unknown_agent_rc2(self) -> None:
         buf = io.StringIO()
         with patch.object(sys, "stderr", buf), patch.object(sys, "stdout", io.StringIO()):
             rc = DOC.main(["--agents", "cursor"])
         self.assertEqual(rc, 2)
         self.assertIn("cursor", buf.getvalue())
+
+    def test_out_writes_result_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "doctor.json"
+            err = io.StringIO()
+            with patch.object(sys, "stderr", err):
+                rc, out, _ = run_main(
+                    [
+                        "--agents",
+                        "hermes",
+                        "--home",
+                        tmp,
+                        "--hermes-home",
+                        str(Path(tmp) / "h"),
+                        "--out",
+                        str(out_path),
+                    ],
+                )
+            self.assertIn(rc, (0, 1))
+            self.assertIn("wrote", err.getvalue())
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertIn("checks", payload)
+            self.assertIsNotNone(check_of(payload, "api_key"))
+
+    def test_verdict_writes_slim_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            rc, out, _ = run_main(
+                [
+                    "--agents", "hermes",
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--verdict", str(verdict),
+                ],
+            )
+            self.assertIn(rc, (0, 1))
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertIn(payload["verdict"], ("pass", "fail"))
+            self.assertEqual(payload["verdict"], "pass" if rc == 0 else "fail")
+            self.assertIn("hermes", payload["agents"])
+            self.assertGreater(payload["checks"], 0)
+            self.assertEqual(payload["failed"], 0 if payload["verdict"] == "pass" else payload["failed"])
+            self.assertGreaterEqual(payload["failed"], 0)
+
+    def test_verdict_watch_writes_final_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            rc, out, _ = run_main(
+                [
+                    "--agents", "hermes",
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--watch", "0.01",
+                    "--verdict", str(verdict),
+                ],
+                env_extra={"JEV_DOCTOR_WATCH_MAX": "1"},
+            )
+            self.assertIn(rc, (0, 1))
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertIn(payload["verdict"], ("pass", "fail"))
+            self.assertIn("agents", payload)
+            self.assertEqual(payload["ticks"], 1)
+
+    def test_verdict_watch_ticks_counts_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            rc, out, _ = run_main(
+                [
+                    "--agents", "hermes",
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--watch", "0.01",
+                    "--verdict", str(verdict),
+                ],
+                env_extra={"JEV_DOCTOR_WATCH_MAX": "2"},
+            )
+            self.assertIn(rc, (0, 1))
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["ticks"], 2)
 
     def test_api_key_from_env_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -282,6 +469,299 @@ class DoctorTests(unittest.TestCase):
             if c["ok"]:
                 self.assertNotIn("hint", c)
 
+    def _full_home(self, tmp: str):
+        home = Path(tmp) / "home"
+        hermes = Path(tmp) / "hermes"
+        make_hermes(hermes)
+        make_skill(home / ".claude" / "skills")
+        make_claude_hooks(home)
+        make_skill(home / ".grok" / "skills")
+        hooks_dir = home / ".grok" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        for name, event, mark in (
+            ("jev-compact.json", "PostToolUse", "compact_hook.py"),
+            ("jev-tools.json", "UserPromptSubmit", "inventory_hook.py"),
+        ):
+            (hooks_dir / name).write_text(
+                json.dumps({"hooks": {event: [{"hooks": [{"command": "x " + mark}]}]}}),
+                encoding="utf-8",
+            )
+        make_skill(home / ".codex" / "skills")
+        (home / ".codex").mkdir(parents=True, exist_ok=True)
+        (home / ".codex" / "hooks.json").write_text(
+            json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [{"command": "x inventory_hook.py"}]}]}}),
+            encoding="utf-8",
+        )
+        (home / ".env").write_text("TYPESAFE_API_KEY=x\n", encoding="utf-8")
+        return home, hermes
+
+    def test_watch_emits_ticks_rc_reflects_last(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(
+                [
+                    "--agents", "claude-code",
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--watch", "0.01",
+                ],
+                env_extra={"JEV_DOCTOR_WATCH_MAX": "2"},
+                cwd=tmp,
+            )
+            ticks = [
+                json.loads(l) for l in text.splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(rc, 1)
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(t["failed"] > 0 and not t["ok"] for t in ticks))
+
+    def test_watch_tick_reports_ok_changed(self) -> None:
+        seq = [
+            [{"agent": "claude-code", "check": "c", "ok": False, "detail": "d"}],
+            [{"agent": "claude-code", "check": "c", "ok": True, "detail": "d"}],
+            [{"agent": "claude-code", "check": "c", "ok": True, "detail": "d"}],
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {"TYPESAFE_API_KEY": "", "JEV_DOCTOR_WATCH_MAX": "3"},
+            ):
+                with patch.object(DOC, "check_claude", side_effect=seq), patch.object(
+                    DOC, "check_common", side_effect=lambda h, hh: []
+                ):
+                    old = os.getcwd()
+                    os.chdir(tmp)
+                    try:
+                        with patch.object(sys, "stdout", buf):
+                            rc = DOC.main(["--agents", "claude-code", "--watch", "0.01"])
+                    finally:
+                        os.chdir(old)
+            ticks = [
+                json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(ticks), 3)
+            self.assertEqual(
+                [t["ok_changed"] for t in ticks], [False, True, False]
+            )
+
+    def test_watch_tick_reports_elapsed_s(self) -> None:
+        ok = [{"agent": "claude-code", "check": "c", "ok": True, "detail": "d"}]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {"TYPESAFE_API_KEY": "", "JEV_DOCTOR_WATCH_MAX": "2"},
+            ):
+                with patch.object(DOC, "check_claude", side_effect=lambda *a: ok), patch.object(
+                    DOC, "check_common", side_effect=lambda h, hh: []
+                ):
+                    old = os.getcwd()
+                    os.chdir(tmp)
+                    try:
+                        with patch.object(sys, "stdout", buf):
+                            rc = DOC.main(["--agents", "claude-code", "--watch", "0.01"])
+                    finally:
+                        os.chdir(old)
+            ticks = [
+                json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(isinstance(t["elapsed_s"], float) for t in ticks))
+            self.assertGreaterEqual(ticks[1]["elapsed_s"], ticks[0]["elapsed_s"])
+
+    def test_watch_writes_stderr_tick_summary(self) -> None:
+        ok = [{"agent": "claude-code", "check": "c", "ok": True, "detail": "d"}]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            err = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {"TYPESAFE_API_KEY": "", "JEV_DOCTOR_WATCH_MAX": "2"},
+            ):
+                with patch.object(DOC, "check_claude", side_effect=lambda *a: ok), patch.object(
+                    DOC, "check_common", side_effect=lambda h, hh: []
+                ):
+                    old = os.getcwd()
+                    os.chdir(tmp)
+                    try:
+                        with patch.object(sys, "stdout", io.StringIO()):
+                            with patch.object(sys, "stderr", err):
+                                rc = DOC.main(["--agents", "claude-code", "--watch", "0.01"])
+                    finally:
+                        os.chdir(old)
+            self.assertEqual(rc, 0)
+            lines = [
+                l for l in err.getvalue().splitlines() if l.startswith("watch tick=")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertIn("ok=True failed=0", lines[0])
+
+    def test_watch_fail_fast_breaks_on_first_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(
+                [
+                    "--agents", "claude-code",
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--watch", "0.01", "--fail-fast",
+                ],
+                env_extra={"JEV_DOCTOR_WATCH_MAX": "9"},
+                cwd=tmp,
+            )
+            ticks = [
+                json.loads(l) for l in text.splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(rc, 1)
+            self.assertEqual(len(ticks), 1)
+            self.assertFalse(ticks[0]["ok"])
+
+    def test_watch_rc_0_when_all_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hermes = self._full_home(tmp)
+            rc, _, text = run_main(
+                [
+                    "--home", str(home),
+                    "--hermes-home", str(hermes),
+                    "--watch", "0.01",
+                ],
+                env_extra={"JEV_DOCTOR_WATCH_MAX": "1"},
+                cwd=tmp,
+            )
+            ticks = [
+                json.loads(l) for l in text.splitlines() if l.startswith("{")
+            ]
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(ticks), 1)
+            self.assertTrue(ticks[0]["ok"])
+
+    def test_watch_appends_ticks_to_out(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home, hermes = self._full_home(tmp)
+            out = Path(tmp) / "ticks.jsonl"
+            rc, _, _ = run_main(
+                [
+                    "--home", str(home),
+                    "--hermes-home", str(hermes),
+                    "--watch", "0.01",
+                    "--out", str(out),
+                ],
+                env_extra={"JEV_DOCTOR_WATCH_MAX": "2"},
+                cwd=tmp,
+            )
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("checks" in t and "ok" in t for t in lines))
+
+
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(
+                [
+                    "--agents", "claude-code",
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--watch", "0.01",
+                    "--jq", "failed",
+                ],
+                env_extra={"JEV_DOCTOR_WATCH_MAX": "2"},
+                cwd=tmp,
+            )
+            lines = text.splitlines()
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all(l.lstrip("-").isdigit() for l in lines))
+            self.assertTrue(all(int(l) > 0 for l in lines))
+
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            start = _time.time()
+            rc, _, text = run_main(
+                [
+                    "--agents", "claude-code",
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--watch", "0.02",
+                ],
+                env_extra={
+                    "JEV_DOCTOR_WATCH_MAX": "0",
+                    "JEV_DOCTOR_WATCH_SECS": "0.05",
+                },
+                cwd=tmp,
+            )
+            self.assertLess(_time.time() - start, 2.0)
+            ticks = [
+                l for l in text.splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
+class EnvDumpTests(unittest.TestCase):
+    def test_env_lists_prefixed_vars_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, data, text = run_main(
+                ["--env"],
+                env_extra={"JEV_FOO_XYZ": "bar", "PATH_LIKE": "nope"},
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 0)
+            self.assertIn("JEV_FOO_XYZ", data["env"])
+            self.assertEqual(data["env"]["JEV_FOO_XYZ"], "bar")
+            self.assertNotIn("PATH_LIKE", data["env"])
+            self.assertEqual(data["count"], len(data["env"]))
+
+    def test_env_masks_secret_names_and_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, data, _ = run_main(
+                ["--env"],
+                env_extra={
+                    "TYPESAFE_API_KEY": "apikey_" + "a" * 30 + "_" + "b" * 30,
+                    "JEV_INNOCENT": "apikey_" + "a" * 30 + "_" + "b" * 30,
+                },
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 0)
+            self.assertEqual(data["env"]["TYPESAFE_API_KEY"], "<set>")
+            self.assertEqual(data["env"]["JEV_INNOCENT"], "<set>")
+            self.assertNotIn("apikey_", json.dumps(data))
+
+    def test_env_empty_secret_name_not_masked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, data, _ = run_main(
+                ["--env"],
+                env_extra={"TYPESAFE_API_KEY": ""},
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 0)
+            self.assertEqual(data["env"]["TYPESAFE_API_KEY"], "")
+
+    def test_env_jq_digs_into_env_map(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(
+                ["--env", "--jq", "env.JEV_FOO_Q"],
+                env_extra={"JEV_FOO_Q": "qq"},
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(text), "qq")
+
+    def test_env_jq_unknown_key_rc2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, _ = run_main(
+                ["--env", "--jq", "nope.deep"], cwd=tmp
+            )
+            self.assertEqual(rc, 2)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

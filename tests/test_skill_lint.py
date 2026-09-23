@@ -6,11 +6,13 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "skills" / "jev-consult" / "scripts" / "skill_lint.py"
@@ -63,6 +65,49 @@ class LintSkillTests(unittest.TestCase):
                 any(f["rule"] == "S004" and f["severity"] == "warn" for f in findings)
             )
 
+    def test_cited_script_missing_warn_s009(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(
+                tmp,
+                "x",
+                GOOD.format(name="x") + "\nRun `scripts/missing.py` first.\n",
+            )
+            (path.parent / "scripts").mkdir()
+            (path.parent / "scripts" / "real.py").write_text("# ok\n")
+            findings = skill_lint.lint_skill(path)
+            rules = {f["rule"] for f in findings}
+            self.assertIn("S009", rules)
+            self.assertTrue(
+                any(
+                    f["rule"] == "S009" and "missing.py" in f["message"]
+                    for f in findings
+                )
+            )
+
+    def test_cited_script_present_no_s009(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(
+                tmp,
+                "x",
+                GOOD.format(name="x") + "\nRun `scripts/real.py` first.\n",
+            )
+            scripts = path.parent / "scripts"
+            scripts.mkdir()
+            (scripts / "real.py").write_text("# ok\n")
+            findings = skill_lint.lint_skill(path)
+            self.assertNotIn("S009", {f["rule"] for f in findings})
+
+    def test_no_scripts_dir_no_s009(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(
+                tmp,
+                "x",
+                GOOD.format(name="x") + "\nRun `scripts/missing.py` first.\n",
+            )
+            # no sibling scripts/ dir — nothing to check citations against
+            findings = skill_lint.lint_skill(path)
+            self.assertNotIn("S009", {f["rule"] for f in findings})
+
     def test_quiet_suppresses_warn_lines(self):
         with tempfile.TemporaryDirectory() as tmp:
             warn_path = write_skill(tmp, "x", "---\nname: x\n---\n")
@@ -71,6 +116,36 @@ class LintSkillTests(unittest.TestCase):
                 rc = skill_lint.main([str(warn_path), "--quiet"])
             self.assertEqual(rc, 0)
             self.assertEqual(buf.getvalue(), "")
+
+    def test_out_writes_findings_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            warn_path = write_skill(tmp, "x", "---\nname: x\n---\n")
+            out_path = Path(tmp) / "findings.json"
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = skill_lint.main([str(warn_path), "--out", str(out_path)])
+            self.assertEqual(rc, 0)
+            self.assertIn("wrote", err.getvalue())
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertTrue(any(f["rule"] == "S004" for f in payload["findings"]))
+            with contextlib.redirect_stderr(io.StringIO()):
+                rc = skill_lint.main([str(warn_path), "--out"])
+            self.assertEqual(rc, 2)
+
+    def test_self_test_finds_s002(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = skill_lint.main(["--self-test"])
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", buf.getvalue())
+        self.assertIn("S002", buf.getvalue())
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = skill_lint.main(["--self-test", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["self_test"], "ok")
+        self.assertIn("S002", payload["rules"])
 
     def test_severity_filters_output(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -89,6 +164,26 @@ class LintSkillTests(unittest.TestCase):
             with contextlib.redirect_stdout(buf):
                 rc = skill_lint.main([str(bad), "--severity", "bogus"])
             self.assertEqual(rc, 2)
+
+    def test_severity_env_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            warn_path = write_skill(tmp, "x", "---\nname: x\n---\n")
+            bad = Path(tmp) / "nope" / "SKILL.md"
+            with mock.patch.dict(os.environ, {"JEV_SLINT_SEVERITY": "warn"}):
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = skill_lint.main([str(warn_path), str(bad)])
+            out = buf.getvalue()
+            self.assertEqual(rc, 1)
+            self.assertIn("S004", out)
+            self.assertNotIn("S001", out)
+            with mock.patch.dict(os.environ, {"JEV_SLINT_SEVERITY": "warn"}):
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = skill_lint.main([str(warn_path), str(bad), "--severity", "error"])
+            out = buf.getvalue()
+            self.assertIn("S001", out)
+            self.assertNotIn("S004", out)
 
     def test_quiet_still_prints_errors(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -130,6 +225,17 @@ class LintSkillTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("name: myskill", path.read_text(encoding="utf-8"))
             self.assertIn("fixed S008", buf.getvalue())
+
+    def test_long_description_s006(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = GOOD.format(name="s").replace(
+                "description: A test skill.", "description: " + ("x" * 1100)
+            )
+            path = write_skill(root, "s", body)
+            findings = skill_lint.lint_skill(path)
+            rules = {f["rule"] for f in findings}
+            self.assertIn("S006", rules)
 
     def test_name_clean_casing_no_s008(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -317,6 +423,264 @@ class CliTests(unittest.TestCase):
             proc = self._run(str(good), str(bad))
             self.assertEqual(proc.returncode, 1)
             self.assertIn(str(bad), proc.stdout)
+
+    def test_watch_emits_ticks(self):
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            good = write_skill(tmp, "ok", GOOD.format(name="ok"))
+            env = dict(_os.environ, JEV_SLINT_WATCH_MAX="2")
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPT), str(good), "--watch", "0.01"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+        self.assertEqual(proc.returncode, 0)
+        ticks = [
+            json.loads(l)
+            for l in proc.stdout.splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertTrue(all("findings" in t and "errors" in t for t in ticks))
+        self.assertTrue(all("warnings" in t and "infos" in t for t in ticks))
+        stderr_lines = [
+            l for l in proc.stderr.splitlines() if l.startswith("watch tick=")
+        ]
+        self.assertEqual(len(stderr_lines), 2)
+        self.assertIn("findings=", stderr_lines[0])
+        self.assertIn("errors=", stderr_lines[0])
+
+    def test_watch_fail_fast_breaks_on_error_tick(self):
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_skill(tmp, "bad", "# nope\n")
+            env = dict(_os.environ, JEV_SLINT_WATCH_MAX="5")
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPT), str(bad), "--watch", "0.01",
+                 "--fail-fast"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+        self.assertEqual(proc.returncode, 1)
+        ticks = [
+            json.loads(l)
+            for l in proc.stdout.splitlines()
+            if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 1)
+
+    def test_watch_rc_reflects_last_lint(self):
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_skill(tmp, "bad", "# nope\n")
+            env = dict(_os.environ, JEV_SLINT_WATCH_MAX="1")
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPT), str(bad), "--watch", "0.01"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 1)
+            good = write_skill(tmp, "ok", GOOD.format(name="ok"))
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPT), str(good), "--watch", "0.01"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+
+    def test_watch_verdict_writes_final_state(self):
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            good = write_skill(tmp, "ok", GOOD.format(name="ok"))
+            verdict = Path(tmp) / "v.json"
+            env = dict(_os.environ, JEV_SLINT_WATCH_MAX="2")
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPT), str(good), "--watch", "0.01",
+                 "--verdict", str(verdict)],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pass")
+            self.assertEqual(payload["ticks"], 2)
+            self.assertEqual(payload["errors"], 0)
+
+    def test_nonwatch_verdict_writes_single_shot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            good = write_skill(tmp, "ok", GOOD.format(name="ok"))
+            verdict = Path(tmp) / "v.json"
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPT), str(good), "--verdict", str(verdict)],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pass")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertEqual(payload["errors"], 0)
+
+    def test_watch_appends_ticks_to_out_file(self):
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            good = write_skill(tmp, "ok", GOOD.format(name="ok"))
+            out = Path(tmp) / "ticks.jsonl"
+            env = dict(_os.environ, JEV_SLINT_WATCH_MAX="2")
+            proc = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), str(good),
+                    "--watch", "0.01", "--out", str(out),
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("findings" in t for t in lines))
+
+
+
+    def test_explain_prints_rule_description(self) -> None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = skill_lint.main(["--explain", "S007"])
+        self.assertEqual(rc, 0)
+        self.assertIn("S007:", buf.getvalue())
+        self.assertIn("policy.json", buf.getvalue())
+
+    def test_explain_unknown_rule_rc2(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = skill_lint.main(["--explain", "S999"])
+        self.assertEqual(rc, 2)
+
+
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp) / "SKILL.md"
+            skill.write_text(
+                "---" + chr(10) + "name: x" + chr(10) + "description: y" + chr(10) + "---" + chr(10) + "body" + chr(10),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with mock.patch.dict(os.environ, {"JEV_SLINT_WATCH_MAX": "2"}):
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+                    rc = skill_lint.main(
+                        [str(skill), "--watch", "0.01", "--jq", "errors"]
+                    )
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().splitlines(), ["0", "0"])
+
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self):
+        import os as _os
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            good = write_skill(tmp, "ok", GOOD.format(name="ok"))
+            env = dict(
+                _os.environ,
+                JEV_SLINT_WATCH_MAX="0",
+                JEV_SLINT_WATCH_SECS="0.05",
+            )
+            start = _time.time()
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPT), str(good), "--watch", "0.02"],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+                timeout=30,
+            )
+            self.assertLess(_time.time() - start, 10.0)
+            ticks = [
+                l for l in proc.stdout.splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
+
+class ShippedSkillLintTests(unittest.TestCase):
+    """The pack's own skills/jev-consult/SKILL.md must stay lint-clean."""
+
+    def test_shipped_skill_lints_clean(self) -> None:
+        rc = skill_lint.main(
+            [str(ROOT / "skills" / "jev-consult" / "SKILL.md"), "--severity", "warn"]
+        )
+        self.assertEqual(rc, 0)
+
+
+class FixtureSkillLintTests(unittest.TestCase):
+    """Every tests/fixtures SKILL.md must stay lint-clean — the fixtures
+    stand in for real installed skills across the suite."""
+
+    def test_fixture_skills_are_lint_clean(self) -> None:
+        fixtures = sorted(
+            (ROOT / "tests" / "fixtures").rglob("SKILL.md")
+        )
+        self.assertTrue(fixtures, "no fixture SKILL.md files found")
+        for path in fixtures:
+            with self.subTest(fixture=path.name):
+                rc = skill_lint.main([str(path), "--severity", "warn"])
+                self.assertEqual(rc, 0, "%s has lint errors" % path)
+
+class RulesCatalogTest(unittest.TestCase):
+    def test_rules_lists_every_rule_sorted(self) -> None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = skill_lint.main(["--rules"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), len(skill_lint.RULES))
+        self.assertIn("S001:", lines[0])
+
+    def test_rules_json_shape(self) -> None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = skill_lint.main(["--rules", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertEqual(sorted(r["rule"] for r in rows), sorted(skill_lint.RULES))
+
+    def test_schema_prints_frontmatter_contract(self) -> None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = skill_lint.main(["--schema"])
+        self.assertEqual(rc, 0)
+        self.assertIn("name: slug", buf.getvalue())
+        self.assertIn("(required)", buf.getvalue())
+        self.assertIn("description:", buf.getvalue())
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = skill_lint.main(["--schema", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertTrue(rows["name"]["required"])
+        self.assertFalse(rows["description"]["required"])
 
 
 if __name__ == "__main__":

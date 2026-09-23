@@ -207,7 +207,9 @@ def upsert_snippet(path: Path, dry_run: bool, snippet: str | None = None) -> str
     block = (snippet or SNIPPET).strip() + "\n"
     cleaned, first = _remove_blocks(text)
     if first >= 0:
-        text = cleaned[:first].rstrip() + "\n\n" + block + cleaned[first:].lstrip("\n")
+        head = cleaned[:first].rstrip()
+        tail = cleaned[first:].lstrip("\r\n")
+        text = (head + "\n\n" if head else "") + block + tail
     else:
         if text and not text.endswith("\n"):
             text += "\n"

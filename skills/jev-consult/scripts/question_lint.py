@@ -17,13 +17,13 @@ import json
 import os
 import re
 import sys
-import tempfile
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import _watch  # noqa: E402
 from compact import estimate_tokens  # noqa: E402
 
 SEVERITIES = ("error", "warn", "info")
@@ -50,6 +50,29 @@ def _text_of(question: dict) -> str:
 
 def _tokens(text: str) -> set[str]:
     return {t for t in re.findall(r"[a-z]{3,}", text.lower())}
+
+
+RULES = {
+    "J001": "instructions contain a negation; prefer the positive phrasing",
+    "J002": "multiple negations; double negatives cut accuracy",
+    "J003": "asks the model to count or do arithmetic; compute it in code instead",
+    "J004": "depends on a date or duration comparison; precompute it in state",
+    "J005": "depends on a numeric comparison; compare in code or describe bands in criteria",
+    "J006": "looks like a multi-hop question; split into atomic questions",
+    "J007": "instructions are very short; Jev will not infer intent",
+    "J008": "subjective wording with no criteria; define the word in criteria",
+    "J009": "missing criteria (noul with none, or undescribed choice options)",
+    "J010": "compound yes/no question (and/or); ask one thing per noul",
+    "J011": "choice exceeds the option cap; use hierarchical classification",
+    "J012": "two options overlap heavily; merge or sharpen the boundary",
+    "J013": "score scale has too many levels; use 3 to 5",
+    "J014": "true and false criteria are identical",
+    "J015": "choice has fewer than two options",
+    "J016": "choice has no 'none'/'other' escape; a forced pick returns a wrong answer",
+    "J017": "two options carry identical descriptions; Jev has no basis to tell them apart",
+    "J020": "state exceeds the 32k-token limit; trim or chunk it first",
+    "J021": "state is over 8k tokens; irrelevant state distracts and drops accuracy",
+}
 
 
 def lint_question(qid: str, q: dict, max_options: int = 255) -> list[dict]:
@@ -159,12 +182,26 @@ def lint_question(qid: str, q: dict, max_options: int = 255) -> list[dict]:
             )
     if qtype == "choice":
         options = criteria if isinstance(criteria, dict) else {}
+        if len(options) < 2:
+            add(
+                "J015",
+                "info",
+                "choice has %d option(s)" % len(options),
+                "A choice needs at least two options to pick between; policy templates may legitimately carry zero (options are injected at scaffold time). Add them to `criteria` or change the type.",
+            )
         if len(options) > max_options:
             add(
                 "J011",
                 "error",
                 "%d options exceeds the %d-option limit" % (len(options), max_options),
                 "Use hierarchical classification.",
+            )
+        if len(options) >= 2 and "none" not in options and "other" not in options:
+            add(
+                "J016",
+                "warn",
+                "choice has no 'none'/'other' escape option",
+                "Without an abstain option Jev must pick something — a forced pick returns a confident wrong answer. Add a `none` criterion.",
             )
         undescribed = [k for k, v in options.items() if not v]
         if len(undescribed) > len(options) / 2:
@@ -174,6 +211,20 @@ def lint_question(qid: str, q: dict, max_options: int = 255) -> list[dict]:
                 "%d of %d options have no description" % (len(undescribed), len(options)),
                 "Option descriptions are where domain rules live. Describe each option.",
             )
+        seen_meanings: dict[str, str] = {}
+        for key, meaning in options.items():
+            norm = str(meaning or "").strip().lower()
+            if not norm:
+                continue
+            if norm in seen_meanings:
+                add(
+                    "J017",
+                    "warn",
+                    "options %r and %r share the same description" % (seen_meanings[norm], key),
+                    "Identical descriptions give Jev no basis to distinguish the options; sharpen one.",
+                )
+            else:
+                seen_meanings[norm] = key
         keys = list(options) if len(options) <= 512 else []
         for i, first in enumerate(keys):
             for second in keys[i + 1:]:
@@ -280,13 +331,35 @@ def apply_fixes(request: dict) -> list[str]:
     return applied
 
 
+def _atomic_write(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S      preset severity floor (error|warn|info; JEV_QLINT_SEVERITY)\n  --quiet           print only errors/warnings count\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+
+
 def main(argv: list[str] | None = None) -> int:
     """Standalone CLI: python question_lint.py request.json [--json] [--fix]"""
     argv = list(sys.argv[1:] if argv is None else argv)
+    if _watch.maybe_version(argv):
+        return 0
+    if "-h" in argv or "--help" in argv:
+        sys.stdout.write(USAGE)
+        return 0
     as_json = "--json" in argv
     do_fix = "--fix" in argv
     strict = "--strict" in argv
     quiet = "--quiet" in argv
+    fail_fast = "--fail-fast" in argv
     severity = ""
     if "--severity" in argv:
         idx = argv.index("--severity")
@@ -298,10 +371,184 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("bad --severity %r (want error|warn|info)\n" % severity)
             return 2
         argv = argv[:idx] + argv[idx + 2 :]
-    argv = [a for a in argv if a not in ("--json", "--fix", "--strict", "--quiet")]
+    else:
+        env_sev = os.environ.get("JEV_QLINT_SEVERITY", "").strip().lower()
+        if env_sev and env_sev in SEVERITIES:
+            severity = env_sev
+    out_path = ""
+    if "--explain" in argv:
+        idx = argv.index("--explain")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--explain needs a RULE value\n")
+            return 2
+        rule = argv[idx + 1].strip().upper()
+        if rule not in RULES:
+            sys.stderr.write(
+                "unknown rule %r (rules: %s)\n" % (rule, ", ".join(sorted(RULES)))
+            )
+            return 2
+        sys.stdout.write("%s: %s\n" % (rule, RULES[rule]))
+        return 0
+    if "--self-test" in argv:
+        probe = {
+            "questions": {
+                "q": {
+                    "type": "noul",
+                    "instructions": "Is it done and does it pass?",
+                    "criteria": {"true": "yes", "false": "no"},
+                }
+            }
+        }
+        found = sorted({f["rule"] for f in lint_request(probe)})
+        ok = bool(found)
+        if as_json:
+            sys.stdout.write(
+                json.dumps({"self_test": "ok" if ok else "FAIL", "rules": found})
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "self-test: %s rules=%s\n" % ("ok" if ok else "FAIL", ",".join(found))
+            )
+        return 0 if ok else 1
+    if "--rules" in argv:
+        if "--json" in argv:
+            sys.stdout.write(
+                json.dumps(
+                    [{"rule": r, "description": RULES[r]} for r in sorted(RULES)],
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            for r in sorted(RULES):
+                sys.stdout.write("%s: %s\n" % (r, RULES[r]))
+        return 0
+    if "--out" in argv:
+        idx = argv.index("--out")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--out needs a PATH value\n")
+            return 2
+        out_path = argv[idx + 1].strip()
+        argv = argv[:idx] + argv[idx + 2 :]
+    watch_seconds = 0.0
+    if "--watch" in argv:
+        idx = argv.index("--watch")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--watch needs a SECONDS value\n")
+            return 2
+        try:
+            watch_seconds = float(argv[idx + 1])
+        except ValueError:
+            sys.stderr.write("bad --watch %r (seconds)\n" % argv[idx + 1])
+            return 2
+        argv = argv[:idx] + argv[idx + 2 :]
+    jq_value = ""
+    if "--jq" in argv:
+        idx = argv.index("--jq")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--jq needs a KEY value\n")
+            return 2
+        jq_value = argv[idx + 1]
+        argv = argv[:idx] + argv[idx + 2 :]
+    max_ticks_arg = 0
+    if "--max-ticks" in argv:
+        idx = argv.index("--max-ticks")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--max-ticks needs an N value\n")
+            return 2
+        try:
+            max_ticks_arg = int(argv[idx + 1])
+        except ValueError:
+            sys.stderr.write("bad --max-ticks %r (integer)\n" % argv[idx + 1])
+            return 2
+        argv = argv[:idx] + argv[idx + 2 :]
+    watch_max_arg = 0.0
+    if "--watch-max" in argv:
+        idx = argv.index("--watch-max")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--watch-max needs a SECONDS value\n")
+            return 2
+        try:
+            watch_max_arg = float(argv[idx + 1])
+        except ValueError:
+            sys.stderr.write("bad --watch-max %r (seconds)\n" % argv[idx + 1])
+            return 2
+        argv = argv[:idx] + argv[idx + 2 :]
+    verdict_path = ""
+    if "--verdict" in argv:
+        idx = argv.index("--verdict")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--verdict needs a PATH value\n")
+            return 2
+        verdict_path = argv[idx + 1]
+        argv = argv[:idx] + argv[idx + 2 :]
+    argv = [
+        a
+        for a in argv
+        if a not in ("--json", "--fix", "--strict", "--quiet", "--fail-fast")
+    ]
     if not argv:
-        sys.stderr.write("usage: question_lint.py FILE [--json] [--fix] [--strict]\n")
+        sys.stderr.write("usage: question_lint.py FILE... [--json] [--fix] [--strict]\n")
         return 2
+    if len(argv) > 1:
+        if watch_seconds > 0 or do_fix:
+            sys.stderr.write("multiple paths support neither --watch nor --fix\n")
+            return 2
+        results = []
+        for arg in argv:
+            fpath = Path(arg)
+            try:
+                freq = json.loads(fpath.read_text(encoding="utf-8"))
+            except OSError as exc:
+                sys.stderr.write("cannot read %s (%s)\n" % (arg, exc))
+                return 2
+            except ValueError as exc:
+                sys.stderr.write("cannot parse %s (%s)\n" % (arg, exc))
+                return 2
+            if not isinstance(freq, dict):
+                sys.stderr.write("request JSON must be an object (%s)\n" % arg)
+                return 2
+            ffind = lint_request(freq)
+            ferr = sum(1 for f in ffind if f["severity"] == "error")
+            fshown = [
+                f
+                for f in ffind
+                if (not severity or f["severity"] == severity)
+                and (not quiet or f["severity"] == "error")
+            ]
+            results.append(
+                {"path": arg, "findings": fshown, "errors": ferr, "total": len(ffind)}
+            )
+        if jq_value:
+            value, found = _watch.dig(results, jq_value)
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (payload is a %d-file list)\n"
+                    % (jq_value, len(results))
+                )
+                return 2
+            sys.stdout.write(json.dumps(value) + "\n")
+            return 0
+        if as_json:
+            sys.stdout.write(json.dumps(results, indent=2) + "\n")
+        else:
+            for res in results:
+                sys.stdout.write("%s:\n" % res["path"])
+                for f in res["findings"]:
+                    sys.stdout.write(format_finding(f) + "\n")
+                sys.stdout.write("  %d error(s) of %d finding(s)\n" % (res["errors"], res["total"]))
+        if out_path:
+            try:
+                _atomic_write(Path(out_path), 
+                    json.dumps(results, indent=2) + "\n", encoding="utf-8"
+                )
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                return 1
+        any_err = any(r["errors"] for r in results)
+        any_find = any(r["total"] for r in results)
+        return 1 if any_err or (strict and any_find) else 0
     try:
         text = Path(argv[0]).read_text(encoding="utf-8")
     except OSError as exc:
@@ -315,25 +562,89 @@ def main(argv: list[str] | None = None) -> int:
     if not isinstance(request, dict):
         sys.stderr.write("request JSON must be an object\n")
         return 2
+    if watch_seconds > 0:
+        import time as _time
+
+        max_ticks = _watch.cap("JEV_QLINT_WATCH_MAX", max_ticks_arg)
+        ticks = 0
+        dead = _watch.deadline("JEV_QLINT_WATCH_SECS", watch_max_arg)
+        tick: dict = {}
+        verdict_ok = True
+
+        def _write_verdict(rc_now: int) -> bool:
+            return _watch.write_verdict(
+                verdict_path,
+                {
+                    "verdict": "fail" if rc_now else "pass",
+                    "ticks": ticks,
+                    "findings": tick.get("findings", 0),
+                    "errors": tick.get("errors", 0),
+                    "warnings": tick.get("warnings", 0),
+                    "infos": tick.get("infos", 0),
+                    "elapsed_s": round(_time.time() - watch_t0, 2),
+                },
+            )
+
+        watch_t0 = _time.time()
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
+            current = lint_request(request)
+            tick = {
+                "ts": int(_time.time()),
+                "findings": len(current),
+                "errors": sum(1 for f in current if f["severity"] == "error"),
+                "warnings": sum(1 for f in current if f["severity"] == "warn"),
+                "infos": sum(1 for f in current if f["severity"] == "info"),
+            }
+            _watch.emit_or_jq(tick, jq_value, out_path, quiet=_watch.quiet("JEV_QLINT_WATCH_QUIET", quiet), bad=tick["errors"] or (strict and tick["findings"]))
+            ticks += 1
+            sys.stderr.write(
+                "watch tick=%d findings=%d errors=%d\n"
+                % (ticks, tick["findings"], tick["errors"])
+            )
+            if verdict_path and verdict_ok:
+                rc_now = 1 if (tick["errors"] or (strict and tick["findings"])) else 0
+                if not _write_verdict(rc_now):
+                    verdict_ok = False  # warn once, stop retrying
+            if fail_fast and (tick["errors"] or (strict and tick["findings"])):
+                break
+            _time.sleep(watch_seconds)
+            try:
+                fresh = json.loads(Path(argv[0]).read_text(encoding="utf-8"))
+                if isinstance(fresh, dict):
+                    request = fresh
+            except (OSError, ValueError):
+                pass
+        rc = 1 if (tick.get("errors", 0) or (strict and tick.get("findings", 0))) else 0
+        if verdict_path and verdict_ok and not _write_verdict(rc):
+            return 1
+        return rc
     if do_fix:
         applied = apply_fixes(request)
         if applied:
-            text = json.dumps(request, indent=2, ensure_ascii=False) + "\n"
-            fd, tmp = tempfile.mkstemp(prefix=Path(argv[0]).name + ".", dir=str(Path(argv[0]).resolve().parent), suffix=".tmp")
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as out:
-                    out.write(text)
-                os.replace(tmp, argv[0])
-            except OSError:
-                try:
-                    os.unlink(tmp)
-                except OSError:
-                    pass
-                raise
+            _atomic_write(Path(argv[0]), json.dumps(request, indent=2, ensure_ascii=False) + "\n")
             for rule in applied:
                 sys.stderr.write("fixed %s\n" % rule)
     findings = lint_request(request)
     shown = [f for f in findings if not severity or f["severity"] == severity]
+    if jq_value:
+        value, found = _watch.dig({"findings": shown}, jq_value)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: findings)\n" % jq_value
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+        return 0
+    if out_path:
+        try:
+            _atomic_write(
+                Path(out_path),
+                json.dumps({"findings": shown}, indent=2, ensure_ascii=False) + "\n",
+            )
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+        sys.stderr.write("wrote %d finding(s) to %s\n" % (len(shown), out_path))
     if as_json:
         sys.stdout.write(json.dumps({"findings": shown}, indent=2) + "\n")
     else:
@@ -343,9 +654,21 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(format_finding(f) + "\n")
         if not quiet:
             sys.stdout.write("lint: %d finding(s)\n" % len(shown))
-    if any(f["severity"] == "error" for f in findings):
-        return 1
-    return 1 if strict and findings else 0
+    rc = 1 if any(f["severity"] == "error" for f in findings) or (strict and findings) else 0
+    if verdict_path:
+        if not _watch.write_verdict(
+            verdict_path,
+            {
+                "verdict": "fail" if rc else "pass",
+                "ticks": 1,
+                "findings": len(findings),
+                "errors": sum(1 for f in findings if f["severity"] == "error"),
+                "warnings": sum(1 for f in findings if f["severity"] == "warn"),
+                "infos": sum(1 for f in findings if f["severity"] == "info"),
+            },
+        ):
+            return 1
+    return rc
 
 
 if __name__ == "__main__":

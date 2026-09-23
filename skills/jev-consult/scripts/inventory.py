@@ -16,6 +16,12 @@ import tempfile
 import time
 from pathlib import Path
 
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+import _watch  # noqa: E402
+
 CATALOGS = (
     ("skills.sh", "https://skills.sh"),
     ("claude-plugins-official", "https://github.com/anthropics/claude-plugins-official"),
@@ -611,7 +617,7 @@ def atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
-def write_miss(path: Path, harness: str, task: str) -> None:
+def write_miss(path: Path, harness: str, task: str, extra: dict | None = None) -> None:
     task = (task or "")[:500]
     prior = read_sidecar(path)
     if prior and sidecar_fresh(prior) and str(prior.get("task") or "") == task:
@@ -622,6 +628,8 @@ def write_miss(path: Path, harness: str, task: str) -> None:
         "empty": True,
         "written_at": int(time.time()),
     }
+    if extra:
+        payload.update(extra)
     atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
 
@@ -643,6 +651,40 @@ def decisions_log_path() -> Path | None:
     return Path.home() / ".cache" / "jev-consult" / "decisions.jsonl"
 
 
+def _file_lock(fd: int) -> None:
+    """Best-effort exclusive lock so concurrent appends never interleave.
+
+    O_APPEND alone is not atomic on Windows (it is seek-then-write), so a
+    byte-range lock serializes writers; POSIX fcntl.flock does the same."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX)
+    except (OSError, ImportError):
+        pass
+
+
+def _file_unlock(fd: int) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except (OSError, ImportError):
+        pass
+
+
 def append_decision(entry: dict, path: Path | None = None) -> None:
     target = path or decisions_log_path()
     if target is None:
@@ -655,7 +697,11 @@ def append_decision(entry: dict, path: Path | None = None) -> None:
             pass
         fd = os.open(str(target), os.O_APPEND | os.O_WRONLY | os.O_CREAT, 0o600)
         try:
-            os.write(fd, (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8"))
+            _file_lock(fd)
+            try:
+                os.write(fd, (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8"))
+            finally:
+                _file_unlock(fd)
         finally:
             os.close(fd)
     except OSError:
@@ -711,6 +757,23 @@ def sidecar_items(payload: dict) -> list[dict]:
     return []
 
 
+def sidecar_issues(payload: dict) -> list[str]:
+    """Schema problems in a sidecar payload; empty list means well-formed."""
+    problems: list[str] = []
+    written = payload.get("written_at") if isinstance(payload, dict) else None
+    if not isinstance(written, (int, float)) or isinstance(written, bool):
+        problems.append("written_at missing or not a number")
+    items = sidecar_items(payload)
+    if not items:
+        problems.append("no names/items entries")
+    for index, item in enumerate(items):
+        if not isinstance(item.get("name"), str) or not item.get("name"):
+            problems.append("entry %d missing name" % index)
+        if not isinstance(item.get("kind"), str) or not item.get("kind"):
+            problems.append("entry %d missing kind" % index)
+    return problems
+
+
 def _policy_dict() -> dict:
     try:
         policy_path = Path(__file__).resolve().parent.parent / "policy.json"
@@ -758,16 +821,34 @@ def hook_budget_seconds() -> float:
 
 HOOK_JEV_TIMEOUT_KEY = "hook_jev_timeout_seconds"
 DEFAULT_HOOK_JEV_TIMEOUT_SECONDS = 8.0
+HOOK_DEDUPE_TTL_KEY = "dedupe_ttl_seconds"
+DEFAULT_HOOK_DEDUPE_TTL_SECONDS = 0.0
 
 
-def hook_jev_timeout_seconds() -> float:
-    """HTTP timeout for the one Jev call inside the prompt hook."""
+def hook_dedupe_ttl_seconds() -> float:
+    """Max age of a sidecar that may answer a repeat of the same prompt
+    (0 = disabled, any fresh sidecar dedupes). Env JEV_HOOK_DEDUPE_TTL
+    > policy dedupe_ttl_seconds > default."""
     try:
-        env = float(os.environ.get("JEV_HOOK_TIMEOUT", "") or -1)
+        env = float(os.environ.get("JEV_HOOK_DEDUPE_TTL", "") or -1)
         if env >= 0:
             return env
     except ValueError:
         pass
+    return _policy_float_key(HOOK_DEDUPE_TTL_KEY, DEFAULT_HOOK_DEDUPE_TTL_SECONDS)
+
+
+def hook_jev_timeout_seconds() -> float:
+    """HTTP timeout for the one Jev call inside the prompt hook."""
+    raw = os.environ.get("JEV_HOOK_TIMEOUT", "")
+    if raw.strip():
+        try:
+            env = float(raw)
+            if env >= 0:
+                return env
+        except ValueError:
+            pass
+        sys.stderr.write("bad JEV_HOOK_TIMEOUT %r (want seconds)\n" % raw)
     return _policy_float_key(HOOK_JEV_TIMEOUT_KEY, DEFAULT_HOOK_JEV_TIMEOUT_SECONDS)
 
 
@@ -801,6 +882,42 @@ def hook_note_limit() -> int:
 
 HOOK_JEV_RETRIES_KEY = "hook_jev_retries"
 DEFAULT_HOOK_JEV_RETRIES = 0
+
+HOOK_MAX_PROMPT_KEY = "hook_max_prompt_chars"
+DEFAULT_HOOK_MAX_PROMPT_CHARS = 20000
+HOOK_MAX_PAYLOAD_KEY = "hook_payload_max_bytes"
+DEFAULT_HOOK_MAX_PAYLOAD_BYTES = 1048576
+
+
+def hook_max_payload_bytes() -> int:
+    """Cap on hook stdin/--file payload bytes (0 = unlimited).
+    Env JEV_HOOK_MAX_PAYLOAD > policy hook_payload_max_bytes > default.
+    Over-cap payloads are ignored (the hook emits {} and stays fail-open)."""
+    try:
+        env = int(os.environ.get("JEV_HOOK_MAX_PAYLOAD", "") or -1)
+        if env >= 0:
+            return env
+    except ValueError:
+        pass
+    try:
+        return max(0, int(_policy_dict().get(HOOK_MAX_PAYLOAD_KEY, DEFAULT_HOOK_MAX_PAYLOAD_BYTES)))
+    except (TypeError, ValueError):
+        return DEFAULT_HOOK_MAX_PAYLOAD_BYTES
+
+
+def hook_max_prompt_chars() -> int:
+    """Cap on prompt chars fed to the hook's IDF/Jev pick (0 = unlimited).
+    Env JEV_HOOK_MAX_PROMPT > policy hook_max_prompt_chars > default."""
+    try:
+        env = int(os.environ.get("JEV_HOOK_MAX_PROMPT", "") or -1)
+        if env >= 0:
+            return env
+    except ValueError:
+        pass
+    try:
+        return max(0, int(_policy_dict().get(HOOK_MAX_PROMPT_KEY, DEFAULT_HOOK_MAX_PROMPT_CHARS)))
+    except (TypeError, ValueError):
+        return DEFAULT_HOOK_MAX_PROMPT_CHARS
 
 
 def hook_jev_retries() -> int:
@@ -863,6 +980,14 @@ def sidecar_fresh(
     ttl = sidecar_ttl_seconds() if ttl_seconds is None else float(ttl_seconds)
     age = (time.time() if now is None else float(now)) - float(written)
     return age <= ttl
+
+
+def sidecar_age_seconds(payload: dict, now: float | None = None) -> float | None:
+    """Seconds since written_at, or None when the payload lacks a valid timestamp."""
+    written = payload.get("written_at") if isinstance(payload, dict) else None
+    if not isinstance(written, (int, float)) or isinstance(written, bool):
+        return None
+    return max(0.0, (time.time() if now is None else float(now)) - float(written))
 
 
 def sidecar_status(
@@ -1004,7 +1129,50 @@ def write_ask(path: Path, task: str, harness: str, picked: list[dict]) -> None:
     atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
 
+def _self_test() -> int:
+    """Scan a temp-dir home with a synthetic catalog through the real
+    scan/shortlist machinery (no Jev); print ok|FAIL per check."""
+    checks = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        skill_dir = home / ".claude" / "skills" / "selftest-skill"
+        skill_dir.mkdir(parents=True)
+        with open(
+            skill_dir / "SKILL.md", "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                "---\nname: selftest-skill\ndescription: selftest token for scan checks\n---\n"
+            )
+        items = scan("claude-code", home=home)
+        names = {item.get("name") for item in items}
+        checks["scan_finds"] = "selftest-skill" in names
+        picked = shortlist(items, "selftest token", 8, [])
+        checks["shortlist_ranks"] = bool(picked) and picked[0].get("name") == "selftest-skill"
+        checks["explicit_hit"] = any(
+            item.get("name") == "selftest-skill"
+            for item in explicit_mentions("please run selftest-skill", items)
+        )
+        duped = items + [dict(item) for item in items[:1]]
+        uniq = uniquify(duped)
+        checks["uniquify"] = len({item["id"] for item in uniq}) == len(uniq) and any(
+            item["id"].endswith("_2") for item in uniq
+        )
+    ok = all(checks.values())
+    sys.stdout.write(
+        "self-test: %s %s\n"
+        % (
+            "ok" if ok else "FAIL",
+            " ".join(
+                "%s=%s" % (k, "ok" if v else "FAIL") for k, v in sorted(checks.items())
+            ),
+        )
+    )
+    return 0 if ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
+    if _watch.maybe_version(sys.argv[1:] if argv is None else argv):
+        return 0
     parser = argparse.ArgumentParser(description="Inventory installed skills/plugins/MCP for a Jev Choice.")
     parser.add_argument(
         "--task",
@@ -1068,14 +1236,80 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--all-names", action="store_true", help="Include every installed name (no descriptions).")
     parser.add_argument("--scores", action="store_true", help="Add IDF score to each shortlist item.")
     parser.add_argument("--csv", action="store_true", help="Emit the shortlist as CSV rows instead of JSON.")
+    parser.add_argument("--jsonl", action="store_true", help="Emit the shortlist as JSON lines, one item per row (for piping).")
+    parser.add_argument("--jq", metavar="KEY", default="", help="Print just one dotted-path field of the JSON payload (e.g. counts.skill); unknown key exits 2. With --watch: print just the named tick field(s) per pass, comma list")
+    parser.add_argument("--out", metavar="PATH", default="", help="Write the payload JSON to PATH instead of stdout.")
+    parser.add_argument("--names", action="store_true", help="Print bare shortlist ids, one per line (for piping).")
+    parser.add_argument("--paths", action="store_true", help="Print bare shortlist item paths, one per line (for piping).")
+    parser.add_argument("--count", action="store_true", help="Print only PICKED/SCANNED counts instead of the payload.")
+    parser.add_argument("--kinds", action="store_true", help="Print per-kind counts (kind N per line) and exit.")
+    parser.add_argument(
+        "--watch",
+        metavar="SECONDS",
+        type=float,
+        default=0.0,
+        help="Rescan and reprint the JSON payload every SECONDS until interrupted.",
+    )
+    parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
+    parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that reports added or removed items")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON to PATH: with --watch a {verdict: stable|changed, ticks, added, removed, counts} payload refreshed every tick; otherwise a one-shot {verdict: ok|empty, scanned, shortlisted, counts} payload.")
+    parser.add_argument("--id", metavar="NAME", default="", help="Print the single matching item's JSON (matches id or name).")
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="Add the matched task tokens to each shortlist item",
+    )
     parser.add_argument(
         "--kind",
         default="",
         help="Comma filter: only shortlist these kinds (skill,plugin,mcp).",
     )
+    parser.add_argument(
+        "--grep",
+        default="",
+        help="Keep only items whose name or description contains SUBSTR (case-insensitive).",
+    )
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
+    parser.add_argument(
+        "--roots",
+        action="store_true",
+        help="Print the resolved scan roots for the harness (exists/items per dir) as JSON and exit.",
+    )
+    parser.add_argument(
+        "--item",
+        metavar="NAME",
+        default="",
+        help="Print the single scanned record with this exact name (kind:name or name) as JSON; exits 2 when absent.",
+    )
+    parser.add_argument(
+        "--item-all",
+        dest="item_all",
+        metavar="NAME",
+        default="",
+        help="Print every scanned record matching NAME (name or kind:name, case-insensitive) as a JSON array; exits 2 when none.",
+    )
+    parser.add_argument(
+        "--dupes",
+        action="store_true",
+        help="List names that appear more than once: across harnesses when --harness is auto, or within the selected harness (different kinds) when it is set.",
+    )
+    parser.add_argument(
+        "--diff",
+        metavar="OLD.json",
+        default="",
+        help="Compare the current scan's item ids against a payload saved via --out (uses installed_names when present, else shortlist ids); prints {added,removed} JSON and exits.",
+    )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Scan a temp-dir home with a synthetic catalog through the real machinery and exit 1 on failure.",
+    )
     args = parser.parse_args(argv)
+    if args.self_test:
+        return _self_test()
     if args.check_sidecar or args.check_miss:
         target = Path(args.check_sidecar or args.check_miss)
         if target.is_dir():
@@ -1107,6 +1341,9 @@ def main(argv: list[str] | None = None) -> int:
         status = sidecar_status(path, args.ttl)
         payload = read_sidecar(path) or {}
         out = {"path": str(path), "status": status, "payload": payload}
+        problems = sidecar_issues(payload) if status != "missing" else ["missing"]
+        out["valid"] = not problems
+        out["issues"] = problems
         written = payload.get("written_at")
         if isinstance(written, (int, float)) and not isinstance(written, bool):
             out["age_seconds"] = int(time.time() - float(written))
@@ -1122,13 +1359,144 @@ def main(argv: list[str] | None = None) -> int:
     harness = detect_harness(Path(__file__)) if args.harness == "auto" else args.harness
     home = Path(args.home) if args.home else None
     hermes = Path(args.hermes_home) if args.hermes_home else None
+    if args.roots:
+        roots = roots_for(harness, home=home, hermes=hermes)
+        report = {
+            "harness": harness,
+            "skills": [
+                {
+                    "path": str(path),
+                    "exists": path.is_dir(),
+                    "items": len(iter_skills([path])) if path.is_dir() else 0,
+                }
+                for path in roots["skills"]
+            ],
+            "plugins": [
+                {
+                    "path": str(path),
+                    "exists": path.is_dir(),
+                    "items": (
+                        len(iter_claude_plugins([path]) + iter_plugin_yaml([path]))
+                        if path.is_dir()
+                        else 0
+                    ),
+                }
+                for path in roots["plugins"]
+            ],
+            "mcp_files": [
+                {
+                    "path": str(path),
+                    "exists": path.is_file(),
+                    "items": len(iter_mcp([path])) if path.is_file() else 0,
+                }
+                for path in roots["mcp_files"]
+            ],
+        }
+        sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        return 0
     items = scan(harness, home=home, hermes=hermes)
+    if getattr(args, "item", ""):
+        wanted = args.item.strip()
+        lowered = wanted.lower()
+        match = next(
+            (
+                item
+                for item in items
+                if str(item.get("name") or "") == wanted
+                or "%s:%s" % (item.get("kind"), item.get("name")) == wanted
+            ),
+            None,
+        )
+        if match is None:
+            match = next(
+                (
+                    item
+                    for item in items
+                    if str(item.get("name") or "").lower() == lowered
+                    or "%s:%s" % (item.get("kind"), str(item.get("name") or "").lower())
+                    == lowered
+                ),
+                None,
+            )
+        if match is None:
+            sys.stderr.write("no item named %s under harness %s\n" % (wanted, harness))
+            return 2
+        sys.stdout.write(json.dumps(match, indent=2, ensure_ascii=False) + "\n")
+        return 0
+    if getattr(args, "item_all", ""):
+        wanted = args.item_all.strip()
+        lowered = wanted.lower()
+        matches = []
+        seen_ids = set()
+        for item in items:
+            name = str(item.get("name") or "")
+            kind_name = "%s:%s" % (item.get("kind"), name)
+            if (
+                name == wanted
+                or kind_name == wanted
+                or name.lower() == lowered
+                or kind_name.lower() == lowered
+            ) and id(item) not in seen_ids:
+                seen_ids.add(id(item))
+                matches.append(item)
+        if not matches:
+            sys.stderr.write("no item named %s under harness %s\n" % (wanted, harness))
+            return 2
+        sys.stdout.write(json.dumps(matches, indent=2, ensure_ascii=False) + "\n")
+        return 0
+    if args.dupes:
+        rows = []
+        for h in HARNESSES if args.harness == "auto" else (harness,):
+            for it in scan(h, home=home, hermes=hermes):
+                rows.append({"harness": h, **it})
+        by_name = {}
+        for it in rows:
+            key = str(it.get("name") or "").lower()
+            if key:
+                by_name.setdefault(key, []).append(it)
+        dupes = []
+        for group in by_name.values():
+            harness_set = sorted({g["harness"] for g in group})
+            if len(group) < 2 or (args.harness == "auto" and len(harness_set) < 2):
+                continue
+            dupes.append(
+                {
+                    "name": group[0]["name"],
+                    "count": len(group),
+                    "harnesses": harness_set,
+                    "kinds": sorted({str(g.get("kind") or "") for g in group}),
+                }
+            )
+        dupes.sort(key=lambda d: (-d["count"], d["name"].lower()))
+        text = json.dumps({"count": len(dupes), "dupes": dupes}, indent=2) + "\n"
+        if args.out:
+            try:
+                atomic_write_text(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+                return 1
+            sys.stderr.write("wrote %s\n" % args.out)
+        else:
+            sys.stdout.write(text)
+        return 0
     kinds = {part.strip() for part in args.kind.split(",") if part.strip()}
     if kinds:
         items = [item for item in items if item["kind"] in kinds]
+    if args.grep:
+        needle = args.grep.strip().lower()
+        items = [
+            item
+            for item in items
+            if needle in str(item.get("name") or "").lower()
+            or needle in str(item.get("description") or "").lower()
+            or needle in str(item.get("id") or "").lower()
+        ]
     extra = [part.strip() for part in args.include.split(",") if part.strip()]
     limit = max(1, min(args.limit, 24))
     picked = shortlist(items, args.task, limit, extra)
+    if args.grep and not args.task.strip():
+        seen_ids = {item["id"] for item in picked}
+        picked += [item for item in items if item["id"] not in seen_ids][:limit]
     counts = {
         "skill": sum(1 for item in items if item["kind"] == KIND_SKILL),
         "plugin": sum(1 for item in items if item["kind"] == KIND_PLUGIN),
@@ -1141,6 +1509,32 @@ def main(argv: list[str] | None = None) -> int:
         "shortlist": picked,
         "catalogs": [{"name": name, "url": url} for name, url in catalogs()],
     }
+    if args.diff:
+        try:
+            old = json.loads(Path(args.diff).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            sys.stderr.write("cannot read %s: %s\n" % (args.diff, exc))
+            return 1
+        old_names = old.get("installed_names") if isinstance(old, dict) else None
+        if isinstance(old_names, list) and old_names:
+            old_ids = {str(x) for x in old_names}
+            cur_ids = {"%s:%s" % (i["kind"], i["name"]) for i in items}
+        else:
+            old_short = old.get("shortlist") if isinstance(old, dict) else None
+            old_short = old_short if isinstance(old_short, list) else []
+            old_ids = {str(i.get("id")) for i in old_short if isinstance(i, dict)}
+            cur_ids = {str(i.get("id")) for i in picked}
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "added": sorted(cur_ids - old_ids),
+                    "removed": sorted(old_ids - cur_ids),
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+        return 0
     if args.all_names:
         payload["installed_names"] = ["%s:%s" % (item["kind"], item["name"]) for item in items]
     if args.scores:
@@ -1149,7 +1543,46 @@ def main(argv: list[str] | None = None) -> int:
         payload["shortlist"] = [
             {**item, "score": score_item(item, query, df)} for item in picked
         ]
-    if getattr(args, "csv", False):
+    if getattr(args, "explain", False):
+        query = tokens(args.task)
+        explained = []
+        for item in payload["shortlist"]:
+            matched = sorted(
+                query
+                & (tokens(item.get("name") or "") | tokens(item.get("description") or ""))
+            )
+            explained.append({**item, "matched": matched})
+        payload["shortlist"] = explained
+    if args.id:
+        want = args.id.strip().lower()
+        found = [
+            item
+            for item in items
+            if str(item.get("id") or "").lower() == want
+            or str(item.get("name") or "").lower() == want
+        ]
+        if not found:
+            sys.stderr.write("no item %s\n" % args.id)
+            return 1
+        sys.stdout.write(json.dumps(found[0], indent=2, sort_keys=True) + "\n")
+        return 0
+    if getattr(args, "kinds", False):
+        for kind in sorted(counts):
+            sys.stdout.write("%s %d\n" % (kind, counts[kind]))
+        return 0
+    if getattr(args, "count", False):
+        sys.stdout.write("%d/%d\n" % (len(payload["shortlist"]), len(items)))
+        return 0
+    if getattr(args, "paths", False):
+        for item in payload["shortlist"]:
+            sys.stdout.write("%s\n" % (item.get("path") or item.get("id")))
+    elif getattr(args, "names", False):
+        for item in payload["shortlist"]:
+            sys.stdout.write("%s\n" % item.get("id"))
+    elif getattr(args, "jsonl", False):
+        for item in payload["shortlist"]:
+            sys.stdout.write(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n")
+    elif getattr(args, "csv", False):
         import csv as _csv
 
         writer = _csv.writer(sys.stdout, lineterminator="\n")
@@ -1163,11 +1596,122 @@ def main(argv: list[str] | None = None) -> int:
                 row.append("%.4f" % (item.get("score") or 0))
             writer.writerow(row)
     else:
-        sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+        watching_jq = bool(getattr(args, "watch", 0.0)) and getattr(args, "jq", "")
+        if getattr(args, "jq", "") and not watching_jq:
+            cur = payload
+            found = True
+            for part in args.jq.split("."):
+                if isinstance(cur, dict) and part in cur:
+                    cur = cur[part]
+                else:
+                    found = False
+                    break
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (payload has: %s)\n"
+                    % (args.jq, ", ".join(sorted(payload)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(cur) + "\n")
+            return 0
+        if not watching_jq:
+            text = json.dumps(payload, indent=2) + "\n"
+            if getattr(args, "out", ""):
+                out_path = Path(args.out)
+                try:
+                    atomic_write_text(out_path, text)
+                except OSError as exc:
+                    sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                    return 1
+                sys.stderr.write("wrote %s\n" % out_path)
+            else:
+                sys.stdout.write(text)
     if args.write_ask:
         write_ask(Path(args.write_ask), args.task, harness, picked)
     if args.sidecar:
         write_sidecar(Path(args.sidecar), harness, args.task, picked)
+    watch_seconds = getattr(args, "watch", 0.0) or 0.0
+    if watch_seconds <= 0:
+        if getattr(args, "verdict", ""):
+            ok = _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "ok" if items else "empty",
+                    "scanned": len(items),
+                    "shortlisted": len(picked),
+                    "counts": counts,
+                },
+            )
+            return 0 if ok else 1
+        return 0
+    max_ticks = _watch.cap("JEV_INV_WATCH_MAX", args.max_ticks)
+    ticks = 0
+    dead = _watch.deadline("JEV_INV_WATCH_SECS", getattr(args, "watch_max", 0.0))
+    prev_ids: set | None = None
+    all_added: set = set()
+    all_removed: set = set()
+    last_tick: dict | None = None
+    verdict_ok = True
+
+    def _write_verdict(tick_count: int) -> bool:
+        if not args.verdict:
+            return True
+        return _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "changed" if (all_added or all_removed) else "stable",
+                "ticks": tick_count,
+                "added": sorted(all_added),
+                "removed": sorted(all_removed),
+                "counts": (last_tick or {}).get("counts", {}),
+                "elapsed_s": round(time.time() - watch_t0, 2),
+            },
+        )
+
+    watch_t0 = time.time()
+    while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
+        time.sleep(watch_seconds)
+        fresh = scan(harness, home=home, hermes=hermes)
+        if kinds:
+            fresh = [item for item in fresh if item["kind"] in kinds]
+        cur_ids = {item.get("id") for item in fresh}
+        tick = {
+            "ts": int(time.time()),
+            "counts": {
+                "skill": sum(1 for i in fresh if i["kind"] == KIND_SKILL),
+                "plugin": sum(1 for i in fresh if i["kind"] == KIND_PLUGIN),
+                "mcp": sum(1 for i in fresh if i["kind"] == KIND_MCP),
+            },
+            "shortlist": [item.get("id") for item in shortlist(fresh, args.task, limit, extra)],
+            "added": sorted(cur_ids - prev_ids) if prev_ids is not None else [],
+            "removed": sorted(prev_ids - cur_ids) if prev_ids is not None else [],
+            "found_delta": (
+                len(cur_ids) - len(prev_ids) if prev_ids is not None else None
+            ),
+            "elapsed_s": round(time.time() - watch_t0, 2),
+        }
+        if prev_ids is not None:
+            all_added.update(cur_ids - prev_ids)
+            all_removed.update(prev_ids - cur_ids)
+        prev_ids = cur_ids
+        last_tick = tick
+        _watch.emit_or_jq(tick, getattr(args, "jq", ""), args.out, quiet=_watch.quiet("JEV_INV_WATCH_QUIET", args.quiet), bad=ticks == 0 or bool(tick.get("added") or tick.get("removed")))
+        ticks += 1
+        sys.stderr.write(
+            "watch tick=%d shortlist=%d added=%d removed=%d\n"
+            % (
+                ticks,
+                len(tick["shortlist"]),
+                len(tick["added"]),
+                len(tick["removed"]),
+            )
+        )
+        if verdict_ok and not _write_verdict(ticks):
+            verdict_ok = False  # warn once, stop retrying
+        if getattr(args, "fail_fast", False) and (tick["added"] or tick["removed"]):
+            break
+    if args.verdict and verdict_ok and not _write_verdict(ticks):
+        return 1
     return 0
 
 

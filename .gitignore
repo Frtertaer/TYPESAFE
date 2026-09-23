@@ -20,3 +20,5 @@ Thumbs.db
 .jev-*.err
 .tmp-jev*
 .devin/progress.sqlite3*
+req*.json
+ans*.json

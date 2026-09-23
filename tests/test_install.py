@@ -429,5 +429,172 @@ def sys_exe_slash() -> str:
     return sys.executable.replace("\\", "/")
 
 
+class IdempotentInstallTests(unittest.TestCase):
+    def _snapshot(self, base: Path) -> dict:
+        return {
+            str(p.relative_to(base)): p.read_bytes()
+            for p in sorted(base.rglob("*"))
+            if p.is_file()
+        }
+
+    def test_second_install_is_byte_identical_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            env = {
+                "USERPROFILE": tmp,
+                "HOME": tmp,
+                "HERMES_HOME": str(base / "hermes"),
+            }
+            repo_before = {
+                n: (ROOT / n).read_bytes()
+                for n in ("AGENTS.md", "CLAUDE.md", ".hermes.md")
+            }
+            with patch.dict(os.environ, env, clear=False):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    install.install(["claude-code"], False)
+                first = self._snapshot(base)
+                self.assertTrue(first, "install wrote nothing")
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    install.install(["claude-code"], False)
+                second = self._snapshot(base)
+            self.assertEqual(first, second)
+            for name, blob in repo_before.items():
+                self.assertEqual((ROOT / name).read_bytes(), blob)
+
+    def test_all_four_harnesses_install_to_tmp_home(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            env = {
+                "USERPROFILE": tmp,
+                "HOME": tmp,
+                "HERMES_HOME": str(base / "hermes"),
+                "TYPESAFE_API_KEY": "",
+            }
+            with patch.dict(os.environ, env, clear=False):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = install.install(
+                        ["hermes", "claude-code", "codex", "grok"], False
+                    )
+            self.assertEqual(rc, 0)
+            expected_skill_dirs = [
+                base / "hermes" / "skills" / "jev-consult",
+                base / ".claude" / "skills" / "jev-consult",
+                base / ".codex" / "skills" / "jev-consult",
+                base / ".agents" / "skills" / "jev-consult",
+                base / ".grok" / "skills" / "jev-consult",
+            ]
+            for d in expected_skill_dirs:
+                self.assertTrue(
+                    (d / "SKILL.md").is_file(), "missing %s" % d
+                )
+            for doc in (
+                base / ".claude" / "CLAUDE.md",
+                base / ".codex" / "AGENTS.md",
+                base / ".grok" / "AGENTS.md",
+            ):
+                self.assertTrue(doc.is_file(), "missing %s" % doc)
+                self.assertIn("jev-consult", doc.read_text(encoding="utf-8"))
+
+    def test_uninstall_all_four_leaves_tmp_home_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            env = {
+                "USERPROFILE": tmp,
+                "HOME": tmp,
+                "HERMES_HOME": str(base / "hermes"),
+                "TYPESAFE_API_KEY": "",
+            }
+            agents = ["hermes", "claude-code", "codex", "grok"]
+            with patch.dict(os.environ, env, clear=False):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    install.install(agents, False)
+                with redirect_stdout(io.StringIO()):
+                    rc = install.uninstall(agents, False)
+            self.assertEqual(rc, 0)
+            for path in sorted(base.rglob("*")):
+                if path.is_dir() and path.name == "jev-consult":
+                    self.fail("leftover skill dir: %s" % path)
+            for doc in (
+                base / ".claude" / "CLAUDE.md",
+                base / ".codex" / "AGENTS.md",
+                base / ".grok" / "AGENTS.md",
+            ):
+                if doc.is_file():
+                    self.assertNotIn(
+                        "jev-consult", doc.read_text(encoding="utf-8"),
+                        "snippet left in %s" % doc,
+                    )
+
+    def test_dry_run_writes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            env = {"USERPROFILE": tmp, "HOME": tmp, "HERMES_HOME": str(base / "h")}
+            with patch.dict(os.environ, env, clear=False):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    install.install(["claude-code"], True)
+            self.assertEqual(self._snapshot(base), {})
+
+
+
+class WrapperScriptTests(unittest.TestCase):
+    """The documented one-command entrypoints actually run install.py."""
+
+    def _env(self) -> dict:
+        env = dict(os.environ)
+        env["TYPESAFE_API_KEY"] = env.get("TYPESAFE_API_KEY") or "x"
+        return env
+
+    def test_install_cmd_check_key_windows(self) -> None:
+        if os.name != "nt":
+            self.skipTest("install.cmd is Windows-only")
+        import subprocess
+
+        proc = subprocess.run(
+            ["cmd", "/c", str(ROOT / "install.cmd"), "--check-key"],
+            capture_output=True,
+            text=True,
+            env=self._env(),
+            cwd=str(ROOT),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+        self.assertIn("TYPESAFE_API_KEY", proc.stdout)
+        self.assertNotIn("x" * 20, proc.stdout)  # never prints the key
+
+    def test_install_sh_check_key_posix(self) -> None:
+        import shutil
+        import subprocess
+
+        sh = shutil.which("sh")
+        if not sh:
+            self.skipTest("no sh on this box")
+        proc = subprocess.run(
+            [sh, str(ROOT / "install.sh"), "--check-key"],
+            capture_output=True,
+            text=True,
+            env=self._env(),
+            cwd=str(ROOT),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+        self.assertIn("TYPESAFE_API_KEY", proc.stdout)
+
+    def test_install_sh_syntax_clean(self) -> None:
+        import shutil
+        import subprocess
+
+        sh = shutil.which("sh")
+        if not sh:
+            self.skipTest("no sh on this box")
+        proc = subprocess.run(
+            [sh, "-n", str(ROOT / "install.sh")],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

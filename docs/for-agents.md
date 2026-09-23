@@ -17,13 +17,21 @@ python skills/jev-consult/scripts/inventory.py --task "<task>" --harness auto --
 python skills/jev-consult/scripts/inventory.py --check-sidecar [path]   # fresh/stale/missing/invalid
 python skills/jev-consult/scripts/inventory.py --check-miss [path]      # same statuses for .jev-tools-miss.json
 python skills/jev-consult/scripts/inventory.py --prune-sidecars DIR     # unlink stale/invalid .jev-tools*.json (--dry-run lists)
-python skills/jev-consult/scripts/inventory.py --show FILE              # sidecar payload + status + age_seconds
+python skills/jev-consult/scripts/inventory.py --show FILE              # sidecar payload + status + age_seconds + valid/issues
 python skills/jev-consult/scripts/inventory.py --show-policy            # effective policy.json contents
-python skills/jev-consult/scripts/policy_lint.py [--strict|--show|--diff other.json]  # validates policy.json
-python skills/jev-consult/scripts/question_lint.py request.json [--json|--fix]        # lint a request file standalone
-python skills/jev-consult/scripts/skill_lint.py skills/*/SKILL.md       # SKILL.md sanity; [--strict] warns fail, [--fix] rewrites name, [--json]
-python skills/jev-consult/scripts/doctor.py                             # verify per-harness install; exit 0 = all ok
-python skills/jev-consult/scripts/smoke.py                              # offline e2e sanity, no API calls
+python skills/jev-consult/scripts/inventory.py --out PATH               # write the payload JSON to a file instead of stdout
+python skills/jev-consult/scripts/inventory.py --names                 # bare shortlist ids, one per line
+python skills/jev-consult/scripts/inventory.py --paths                 # bare shortlist item paths, one per line
+python skills/jev-consult/scripts/inventory.py --id NAME               # print the matching item JSON (rc 1 when absent)
+python skills/jev-consult/scripts/inventory.py --count                  # print PICKED/SCANNED counts
+python skills/jev-consult/scripts/inventory.py --jsonl                  # shortlist as JSON lines
+python skills/jev-consult/scripts/inventory.py --kinds                  # per-kind counts
+python skills/jev-consult/scripts/inventory.py --grep SUBSTR            # keep items whose name/desc/id contains SUBSTR
+python skills/jev-consult/scripts/policy_lint.py [--strict|--show|--diff other.json|--out PATH]  # validates policy.json
+python skills/jev-consult/scripts/question_lint.py request.json [--json|--fix|--out PATH]  # lint a request file standalone
+python skills/jev-consult/scripts/skill_lint.py skills/*/SKILL.md       # SKILL.md sanity; [--strict] warns fail, [--fix] rewrites name, [--json] [--out PATH]
+python skills/jev-consult/scripts/doctor.py                             # verify per-harness install; exit 0 = all ok; --quiet/--out PATH
+python skills/jev-consult/scripts/smoke.py                              # offline e2e sanity, no API calls; --only/--list/--fail-fast/--out PATH/--report PATH (markdown step report)/--junit PATH (JUnit XML)/--verdict PATH (slim PASS/FAIL JSON)
 python skills/jev-consult/scripts/decisions.py                          # stats + --days/--since/--harness/--status/--outcome/--fill
                                                                         # filters, --tail/--json/--csv/--md, count lists
                                                                         # --statuses/--harnesses/--winners/--outcomes/--fills/--fields,
@@ -36,8 +44,8 @@ python skills/jev-consult/scripts/progress.py history reliability
 python skills/jev-consult/scripts/progress.py evidence reliability 1     # rebuild the recorded Jev input for event 1
 python skills/jev-consult/scripts/compare.py --live
 python skills/jev-consult/scripts/compact.py transcript.json --history --fake   # --dir DIR for batch, --prune-spill S, --list-spill
-python skills/jev-consult/scripts/trace.py show --key plan                      # single field from .jev-trace.json
-python skills/jev-consult/scripts/trace.py stats                                # counts, last_pick, file age
+python skills/jev-consult/scripts/trace.py show --key plan                      # single field from .jev-trace.json (--out PATH writes JSON to a file)
+python skills/jev-consult/scripts/trace.py stats                                # counts, last_pick, file age (--out PATH writes JSON to a file)
 python tests/test_jev.py
 python tests/test_inventory.py
 python tests/test_trace.py

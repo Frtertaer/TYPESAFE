@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -678,6 +679,18 @@ class CompactTests(unittest.TestCase):
     def test_history_drop_is_not_default(self):
         self.assertEqual(C.main(["missing.json"]), 2)
 
+    def test_self_test_runs_offline(self):
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = C.main(["--self-test", "--json"])
+        self.assertEqual(rc, 0)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["self_test"], "ok")
+        self.assertTrue(all(out["checks"].values()))
+
 
 def _call(**kw):
     base = dict(
@@ -878,7 +891,7 @@ class InternalsTests(unittest.TestCase):
 
         class FakeJev:
             @staticmethod
-            def load_policy(path):
+            def load_policy(path=None):
                 seen["policy_path"] = path
                 return {"fake": True}
 
@@ -889,7 +902,9 @@ class InternalsTests(unittest.TestCase):
 
         with patch.object(C, "load_jev", return_value=FakeJev):
             C.jev_asker({"a": 1}, {"q": {}})
-        self.assertTrue(str(seen["policy_path"]).endswith("policy.json"))
+        # no explicit path — load_policy() falls back to the pack
+        # policy.json and honors the JEV_POLICY override
+        self.assertIsNone(seen["policy_path"])
         self.assertEqual(seen["policy"], {"fake": True})
 
 
@@ -1142,6 +1157,76 @@ class CompactCliTests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("--history", err.getvalue())
 
+    def test_md_emits_markdown_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0", "--md"]
+                )
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertTrue(out.startswith("# compact result"))
+            self.assertIn("messages:", out)
+            self.assertIn("chars:", out)
+            self.assertIn("fallback:", out)
+
+    def test_md_writes_markdown_to_output_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            out_f = Path(tmp) / "plan.md"
+            with patch.object(sys, "stdout", io.StringIO()):
+                rc = C.main(
+                    [
+                        str(f), "--history", "--fake", "--min-reduction", "0",
+                        "--md", "-o", str(out_f),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            text = out_f.read_text(encoding="utf-8")
+            self.assertTrue(text.startswith("# compact result"))
+
+    def test_min_messages_returns_transcript_untouched(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            transcript = self._transcript()
+            f.write_text(json.dumps(transcript), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [
+                        str(f), "--history", "--fake", "--min-reduction", "0",
+                        "--min-messages", "10", "--json",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["stats"]["skipped"], "min_messages")
+            self.assertEqual(payload["stats"]["calls"], 0)
+            self.assertEqual(
+                len(payload["messages"]), len(transcript)
+            )
+
+    def test_min_messages_passes_when_above_floor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [
+                        str(f), "--history", "--fake", "--min-reduction", "0",
+                        "--min-messages", "2", "--json",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertNotIn("skipped", payload["stats"])
+            self.assertGreaterEqual(payload["stats"]["calls"], 1)
+
     def test_fake_compact_stdout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"
@@ -1154,6 +1239,59 @@ class CompactCliTests(unittest.TestCase):
         self.assertIn("messages", out)
         self.assertEqual(out["stats"]["calls"], 1)
         self.assertIn(out["decisions"][0]["action"], ("drop_result", "drop_call", "keep", "kept"))
+
+    def test_compact_is_idempotent(self) -> None:
+        # compacting an already-compacted transcript yields the same payload
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf1 = io.StringIO()
+            with patch.object(sys, "stdout", buf1):
+                rc1 = C.main([str(f), "--history", "--fake", "--min-reduction", "0"])
+            self.assertEqual(rc1, 0)
+            f2 = Path(tmp) / "t2.json"
+            f2.write_text(buf1.getvalue(), encoding="utf-8")
+            buf2 = io.StringIO()
+            with patch.object(sys, "stdout", buf2):
+                rc2 = C.main([str(f2), "--history", "--fake", "--min-reduction", "0"])
+            self.assertEqual(rc2, 0)
+            out1, out2 = json.loads(buf1.getvalue()), json.loads(buf2.getvalue())
+            # ms is wall-time and legitimately differs between runs
+            out1["stats"].pop("ms", None)
+            out2["stats"].pop("ms", None)
+            self.assertEqual(out1, out2)
+
+    def test_jq_prints_one_field_of_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main([str(f), "--history", "--fake", "--min-reduction", "0", "--jq", "stats.calls"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), 1)
+            with patch.object(sys, "stderr", io.StringIO()) as err:
+                rc = C.main([str(f), "--history", "--fake", "--min-reduction", "0", "--jq", "nope.x"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --jq key", err.getvalue())
+
+    def test_explain_prints_decision_lines_to_stderr(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            err = io.StringIO()
+            with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", err
+            ):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0", "--explain"]
+                )
+            self.assertEqual(rc, 0)
+            lines = [l for l in err.getvalue().splitlines() if l.startswith("explain:")]
+            self.assertEqual(len(lines), 1)
+            self.assertIn("action=", lines[0])
+            self.assertIn("reason=", lines[0])
+            self.assertIn("keepCall=", lines[0])
 
     def test_output_file_and_stdin(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1175,6 +1313,344 @@ class CompactCliTests(unittest.TestCase):
             out = json.loads(buf.getvalue())
         self.assertTrue(out["stats"]["fallback"])
         self.assertEqual(out["stats"]["messagesAfter"], out["stats"]["messagesBefore"])
+
+    def test_apply_decisions_no_spill_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp) / "spill"
+            long_text = "x" * 1000
+            messages = [
+                msg("user", "goal"),
+                msg("assistant", "", [use("u1", "Read", {"file_path": "a.ts"})]),
+                msg("user", "", results=[result("u1", long_text)]),
+                msg("assistant", "ok"),
+            ]
+            calls = C.collect_tool_calls(messages, 0)
+            decisions = [
+                {
+                    "id": calls[0].id,
+                    "tool": "Read",
+                    "keepCall": 0.9,
+                    "keepResult": 0.1,
+                    "action": "drop_result",
+                    "reason": "result_dropped",
+                }
+            ]
+            with patch.dict(os.environ, {"JEV_CONSULT_SPILL": str(spill_dir)}):
+                kept = C.apply_decisions(
+                    messages, decisions, calls, 300, spill_enabled=False
+                )
+                blob = json.dumps(kept)
+                self.assertIn("fast-jev-compaction truncated", blob)
+                self.assertNotIn("full output saved", blob)
+                self.assertFalse(spill_dir.exists())
+                # control: enabled writes the spill file
+                kept2 = C.apply_decisions(
+                    messages, decisions, calls, 300, spill_enabled=True
+                )
+                self.assertIn("full output saved", json.dumps(kept2))
+                self.assertTrue(spill_dir.exists() and any(spill_dir.iterdir()))
+
+    def test_dry_run_json_stats_only_and_no_spill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            spill_dir = Path(tmp) / "spill"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf), patch.dict(
+                os.environ, {"JEV_CONSULT_SPILL": str(spill_dir)}
+            ):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0",
+                     "--dry-run", "--json"]
+                )
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertTrue(out["dry_run"])
+            self.assertIn("stats", out)
+            self.assertNotIn("messages", out)
+            stats = out["stats"]
+            self.assertTrue(stats["dry_run"])
+            self.assertEqual(stats["messagesAfter"], stats["messagesBefore"])
+            # dry-run never writes spill payloads
+            self.assertFalse(spill_dir.exists() and any(spill_dir.iterdir()))
+
+    def test_dry_run_without_json_still_emits_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0",
+                     "--dry-run"]
+                )
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertIn("messages", out)
+            self.assertTrue(out["stats"]["dry_run"])
+
+    def test_watch_jq_prints_only_the_named_tick_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", buf), patch.object(
+                    sys, "stderr", io.StringIO()
+                ):
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0",
+                         "--watch", "0.01", "--jq", "fallback"]
+                    )
+        self.assertEqual(rc, 0)
+        lines = [l for l in buf.getvalue().splitlines() if l.strip()]
+        self.assertEqual(lines, ["false", "false"])
+
+    def test_watch_emits_stats_ticks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0",
+                         "--watch", "0.01"]
+                    )
+        self.assertEqual(rc, 0)
+        ticks = [
+            json.loads(l) for l in buf.getvalue().splitlines() if l.startswith("{")
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertTrue(all("charsBefore" in t and "reduction" in t for t in ticks))
+        self.assertTrue(all(t["fallback"] is False for t in ticks))
+
+    def test_watch_writes_stderr_tick_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            err = io.StringIO()
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", io.StringIO()):
+                    with patch.object(sys, "stderr", err):
+                        rc = C.main(
+                            [str(f), "--history", "--fake", "--min-reduction", "0",
+                             "--watch", "0.01"]
+                        )
+        self.assertEqual(rc, 0)
+        lines = [l for l in err.getvalue().splitlines() if l.startswith("watch tick=")]
+        self.assertEqual(len(lines), 2)
+        self.assertIn("fallback=False", lines[0])
+
+    def test_watch_rc_1_on_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "1"}):
+                with patch.object(sys, "stdout", io.StringIO()):
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0.99",
+                         "--watch", "0.01"]
+                    )
+        self.assertEqual(rc, 1)
+
+    def test_watch_fail_fast_breaks_on_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "5"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0.99",
+                         "--watch", "0.01", "--fail-fast"]
+                    )
+            self.assertEqual(rc, 1)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 1)
+            self.assertTrue(ticks[0]["fallback"])
+
+    def test_watch_fail_fast_keeps_running_when_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0",
+                         "--watch", "0.01", "--fail-fast"]
+                    )
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+
+    def test_watch_tick_reports_elapsed_s(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "1"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0",
+                         "--watch", "0.01"]
+                    )
+            self.assertEqual(rc, 0)
+            tick = json.loads(
+                next(l for l in buf.getvalue().splitlines() if l.startswith("{"))
+            )
+            self.assertIsInstance(tick["elapsed_s"], float)
+            self.assertGreaterEqual(tick["elapsed_s"], 0.0)
+
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            out = Path(tmp) / "ticks.jsonl"
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "2"}):
+                with patch.object(sys, "stdout", buf):
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0",
+                         "--watch", "0.01", "--out", str(out)]
+                    )
+            self.assertEqual(rc, 0)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("reduction" in t for t in lines))
+
+    def test_watch_verdict_writes_final_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            verdict = Path(tmp) / "v.json"
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "1"}):
+                with patch.object(sys, "stdout", io.StringIO()):
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0",
+                         "--watch", "0.01", "--verdict", str(verdict)]
+                    )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "ok")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertFalse(payload["fallback"])
+            self.assertIn("reduction", payload)
+
+    def test_watch_verdict_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            verdict = Path(tmp) / "v.json"
+            with patch.dict(os.environ, {"JEV_COMPACT_WATCH_MAX": "1"}):
+                with patch.object(sys, "stdout", io.StringIO()):
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0.99",
+                         "--watch", "0.01", "--verdict", str(verdict)]
+                    )
+            self.assertEqual(rc, 1)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "fallback")
+            self.assertTrue(payload["fallback"])
+
+    def test_nonwatch_verdict_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            verdict = Path(tmp) / "v.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0",
+                     "--verdict", str(verdict)]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "ok")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertFalse(payload["fallback"])
+            self.assertIn("reduction", payload)
+
+    def test_nonwatch_verdict_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            verdict = Path(tmp) / "v.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0.99",
+                     "--verdict", str(verdict)]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "fallback")
+            self.assertTrue(payload["fallback"])
+
+    def test_check_exits_1_below_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0.99", "--check"]
+                )
+            self.assertEqual(rc, 1)
+            self.assertIn("check: FAIL", buf.getvalue())
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0", "--check"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertIn("check: ok", buf.getvalue())
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [
+                        str(f),
+                        "--history",
+                        "--fake",
+                        "--min-reduction",
+                        "0.99",
+                        "--check",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(rc, 1)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["check"], "FAIL")
+            self.assertEqual(out["min_reduction"], 0.99)
+            self.assertEqual(out["rc"], 1)
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [
+                        str(f),
+                        "--history",
+                        "--fake",
+                        "--min-reduction",
+                        "0",
+                        "--check",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["check"], "ok")
+            self.assertEqual(out["rc"], 0)
 
     def test_trace_file_loads(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1236,7 +1712,7 @@ class BatchDirTests(unittest.TestCase):
             self.assertEqual(len(rows), 2)
             self.assertTrue(all(r["ok"] for r in rows))
             self.assertEqual({r["file"] for r in rows}, {"a.json", "b.json"})
-            self.assertEqual(lines[-1], "batch: 2 file(s)")
+            self.assertTrue(lines[-1].startswith("batch: 2 file(s), 2 ok,"))
 
     def test_dir_uppercase_suffix(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1262,6 +1738,25 @@ class BatchDirTests(unittest.TestCase):
             by_file = {r["file"]: r for r in rows}
             self.assertTrue(by_file["good.json"]["ok"])
             self.assertFalse(by_file["bad.json"]["ok"])
+
+    def test_dir_json_emits_single_result_object(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self._write_transcript(d, "a.json")
+            self._write_transcript(d, "b.json")
+            (d / "bad.json").write_text("{{{", encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    ["--dir", str(d), "--history", "--fake", "--min-reduction", "0", "--json"]
+                )
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue().strip())
+            self.assertEqual(out["count"], 3)
+            self.assertEqual(out["ok"], 2)
+            self.assertEqual(len(out["files"]), 3)
+            self.assertIn("chars_in", out)
+            self.assertIn("chars_out", out)
 
 
 class StatsFlagTests(unittest.TestCase):
@@ -1343,6 +1838,44 @@ class StatsFlagTests(unittest.TestCase):
             self.assertIn("charsBefore", stats)
             self.assertIn("kept", stats)
 
+    def test_report_writes_stats_json_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._transcript_file(tmp)
+            report = Path(tmp) / "report.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                rc = C.main(
+                    [
+                        str(path),
+                        "--history",
+                        "--fake",
+                        "--min-reduction",
+                        "0",
+                        "--report",
+                        str(report),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            stats = json.loads(report.read_text(encoding="utf-8"))
+            self.assertIn("charsBefore", stats)
+            self.assertIn("kept", stats)
+            # unwritable report path -> rc 1, no crash
+            bad = Path(tmp) / "no-dir" / "r.json"
+            with patch.object(sys, "stdout", io.StringIO()), patch.object(
+                sys, "stderr", io.StringIO()
+            ):
+                rc = C.main(
+                    [
+                        str(path),
+                        "--history",
+                        "--fake",
+                        "--min-reduction",
+                        "0",
+                        "--report",
+                        str(bad),
+                    ]
+                )
+            self.assertEqual(rc, 1)
+
 
 class PruneSpillTests(unittest.TestCase):
     def _spill_dir(self, tmp: str) -> Path:
@@ -1420,6 +1953,184 @@ class ListSpillTests(unittest.TestCase):
             out = buf.getvalue()
             self.assertIn("%s 5 " % f, out)
             self.assertIn("1 spill files", out)
+
+    def test_cli_verify_spill_checks_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            existing = Path(tmp) / "a.txt"
+            existing.write_text("x", encoding="utf-8")
+            doc = Path(tmp) / "out.txt"
+            doc.write_text(
+                "head [fast-jev-compaction truncated 9 chars of this tool result "
+                "(error); full output saved: %s]\n"
+                "and [truncated 1; full output saved: %s]\n" % (existing, Path(tmp) / "gone.txt"),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--verify-spill", str(doc)])
+            self.assertEqual(rc, 1)
+            out = buf.getvalue()
+            self.assertIn("ok %s" % existing, out)
+            self.assertIn("missing %s" % (Path(tmp) / "gone.txt"), out)
+            self.assertIn("2 refs, 1 missing", out)
+            doc.write_text("no refs here", encoding="utf-8")
+            with patch("sys.stdout", buf):
+                rc = C.main(["--verify-spill", str(doc)])
+            self.assertEqual(rc, 0)
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = C.main(["--verify-spill", str(Path(tmp) / "nope.txt")])
+            self.assertEqual(rc, 2)
+
+    def test_cli_verify_spill_matches_emitted_marker(self) -> None:
+        # abridge_live emits "full output saved: PATH …]" — the ref ends
+        # at the space-ellipsis, not at ']' glued to the path
+        with tempfile.TemporaryDirectory() as tmp:
+            existing = Path(tmp) / "spillfile.txt"
+            existing.write_text("x", encoding="utf-8")
+            doc = Path(tmp) / "out.txt"
+            doc.write_text(
+                "head\n[… 9000 chars omitted; full output saved: %s …]\ntail\n"
+                % existing,
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--verify-spill", str(doc)])
+            self.assertEqual(rc, 0)
+            self.assertIn("1 refs, 0 missing", buf.getvalue())
+
+    def test_cli_orphan_spill_lists_unreferenced(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            used = target / "used.txt"
+            free = target / "free.txt"
+            used.write_text("u", encoding="utf-8")
+            free.write_text("f", encoding="utf-8")
+            doc = Path(tmp) / "out.txt"
+            doc.write_text(
+                "[truncated 1; full output saved: %s]" % used, encoding="utf-8"
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(
+                    ["--orphan-spill", str(doc), "--spill-dir", str(target)]
+                )
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertIn("orphan: %s" % free, out)
+            self.assertNotIn("orphan: %s" % used, out)
+            self.assertIn("1 orphans", out)
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = C.main(["--orphan-spill", str(Path(tmp) / "nope.txt")])
+            self.assertEqual(rc, 2)
+
+    def test_cli_verify_spill_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            existing = Path(tmp) / "a.txt"
+            existing.write_text("x", encoding="utf-8")
+            gone = Path(tmp) / "gone.txt"
+            doc = Path(tmp) / "out.txt"
+            doc.write_text(
+                "[full output saved: %s] [full output saved: %s]"
+                % (existing, gone),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--verify-spill", str(doc), "--json"])
+            self.assertEqual(rc, 1)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(len(payload["refs"]), 2)
+            self.assertEqual(payload["missing"], [str(gone)])
+            self.assertFalse(payload["ok"])
+
+    def test_cli_orphan_spill_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            used = target / "used.txt"
+            free = target / "free.txt"
+            used.write_text("u", encoding="utf-8")
+            free.write_text("f", encoding="utf-8")
+            doc = Path(tmp) / "out.txt"
+            doc.write_text(
+                "[full output saved: %s]" % used, encoding="utf-8"
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(
+                    ["--orphan-spill", str(doc), "--spill-dir", str(target), "--json"]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["count"], 1)
+            self.assertEqual(payload["orphans"], [str(free)])
+
+    def test_cli_list_spill_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            (target / "a.txt").write_text("x" * 3, encoding="utf-8")
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(
+                    ["--list-spill", "--spill-dir", str(target), "--json"]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["count"], 1)
+            self.assertEqual(payload["files"][0]["size"], 3)
+
+    def test_cli_prune_spill_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            stale = target / "a.txt"
+            stale.write_text("x" * 3, encoding="utf-8")
+            import os as _os
+            import time as _time
+
+            old = _time.time() - 10
+            _os.utime(stale, (old, old))
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(
+                    [
+                        "--prune-spill", "5",
+                        "--spill-dir", str(target),
+                        "--json",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["count"], 1)
+            self.assertFalse((target / "a.txt").exists())
+
+    def test_cli_list_spill_out_writes_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            (target / "f.txt").write_text("y" * 5, encoding="utf-8")
+            out_path = Path(tmp) / "list.txt"
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = C.main(
+                    [
+                        "--list-spill",
+                        "--spill-dir",
+                        str(target),
+                        "--out",
+                        str(out_path),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            text = out_path.read_text(encoding="utf-8")
+            self.assertIn("f.txt 5 ", text)
+            self.assertIn("1 spill files", text)
+            self.assertIn("wrote", err.getvalue())
 
 
 class KeepTextTests(unittest.TestCase):
@@ -1704,6 +2415,170 @@ class DryRunTests(unittest.TestCase):
             out = _json.loads(buf.getvalue())
             self.assertTrue(out["stats"]["dry_run"])
             self.assertEqual(len(out["messages"]), len(messages))
+
+
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import time as _time
+
+        transcript = [
+            {"role": "user", "content": "read the file"},
+            {"role": "assistant", "content": "done"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(transcript), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {"JEV_COMPACT_WATCH_MAX": "0", "JEV_COMPACT_WATCH_SECS": "0.05"},
+            ):
+                with patch.object(sys, "stdout", buf):
+                    start = _time.time()
+                    rc = C.main(
+                        [str(f), "--history", "--fake", "--min-reduction", "0",
+                         "--watch", "0.02"]
+                    )
+            self.assertEqual(rc, 0)
+            self.assertLess(_time.time() - start, 2.0)
+            ticks = [
+                l for l in buf.getvalue().splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
+class SpillGcTests(unittest.TestCase):
+    def test_spill_prunes_oldest_beyond_max_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp)
+            oldest = None
+            for i in range(C.SPILL_MAX_FILES + 5):
+                p = C.spill("old-%d" % i, spill_dir)
+                self.assertIsNotNone(p)
+                # deterministic order: ascending mtime, oldest first
+                os.utime(p, (i, i))
+                if i == 0:
+                    oldest = p
+            p = C.spill("fresh", spill_dir)
+            self.assertIsNotNone(p)
+            files = [
+                f
+                for f in spill_dir.iterdir()
+                if f.is_file() and f.name != "index.jsonl"
+            ]
+            self.assertLessEqual(len(files), C.SPILL_MAX_FILES)
+            self.assertTrue(p.is_file())
+            self.assertFalse(oldest.exists())
+
+    def test_spill_keeps_under_caps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp)
+            paths = [C.spill("keep-%d" % i, spill_dir) for i in range(3)]
+            for p in paths:
+                self.assertTrue(p.is_file())
+            self.assertEqual(
+                len(
+                    [
+                        f
+                        for f in spill_dir.iterdir()
+                        if f.is_file() and f.name != "index.jsonl"
+                    ]
+                ),
+                3,
+            )
+
+    def test_spill_writes_index_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp)
+            path = C.spill("payload text", spill_dir)
+            self.assertIsNotNone(path)
+            index = spill_dir / "index.jsonl"
+            self.assertTrue(index.is_file())
+            rows = [
+                json.loads(line)
+                for line in index.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["name"], path.name)
+            self.assertEqual(rows[0]["bytes"], path.stat().st_size)
+            self.assertIsInstance(rows[0]["ts"], (int, float))
+
+    def test_list_spill_uses_index_and_skips_index_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp)
+            path = C.spill("payload text", spill_dir)
+            rows = C.list_spill(spill_dir)
+            self.assertEqual([r[0] for r in rows], [path])
+            self.assertEqual(rows[0][1], path.stat().st_size)
+            # a hand-written file with no index row still lists via stat
+            stray = spill_dir / "stray.txt"
+            stray.write_text("stray", encoding="utf-8")
+            rows = C.list_spill(spill_dir)
+            self.assertEqual({r[0].name for r in rows}, {path.name, "stray.txt"})
+            self.assertNotIn("index.jsonl", [r[0].name for r in rows])
+            removed = C.prune_spill(spill_dir, older_than=0, now=time.time() + 60)
+            self.assertEqual({p.name for p in removed}, {path.name, "stray.txt"})
+            self.assertTrue((spill_dir / "index.jsonl").is_file())
+
+    def test_spill_stats_reports_totals(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp)
+            C.spill("one", spill_dir)
+            C.spill("two two", spill_dir)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = C.main(["--spill-stats", "--spill-dir", str(spill_dir), "--json"])
+            self.assertEqual(rc, 0)
+            stats = json.loads(buf.getvalue())
+            self.assertEqual(stats["count"], 2)
+            self.assertEqual(stats["bytes"], 3 + 7)
+            self.assertIsNotNone(stats["oldest_ts"])
+            self.assertLessEqual(stats["oldest_ts"], stats["newest_ts"])
+            self.assertEqual(stats["dir"], str(spill_dir))
+
+    def test_spill_stats_text_and_empty_dir(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp) / "empty"
+            spill_dir.mkdir()
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = C.main(["--spill-stats", "--spill-dir", str(spill_dir)])
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertIn("count 0", out)
+            self.assertIn("bytes 0", out)
+            self.assertIn("oldest_ts -", out)
+
+    def test_spill_stats_out_writes_file(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spill_dir = Path(tmp) / "spill"
+            spill_dir.mkdir()
+            C.spill("data", spill_dir)
+            out_f = Path(tmp) / "stats.txt"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = C.main(
+                    [
+                        "--spill-stats",
+                        "--spill-dir",
+                        str(spill_dir),
+                        "--out",
+                        str(out_f),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue(), "")
+            text = out_f.read_text(encoding="utf-8")
+            self.assertIn("count 1", text)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -83,6 +84,56 @@ class InventoryHookTests(unittest.TestCase):
             note = out["hookSpecificOutput"]["additionalContext"]
             self.assertEqual(note.count("- skill"), 1)
             self.assertGreater(HOOK.LAST_DECISION["shortlist_n"], 1)
+
+    def test_last_decision_records_shortlist_score_avg(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            HOOK.handle(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "Add JWT access tokens in Python",
+                    "cwd": tmp,
+                },
+                items=items,
+                harness="claude-code",
+                pick_fn=skip_pick,
+            )
+            avg = HOOK.LAST_DECISION["shortlist_score_avg"]
+            self.assertIsInstance(avg, float)
+            self.assertGreater(avg, 0)
+
+    def test_avg_score_none_for_empty_query(self) -> None:
+        self.assertIsNone(HOOK._avg_score([{"name": "x"}], [], ""))
+
+    def test_hook_limit_env_narrows_shortlist(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_LIMIT": "1"}):
+                HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "jwt scan",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            self.assertEqual(HOOK.LAST_DECISION.get("shortlist_n"), 1)
+            tmp2 = Path(tmp) / "other"
+            tmp2.mkdir()
+            with patch.dict(os.environ, {"JEV_HOOK_LIMIT": "3"}):
+                HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "jwt scan",
+                        "cwd": str(tmp2),
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            self.assertEqual(HOOK.LAST_DECISION.get("shortlist_n"), 2)
 
     def test_max_age_env_skips_stale_prompt(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
@@ -201,6 +252,854 @@ class InventoryHookTests(unittest.TestCase):
             self.assertIn("ascii-art", note)
             self.assertTrue(HOOK.LAST_DECISION["explicit"])
             self.assertEqual(HOOK.LAST_DECISION["jev_status"], "winner")
+            self.assertEqual(HOOK.LAST_DECISION["question"], "env")
+            self.assertEqual(HOOK.LAST_DECISION["reason"], "pick forced by JEV_HOOK_WINNER")
+
+    def test_last_decision_reason_per_status(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "Add JWT access tokens in Python",
+                "cwd": tmp,
+            }
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=skip_pick)
+            self.assertEqual(
+                HOOK.LAST_DECISION["reason"], "event skipped by hook config"
+            )
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=skip_pick)
+            self.assertEqual(
+                HOOK.LAST_DECISION["reason"],
+                "same prompt inside a fresh sidecar; picks reused without a Jev call",
+            )
+
+            def winner_pick(*_args, **_kwargs):
+                return {
+                    "status": "winner",
+                    "winner": {"kind": "skill", "name": "jwt-auth"},
+                    "question": "load_tools",
+                }
+
+            payload2 = dict(payload, prompt="refresh JWT tokens in Python", cwd=str(Path(tmp) / "other"))
+            HOOK.handle(payload2, items=items, harness="claude-code", pick_fn=winner_pick)
+            self.assertEqual(
+                HOOK.LAST_DECISION["reason"],
+                "jev picked jwt-auth from the shortlist",
+            )
+
+    def test_hook_note_env_tags_last_decision(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_NOTE": "ci-run-42"}):
+                HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "Add JWT access tokens in Python",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            self.assertEqual(HOOK.LAST_DECISION["note"], "ci-run-42")
+            sidecar = json.loads(
+                (Path(tmp) / ".jev-tools.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(sidecar.get("note"), "ci-run-42")
+            # a second run without the env drops the tag
+            HOOK.handle(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "fresh prompt",
+                    "cwd": str(Path(tmp) / "o"),
+                },
+                items=items,
+                harness="claude-code",
+                pick_fn=skip_pick,
+            )
+            self.assertNotIn("note", HOOK.LAST_DECISION)
+
+    def test_hook_note_env_tags_miss_marker(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_NOTE": "nightly"}):
+                HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "zzzqqq unrelated tokens",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            miss = json.loads(
+                (Path(tmp) / ".jev-tools-miss.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(miss.get("note"), "nightly")
+
+    def test_hook_note_env_truncates_at_120(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_NOTE": "x" * 200}):
+                HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "jwt tokens",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            self.assertEqual(HOOK.LAST_DECISION["note"], "x" * 120)
+
+    def test_question_marks_pick_source(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "Add JWT access tokens in Python",
+                "cwd": tmp,
+            }
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=skip_pick)
+            self.assertIsNone(HOOK.LAST_DECISION["question"])
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=skip_pick)
+            self.assertEqual(HOOK.LAST_DECISION["question"], "dedupe")
+
+    def test_last_decision_records_sidecar_age(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "Add JWT access tokens in Python",
+                "cwd": tmp,
+            }
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=skip_pick)
+            self.assertIsNone(HOOK.LAST_DECISION["sidecar_age_s"])
+            sidecar_path = Path(tmp) / ".jev-tools.json"
+            blob = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            blob["written_at"] = int(blob["written_at"]) - 42
+            sidecar_path.write_text(json.dumps(blob), encoding="utf-8")
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=skip_pick)
+            self.assertEqual(HOOK.LAST_DECISION["sidecar_age_s"], 42)
+            self.assertEqual(HOOK.LAST_DECISION["question"], "dedupe")
+
+    def test_stale_sidecar_triggers_repick(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        calls = []
+
+        def counting_pick(*args, **kwargs):
+            calls.append(1)
+            return skip_pick(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "Add JWT access tokens in Python",
+                "cwd": tmp,
+            }
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=counting_pick)
+            self.assertEqual(len(calls), 1)
+            self.assertFalse(HOOK.LAST_DECISION["stale_sidecar"])
+            sidecar_path = Path(tmp) / ".jev-tools.json"
+            blob = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            blob["written_at"] = int(blob["written_at"]) - (INV.sidecar_ttl_seconds() + 60)
+            sidecar_path.write_text(json.dumps(blob), encoding="utf-8")
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=counting_pick)
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(HOOK.LAST_DECISION["stale_sidecar"])
+            self.assertNotEqual(HOOK.LAST_DECISION["question"], "dedupe")
+            self.assertFalse(HOOK.LAST_DECISION.get("dedupe"))
+
+    def test_watch_file_emits_ticks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {
+                        "event": "UserPromptSubmit",
+                        "prompt": "jwt",
+                        "cwd": str(cwd),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ, {"JEV_HOOK_WATCH_MAX": "2", "JEV_HOOK_OFF": "1"}
+            ):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(
+                        ["--file", str(payload), "--watch", "0.01"]
+                    )
+            self.assertEqual(rc, 1)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(t["keys"] == [] for t in ticks))
+            self.assertTrue(all(t["winner"] is None for t in ticks))
+
+    def test_self_test_runs_emit_machinery(self) -> None:
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            rc = HOOK.main(["--self-test"])
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", buf.getvalue())
+        self.assertIn("explicit_winner=ok", buf.getvalue())
+        self.assertIn("miss_written=ok", buf.getvalue())
+
+    def test_watch_fail_fast_breaks_on_winnerless_tick(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload.json"
+            payload.write_text(
+                '{"event": "UserPromptSubmit", "prompt": "p"}', encoding="utf-8"
+            )
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ, {"JEV_HOOK_WATCH_MAX": "9", "JEV_HOOK_OFF": "1"}
+            ):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(
+                        ["--file", str(payload), "--watch", "0.01", "--fail-fast"]
+                    )
+            self.assertEqual(rc, 1)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 1)
+            self.assertIsNone(ticks[0]["winner"])
+
+    def test_watch_writes_stderr_tick_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload.json"
+            payload.write_text(
+                '{"event": "UserPromptSubmit", "prompt": "p"}', encoding="utf-8"
+            )
+            err = io.StringIO()
+            with patch.dict(
+                os.environ, {"JEV_HOOK_WATCH_MAX": "2", "JEV_HOOK_OFF": "1"}
+            ):
+                with patch("sys.stdout", io.StringIO()):
+                    with patch("sys.stderr", err):
+                        rc = HOOK.main(
+                            ["--file", str(payload), "--watch", "0.01"]
+                        )
+            self.assertEqual(rc, 1)
+            lines = [
+                l for l in err.getvalue().splitlines() if l.startswith("watch tick=")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertIn("winner=-", lines[0])
+
+    def test_watch_tick_reports_winner_changed(self) -> None:
+        calls = []
+
+        def fake_handle(payload):
+            calls.append(1)
+            HOOK.LAST_DECISION = {"winner": {"name": "w%d" % len(calls)}}
+            return {"note": "x"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload.json"
+            payload.write_text('{"event": "UserPromptSubmit", "prompt": "p"}',
+                               encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_HOOK_WATCH_MAX": "2"}):
+                with patch.object(HOOK, "handle", side_effect=fake_handle):
+                    with patch("sys.stdout", buf):
+                        rc = HOOK.main(["--file", str(payload), "--watch", "0.01"])
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 2)
+            self.assertFalse(ticks[0]["winner_changed"])
+            self.assertTrue(ticks[1]["winner_changed"])
+
+    def test_watch_verdict_reports_winner_stability(self) -> None:
+        winners = iter(["a-tool", "b-tool"])
+
+        def fake_handle(payload):
+            HOOK.LAST_DECISION = {"winner": {"name": next(winners)}}
+            return {"note": "x"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload.json"
+            payload.write_text('{"event": "UserPromptSubmit", "prompt": "p"}',
+                               encoding="utf-8")
+            verdict = Path(tmp) / "verdict.json"
+            with patch.dict(os.environ, {"JEV_HOOK_WATCH_MAX": "2"}):
+                with patch.object(HOOK, "handle", side_effect=fake_handle):
+                    with patch("sys.stdout", io.StringIO()):
+                        rc = HOOK.main(
+                            [
+                                "--file", str(payload),
+                                "--watch", "0.01",
+                                "--verdict", str(verdict),
+                            ]
+                        )
+            self.assertEqual(rc, 0)
+            out = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(out["winner_stability"], 2)
+            self.assertEqual(out["winner"], "b-tool")
+            self.assertEqual(out["winner_changes"], 1)
+            self.assertEqual(out["winner_flap_rate"], 0.5)
+
+    def test_watch_verdict_flap_rate_zero_when_stable(self) -> None:
+        def fake_handle(payload):
+            HOOK.LAST_DECISION = {"winner": {"name": "same"}}
+            return {"note": "x"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload.json"
+            payload.write_text('{"event": "UserPromptSubmit", "prompt": "p"}',
+                               encoding="utf-8")
+            verdict = Path(tmp) / "verdict.json"
+            with patch.dict(os.environ, {"JEV_HOOK_WATCH_MAX": "2"}):
+                with patch.object(HOOK, "handle", side_effect=fake_handle):
+                    with patch("sys.stdout", io.StringIO()):
+                        rc = HOOK.main(
+                            [
+                                "--file", str(payload),
+                                "--watch", "0.01",
+                                "--verdict", str(verdict),
+                            ]
+                        )
+            self.assertEqual(rc, 0)
+            out = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(out["winner_changes"], 0)
+            self.assertEqual(out["winner_flap_rate"], 0.0)
+
+    def test_watch_verdict_winner_stability_one_when_stable(self) -> None:
+        def fake_handle(payload):
+            HOOK.LAST_DECISION = {"winner": {"name": "same"}}
+            return {"note": "x"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload.json"
+            payload.write_text('{"event": "UserPromptSubmit", "prompt": "p"}',
+                               encoding="utf-8")
+            verdict = Path(tmp) / "verdict.json"
+            with patch.dict(os.environ, {"JEV_HOOK_WATCH_MAX": "2"}):
+                with patch.object(HOOK, "handle", side_effect=fake_handle):
+                    with patch("sys.stdout", io.StringIO()):
+                        rc = HOOK.main(
+                            [
+                                "--file", str(payload),
+                                "--watch", "0.01",
+                                "--verdict", str(verdict),
+                            ]
+                        )
+            self.assertEqual(rc, 0)
+            out = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(out["winner_stability"], 1)
+
+    def test_watch_tick_winner_changed_false_when_stable(self) -> None:
+        def fake_handle(payload):
+            HOOK.LAST_DECISION = {"winner": {"name": "same"}}
+            return {"note": "x"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload.json"
+            payload.write_text('{"event": "UserPromptSubmit", "prompt": "p"}',
+                               encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_HOOK_WATCH_MAX": "2"}):
+                with patch.object(HOOK, "handle", side_effect=fake_handle):
+                    with patch("sys.stdout", buf):
+                        rc = HOOK.main(["--file", str(payload), "--watch", "0.01"])
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual([t["winner_changed"] for t in ticks], [False, False])
+            self.assertTrue(all(isinstance(t["elapsed_s"], float) for t in ticks))
+            self.assertGreaterEqual(ticks[1]["elapsed_s"], ticks[0]["elapsed_s"])
+
+    def test_watch_rc_0_when_last_tick_has_winner(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {
+                        "event": "UserPromptSubmit",
+                        "prompt": "jwt",
+                        "cwd": str(cwd),
+                        "harness": "claude-code",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            env = {
+                "JEV_HOOK_WATCH_MAX": "1",
+                "JEV_HOOK_WINNER": "ascii-art",
+                "JEV_HOOK_NOSIDECAR": "1",
+                "JEV_HOOK_NOMISS": "1",
+            }
+            with patch.dict(os.environ, env):
+                with patch.object(HOOK, "scan_cached", return_value=items):
+                    with patch("sys.stdout", buf):
+                        rc = HOOK.main(
+                            ["--file", str(payload), "--watch", "0.01"]
+                        )
+            self.assertEqual(rc, 0)
+            ticks = [
+                json.loads(l)
+                for l in buf.getvalue().splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(ticks[0]["winner"], "ascii-art")
+
+    def test_watch_verdict_writes_final_state(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {
+                        "event": "UserPromptSubmit",
+                        "prompt": "jwt",
+                        "cwd": str(cwd),
+                        "harness": "claude-code",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            verdict = cwd / "v.json"
+            env = {
+                "JEV_HOOK_WATCH_MAX": "1",
+                "JEV_HOOK_WINNER": "ascii-art",
+                "JEV_HOOK_NOSIDECAR": "1",
+                "JEV_HOOK_NOMISS": "1",
+            }
+            with patch.dict(os.environ, env):
+                with patch.object(HOOK, "scan_cached", return_value=items):
+                    with patch("sys.stdout", io.StringIO()):
+                        rc = HOOK.main(
+                            [
+                                "--file", str(payload), "--watch", "0.01",
+                                "--verdict", str(verdict),
+                            ]
+                        )
+            self.assertEqual(rc, 0)
+            out = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(out["verdict"], "pass")
+            self.assertEqual(out["ticks"], 1)
+            self.assertEqual(out["winner"], "ascii-art")
+            self.assertIsInstance(out["keys"], list)
+            self.assertEqual(out["keys_count"], len(out["keys"]))
+            self.assertIn("elapsed_s", out)
+
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {"event": "UserPromptSubmit", "prompt": "jwt", "cwd": str(cwd)}
+                ),
+                encoding="utf-8",
+            )
+            out = cwd / "ticks.jsonl"
+            env = {
+                "JEV_HOOK_WATCH_MAX": "2",
+                "JEV_HOOK_OFF": "1",
+            }
+            with patch.dict(os.environ, env):
+                with patch("sys.stdout", io.StringIO()):
+                    HOOK.main(
+                        ["--file", str(payload), "--watch", "0.01",
+                         "--out", str(out)]
+                    )
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("winner" in t and "keys" in t for t in lines))
+
+    def test_file_flag_reads_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text("{}\n", encoding="utf-8")
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--file", str(payload)])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "{}")
+
+    def test_nonwatch_verdict_writes_decision(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {
+                        "event": "UserPromptSubmit",
+                        "prompt": "jwt",
+                        "cwd": str(cwd),
+                        "harness": "claude-code",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            verdict = cwd / "v.json"
+            env = {
+                "JEV_HOOK_WINNER": "ascii-art",
+                "JEV_HOOK_NOSIDECAR": "1",
+                "JEV_HOOK_NOMISS": "1",
+            }
+            with patch.dict(os.environ, env):
+                with patch.object(HOOK, "scan_cached", return_value=items):
+                    with patch("sys.stdout", io.StringIO()):
+                        rc = HOOK.main(
+                            ["--file", str(payload), "--verdict", str(verdict)]
+                        )
+            self.assertEqual(rc, 0)
+            out = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(out["verdict"], "pass")
+            self.assertEqual(out["winner"], "ascii-art")
+            self.assertEqual(out["ticks"], 1)
+
+    def test_nonwatch_verdict_fail_when_no_winner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {"event": "UserPromptSubmit", "prompt": "x", "cwd": str(cwd)}
+                ),
+                encoding="utf-8",
+            )
+            verdict = cwd / "v.json"
+            with patch.dict(os.environ, {"JEV_HOOK_OFF": "1"}):
+                with patch("sys.stdout", io.StringIO()):
+                    rc = HOOK.main(
+                        ["--file", str(payload), "--verdict", str(verdict)]
+                    )
+            self.assertEqual(rc, 0)
+            out = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(out["verdict"], "fail")
+            self.assertIsNone(out["winner"])
+
+    def test_events_flag_lists_allowed_events(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_EVENTS": ""}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--events"])
+        self.assertEqual(rc, 0)
+        names = buf.getvalue().split()
+        self.assertEqual(names, ["UserPromptSubmit", "pre_llm_call"])
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_EVENTS": "b_event,a_event"}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--events"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().split(), ["a_event", "b_event"])
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_EVENTS": ""}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--events", "--json"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            json.loads(buf.getvalue()), ["UserPromptSubmit", "pre_llm_call"]
+        )
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_EVENTS": ""}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--events", "--jsonl"])
+        self.assertEqual(rc, 0)
+        rows = [json.loads(l) for l in buf.getvalue().splitlines()]
+        self.assertEqual(
+            rows, [{"event": "UserPromptSubmit"}, {"event": "pre_llm_call"}]
+        )
+
+    def test_env_flag_reports_resolved_config(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(
+            os.environ,
+            {"JEV_HOOK_LIMIT": "3", "JEV_HOOK_OFF": "1", "JEV_HOOK_WINNER": "ascii-art"},
+        ):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--env"])
+        self.assertEqual(rc, 0)
+        report = json.loads(buf.getvalue())
+        self.assertEqual(report["limit"], 3)
+        self.assertTrue(report["jev_hook_off"])
+        self.assertTrue(report["jev_hook_winner"])
+        self.assertFalse(report["jev_hook_nomiss"])
+        self.assertEqual(report["dedupe_ttl_seconds"], 0.0)
+        self.assertNotIn("api_key", buf.getvalue().lower())
+
+    def test_env_jq_prints_one_value(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_LIMIT": "3"}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--env", "--jq", "limit"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(buf.getvalue()), 3)
+
+    def test_env_jq_bad_key_is_usage_error(self) -> None:
+        buf = io.StringIO()
+        err = io.StringIO()
+        with patch("sys.stdout", buf), patch("sys.stderr", err):
+            rc = HOOK.main(["--env", "--jq", "nope"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(buf.getvalue(), "")
+        self.assertIn("bad --jq key", err.getvalue())
+
+    def test_env_report_includes_cwd_sidecar_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".jev-tools.json").write_text("{}", encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_HOOK_CWD": tmp}):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(["--env"])
+            self.assertEqual(rc, 0)
+            report = json.loads(buf.getvalue())
+            self.assertTrue(report["sidecar_present"])
+            self.assertFalse(report["miss_present"])
+
+    def test_env_report_shows_policy_source(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_POLICY": ""}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--env"])
+        self.assertEqual(rc, 0)
+        report = json.loads(buf.getvalue())
+        self.assertEqual(report["policy"], "default")
+
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_POLICY": "C:/x/policy-copy.json"}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--env"])
+        self.assertEqual(rc, 0)
+        report = json.loads(buf.getvalue())
+        self.assertEqual(report["policy"], "C:/x/policy-copy.json")
+
+    def test_env_out_writes_report_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "env.json"
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_HOOK_LIMIT": "3"}):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(["--env", "--out", str(target)])
+            self.assertEqual(rc, 0)
+            report = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(report["limit"], 3)
+            self.assertEqual(json.loads(buf.getvalue())["limit"], 3)
+
+    def test_hook_skip_events_excludes_events(self) -> None:
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_HOOK_SKIP_EVENTS": "pre_llm_call"}):
+            with patch("sys.stdout", buf):
+                rc = HOOK.main(["--events"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().split(), ["UserPromptSubmit"])
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_SKIP_EVENTS": "UserPromptSubmit"}):
+                out = HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "Add JWT access tokens in Python",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+            self.assertEqual(out, {})
+            self.assertIsNone(HOOK.LAST_DECISION)
+
+    def test_over_budget_flag_when_pick_exceeds_budget(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+
+        def slow_pick(*_a, **_kw):
+            return {"status": "idf", "winner": None, "latency_ms": 99999}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_BUDGET": "12"}):
+                HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "Add JWT access tokens in Python",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=slow_pick,
+                )
+            self.assertEqual(HOOK.LAST_DECISION["budget_ms"], 12000)
+            self.assertTrue(HOOK.LAST_DECISION["over_budget"])
+
+    def test_hook_events_env_overrides_allowed_events(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_HOOK_EVENTS": "pre_llm_call"}):
+                out = HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "Add JWT access tokens in Python",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+                self.assertEqual(out, {})
+            with patch.dict(os.environ, {"JEV_HOOK_EVENTS": "CustomEvent"}):
+                out = HOOK.handle(
+                    {
+                        "hook_event_name": "CustomEvent",
+                        "prompt": "Add JWT access tokens in Python",
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+                self.assertIn("hookSpecificOutput", out)
+
+    def test_dedupe_ttl_forces_repick(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        calls = []
+
+        def counting_pick(*args, **kwargs):
+            calls.append(1)
+            return skip_pick(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "Add JWT access tokens in Python",
+                "cwd": tmp,
+            }
+            HOOK.handle(payload, items=items, harness="claude-code", pick_fn=counting_pick)
+            self.assertEqual(len(calls), 1)
+            sidecar_path = Path(tmp) / ".jev-tools.json"
+            blob = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            blob["written_at"] = int(blob["written_at"]) - 120
+            sidecar_path.write_text(json.dumps(blob), encoding="utf-8")
+            # dedupe TTL off (0): fresh sidecar still dedupes the same prompt
+            with patch.dict(os.environ, {"JEV_HOOK_DEDUPE_TTL": "0"}):
+                HOOK.handle(payload, items=items, harness="claude-code", pick_fn=counting_pick)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(HOOK.LAST_DECISION["question"], "dedupe")
+            # TTL 30 < age 120: repeat prompt re-runs the pick instead of deduping
+            with patch.dict(os.environ, {"JEV_HOOK_DEDUPE_TTL": "30"}):
+                HOOK.handle(payload, items=items, harness="claude-code", pick_fn=counting_pick)
+            self.assertEqual(len(calls), 2)
+            self.assertNotEqual(HOOK.LAST_DECISION["question"], "dedupe")
+            self.assertFalse(HOOK.LAST_DECISION.get("dedupe"))
+
+    def test_dry_run_writes_dry_sidecar_not_live(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        saved = {
+            k: os.environ.get(k)
+            for k in ("JEV_HOOK_NOSIDECAR", "JEV_HOOK_NOMISS")
+        }
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                payload = Path(tmp) / "payload.json"
+                payload.write_text(
+                    json.dumps(
+                        {
+                            "hook_event_name": "UserPromptSubmit",
+                            "prompt": "paint a mural today",
+                            "cwd": tmp,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                buf = io.StringIO()
+                with patch.object(sys, "stdout", buf):
+                    rc = HOOK.main(["--file", str(payload), "--dry-run"])
+                self.assertEqual(rc, 0)
+                self.assertFalse((Path(tmp) / ".jev-tools.json").exists())
+                self.assertFalse((Path(tmp) / ".jev-tools-miss.json").exists())
+                dry = Path(tmp) / ".jev-tools.dry.json"
+                self.assertTrue(dry.exists())
+                data = json.loads(dry.read_text(encoding="utf-8"))
+                self.assertIn("written_at", data)
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    def test_dry_run_no_sidecar_env_writes_nothing(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "paint a mural today",
+                        "cwd": tmp,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"JEV_HOOK_NOSIDECAR": "1"}):
+                buf = io.StringIO()
+                with patch.object(sys, "stdout", buf):
+                    rc = HOOK.main(["--file", str(payload), "--dry-run"])
+            self.assertEqual(rc, 0)
+            self.assertFalse((Path(tmp) / ".jev-tools.json").exists())
+            self.assertFalse((Path(tmp) / ".jev-tools.dry.json").exists())
+
+    def test_dry_run_skips_sidecar_and_miss(self) -> None:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        saved = {
+            k: os.environ.get(k)
+            for k in ("JEV_HOOK_NOSIDECAR", "JEV_HOOK_NOMISS")
+        }
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                payload = Path(tmp) / "payload.json"
+                payload.write_text(
+                    json.dumps(
+                        {
+                            "hook_event_name": "UserPromptSubmit",
+                            "prompt": "paint a mural today",
+                            "cwd": tmp,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                buf = io.StringIO()
+                with patch.object(sys, "stdout", buf):
+                    rc = HOOK.main(["--file", str(payload), "--dry-run"])
+                self.assertEqual(rc, 0)
+                self.assertFalse((Path(tmp) / ".jev-tools.json").exists())
+                self.assertFalse((Path(tmp) / ".jev-tools-miss.json").exists())
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
 
     def test_no_sidecar_env_skips_sidecar_write(self) -> None:
         items = INV.scan("hermes", hermes=FIXTURE)
@@ -784,7 +1683,24 @@ class PickWithJevTests(unittest.TestCase):
         )
         out = HOOK.pick_with_jev("t", "hermes", PICKED)
         self.assertEqual(out["status"], "none")
-        self.assertIsNone(out["winner"])
+
+    def test_post_timeout_message_maps_to_timeout(self) -> None:
+        sys.modules["jev"] = fake_jev(post_exc=SystemExit("Jev network error: timed out"))
+        self.assertEqual(HOOK.pick_with_jev("t", "hermes", PICKED)["status"], "timeout")
+
+    def test_post_timeout_error_maps_to_timeout(self) -> None:
+        sys.modules["jev"] = fake_jev(post_exc=TimeoutError("timed out"))
+        self.assertEqual(HOOK.pick_with_jev("t", "hermes", PICKED)["status"], "timeout")
+
+    def test_post_socket_timeout_maps_to_timeout(self) -> None:
+        import socket
+
+        sys.modules["jev"] = fake_jev(post_exc=socket.timeout("timed out"))
+        self.assertEqual(HOOK.pick_with_jev("t", "hermes", PICKED)["status"], "timeout")
+
+    def test_post_http_systemexit_stays_error(self) -> None:
+        sys.modules["jev"] = fake_jev(post_exc=SystemExit("Jev HTTP 500: nope"))
+        self.assertEqual(HOOK.pick_with_jev("t", "hermes", PICKED)["status"], "error")
 
     def test_strong_winner_sets_fields(self) -> None:
         sys.modules["jev"] = fake_jev(
@@ -826,6 +1742,62 @@ class PickWithJevTests(unittest.TestCase):
         sys.modules["jev"] = FakeJev
         HOOK.pick_with_jev("t", "hermes", PICKED)
         self.assertEqual(seen.get("timeout"), INV.hook_jev_timeout_seconds())
+
+    def test_hook_retries_env_reaches_jev_call(self) -> None:
+        seen = {}
+
+        class FakeJev:
+            @staticmethod
+            def load_api_key():
+                return "k"
+
+            @staticmethod
+            def load_policy(path=None):
+                return {}
+
+            @staticmethod
+            def post_systemone(state, questions, policy, **kwargs):
+                seen.update(kwargs)
+                return {"answers": {}, "model": "fake-0"}
+
+            @staticmethod
+            def decide(ans, policy, irreversible=False):
+                return {"action": "proceed", "picks": {}, "probabilities": {}}
+
+        sys.modules["jev"] = FakeJev
+        with patch.dict(os.environ, {"JEV_HOOK_RETRIES": "2"}):
+            HOOK.pick_with_jev("t", "hermes", PICKED)
+        self.assertEqual(seen.get("retries"), 2)
+
+    def test_hook_timeout_env_overrides(self) -> None:
+        seen = {}
+
+        class FakeJev:
+            @staticmethod
+            def load_api_key():
+                return "k"
+
+            @staticmethod
+            def load_policy(path=None):
+                return {}
+
+            @staticmethod
+            def post_systemone(state, questions, policy, **kwargs):
+                seen.update(kwargs)
+                return {"answers": {}, "model": "fake-0"}
+
+            @staticmethod
+            def decide(ans, policy, irreversible=False):
+                return {"action": "proceed", "picks": {}, "probabilities": {}}
+
+        sys.modules["jev"] = FakeJev
+        with patch.dict(os.environ, {"JEV_HOOK_TIMEOUT": "1.5"}):
+            HOOK.pick_with_jev("t", "hermes", PICKED)
+        self.assertEqual(seen.get("timeout"), 1.5)
+        seen.clear()
+        with patch.dict(os.environ, {"JEV_HOOK_TIMEOUT": "bogus"}):
+            HOOK.pick_with_jev("t", "hermes", PICKED)
+        self.assertEqual(seen.get("timeout"), INV.DEFAULT_HOOK_JEV_TIMEOUT_SECONDS)
 
     def test_retries_defaults_to_policy_value(self) -> None:
         seen = {}
@@ -915,6 +1887,50 @@ class MainLoopTests(unittest.TestCase):
             self.assertIn("jev_status=idf", text)
             self.assertIn("winner=jwt-auth", text)
 
+    def run_main_verbose(self, stdin_text: str, extra_argv=None) -> tuple:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        out_buf, err_buf = io.StringIO(), io.StringIO()
+        argv = ["inventory_hook.py", "--verbose"] + list(extra_argv or [])
+        with patch.object(sys, "argv", argv), patch(
+            "sys.stdin", io.StringIO(stdin_text)
+        ), redirect_stdout(out_buf), redirect_stderr(err_buf):
+            rc = HOOK.main()
+        self.assertEqual(rc, 0)
+        return out_buf.getvalue(), err_buf.getvalue()
+
+    def test_verbose_explains_hook_off(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_OFF": "1"}):
+            out, err = self.run_main_verbose('{"prompt": "x", "event": "UserPromptSubmit"}')
+        self.assertEqual(out.strip(), "{}")
+        self.assertIn("JEV_HOOK_OFF", err)
+
+    def test_verbose_explains_disallowed_event(self) -> None:
+        out, err = self.run_main_verbose('{"prompt": "x", "event": "PostToolUse"}')
+        self.assertEqual(out.strip(), "{}")
+        self.assertIn("not in allowed set", err)
+
+    def test_verbose_explains_missing_prompt(self) -> None:
+        out, err = self.run_main_verbose('{"event": "UserPromptSubmit"}')
+        self.assertEqual(out.strip(), "{}")
+        self.assertIn("no prompt", err)
+
+    def test_verbose_reports_jev_status_when_no_context(self) -> None:
+        decision = {"jev_status": "none"}
+        with patch.object(HOOK, "handle", lambda _p: {}), patch.object(
+            HOOK, "LAST_DECISION", decision
+        ):
+            out, err = self.run_main_verbose('{"prompt": "x"}')
+        self.assertEqual(out.strip(), "{}")
+        self.assertIn("jev_status=none", err)
+
+    def test_verbose_silent_when_context_emitted(self) -> None:
+        with patch.object(HOOK, "handle", lambda _p: {"context": "note"}):
+            out, err = self.run_main_verbose('{"prompt": "x"}')
+        self.assertIn("context", out)
+        self.assertEqual(err, "")
+
     def test_debug_file_bad_path_fails_open(self) -> None:
         decision = {"jev_status": "idf"}
         with patch.object(HOOK, "LAST_DECISION", decision), patch.object(
@@ -944,6 +1960,9 @@ class HandleBranchTests(unittest.TestCase):
             "deep dive",
         )
         self.assertEqual(HOOK.extract_prompt({"userMessage": "m"}), "m")
+        with patch.dict(os.environ, {"JEV_HOOK_PROMPT": " env prompt "}):
+            self.assertEqual(HOOK.extract_prompt({"prompt": "p"}), "p")
+            self.assertEqual(HOOK.extract_prompt({}), "env prompt")
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"JEV_HOOK_CWD": tmp}):
                 self.assertEqual(HOOK.extract_cwd({}), Path(tmp))
@@ -1468,12 +2487,20 @@ class HookE2ETests(unittest.TestCase):
 
     HOOK_PATH = ROOT / "skills" / "jev-consult" / "scripts" / "inventory_hook.py"
 
-    def _run(self, stdin_text: str, cwd: str | None = None, home: str | None = None):
+    def _run(
+        self,
+        stdin_text: str,
+        cwd: str | None = None,
+        home: str | None = None,
+        env_extra: dict | None = None,
+    ):
         import subprocess
 
         env = dict(os.environ)
         env.pop("TYPESAFE_API_KEY", None)
         env["JEV_CONSULT_LOG"] = "0"
+        if env_extra:
+            env.update(env_extra)
         if home:
             env["USERPROFILE"] = home
             env["HOME"] = home
@@ -1491,6 +2518,47 @@ class HookE2ETests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return proc.stdout.strip()
+
+    def test_jq_prints_one_field_of_emitted_payload(self) -> None:
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "p.json"
+            f.write_text(
+                json.dumps(
+                    {"hook_event_name": "UserPromptSubmit", "prompt": "Add JWT", "cwd": tmp}
+                ),
+                encoding="utf-8",
+            )
+            proc = subprocess.run(
+                [sys.executable, str(self.HOOK_PATH), "--file", str(f), "--jq", "context"],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("jev-consult:", json.loads(proc.stdout))
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "p.json"
+            f.write_text(
+                json.dumps(
+                    {"hook_event_name": "UserPromptSubmit", "prompt": "Add JWT", "cwd": tmp}
+                ),
+                encoding="utf-8",
+            )
+            proc = subprocess.run(
+                [sys.executable, str(self.HOOK_PATH), "--file", str(f), "--jq", "nope.x"],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("bad --jq key", proc.stderr)
 
     def test_empty_stdin(self) -> None:
         self.assertEqual(json.loads(self._run("")), {})
@@ -1533,6 +2601,72 @@ class HookE2ETests(unittest.TestCase):
         out = json.loads(self._run(json.dumps({"event": "PostToolUse", "prompt": "x"})))
         self.assertEqual(out, {})
 
+    def test_max_age_skips_stale_payload_e2e(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            stale = json.dumps(
+                {
+                    "event": "UserPromptSubmit",
+                    "prompt": "jwt stuff",
+                    "cwd": str(cwd),
+                    "timestamp": 1700000000,
+                }
+            )
+            out = json.loads(
+                self._run(stale, env_extra={"JEV_HOOK_MAX_AGE": "30"})
+            )
+            self.assertEqual(out, {})
+            fresh = json.dumps(
+                {
+                    "event": "UserPromptSubmit",
+                    "prompt": "jwt stuff",
+                    "cwd": str(cwd),
+                    "timestamp": int(time.time()),
+                }
+            )
+            out = json.loads(
+                self._run(fresh, env_extra={"JEV_HOOK_MAX_AGE": "30"})
+            )
+            self.assertNotEqual(out, {})
+
+    def test_json_flag_echoes_last_decision_to_stderr(self) -> None:
+        import subprocess
+
+        env = dict(os.environ)
+        env.pop("TYPESAFE_API_KEY", None)
+        env["JEV_CONSULT_LOG"] = "0"
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            skill = home / ".hermes" / "skills" / "jwt-stuff"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: jwt-stuff\ndescription: jwt\n---\n", encoding="utf-8"
+            )
+            cwd = Path(tmp) / "work"
+            cwd.mkdir()
+            env["USERPROFILE"] = str(home)
+            env["HOME"] = str(home)
+            proc = subprocess.run(
+                [sys.executable, str(self.HOOK_PATH), "--json"],
+                input=json.dumps(
+                    {
+                        "event": "UserPromptSubmit",
+                        "prompt": "jwt stuff please",
+                        "cwd": str(cwd),
+                    }
+                ),
+                capture_output=True,
+                text=True,
+                cwd=str(cwd),
+                env=env,
+                timeout=60,
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        decision = json.loads(proc.stderr.strip().splitlines()[-1])
+        self.assertIn("jev_status", decision)
+        self.assertIn("prompt_sha", decision)
+        self.assertIn("jwt", json.dumps(proc.stdout))
+
     def _run_script(self, script: Path, stdin_text: str, home: str, cwd: str):
         import subprocess
 
@@ -1567,6 +2701,10 @@ class HookE2ETests(unittest.TestCase):
             shutil.copyfile(
                 self.HOOK_PATH.parent / "inventory.py",
                 grok_hook.parent / "inventory.py",
+            )
+            shutil.copyfile(
+                self.HOOK_PATH.parent / "_watch.py",
+                grok_hook.parent / "_watch.py",
             )
             skill = home / ".grok" / "skills" / "jwt-stuff"
             skill.mkdir(parents=True)
@@ -2119,6 +3257,15 @@ class DebugFlagTests(unittest.TestCase):
         self.assertIn("jev_status=", err)
         self.assertIn("shortlist=", err)
 
+    def test_out_flag_writes_payload_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "hook.json"
+            payload = {"hook_event_name": "UserPromptSubmit", "prompt": "Add JWT tokens"}
+            rc, out, err = self._run_main(payload, ["--out", str(out_path)])
+            self.assertEqual(rc, 0)
+            written = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual(written, json.loads(out))
+
     def test_no_debug_flag_silent_stderr(self) -> None:
         payload = {"hook_event_name": "UserPromptSubmit", "prompt": "Add JWT tokens"}
         rc, out, err = self._run_main(payload, [])
@@ -2130,6 +3277,455 @@ class DebugFlagTests(unittest.TestCase):
         with patch.dict(os.environ, {"JEV_HOOK_DEBUG": "1"}):
             rc, out, err = self._run_main(payload, [])
         self.assertIn("jev_status=", err)
+
+
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {
+                        "event": "UserPromptSubmit",
+                        "prompt": "jwt",
+                        "cwd": str(cwd),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ, {"JEV_HOOK_WATCH_MAX": "2", "JEV_HOOK_OFF": "1"}
+            ):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(
+                        ["--file", str(payload), "--watch", "0.01", "--jq", "winner"]
+                    )
+            self.assertEqual(rc, 1)
+            self.assertEqual(buf.getvalue().splitlines(), ["null", "null"])
+
+    def test_watch_jq_reads_payload_from_stdin(self) -> None:
+        payload_text = json.dumps(
+            {"event": "UserPromptSubmit", "prompt": "jwt", "cwd": "."}
+        )
+        buf = io.StringIO()
+        with patch.dict(
+            os.environ, {"JEV_HOOK_WATCH_MAX": "2", "JEV_HOOK_OFF": "1"}
+        ):
+            with patch.object(HOOK, "_read_stdin", return_value=payload_text):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(["--watch", "0.01", "--jq", "winner"])
+        self.assertEqual(rc, 1)
+        self.assertEqual(buf.getvalue().splitlines(), ["null", "null"])
+
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            payload = cwd / "payload.json"
+            payload.write_text(
+                json.dumps(
+                    {"event": "UserPromptSubmit", "prompt": "jwt", "cwd": str(cwd)}
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {
+                    "JEV_HOOK_WATCH_MAX": "0",
+                    "JEV_HOOK_WATCH_SECS": "0.05",
+                    "JEV_HOOK_OFF": "1",
+                },
+            ):
+                start = _time.time()
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(
+                        ["--file", str(payload), "--watch", "0.02"]
+                    )
+            self.assertEqual(rc, 1)
+            self.assertLess(_time.time() - start, 2.0)
+            ticks = [
+                l for l in buf.getvalue().splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
+class MaxPromptCharsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+
+    def _handle(self, prompt: str, env: dict) -> dict:
+        items = INV.scan("hermes", hermes=FIXTURE)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, env):
+                out = HOOK.handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": prompt,
+                        "cwd": tmp,
+                    },
+                    items=items,
+                    harness="claude-code",
+                    pick_fn=skip_pick,
+                )
+        return out
+
+    def test_over_cap_truncates_before_pick(self) -> None:
+        prompt = "jwt " + ("x" * 300)
+        self._handle(prompt, {"JEV_HOOK_MAX_PROMPT": "50"})
+        self.assertTrue(HOOK.LAST_DECISION["prompt_truncated"])
+        self.assertEqual(HOOK.LAST_DECISION["prompt_len"], 50)
+
+    def test_under_cap_untouched(self) -> None:
+        prompt = "Add JWT access tokens in Python"
+        self._handle(prompt, {"JEV_HOOK_MAX_PROMPT": "500"})
+        self.assertFalse(HOOK.LAST_DECISION["prompt_truncated"])
+        self.assertEqual(HOOK.LAST_DECISION["prompt_len"], len(prompt))
+
+    def test_cap_zero_never_truncates(self) -> None:
+        prompt = "jwt " + ("x" * 50000)
+        self._handle(prompt, {"JEV_HOOK_MAX_PROMPT": "0"})
+        self.assertFalse(HOOK.LAST_DECISION["prompt_truncated"])
+        self.assertEqual(HOOK.LAST_DECISION["prompt_len"], len(prompt))
+
+    def test_helper_env_and_policy_and_default(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_MAX_PROMPT": "123"}):
+            self.assertEqual(INV.hook_max_prompt_chars(), 123)
+        with patch.dict(os.environ, {"JEV_HOOK_MAX_PROMPT": "bogus"}):
+            self.assertEqual(INV.hook_max_prompt_chars(), 20000)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("JEV_HOOK_MAX_PROMPT", None)
+            self.assertEqual(INV.hook_max_prompt_chars(), 20000)
+
+    def test_env_report_exposes_resolved_cap(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_MAX_PROMPT": "77"}):
+            report = HOOK.env_report()
+        self.assertEqual(report["max_prompt_chars"], 77)
+
+
+class MaxPayloadBytesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+
+    def _run_stdin(self, raw: str, env: dict) -> tuple:
+        import io
+
+        buf = io.StringIO()
+        with patch.dict(os.environ, env):
+            with patch.object(sys, "stdin", io.StringIO(raw)):
+                with patch.object(sys, "stdout", buf):
+                    rc = HOOK.main([])
+        return rc, buf.getvalue()
+
+    def test_over_cap_emits_empty_object(self) -> None:
+        raw = json.dumps({"prompt": "x" * 500, "cwd": "c:/"})
+        rc, out = self._run_stdin(raw, {"JEV_HOOK_MAX_PAYLOAD": "64"})
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "{}")
+
+    def test_under_cap_processed(self) -> None:
+        raw = json.dumps({"prompt": "hi", "cwd": "c:/nope"})
+        rc, out = self._run_stdin(raw, {"JEV_HOOK_MAX_PAYLOAD": "4096"})
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.strip())  # {} or a winner payload, either way reads
+
+    def test_cap_zero_unlimited(self) -> None:
+        raw = json.dumps({"prompt": "x" * 5000, "cwd": "c:/"})
+        rc, out = self._run_stdin(raw, {"JEV_HOOK_MAX_PAYLOAD": "0"})
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.strip())
+
+    def test_helper_env_and_default(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_MAX_PAYLOAD": "123"}):
+            self.assertEqual(INV.hook_max_payload_bytes(), 123)
+        with patch.dict(os.environ, {"JEV_HOOK_MAX_PAYLOAD": "bogus"}):
+            self.assertEqual(INV.hook_max_payload_bytes(), 1048576)
+        os.environ.pop("JEV_HOOK_MAX_PAYLOAD", None)
+        self.assertEqual(INV.hook_max_payload_bytes(), 1048576)
+
+    def test_env_report_exposes_cap(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_MAX_PAYLOAD": "77"}):
+            report = HOOK.env_report()
+        self.assertEqual(report["max_payload_bytes"], 77)
+
+
+class EnvReportMatrixTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+
+    EXPECTED_KEYS = {
+        "budget_seconds", "dedupe_ttl_seconds", "events", "jev_hook_cwd",
+        "jev_hook_debug", "jev_hook_debug_file", "jev_hook_event",
+        "jev_hook_events", "jev_hook_harness", "jev_hook_nomiss",
+        "jev_hook_nosidecar", "jev_hook_off", "jev_hook_prompt",
+        "jev_hook_skip_events", "jev_hook_winner", "jev_retries",
+        "jev_timeout_seconds", "limit", "max_age_seconds", "max_payload_bytes",
+        "max_prompt_chars", "miss_present", "note_limit", "sidecar_present",
+        "ttl_seconds", "watch_max", "watch_secs", "watch_quiet",
+    }
+
+    def test_report_covers_every_knob(self) -> None:
+        report = HOOK.env_report()
+        self.assertTrue(self.EXPECTED_KEYS <= set(report.keys()))
+
+    def test_ttl_seconds_honors_env(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_TTL": "9"}):
+            self.assertEqual(HOOK.env_report()["ttl_seconds"], 9.0)
+
+    def test_watch_knobs_honor_env(self) -> None:
+        env = {
+            "JEV_HOOK_WATCH_MAX": "3",
+            "JEV_HOOK_WATCH_SECS": "7.5",
+            "JEV_HOOK_WATCH_QUIET": "1",
+        }
+        with patch.dict(os.environ, env):
+            report = HOOK.env_report()
+        self.assertEqual(report["watch_max"], 3)
+        self.assertEqual(report["watch_secs"], 7.5)
+        self.assertTrue(report["watch_quiet"])
+
+
+class StdinGuardTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._log_env = patch.dict(os.environ, {"JEV_CONSULT_LOG": "0"})
+        self._log_env.start()
+        self.addCleanup(self._log_env.stop)
+
+    def _stdin(self, raw: str) -> tuple:
+        import io
+
+        buf = io.StringIO()
+        with patch.object(sys, "stdin", io.StringIO(raw)):
+            with patch.object(sys, "stdout", buf):
+                rc = HOOK.main([])
+        return rc, buf.getvalue()
+
+    def test_empty_stdin_emits_empty_object(self) -> None:
+        rc, out = self._stdin("")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "{}")
+
+    def test_garbage_stdin_emits_empty_object(self) -> None:
+        rc, out = self._stdin("not json at all")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "{}")
+
+    def test_whitespace_stdin_emits_empty_object(self) -> None:
+        rc, out = self._stdin("   \n\t  ")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "{}")
+
+    def test_null_bytes_stdin_fail_open(self) -> None:
+        rc, out = self._stdin("\x00\x01\x02")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "{}")
+
+    def test_array_stdin_emits_empty_object(self) -> None:
+        rc, out = self._stdin("[1,2,3]")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "{}")
+
+
+
+class EnvOnMatrixTests(unittest.TestCase):
+    TRUTHY = ["1", "true", "yes", "on", "TRUE", "On"]
+    FALSY = ["0", "false", "no", "off", "", "2"]
+
+    def test_env_on_accepts_documented_truthy_forms(self) -> None:
+        for val in self.TRUTHY:
+            for name in (
+                "JEV_HOOK_OFF",
+                "JEV_HOOK_NOSIDECAR",
+                "JEV_HOOK_NOMISS",
+                "JEV_HOOK_DEBUG",
+            ):
+                with patch.dict(os.environ, {name: val}):
+                    self.assertTrue(HOOK._env_on(name), "%s=%r" % (name, val))
+
+    def test_env_on_rejects_other_values(self) -> None:
+        for val in self.FALSY:
+            for name in (
+                "JEV_HOOK_OFF",
+                "JEV_HOOK_NOSIDECAR",
+                "JEV_HOOK_NOMISS",
+                "JEV_HOOK_DEBUG",
+            ):
+                with patch.dict(os.environ, {name: val}):
+                    self.assertFalse(HOOK._env_on(name), "%s=%r" % (name, val))
+
+    def test_hook_off_uppercase_disables(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_OFF": "TRUE"}):
+            self.assertEqual(
+                HOOK.handle(
+                    {"hook_event_name": "UserPromptSubmit", "prompt": "jwt"},
+                    items=[
+                        {
+                            "kind": "skill",
+                            "name": "jwt-auth",
+                            "id": "skill_jwt_auth",
+                            "description": "jwt",
+                        }
+                    ],
+                    harness="claude-code",
+                ),
+                {},
+            )
+
+    def test_debug_enabled_accepts_on(self) -> None:
+        with patch.dict(os.environ, {"JEV_HOOK_DEBUG": "on"}):
+            self.assertTrue(HOOK._debug_enabled([]))
+
+
+class WrongTypedFieldTests(unittest.TestCase):
+    BAD = [
+        {"hook_event_name": 123, "prompt": "jwt"},
+        {"hook_event_name": "UserPromptSubmit", "prompt": ["list"]},
+        {"hook_event_name": "UserPromptSubmit", "prompt": 0},
+        {"hook_event_name": "UserPromptSubmit", "prompt": {"x": 1}},
+        {"hook_event_name": "UserPromptSubmit", "prompt": "jwt", "cwd": {"x": 1}},
+        {"hook_event_name": "UserPromptSubmit", "prompt": "jwt", "cwd": ["/tmp"]},
+        {"hook_event_name": "UserPromptSubmit", "prompt": "jwt", "timestamp": "not-a-number"},
+        {"hook_event_name": None, "prompt": "jwt"},
+        {},
+    ]
+
+    def test_wrong_typed_fields_never_raise(self) -> None:
+        for payload in self.BAD:
+            with self.subTest(payload=payload):
+                try:
+                    out = HOOK.handle(payload, items=[], harness="claude-code")
+                except Exception as err:
+                    self.fail("handle raised %r on %r" % (err, payload))
+                self.assertIsInstance(out, dict)
+
+    def test_wrong_typed_fields_write_nothing_to_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for payload in self.BAD:
+                HOOK.handle(payload, items=[], harness="claude-code")
+            leaked = [x.name for x in Path(tmp).iterdir()]
+            self.assertEqual(leaked, [], "handle wrote into cwd: %s" % leaked)
+
+    def test_simulate_emits_payload_without_stdin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.getcwd()
+            os.chdir(tmp)
+            try:
+                buf = io.StringIO()
+                with patch.dict(os.environ, {"JEV_HOOK_OFF": "1"}):
+                    with patch("sys.stdout", buf):
+                        rc = HOOK.main(["--simulate", "add jwt tokens"])
+            finally:
+                os.chdir(old)
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), {})
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_simulate_uses_text_as_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.getcwd()
+            os.chdir(tmp)
+            seen = {}
+            def spy(payload, **_kw):
+                seen.update(payload)
+                return {}
+            try:
+                buf = io.StringIO()
+                with patch.object(HOOK, "handle", spy):
+                    with patch("sys.stdout", buf):
+                        rc = HOOK.main(["--simulate", "my task text"])
+            finally:
+                os.chdir(old)
+            self.assertEqual(rc, 0)
+            self.assertEqual(seen["prompt"], "my task text")
+            self.assertEqual(seen["hook_event_name"], "UserPromptSubmit")
+            self.assertEqual(seen["cwd"], str(Path(tmp)))
+            self.assertEqual(json.loads(buf.getvalue()), {})
+
+    def test_simulate_missing_text_runs_empty_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.getcwd()
+            os.chdir(tmp)
+            try:
+                buf = io.StringIO()
+                with patch.dict(os.environ, {"JEV_HOOK_OFF": "1"}):
+                    with patch("sys.stdout", buf):
+                        rc = HOOK.main(["--simulate"])
+            finally:
+                os.chdir(old)
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), {})
+
+    def test_simulate_matches_stdin_payload(self) -> None:
+        # --simulate must produce the same emitted payload as a real stdin
+        # event carrying the same prompt/cwd/event name.
+        items = [
+            {
+                "id": "skill:jwt-auth",
+                "kind": "skill",
+                "name": "jwt-auth",
+                "description": "jwt tokens",
+                "path": "",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch.object(HOOK, "scan_cached", return_value=items):
+                    buf_sim = io.StringIO()
+                    with patch("sys.stdout", buf_sim):
+                        rc_sim = HOOK.main(["--simulate", "please run jwt-auth"])
+                    event = {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "please run jwt-auth",
+                        "cwd": str(Path(tmp)),
+                    }
+                    buf_stdin = io.StringIO()
+                    with patch("sys.stdin", io.StringIO(json.dumps(event))):
+                        with patch("sys.stdout", buf_stdin):
+                            rc_stdin = HOOK.main([])
+            finally:
+                os.chdir(old)
+            self.assertEqual(rc_sim, rc_stdin)
+            self.assertEqual(
+                json.loads(buf_sim.getvalue()), json.loads(buf_stdin.getvalue())
+            )
+            self.assertTrue(json.loads(buf_sim.getvalue()))
+
+    def test_watch_dedupe_skips_identical_ticks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            event = tmp_path / "event.json"
+            with open(event, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"hook_event_name": "Bogus", "prompt": "x"}))
+            verdict = tmp_path / "verdict.json"
+            buf = io.StringIO()
+            err = io.StringIO()
+            with patch.dict(os.environ, {"JEV_HOOK_OFF": "1"}):
+                with patch("sys.stdout", buf), patch("sys.stderr", err):
+                    rc = HOOK.main([
+                        "--file", str(event),
+                        "--watch", "0.1",
+                        "--max-ticks", "3",
+                        "--dedupe",
+                        "--verdict", str(verdict),
+                    ])
+            self.assertIn(rc, (0, 1))
+            self.assertEqual(len(buf.getvalue().strip().splitlines()), 1)
+            self.assertIn("watch tick=3", err.getvalue())
+            data = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(data["dupes"], 2)
+            self.assertEqual(data["ticks"], 3)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import socket
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -19,7 +21,9 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import _watch  # noqa: E402
 from inventory import (  # noqa: E402
+    atomic_write_text,
     hook_limit,
     MISS_NAME,
     SIDECAR_NAME,
@@ -31,16 +35,23 @@ from inventory import (  # noqa: E402
     format_note,
     format_winner_note,
     hook_budget_seconds,
+    hook_dedupe_ttl_seconds,
+    hook_max_payload_bytes,
+    hook_max_prompt_chars,
     hook_note_limit,
     hook_jev_retries,
     hook_jev_timeout_seconds,
+    name_df,
     picker_request,
     read_sidecar,
     resolve_picker,
     scan_cached,
+    score_item,
     shortlist,
+    sidecar_age_seconds,
     sidecar_fresh,
     sidecar_items,
+    sidecar_ttl_seconds,
     tokens,
     write_miss,
     write_sidecar,
@@ -59,6 +70,40 @@ def _redact_prompt(prompt: str) -> str:
         return jev_mod.redact(prompt)
     except Exception:
         return prompt
+
+
+def _env_on(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _read_stdin() -> str:
+    """stdin as text, decoded utf-8-sig: strips a UTF-8 BOM and avoids
+    mojibake when the console codepage isn't utf-8 (Windows cp1252)."""
+    stream = getattr(sys.stdin, "buffer", None)
+    if stream is not None:
+        try:
+            return stream.read().decode("utf-8-sig", "replace")
+        except (OSError, ValueError):
+            pass
+    try:
+        return sys.stdin.read().lstrip("﻿")
+    except (OSError, UnicodeError):
+        return ""
+
+
+def _avg_score(items: list[dict], pool: list[dict], text: str) -> float | None:
+    """Mean IDF score of `items` under the prompt query; None when no query."""
+    query = tokens(text)
+    if not query or not items:
+        return None
+    try:
+        df = name_df(pool or items, query)
+        vals = [score_item(item, query, df) for item in items]
+    except Exception:
+        return None
+    if not vals:
+        return None
+    return round(sum(vals) / len(vals), 3)
 
 
 def last_decision_age() -> float | None:
@@ -98,7 +143,7 @@ def extract_prompt(payload: dict) -> str:
             )
             if text.strip():
                 return text.strip()
-    return ""
+    return os.environ.get("JEV_HOOK_PROMPT", "").strip()
 
 
 def extract_cwd(payload: dict) -> Path | None:
@@ -192,10 +237,13 @@ def pick_with_jev(
         if not isinstance(answers, dict):
             return {"status": "error", "winner": None}
         decision = jev_mod.decide(answers, policy, irreversible=False)
-    except SystemExit:
-        return {"status": "error", "winner": None}
-    except Exception:
-        return {"status": "error", "winner": None}
+    except SystemExit as err:
+        msg = str(err.code or "").lower()
+        status = "timeout" if ("timed out" in msg or "timeout" in msg) else "error"
+        return {"status": status, "winner": None}
+    except Exception as err:
+        status = "timeout" if isinstance(err, (TimeoutError, socket.timeout)) else "error"
+        return {"status": status, "winner": None}
     picker = resolve_picker(picked, decision, policy)
     try:
         need = float((decision.get("picks") or {}).get("need_skill"))
@@ -204,7 +252,35 @@ def pick_with_jev(
     picker["need"] = need
     picker["probabilities"] = (decision.get("probabilities") or {}).get("load_tools") or {}
     picker["latency_ms"] = latency_ms
+    picker["question"] = "load_tools"
     return picker
+
+
+def _status_reason(status: str, winner_name: str | None = None, via: str = "") -> str:
+    """One-line human explanation of a jev_status for the routing log."""
+    if status == "dedupe":
+        return "same prompt inside a fresh sidecar; picks reused without a Jev call"
+    if status == "winner":
+        if via == "env":
+            return "pick forced by JEV_HOOK_WINNER"
+        if via == "explicit":
+            return "prompt named the item explicitly ($name)"
+        if via == "dedupe":
+            return "winner carried over from the fresh dedupe sidecar"
+        return "jev picked %s from the shortlist" % (winner_name or "an item")
+    if status == "none":
+        return "jev answered none for the shortlist"
+    if status == "idf":
+        return "jev unavailable or no ask made; IDF shortlist only"
+    if status == "empty":
+        return "jev returned an empty answer"
+    if status == "error":
+        return "pick chooser raised; fell back to the IDF shortlist"
+    if status == "budget":
+        return "hook budget hit after shortlisting; Jev call skipped"
+    if status == "skip":
+        return "event skipped by hook config"
+    return "status=%s" % status
 
 
 def _note_for_picker(picked: list[dict], picker: dict) -> str:
@@ -224,14 +300,16 @@ def handle(
     items: list[dict] | None = None,
     harness: str | None = None,
     pick_fn=None,
+    no_writes: bool = False,
 ) -> dict:
     global LAST_DECISION
     LAST_DECISION = None
-    if os.environ.get("JEV_HOOK_OFF", "").strip() in {"1", "true", "yes"}:
+    if _env_on("JEV_HOOK_OFF"):
         return {}
     t0 = time.monotonic()
     event = event_name(payload)
-    if event and event not in {"UserPromptSubmit", "pre_llm_call"}:
+    allowed = allowed_events()
+    if event and event not in allowed:
         return {}
     max_age = hook_max_age()
     if max_age > 0:
@@ -241,6 +319,11 @@ def handle(
     prompt = extract_prompt(payload) or os.environ.get("JEV_HOOK_PROMPT", "").strip()
     if not prompt:
         return {}
+    note_tag = os.environ.get("JEV_HOOK_NOTE", "").strip()[:120] or None
+    prompt_cap = hook_max_prompt_chars()
+    prompt_truncated = bool(prompt_cap) and len(prompt) > prompt_cap
+    if prompt_truncated:
+        prompt = prompt[:prompt_cap]
     harness = (
         harness
         or os.environ.get("JEV_HOOK_HARNESS", "").strip()
@@ -249,11 +332,20 @@ def handle(
     cwd = extract_cwd(payload)
     deduped = None
     stale_match = False
+    sidecar_age_s = None
     if cwd is not None:
         prior = read_sidecar(cwd / SIDECAR_NAME)
+        age = sidecar_age_seconds(prior)
+        if age is not None:
+            sidecar_age_s = int(age)
         norm = lambda s: " ".join(str(s or "").split())[:500].lower()
         if prior and norm(prior.get("task")) == norm(prompt):
-            if sidecar_fresh(prior):
+            dedupe_ttl = hook_dedupe_ttl_seconds()
+            within_ttl = (
+                dedupe_ttl <= 0
+                or (age is not None and age <= dedupe_ttl)
+            )
+            if sidecar_fresh(prior) and within_ttl:
                 deduped = prior
             else:
                 stale_match = True
@@ -295,10 +387,16 @@ def handle(
             "explicit": False,
             "dedupe": True,
             "jev_status": extra["jev_status"],
+            "reason": _status_reason(extra["jev_status"], (winner_out or {}).get("name"), "dedupe"),
+            "question": "dedupe",
             "winner": {"kind": winner_out.get("kind"), "name": winner_out.get("name")}
             if winner_out
             else None,
+            "sidecar_age_s": sidecar_age_s,
+            "shortlist_score_avg": _avg_score(picked, items or picked, prompt),
         }
+        if note_tag:
+            LAST_DECISION["note"] = note_tag
         append_decision(LAST_DECISION)
         if not note:
             return {}
@@ -329,7 +427,11 @@ def handle(
     picker = {"status": "idf", "winner": None}
     if explicit_winner is not None:
         picked = [explicit_winner]
-        picker = {"status": "winner", "winner": explicit_winner}
+        picker = {
+            "status": "winner",
+            "winner": explicit_winner,
+            "question": "env" if env_winner else "explicit",
+        }
     else:
         picked = shortlist(catalog, prompt, hook_limit(), [hit["name"] for hit in hits])
         if picked and time.monotonic() - t0 >= hook_budget_seconds():
@@ -345,6 +447,8 @@ def handle(
     extra = {"jev_status": str(picker.get("status") or "idf")}
     if stale_match:
         extra["stale_sidecar"] = True
+    if note_tag:
+        extra["note"] = note_tag
     if explicit_winner is not None:
         extra["explicit"] = True
     if picker.get("strong"):
@@ -360,36 +464,49 @@ def handle(
         "prompt_head": _redact_prompt(prompt[:240])[:160],
         "prompt_tail": _redact_prompt(prompt[-80:]),
         "prompt_len": len(prompt),
+        "prompt_truncated": prompt_truncated,
         "n_catalog": len(catalog),
         "shortlist_n": len(picked),
         "shortlist": [item.get("id") for item in picked],
         "explicit": explicit_winner is not None,
         "jev_status": extra["jev_status"],
+        "reason": _status_reason(extra["jev_status"], (winner or {}).get("name"), str(picker.get("question") or "")),
+        "question": picker.get("question"),
         "need": picker.get("need"),
         "probabilities": picker.get("probabilities") or {},
+        "shortlist_score_avg": _avg_score(picked, catalog, prompt),
         "winner": {"kind": winner.get("kind"), "name": winner.get("name")}
         if winner
         else None,
         "strong_pick": bool(picker.get("strong")),
         "latency_ms": picker.get("latency_ms"),
+        "budget_ms": int(hook_budget_seconds() * 1000),
+        "over_budget": (
+            isinstance(picker.get("latency_ms"), (int, float))
+            and picker["latency_ms"] > hook_budget_seconds() * 1000
+        ),
         "stale_sidecar": stale_match,
+        "sidecar_age_s": sidecar_age_s,
     }
+    if note_tag:
+        LAST_DECISION["note"] = note_tag
     append_decision(LAST_DECISION)
     if note:
         extra["note_sha"] = hashlib.sha256(note.encode("utf-8")).hexdigest()[:12]
-    no_sidecar = os.environ.get("JEV_HOOK_NOSIDECAR", "").strip() in {"1", "true", "yes"}
-    if cwd is not None and not no_sidecar:
+    env_no_sidecar = _env_on("JEV_HOOK_NOSIDECAR")
+    env_no_miss = _env_on("JEV_HOOK_NOMISS")
+    if cwd is not None and not env_no_sidecar:
+        sidecar_path = cwd / (".jev-tools.dry.json" if no_writes else SIDECAR_NAME)
         try:
-            write_sidecar(cwd / SIDECAR_NAME, harness, prompt, picked, extra)
+            write_sidecar(sidecar_path, harness, prompt, picked, extra)
         except OSError:
             pass
-        no_miss = os.environ.get("JEV_HOOK_NOMISS", "").strip() in {"1", "true", "yes"}
-        miss_path = cwd / MISS_NAME
+        miss_path = cwd / (".jev-tools-miss.dry.json" if no_writes else MISS_NAME)
         try:
-            if picked or no_miss:
+            if picked or env_no_miss:
                 clear_miss(miss_path)
             elif tokens(prompt):
-                write_miss(miss_path, harness, prompt)
+                write_miss(miss_path, harness, prompt, {"note": note_tag} if note_tag else None)
                 note = format_miss_note(FILL_SCRIPT)
             else:
                 clear_miss(miss_path)
@@ -413,17 +530,390 @@ def handle(
     return {}
 
 
+def _silence_reason(payload: dict) -> str:
+    """Why handle() emitted no context — mirrors its early returns in order."""
+    if _env_on("JEV_HOOK_OFF"):
+        return "hook disabled (JEV_HOOK_OFF)"
+    event = event_name(payload) if isinstance(payload, dict) else None
+    if event and event not in allowed_events():
+        return "skipped: event %r not in allowed set" % event
+    max_age = hook_max_age()
+    if isinstance(payload, dict) and max_age > 0:
+        ts = payload_ts(payload)
+        if ts is not None and time.time() - ts > max_age:
+            return "skipped: payload older than JEV_HOOK_MAX_AGE"
+    prompt = (extract_prompt(payload) if isinstance(payload, dict) else "") or os.environ.get(
+        "JEV_HOOK_PROMPT", ""
+    ).strip()
+    if not prompt:
+        return "skipped: no prompt in payload"
+    if isinstance(LAST_DECISION, dict):
+        return "no context emitted (jev_status=%s)" % LAST_DECISION.get("jev_status")
+    return "no context emitted"
+
+
 def _debug_enabled(argv: list[str]) -> bool:
     import os
 
     if "--debug" in argv:
         return True
-    return os.environ.get("JEV_HOOK_DEBUG", "").strip().lower() in {"1", "true", "yes"}
+    return _env_on("JEV_HOOK_DEBUG")
+
+
+def allowed_events() -> set[str]:
+    raw = os.environ.get("JEV_HOOK_EVENTS", "").strip()
+    if raw:
+        allowed = {part.strip() for part in raw.split(",") if part.strip()}
+    else:
+        allowed = {"UserPromptSubmit", "pre_llm_call"}
+    skip = os.environ.get("JEV_HOOK_SKIP_EVENTS", "").strip()
+    if skip:
+        allowed -= {part.strip() for part in skip.split(",") if part.strip()}
+    return allowed
+
+
+def _float_or_zero(env_name: str) -> float:
+    try:
+        return max(float(os.environ.get(env_name, "") or 0), 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def env_report() -> dict:
+    """Resolved hook configuration: effective values for every JEV_HOOK_* knob.
+    Values only — never secrets."""
+    onoff = ("JEV_HOOK_OFF", "JEV_HOOK_NOSIDECAR", "JEV_HOOK_NOMISS", "JEV_HOOK_DEBUG")
+    strings = (
+        "JEV_HOOK_HARNESS",
+        "JEV_HOOK_CWD",
+        "JEV_HOOK_PROMPT",
+        "JEV_HOOK_EVENT",
+        "JEV_HOOK_EVENTS",
+        "JEV_HOOK_SKIP_EVENTS",
+        "JEV_HOOK_WINNER",
+        "JEV_HOOK_DEBUG_FILE",
+    )
+    report = {
+        "events": sorted(allowed_events()),
+        "limit": hook_limit(),
+        "note_limit": hook_note_limit(),
+        "jev_timeout_seconds": hook_jev_timeout_seconds(),
+        "jev_retries": hook_jev_retries(),
+        "budget_seconds": hook_budget_seconds(),
+        "max_age_seconds": hook_max_age(),
+        "max_prompt_chars": hook_max_prompt_chars(),
+        "max_payload_bytes": hook_max_payload_bytes(),
+        "dedupe_ttl_seconds": hook_dedupe_ttl_seconds(),
+        "ttl_seconds": sidecar_ttl_seconds(),
+        "watch_max": _watch.cap("JEV_HOOK_WATCH_MAX", None),
+        "watch_secs": _float_or_zero("JEV_HOOK_WATCH_SECS"),
+        "watch_quiet": _watch.quiet("JEV_HOOK_WATCH_QUIET", False),
+    }
+    for name in onoff:
+        report[name.lower()] = os.environ.get(name, "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+    for name in strings:
+        report[name.lower()] = bool(os.environ.get(name, "").strip())
+    env_policy = os.environ.get("JEV_POLICY", "").strip()
+    report["policy"] = env_policy or "default"
+    cwd = os.environ.get("JEV_HOOK_CWD", "").strip() or "."
+    base = Path(cwd)
+    report["sidecar_present"] = (base / SIDECAR_NAME).is_file()
+    report["miss_present"] = (base / MISS_NAME).is_file()
+    return report
+
+
+USAGE = 'Usage: python inventory_hook.py [--env|--events|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet] [--dedupe]\n       [--verdict PATH]] [--self-test]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n  --events   print allowed hook event names and exit\n  --dry-run  resolve the pick writing sidecar/miss as .jev-tools.dry.json /\n             .jev-tools-miss.dry.json instead of the live names\n  --simulate TEXT  run the hook on a synthetic UserPromptSubmit event with TEXT as the prompt and the process cwd (implies --dry-run; no stdin)\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --version  print the pack policy version and exit\n  --self-test  run the emit machinery on synthetic payloads in a temp dir\n             (no Jev); prints self-test ok|FAIL per check, rc 0/1\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --dedupe   with --watch: skip emitting a tick identical to the previous\n             (ts/elapsed_s ignored; JEV_HOOK_WATCH_DEDUPE presets)\n  --verdict P  write a slim {verdict, ticks, winner, winner_stability, keys} JSON\n'
+
+
+def _self_test() -> int:
+    """Exercise handle()'s emit paths on synthetic payloads; no Jev calls."""
+    checks: dict = {}
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            item = {
+                "id": "selftest-item",
+                "kind": "skill",
+                "name": "selftest-item",
+                "description": "self-test item",
+                "path": "",
+            }
+            old_log = os.environ.get("JEV_CONSULT_LOG")
+            os.environ["JEV_CONSULT_LOG"] = str(tmp_path / "decisions.jsonl")
+            try:
+                checks["empty_event"] = handle({}) == {}
+                checks["bad_event"] = (
+                    handle({"hook_event_name": "Bogus", "prompt": "x"}) == {}
+                )
+                winner_out = handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "please run selftest-item on this repo",
+                        "cwd": str(tmp_path),
+                    },
+                    items=[item],
+                    harness="hermes",
+                    no_writes=True,
+                )
+                checks["explicit_winner"] = (
+                    isinstance(winner_out, dict)
+                    and bool(winner_out.get("context"))
+                    and (tmp_path / ".jev-tools.dry.json").is_file()
+                )
+                miss_out = handle(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "unrelated task with no matching items",
+                        "cwd": str(tmp_path),
+                    },
+                    items=[],
+                    harness="hermes",
+                    pick_fn=lambda *a, **kw: {"status": "none", "winner": None},
+                    no_writes=True,
+                )
+                checks["miss_written"] = (
+                    isinstance(miss_out, dict)
+                    and bool(miss_out.get("context"))
+                    and (tmp_path / ".jev-tools-miss.dry.json").is_file()
+                )
+            finally:
+                if old_log is None:
+                    os.environ.pop("JEV_CONSULT_LOG", None)
+                else:
+                    os.environ["JEV_CONSULT_LOG"] = old_log
+    except Exception:
+        checks = {"raised": False}
+    ok = bool(checks) and all(checks.values())
+    sys.stdout.write(
+        "self-test: %s %s\n"
+        % (
+            "ok" if ok else "FAIL",
+            " ".join(
+                "%s=%s" % (k, "ok" if v else "FAIL")
+                for k, v in sorted(checks.items())
+            ),
+        )
+    )
+    return 0 if ok else 1
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    raw = sys.stdin.read()
+    if _watch.maybe_version(list(argv)):
+        return 0
+    if "-h" in argv or "--help" in argv:
+        sys.stdout.write(USAGE)
+        return 0
+    no_writes = False
+    if "--dry-run" in argv:
+        no_writes = True
+        argv = [a for a in argv if a != "--dry-run"]
+    simulated_raw = ""
+    if "--simulate" in argv:
+        idx = argv.index("--simulate")
+        task = argv[idx + 1] if idx + 1 < len(argv) else ""
+        del argv[idx : idx + 2]
+        no_writes = True
+        simulated_raw = json.dumps(
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": task,
+                "cwd": str(Path.cwd()),
+            }
+        )
+    if "--events" in argv:
+        names = sorted(allowed_events())
+        if "--jsonl" in argv:
+            for name in names:
+                sys.stdout.write(json.dumps({"event": name}) + "\n")
+        elif "--json" in argv:
+            sys.stdout.write(json.dumps(names) + "\n")
+        else:
+            for name in names:
+                sys.stdout.write(name + "\n")
+        return 0
+    if "--self-test" in argv:
+        return _self_test()
+    if "--env" in argv:
+        report = env_report()
+        if "--jq" in argv:
+            idx = argv.index("--jq")
+            if idx + 1 < len(argv):
+                key = argv[idx + 1]
+                if key in report:
+                    sys.stdout.write(json.dumps(report[key]) + "\n")
+                    return 0
+                sys.stderr.write(
+                    "bad --jq key %r (env has: %s)\n"
+                    % (key, ", ".join(sorted(report)))
+                )
+                return 2
+            sys.stderr.write("--jq needs a KEY value\n")
+            return 2
+        text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+        if "--out" in argv:
+            idx = argv.index("--out")
+            if idx + 1 < len(argv):
+                try:
+                    atomic_write_text(Path(argv[idx + 1]), text)
+                except OSError:
+                    pass  # fail-open: still print to stdout
+        sys.stdout.write(text)
+        return 0
+    raw = ""
+    file_path = ""
+    if "--file" in argv:
+        idx = argv.index("--file")
+        if idx + 1 < len(argv):
+            file_path = argv[idx + 1]
+            try:
+                raw = Path(file_path).read_text(encoding="utf-8")
+                raw = raw.lstrip("﻿")
+            except OSError:
+                sys.stdout.write("{}\n")
+                return 0
+            del argv[idx : idx + 2]
+        else:
+            sys.stdout.write("{}\n")
+            return 0
+    watch_seconds = 0.0
+    if "--watch" in argv:
+        idx = argv.index("--watch")
+        if idx + 1 < len(argv):
+            try:
+                watch_seconds = float(argv[idx + 1])
+            except ValueError:
+                watch_seconds = 0.0
+    if watch_seconds > 0:
+        watch_out = ""
+        if "--out" in argv:
+            idx = argv.index("--out")
+            if idx + 1 < len(argv):
+                watch_out = argv[idx + 1]
+        max_ticks_arg = 0
+        if "--max-ticks" in argv:
+            idx = argv.index("--max-ticks")
+            if idx + 1 < len(argv):
+                try:
+                    max_ticks_arg = int(argv[idx + 1])
+                except ValueError:
+                    max_ticks_arg = 0
+        max_ticks = _watch.cap("JEV_HOOK_WATCH_MAX", max_ticks_arg)
+        quiet = "--quiet" in argv
+        watch_max_arg = 0.0
+        if "--watch-max" in argv:
+            idx = argv.index("--watch-max")
+            if idx + 1 < len(argv):
+                try:
+                    watch_max_arg = float(argv[idx + 1])
+                except ValueError:
+                    watch_max_arg = 0.0
+        dead = _watch.deadline("JEV_HOOK_WATCH_SECS", watch_max_arg)
+        fail_fast = "--fail-fast" in argv
+        hook_jq = ""
+        if "--jq" in argv:
+            idx = argv.index("--jq")
+            if idx + 1 < len(argv):
+                hook_jq = argv[idx + 1]
+        verdict_path = ""
+        if "--verdict" in argv:
+            idx = argv.index("--verdict")
+            if idx + 1 < len(argv):
+                verdict_path = argv[idx + 1]
+        dedupe = "--dedupe" in argv or os.environ.get(
+            "JEV_HOOK_WATCH_DEDUPE", ""
+        ).strip().lower() in ("1", "true", "yes", "on")
+        ticks = 0
+        dupes = 0
+        prev_tick: dict | None = None
+        tick: dict = {}
+        verdict_ok = True
+        prev_winner: str | None = None
+        winners_seen: set = set()
+        winner_changes = 0
+        watch_t0 = time.time()
+
+        def _write_verdict() -> bool:
+            return _watch.write_verdict(
+                verdict_path,
+                {
+                    "verdict": "pass" if tick.get("winner") else "fail",
+                    "ticks": ticks,
+                    "winner": tick.get("winner"),
+                    "winner_stability": len(winners_seen),
+                    "winner_changes": winner_changes,
+                    "winner_flap_rate": (
+                        round(winner_changes / ticks, 3) if ticks else None
+                    ),
+                    "keys": tick.get("keys", []),
+                    "keys_count": len(tick.get("keys") or []),
+                    "dupes": dupes,
+                    "elapsed_s": round(time.time() - watch_t0, 2),
+                },
+            )
+
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
+            tick = {"ts": int(time.time())}
+            try:
+                if file_path:
+                    raw = Path(file_path).read_text(encoding="utf-8")
+                else:
+                    raw = _read_stdin()
+                raw = raw.lstrip("﻿")
+                payload_cap = hook_max_payload_bytes()
+                if payload_cap and len(raw.encode("utf-8", "ignore")) > payload_cap:
+                    raw = ""
+                payload = json.loads(raw) if raw.strip() else {}
+                out = (
+                    handle(payload, no_writes=True)
+                    if (isinstance(payload, dict) and no_writes)
+                    else handle(payload)
+                    if isinstance(payload, dict)
+                    else {}
+                )
+            except Exception:
+                out = {}
+            tick["keys"] = sorted(out.keys()) if isinstance(out, dict) else []
+            tick["winner"] = (
+                ((LAST_DECISION or {}).get("winner") or {}).get("name") or None
+            )
+            tick["winner_changed"] = (
+                prev_winner is not None and tick["winner"] != prev_winner
+            )
+            prev_winner = tick["winner"]
+            if tick["winner_changed"]:
+                winner_changes += 1
+            if tick["winner"]:
+                winners_seen.add(tick["winner"])
+            tick["elapsed_s"] = round(time.time() - watch_t0, 2)
+            if dedupe and _watch.same_tick(prev_tick, tick):
+                dupes += 1
+            else:
+                _watch.emit_or_jq(tick, hook_jq, watch_out, quiet=_watch.quiet("JEV_HOOK_WATCH_QUIET", quiet), bad=not tick["winner"])
+            prev_tick = tick
+            ticks += 1
+            sys.stderr.write(
+                "watch tick=%d winner=%s keys=%s\n"
+                % (ticks, tick["winner"] or "-", ",".join(tick["keys"]) or "-")
+            )
+            if verdict_path and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
+            if fail_fast and not tick["winner"]:
+                break
+            time.sleep(watch_seconds)
+        if verdict_path and verdict_ok and not _write_verdict():
+            return 1
+        return 0 if tick["winner"] else 1
+    if not raw:
+        raw = simulated_raw or _read_stdin()
+    payload_cap = hook_max_payload_bytes()
+    if payload_cap and len(raw.encode("utf-8", "ignore")) > payload_cap:
+        sys.stdout.write("{}\n")
+        return 0
     if not raw.strip():
         sys.stdout.write("{}\n")
         return 0
@@ -436,10 +926,55 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("{}\n")
         return 0
     try:
-        out = handle(payload)
+        out = (
+            handle(payload, no_writes=True) if no_writes else handle(payload)
+        )
     except Exception:
         out = {}
+    if "--verdict" in argv:
+        idx = argv.index("--verdict")
+        if idx + 1 < len(argv):
+            winner = ((LAST_DECISION or {}).get("winner") or {}).get("name") or None
+            _watch.write_verdict(
+                argv[idx + 1],
+                {
+                    "verdict": "pass" if winner else "fail",
+                    "ticks": 1,
+                    "winner": winner,
+                    "keys": sorted(out.keys()) if isinstance(out, dict) else [],
+                },
+            )
+    if "--out" in argv:
+        idx = argv.index("--out")
+        if idx + 1 < len(argv):
+            try:
+                atomic_write_text(Path(argv[idx + 1]), json.dumps(out) + "\n")
+            except OSError:
+                pass
+    if "--jq" in argv:
+        idx = argv.index("--jq")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--jq needs a KEY value\n")
+            return 2
+        node = out
+        found = True
+        for part in argv[idx + 1].split("."):
+            if isinstance(node, dict) and part in node:
+                node = node[part]
+            else:
+                found = False
+                break
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (argv[idx + 1], ", ".join(sorted(out)) if isinstance(out, dict) else "")
+            )
+            return 2
+        sys.stdout.write(json.dumps(node) + "\n")
+        return 0
     sys.stdout.write(json.dumps(out) + "\n")
+    if "--json" in argv and LAST_DECISION is not None:
+        sys.stderr.write(json.dumps(LAST_DECISION, sort_keys=True) + "\n")
     debug_file = os.environ.get("JEV_HOOK_DEBUG_FILE", "").strip()
     if (_debug_enabled(argv) or debug_file) and LAST_DECISION is not None:
         parts = {
@@ -448,6 +983,8 @@ def main(argv: list[str] | None = None) -> int:
             "dedupe": LAST_DECISION.get("dedupe"),
             "shortlist": len(LAST_DECISION.get("shortlist") or []),
             "latency_ms": LAST_DECISION.get("latency_ms"),
+            "sidecar_age_s": LAST_DECISION.get("sidecar_age_s"),
+            "score_avg": LAST_DECISION.get("shortlist_score_avg"),
         }
         line = " ".join("%s=%s" % (k, v) for k, v in parts.items() if v is not None)
         if _debug_enabled(argv):
@@ -458,6 +995,8 @@ def main(argv: list[str] | None = None) -> int:
                     fh.write(line + "\n")
             except OSError:
                 pass
+    if "--verbose" in argv and not out:
+        sys.stderr.write("verbose: %s\n" % _silence_reason(payload))
     return 0
 
 

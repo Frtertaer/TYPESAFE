@@ -15,9 +15,12 @@
   "noul_unsure": 0.5,
   "tight_gap": 0.08,
   "sidecar_ttl_seconds": 14400,
+  "dedupe_ttl_seconds": 0,
   "hook_budget_seconds": 12,
   "hook_jev_timeout_seconds": 8,
   "hook_jev_retries": 0,
+  "hook_max_prompt_chars": 20000,
+  "hook_payload_max_bytes": 1048576,
   "must_ask": [
     "approach",
     "keep_vs_change",
@@ -96,6 +99,10 @@
     "good_enough": {
       "type": "noul",
       "instructions": "Is this good enough to stop?"
+    },
+    "risky": {
+      "type": "noul",
+      "instructions": "How likely is the proposed action in state to be destructive, irreversible, or visibly breaking for the user?"
     },
     "on_track": {
       "type": "noul",
@@ -249,6 +256,7 @@
     }
   ],
   "catalog_cache_seconds": 900,
+  "smoke_perf_budget_seconds": 30,
   "progress": {
     "rubric_version": 1,
     "points": {

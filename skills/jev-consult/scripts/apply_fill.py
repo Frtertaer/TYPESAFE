@@ -9,18 +9,23 @@ Never clone kitze/skillbox. Other harness markets stay human. Fail open.
 from __future__ import annotations
 
 import argparse
+import io
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+from contextlib import redirect_stdout
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import _watch  # noqa: E402
 from catalog_fill import BLOCKED_INSPECT, blocked_text, slug_id  # noqa: E402
 from inventory import (  # noqa: E402
     MISS_NAME,
@@ -34,6 +39,7 @@ from inventory import (  # noqa: E402
     shortlist,
     tokens,
     user_home,
+    write_miss,
     write_sidecar,
 )
 from peer_fill import read_miss, run_jev  # noqa: E402
@@ -341,6 +347,8 @@ def fill(
 
 
 def main() -> int:
+    if _watch.maybe_version(sys.argv[1:]):
+        return 0
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", default="")
     parser.add_argument("--harness", default="auto")
@@ -352,12 +360,217 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--ask-file", default="")
     parser.add_argument(
+        "--list",
+        action="store_true",
+        help="Print the ranked installable candidates for --task (or the miss task) and exit; no installs.",
+    )
+    parser.add_argument(
+        "--show",
+        default="",
+        metavar="NAME",
+        help="Print one candidate's full JSON record by name/id and exit.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit the outcome as a JSON object instead of a text line.",
     )
+    parser.add_argument(
+        "--watch",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Re-scan the cwd for miss/ask files every S seconds, printing {ts,miss,ask} ticks (read-only; JEV_APPLY_WATCH_MAX caps ticks).",
+    )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Print the cwd fill state (miss present/age, ask file) as JSON and exit; --jq KEY prints one dotted-path field.",
+    )
+    parser.add_argument("--jq", metavar="KEY", default="", help="With --status: print just one dotted-path field of the report (e.g. miss_age_s); unknown key exits 2. With --watch: print just the named tick field(s) per pass, comma list.")
+    parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
+    parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that finds a pending miss or ask.")
+    parser.add_argument(
+        "--out",
+        default="",
+        help="With --watch, append each tick line to PATH (fail-open).",
+    )
+    parser.add_argument(
+        "--verdict",
+        default="",
+        metavar="PATH",
+        help="Write a slim {verdict: pending|clean, ticks, miss, ask} JSON to PATH — refreshed every tick with --watch; without it, a one-shot {ticks: 1} payload.",
+    )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Exercise the offline paths in a temp dir (hermes gate, blocked pick, pick match, miss round-trip+stale prune); exit 1 on failure (--json emits the checks).",
+    )
     args = parser.parse_args()
+    if args.self_test:
+        checks: dict = {}
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                ask_path = tmp_path / "ask.json"
+                old_log = os.environ.get("JEV_CONSULT_LOG")
+                os.environ["JEV_CONSULT_LOG"] = str(tmp_path / "decisions.jsonl")
+                try:
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        fill(
+                            "self-test task",
+                            "claude",
+                            tmp_path,
+                            None,
+                            True,
+                            ask_path,
+                        )
+                    checks["hermes_gate"] = "human" in buf.getvalue()
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        fill(
+                            "self-test task",
+                            "hermes",
+                            tmp_path,
+                            "exploit-kit",
+                            True,
+                            ask_path,
+                        )
+                    checks["blocked_pick"] = "blocked" in buf.getvalue()
+                    hit = as_item("plugin", "selftest-item")
+                    checks["pick_match"] = (
+                        item_for_pick("plugin:selftest-item", [hit]) is hit
+                    )
+                    miss_path = tmp_path / MISS_NAME
+                    write_miss(miss_path, "hermes", "self-test task")
+                    checks["miss_roundtrip"] = (
+                        str(read_miss(miss_path).get("task") or "")
+                        == "self-test task"
+                    )
+                    miss_path.unlink()
+                    write_miss(
+                        miss_path,
+                        "hermes",
+                        "self-test task",
+                        extra={"written_at": 1},
+                    )
+                    checks["stale_pruned"] = (
+                        not read_miss(miss_path) and not miss_path.is_file()
+                    )
+                finally:
+                    if old_log is None:
+                        os.environ.pop("JEV_CONSULT_LOG", None)
+                    else:
+                        os.environ["JEV_CONSULT_LOG"] = old_log
+        except Exception:
+            checks = {"raised": False}
+        ok = bool(checks) and all(checks.values())
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {"self_test": "ok" if ok else "FAIL", "checks": checks},
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "self-test: %s %s\n"
+                % (
+                    "ok" if ok else "FAIL",
+                    " ".join(
+                        "%s=%s" % (k, "ok" if v else "FAIL")
+                        for k, v in sorted(checks.items())
+                    ),
+                )
+            )
+        return 0 if ok else 1
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
+    if args.status:
+        try:
+            now = time.time()
+            miss = read_miss(cwd / MISS_NAME)
+            miss_ts = miss.get("written_at") if isinstance(miss.get("written_at"), (int, float)) else None
+            ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+            report = {
+                "cwd": str(cwd),
+                "miss": bool(miss),
+                "miss_age_s": round(now - miss_ts, 1) if miss_ts is not None else None,
+                "miss_written_at": miss_ts,
+                "ask": ask_path.is_file(),
+                "task": str(miss.get("task") or "") if miss else "",
+            }
+            if args.jq:
+                cur = report
+                found = True
+                for part in args.jq.split("."):
+                    if isinstance(cur, dict) and part in cur:
+                        cur = cur[part]
+                    else:
+                        found = False
+                        break
+                if not found:
+                    sys.stderr.write(
+                        "bad --jq key %r (payload has: %s)\n"
+                        % (args.jq, ", ".join(sorted(report)))
+                    )
+                    return 2
+                sys.stdout.write(json.dumps(cur) + "\n")
+            else:
+                sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        except Exception:
+            sys.stdout.write(json.dumps({"error": "fail_open"}) + "\n")
+        return 0
+    if args.watch and args.watch > 0:
+        max_ticks = _watch.cap("JEV_APPLY_WATCH_MAX", args.max_ticks)
+        ticks = 0
+        dead = _watch.deadline("JEV_APPLY_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+        miss_path = cwd / MISS_NAME
+        tick: dict = {}
+        verdict_ok = True
+
+        def _write_verdict() -> bool:
+            pending = bool(tick.get("miss") or tick.get("ask"))
+            return _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "pending" if pending else "clean",
+                    "ticks": ticks,
+                    "miss": bool(tick.get("miss")),
+                    "ask": bool(tick.get("ask")),
+                    "elapsed_s": round(time.time() - watch_t0, 2),
+                },
+            )
+
+        watch_t0 = time.time()
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
+            now = time.time()
+            miss = read_miss(miss_path)
+            miss_ts = miss.get("written_at") if isinstance(miss.get("written_at"), (int, float)) else None
+            tick = {
+                "ts": int(now),
+                "miss": bool(miss),
+                "miss_age_s": round(now - miss_ts, 1) if miss_ts is not None else None,
+                "ask": ask_path.is_file(),
+                "elapsed_s": round(now - watch_t0, 2),
+            }
+            _watch.emit_or_jq(tick, getattr(args, "jq", ""), args.out, quiet=_watch.quiet("JEV_APPLY_WATCH_QUIET", args.quiet), bad=bool(tick["miss"] or tick["ask"]))
+            ticks += 1
+            sys.stderr.write(
+                "watch tick=%d miss=%s ask=%s\n" % (ticks, tick["miss"], tick["ask"])
+            )
+            if args.verdict and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
+            if args.fail_fast and (tick["miss"] or tick["ask"]):
+                break
+            time.sleep(args.watch)
+        if args.verdict and verdict_ok and not _write_verdict():
+            return 1
+        return 0
     task = args.task
     dest = args.harness
     if args.from_miss:
@@ -365,6 +578,66 @@ def main() -> int:
         task = task or str(miss.get("task") or "")
         if dest == "auto":
             dest = str(miss.get("harness") or "auto")
+    if args.list or args.show:
+        try:
+            hits = search_hits(task)
+            if args.list:
+                items = shortlist(hits, task, SEARCH_LIMIT, []) if hits else []
+                if args.json:
+                    rows = [
+                        {
+                            "kind": item.get("kind") or "?",
+                            "name": item.get("name") or "?",
+                            "id": item.get("id") or "",
+                        }
+                        for item in items
+                    ]
+                    sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+                else:
+                    for item in items:
+                        sys.stdout.write(
+                            "%s %s %s\n"
+                            % (
+                                item.get("kind") or "?",
+                                item.get("name") or "?",
+                                item.get("id") or "",
+                            )
+                        )
+            else:
+                match = next(
+                    (
+                        item
+                        for item in (hits or [])
+                        if args.show
+                        in (
+                            item.get("name"),
+                            item.get("id"),
+                            item.get("identifier"),
+                        )
+                    ),
+                    None,
+                )
+                if match is None:
+                    sys.stdout.write("not found: %s\n" % args.show)
+                else:
+                    sys.stdout.write(json.dumps(match, indent=2) + "\n")
+        except Exception:
+            pass
+        return 0
+    ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+    if args.verdict:
+        miss_now = bool(read_miss(cwd / MISS_NAME))
+        ask_now = ask_path.is_file()
+        if not _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "pending" if (miss_now or ask_now) else "clean",
+                "ticks": 1,
+                "miss": miss_now,
+                "ask": ask_now,
+            },
+        ):
+            return 1
     if not task.strip():
         if args.json:
             sys.stdout.write(json.dumps({"outcome": "no_task"}) + "\n")
@@ -373,7 +646,6 @@ def main() -> int:
         return 0
     if dest == "auto":
         dest = detect_harness(Path(__file__))
-    ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
     try:
         return fill(
             task,

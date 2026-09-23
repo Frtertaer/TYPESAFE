@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -20,6 +22,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import _watch  # noqa: E402
 from inventory import (  # noqa: E402
     MISS_NAME,
     SIDECAR_NAME,
@@ -143,6 +146,20 @@ def read_catalog_cache(
     return [item for item in hits if isinstance(item, dict)]
 
 
+def catalog_cache_age(query: str, path: Path | None = None) -> float | None:
+    """Seconds since the cached hits entry for query was written; None if absent."""
+    target = path or catalog_cache_path()
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    entry = raw.get(query) if isinstance(raw, dict) else None
+    written = entry.get("written_at") if isinstance(entry, dict) else None
+    if not isinstance(written, (int, float)) or isinstance(written, bool):
+        return None
+    return time.time() - float(written)
+
+
 def write_catalog_cache(query: str, hits: list[dict], path: Path | None = None) -> None:
     target = path or catalog_cache_path()
     try:
@@ -167,6 +184,24 @@ def write_catalog_cache(query: str, hits: list[dict], path: Path | None = None) 
         pass
 
 
+def clear_catalog_cache(query: str, path: Path | None = None) -> bool:
+    """Drop the cached hits entry for query. True when an entry was removed."""
+    target = path or catalog_cache_path()
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(raw, dict) or query not in raw:
+        return False
+    del raw[query]
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(target, json.dumps(raw, indent=2) + "\n")
+    except OSError:
+        return False
+    return True
+
+
 def parse_search(raw: str) -> list[dict]:
     try:
         data = json.loads(raw)
@@ -177,8 +212,13 @@ def parse_search(raw: str) -> list[dict]:
     return []
 
 
+def cache_query(task: str) -> str:
+    """Cache key search_hits writes under for a task string."""
+    return " ".join(sorted(tokens(task))[:8]) or task[:80]
+
+
 def search_hits(task: str, cache: bool = True) -> list[dict] | None:
-    query = " ".join(sorted(tokens(task))[:8]) or task[:80]
+    query = cache_query(task)
     if not query.strip():
         return []
     if cache:
@@ -392,7 +432,55 @@ def fill(
     return 0
 
 
+def _self_test() -> int:
+    """Run the catalog cache/block/parse machinery against a temp-dir
+    fixture (no Jev, no Hermes); print ok|FAIL per check."""
+    checks = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        cache = Path(tmp) / "catalog-cache.json"
+        query = cache_query("selftest task")
+        hits = [
+            {"name": "selftest-hit", "description": "synthetic", "identifier": "x/y"},
+            {"name": "exploit-kit", "description": "drops shells", "identifier": "e/k"},
+        ]
+        write_catalog_cache(query, hits, path=cache)
+        back = read_catalog_cache(query, path=cache)
+        checks["cache_roundtrip"] = isinstance(back, list) and len(back) == 2
+        stale = read_catalog_cache(
+            query, path=cache, ttl_seconds=1, now=time.time() + 3600
+        )
+        checks["stale_pruned"] = stale is None
+        checks["age_reported"] = isinstance(
+            catalog_cache_age(query, path=cache), (int, float)
+        )
+        checks["clear_drops"] = (
+            clear_catalog_cache(query, path=cache)
+            and read_catalog_cache(query, path=cache) is None
+        )
+        kept = drop_blocked(hits)
+        checks["blocked_drop"] = [h["name"] for h in kept] == ["selftest-hit"]
+        parsed = parse_search(json.dumps(hits))
+        checks["parse_search"] = [h["name"] for h in parsed] == [
+            "selftest-hit",
+            "exploit-kit",
+        ]
+    ok = all(checks.values())
+    sys.stdout.write(
+        "self-test: %s %s\n"
+        % (
+            "ok" if ok else "FAIL",
+            " ".join(
+                "%s=%s" % (k, "ok" if v else "FAIL")
+                for k, v in sorted(checks.items())
+            ),
+        )
+    )
+    return 0 if ok else 1
+
+
 def main() -> int:
+    if _watch.maybe_version(sys.argv[1:]):
+        return 0
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", default="")
     parser.add_argument("--harness", default="auto")
@@ -419,7 +507,43 @@ def main() -> int:
         metavar="NAME",
         help="Print one catalog hit's full JSON record by name and exit.",
     )
+    parser.add_argument(
+        "--clear",
+        action="store_true",
+        help="Drop the cached catalog hits for --task and exit.",
+    )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Print the cwd fill state (miss present/age, ask file) as JSON and exit; --jq KEY prints one dotted-path field.",
+    )
+    parser.add_argument(
+        "--watch",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Re-run the catalog search for --task every S seconds, printing {ts,hits,cached,cache_age_s} ticks (read-only; JEV_CATALOG_WATCH_MAX caps ticks).",
+    )
+    parser.add_argument("--jq", metavar="KEY", default="", help="With --status: print just one dotted-path field of the report (e.g. miss_age_s); unknown key exits 2. With --watch: print just the named tick field(s) per pass, comma list (e.g. hits); null on a miss.")
+    parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
+    parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that finds catalog hits")
+    parser.add_argument("--verdict", default="", metavar="PATH", help="Write a slim {verdict: hits|none, ticks, hits, cached} JSON — refreshed every tick with --watch; in --list/--show mode a one-shot {ticks: 1} payload.")
+    parser.add_argument(
+        "--out",
+        default="",
+        metavar="PATH",
+        help="With --watch, append each tick line to PATH (fail-open).",
+    )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Exercise the cache/search machinery on a temp-dir catalog (no Jev, no Hermes); exits 1 on failure.",
+    )
     args = parser.parse_args()
+    if args.self_test:
+        return _self_test()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     task = args.task
     dest = args.harness
@@ -428,6 +552,41 @@ def main() -> int:
         task = task or str(miss.get("task") or "")
         if dest == "auto":
             dest = str(miss.get("harness") or "auto")
+    if args.status:
+        try:
+            now = time.time()
+            miss = read_miss(cwd / MISS_NAME)
+            miss_ts = miss.get("written_at") if isinstance(miss.get("written_at"), (int, float)) else None
+            ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+            report = {
+                "cwd": str(cwd),
+                "miss": bool(miss),
+                "miss_age_s": round(now - miss_ts, 1) if miss_ts is not None else None,
+                "miss_written_at": miss_ts,
+                "ask": ask_path.is_file(),
+                "task": str(miss.get("task") or "") if miss else "",
+            }
+            if args.jq:
+                cur = report
+                found = True
+                for part in args.jq.split("."):
+                    if isinstance(cur, dict) and part in cur:
+                        cur = cur[part]
+                    else:
+                        found = False
+                        break
+                if not found:
+                    sys.stderr.write(
+                        "bad --jq key %r (payload has: %s)\n"
+                        % (args.jq, ", ".join(sorted(report)))
+                    )
+                    return 2
+                sys.stdout.write(json.dumps(cur) + "\n")
+            else:
+                sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        except Exception:
+            sys.stdout.write(json.dumps({"error": "fail_open"}) + "\n")
+        return 0
     if not task.strip():
         sys.stdout.write(
             json.dumps({"outcome": "no_task"}) + "\n" if args.json else "no_task\n"
@@ -435,11 +594,82 @@ def main() -> int:
         return 0
     home = Path(args.home) if args.home else user_home()
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home()
+    if args.clear:
+        removed = clear_catalog_cache(cache_query(task))
+        if args.json:
+            sys.stdout.write(
+                json.dumps({"cleared": bool(removed), "task": task}) + "\n"
+            )
+        else:
+            sys.stdout.write("cleared\n" if removed else "no_cache\n")
+        return 0
+    if args.watch and args.watch > 0:
+        max_ticks = _watch.cap("JEV_CATALOG_WATCH_MAX", args.max_ticks)
+        ticks = 0
+        dead = _watch.deadline("JEV_CATALOG_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        tick: dict = {}
+        verdict_ok = True
+
+        def _write_verdict() -> bool:
+            return _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "hits" if tick.get("hits") else "none",
+                    "ticks": ticks,
+                    "hits": tick.get("hits", 0),
+                    "cached": bool(tick.get("cached")),
+                    "elapsed_s": round(time.time() - watch_t0, 2),
+                },
+            )
+
+        watch_t0 = time.time()
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
+            tick = {"ts": int(time.time())}
+            cquery = cache_query(task)
+            try:
+                hits = search_hits(task) or []
+                tick["hits"] = len(hits)
+                tick["cached"] = read_catalog_cache(cquery) is not None
+                age = catalog_cache_age(cquery)
+                tick["cache_age_s"] = round(age, 1) if age is not None else None
+            except Exception:
+                tick["hits"] = 0
+                tick["cached"] = False
+                tick["cache_age_s"] = None
+            tick["elapsed_s"] = round(time.time() - watch_t0, 2)
+            _watch.emit_or_jq(tick, getattr(args, "jq", ""), args.out, quiet=_watch.quiet("JEV_CATALOG_WATCH_QUIET", args.quiet), bad=bool(tick["hits"]))
+            ticks += 1
+            sys.stderr.write(
+                "watch tick=%d hits=%d cached=%s\n"
+                % (ticks, tick["hits"], tick["cached"])
+            )
+            if args.verdict and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
+            if args.fail_fast and tick["hits"]:
+                break
+            time.sleep(args.watch)
+        if args.verdict and verdict_ok and not _write_verdict():
+            return 1
+        return 0
     if dest == "auto":
         dest = detect_harness(Path(__file__))
+    def _oneshot_verdict(hits_now) -> bool:
+        hits_list = hits_now or []
+        return _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "hits" if hits_list else "none",
+                "ticks": 1,
+                "hits": len(hits_list),
+                "cached": read_catalog_cache(task) is not None,
+            },
+        )
+
     if args.list:
         try:
             hits = search_hits(task)
+            if args.verdict and not _oneshot_verdict(hits):
+                return 1
             if args.json:
                 rows = [
                     {
@@ -461,6 +691,8 @@ def main() -> int:
     if args.show:
         try:
             hits = search_hits(task)
+            if args.verdict and not _oneshot_verdict(hits):
+                return 1
             match = next(
                 (item for item in (hits or []) if item.get("name") == args.show),
                 None,

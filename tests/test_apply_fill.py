@@ -89,6 +89,328 @@ class ApplyFillTests(unittest.TestCase):
             self.assertIn("never claude plugin install", blob)
             self.assertIn("not skillbox", blob)
 
+    def test_list_prints_ranked_candidates(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        hits = [
+            FILL.as_item("plugin", "alpha", "a plugin"),
+            FILL.as_item("mcp", "beta", "b mcp"),
+        ]
+        with patch.object(FILL, "search_hits", return_value=hits):
+            with patch.object(sys, "argv", ["apply_fill.py", "--task", "alpha", "--list"]):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+        self.assertEqual(rc, 0)
+        self.assertIn("alpha", buf.getvalue())
+
+    def test_self_test_exercises_offline_paths(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with patch.object(sys, "argv", ["apply_fill.py", "--self-test", "--json"]):
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = FILL.main()
+        self.assertEqual(rc, 0)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["self_test"], "ok")
+        self.assertEqual(
+            out["checks"],
+            {
+                "hermes_gate": True,
+                "blocked_pick": True,
+                "pick_match": True,
+                "miss_roundtrip": True,
+                "stale_pruned": True,
+            },
+        )
+
+    def test_list_json_emits_rows(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        hits = [FILL.as_item("mcp", "beta", "b mcp")]
+        with patch.object(FILL, "search_hits", return_value=hits):
+            with patch.object(
+                sys, "argv", ["apply_fill.py", "--task", "beta", "--list", "--json"]
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertEqual(rows[0]["name"], "beta")
+        self.assertEqual(rows[0]["kind"], "mcp")
+
+    def test_show_prints_matching_record(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        hits = [FILL.as_item("plugin", "alpha", "a plugin")]
+        with patch.object(FILL, "search_hits", return_value=hits):
+            with patch.object(
+                sys, "argv", ["apply_fill.py", "--task", "x", "--show", "alpha"]
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+        self.assertEqual(rc, 0)
+        rec = json.loads(buf.getvalue())
+        self.assertEqual(rec["identifier"], "plugin:alpha")
+
+    def test_show_not_found_line(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with patch.object(FILL, "search_hits", return_value=[]):
+            with patch.object(
+                sys, "argv", ["apply_fill.py", "--task", "x", "--show", "nope"]
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+        self.assertEqual(rc, 0)
+        self.assertIn("not found: nope", buf.getvalue())
+
+    def test_watch_emits_readonly_ticks(self) -> None:
+        import subprocess
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / ".jev-tools-miss.json").write_text(
+                json.dumps({"task": "jwt", "harness": "hermes", "written_at": time.time()}),
+                encoding="utf-8",
+            )
+            env = dict(os.environ, JEV_APPLY_WATCH_MAX="2")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--watch", "0.01",
+                    "--cwd", str(cwd),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            ticks = [
+                json.loads(l)
+                for l in proc.stdout.splitlines()
+                if l.startswith("{")
+            ]
+            stderr_lines = [
+                l for l in proc.stderr.splitlines() if l.startswith("watch tick=")
+            ]
+            self.assertEqual(len(stderr_lines), 2)
+            self.assertIn("miss=True", stderr_lines[0])
+            self.assertIn("ask=False", stderr_lines[0])
+            self.assertEqual(len(ticks), 2)
+            self.assertTrue(all(t["miss"] is True for t in ticks))
+            self.assertTrue(all(t["ask"] is False for t in ticks))
+            self.assertTrue(all(t["miss_age_s"] >= 0 for t in ticks))
+
+    def test_watch_fail_fast_breaks_when_miss_present(self) -> None:
+        import subprocess
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / ".jev-tools-miss.json").write_text(
+                json.dumps({"task": "jwt", "harness": "hermes", "written_at": time.time()}),
+                encoding="utf-8",
+            )
+            env = dict(os.environ, JEV_APPLY_WATCH_MAX="9")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--watch", "0.01",
+                    "--cwd", str(cwd),
+                    "--fail-fast",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            ticks = [
+                json.loads(l)
+                for l in proc.stdout.splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 1)
+            self.assertTrue(ticks[0]["miss"])
+
+    def test_watch_tick_miss_age_none_without_miss(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            env = dict(os.environ, JEV_APPLY_WATCH_MAX="1")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--watch", "0.01",
+                    "--cwd", str(cwd),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            ticks = [
+                json.loads(l)
+                for l in proc.stdout.splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(ticks), 1)
+            self.assertIsNone(ticks[0]["miss_age_s"])
+
+    def test_watch_verdict_writes_state_json(self) -> None:
+        import subprocess
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / ".jev-tools-miss.json").write_text(
+                json.dumps({"task": "jwt", "harness": "hermes", "written_at": time.time()}),
+                encoding="utf-8",
+            )
+            verdict = cwd / "v.json"
+            env = dict(os.environ, JEV_APPLY_WATCH_MAX="2")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--watch", "0.01",
+                    "--cwd", str(cwd),
+                    "--verdict", str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pending")
+            self.assertEqual(payload["ticks"], 2)
+            self.assertTrue(payload["miss"])
+            self.assertFalse(payload["ask"])
+
+    def test_watch_verdict_clean_when_no_files(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            verdict = cwd / "v.json"
+            env = dict(os.environ, JEV_APPLY_WATCH_MAX="1")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--watch", "0.01",
+                    "--cwd", str(cwd),
+                    "--verdict", str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "clean")
+            self.assertFalse(payload["miss"])
+            self.assertFalse(payload["ask"])
+
+    def test_nonwatch_verdict_pending_with_miss(self) -> None:
+        import subprocess
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / ".jev-tools-miss.json").write_text(
+                json.dumps({"task": "jwt", "harness": "hermes", "written_at": time.time()}),
+                encoding="utf-8",
+            )
+            verdict = cwd / "v.json"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--cwd", str(cwd),
+                    "--verdict", str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "pending")
+            self.assertEqual(payload["ticks"], 1)
+            self.assertTrue(payload["miss"])
+
+    def test_nonwatch_verdict_clean(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            verdict = cwd / "v.json"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--cwd", str(cwd),
+                    "--verdict", str(verdict),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"], "clean")
+            self.assertEqual(payload["ticks"], 1)
+
+    def test_watch_appends_ticks_to_out_file(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            out = cwd / "ticks.jsonl"
+            env = dict(os.environ, JEV_APPLY_WATCH_MAX="2")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--watch", "0.01",
+                    "--cwd", str(cwd),
+                    "--out", str(out),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = [
+                json.loads(l)
+                for l in out.read_text(encoding="utf-8").splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(all("miss" in t and "ask" in t for t in lines))
+
     def test_other_harness_stays_human(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
@@ -394,6 +716,154 @@ class ApplyFillE2ETests(unittest.TestCase):
             self.assertEqual(entry["outcome"], "human")
             self.assertEqual(entry["harness"], "codex")
 
+
+
+    def test_status_reports_fill_state(self) -> None:
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = self._run(["--status", "--cwd", tmp], cwd=tmp, home=tmp)
+            report = json.loads(out)
+            self.assertFalse(report["miss"])
+            self.assertFalse(report["ask"])
+            self.assertIsNone(report["miss_age_s"])
+            (Path(tmp) / INV.MISS_NAME).write_text(
+                json.dumps({"task": "jwt", "harness": "codex", "written_at": time.time()}),
+                encoding="utf-8",
+            )
+            out = self._run(["--status", "--cwd", tmp], cwd=tmp, home=tmp)
+            report = json.loads(out)
+            self.assertTrue(report["miss"])
+            self.assertEqual(report["task"], "jwt")
+            self.assertIsNotNone(report["miss_age_s"])
+
+    def test_status_jq_prints_one_field(self) -> None:
+        import subprocess
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / INV.MISS_NAME).write_text(
+                json.dumps({"task": "jwt", "harness": "codex", "written_at": time.time()}),
+                encoding="utf-8",
+            )
+            env = dict(os.environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env["JEV_CONSULT_LOG"] = "0"
+            env["USERPROFILE"] = tmp
+            env["HOME"] = tmp
+            proc = subprocess.run(
+                [sys.executable, str(self.SCRIPT), "--status", "--cwd", tmp, "--jq", "task"],
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout), "jwt")
+            proc = subprocess.run(
+                [sys.executable, str(self.SCRIPT), "--status", "--cwd", tmp, "--jq", "nope"],
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("bad --jq key", proc.stderr)
+
+
+class WatchJqTests(unittest.TestCase):
+    def test_watch_jq_prints_only_named_tick_field(self) -> None:
+        import subprocess
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / ".jev-tools-miss.json").write_text(
+                json.dumps({"task": "jwt", "harness": "hermes", "written_at": time.time()}),
+                encoding="utf-8",
+            )
+            env = dict(os.environ, JEV_APPLY_WATCH_MAX="2")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--watch", "0.01",
+                    "--cwd", str(cwd),
+                    "--jq", "miss",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.splitlines(), ["true", "true"])
+
+class WatchSecsEnvTests(unittest.TestCase):
+    def test_watch_secs_env_bounds_loop(self) -> None:
+        import subprocess
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(
+                os.environ,
+                JEV_APPLY_WATCH_MAX="0",
+                JEV_APPLY_WATCH_SECS="0.05",
+            )
+            start = _time.time()
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "apply_fill.py"),
+                    "--watch", "0.02",
+                    "--cwd", tmp,
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+            self.assertLess(_time.time() - start, 10.0)
+            ticks = [
+                l for l in proc.stdout.splitlines() if l.startswith("{")
+            ]
+            self.assertLessEqual(len(ticks), 10)
+            self.assertGreaterEqual(len(ticks), 1)
+
+class WriteAskAtomicTests(unittest.TestCase):
+    def test_write_ask_atomic_no_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "ask.json"
+            hits = [{"id": "kind:name", "kind": "kind", "name": "name"}]
+            FILL.write_apply_ask(out, "task", hits)
+            names = sorted(p.name for p in Path(tmp).iterdir())
+            self.assertEqual(names, ["ask.json"])
+            data = json.loads(out.read_text(encoding="utf-8"))
+            self.assertIn("questions", data)
+
+    def test_ask_payload_is_lint_clean_choice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "ask.json"
+            hits = [
+                {"id": "kind:a", "kind": "kind", "name": "a", "description": "A"},
+                {"id": "kind:b", "kind": "kind", "name": "b"},
+            ]
+            FILL.write_apply_ask(out, "task", hits)
+            data = json.loads(out.read_text(encoding="utf-8"))
+        self.assertIn("state", data)
+        self.assertIn("task", data["state"])
+        questions = data["questions"]
+        self.assertIn("load_tools", questions)
+        q = questions["load_tools"]
+        self.assertEqual(q["type"], "choice")
+        criteria = q["criteria"]
+        self.assertIn("none", criteria)
+        self.assertIn("kind:a", criteria)
+        self.assertIn("kind:b", criteria)
+        for key, label in criteria.items():
+            self.assertTrue(str(label).strip(), "empty label for %s" % key)
 
 if __name__ == "__main__":
     unittest.main()

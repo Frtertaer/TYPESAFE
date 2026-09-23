@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -19,6 +21,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import _watch  # noqa: E402
 from inventory import (  # noqa: E402
     HARNESSES,
     KIND_SKILL,
@@ -37,6 +40,7 @@ from inventory import (  # noqa: E402
     sidecar_fresh,
     tokens,
     user_home,
+    write_miss,
     write_sidecar,
 )
 
@@ -126,6 +130,17 @@ def write_peer_ask(path: Path, task: str, dest: str, picked: list[dict]) -> None
     atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 
 
+def fill_timeout_seconds() -> float:
+    """JEV_FILL_TIMEOUT env overrides the default 90s Jev ask timeout."""
+    try:
+        env = float(os.environ.get("JEV_FILL_TIMEOUT", "") or 0)
+        if env > 0:
+            return env
+    except ValueError:
+        pass
+    return 90.0
+
+
 def run_jev(ask_path: Path) -> dict | None:
     script = _SCRIPTS / "jev.py"
     try:
@@ -133,7 +148,7 @@ def run_jev(ask_path: Path) -> dict | None:
             [sys.executable, str(script), "ask", str(ask_path)],
             capture_output=True,
             text=True,
-            timeout=90,
+            timeout=fill_timeout_seconds(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -275,6 +290,8 @@ def fill(
 
 
 def main() -> int:
+    if _watch.maybe_version(sys.argv[1:]):
+        return 0
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", default="")
     parser.add_argument("--harness", default="auto")
@@ -301,7 +318,92 @@ def main() -> int:
         metavar="NAME",
         help="Print one peer item's full JSON record by name and exit.",
     )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Print the cwd fill state (miss file, task, ask file) as JSON and exit.",
+    )
+    parser.add_argument(
+        "--watch",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Re-print the fill state as a {ts,miss,ask} JSON tick every S seconds (JEV_PEER_WATCH_MAX caps ticks).",
+    )
+    parser.add_argument("--jq", metavar="KEY", default="", help="With --status: print just one dotted-path field of the report (e.g. miss); unknown key exits 2. With --watch: print just the named tick field(s) per pass, comma list.")
+    parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
+    parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
+    parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
+    parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick where a miss or pending ask is present")
+    parser.add_argument(
+        "--out",
+        default="",
+        metavar="PATH",
+        help="With --watch, append each tick line to PATH (fail-open).",
+    )
+    parser.add_argument(
+        "--verdict",
+        default="",
+        metavar="PATH",
+        help="Write a slim {verdict: pending|clean, ticks, miss, miss_task, ask} JSON to PATH — refreshed every tick with --watch; without it, a one-shot {ticks: 1} payload.",
+    )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Exercise the miss/sidecar round-trip in a temp dir (fresh read, stale prune, sidecar names); exit 1 on failure (--json emits the checks).",
+    )
     args = parser.parse_args()
+    if args.self_test:
+        checks: dict = {}
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                miss_path = Path(tmp) / MISS_NAME
+                write_miss(miss_path, "hermes", "self-test task")
+                fresh = read_miss(miss_path)
+                checks["fresh_miss"] = (
+                    str(fresh.get("task") or "") == "self-test task"
+                    and str(fresh.get("harness") or "") == "hermes"
+                )
+                miss_path.unlink()
+                write_miss(miss_path, "hermes", "self-test task", extra={"written_at": 1})
+                stale = read_miss(miss_path)
+                checks["stale_miss_pruned"] = not stale and not miss_path.is_file()
+                sidecar_path = Path(tmp) / SIDECAR_NAME
+                write_sidecar(
+                    sidecar_path,
+                    "hermes",
+                    "self-test task",
+                    [{"kind": KIND_SKILL, "name": "self-test-item"}],
+                )
+                names = [
+                    n.get("name")
+                    for n in (read_sidecar(sidecar_path).get("names") or [])
+                    if isinstance(n, dict)
+                ]
+                checks["sidecar_roundtrip"] = names == ["self-test-item"]
+        except Exception:
+            checks = {"raised": False}
+        ok = bool(checks) and all(checks.values())
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {"self_test": "ok" if ok else "FAIL", "checks": checks},
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "self-test: %s %s\n"
+                % (
+                    "ok" if ok else "FAIL",
+                    " ".join(
+                        "%s=%s" % (k, "ok" if v else "FAIL")
+                        for k, v in sorted(checks.items())
+                    ),
+                )
+            )
+        return 0 if ok else 1
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     task = args.task
     dest = args.harness
@@ -314,6 +416,90 @@ def main() -> int:
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home()
     if dest == "auto":
         dest = detect_harness(Path(__file__))
+    if args.status:
+        try:
+            miss = read_miss(cwd / MISS_NAME)
+            ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+            report = {
+                "cwd": str(cwd),
+                "harness": dest,
+                "miss": bool(miss),
+                "miss_task": str(miss.get("task") or "") if miss else "",
+                "miss_written_at": miss.get("written_at") if miss else None,
+                "ask_file_exists": ask_path.is_file(),
+                "task": task,
+            }
+            if args.jq:
+                cur = report
+                found = True
+                for part in args.jq.split("."):
+                    if isinstance(cur, dict) and part in cur:
+                        cur = cur[part]
+                    else:
+                        found = False
+                        break
+                if not found:
+                    sys.stderr.write(
+                        "bad --jq key %r (payload has: %s)\n"
+                        % (args.jq, ", ".join(sorted(report)))
+                    )
+                    return 2
+                sys.stdout.write(json.dumps(cur) + "\n")
+            else:
+                sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        except Exception:
+            sys.stdout.write(json.dumps({"error": "fail_open"}) + "\n")
+        return 0
+    if args.watch and args.watch > 0:
+        max_ticks = _watch.cap("JEV_PEER_WATCH_MAX", args.max_ticks)
+        ticks = 0
+        dead = _watch.deadline("JEV_PEER_WATCH_SECS", getattr(args, "watch_max", 0.0))
+        ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+        tick: dict = {}
+        verdict_ok = True
+
+        def _write_verdict() -> bool:
+            pending = bool(tick.get("miss") or tick.get("ask"))
+            return _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "pending" if pending else "clean",
+                    "ticks": ticks,
+                    "miss": tick.get("miss"),
+                    "miss_task": tick.get("miss_task", ""),
+                    "ask": tick.get("ask"),
+                    "elapsed_s": round(time.time() - watch_t0, 2),
+                },
+            )
+
+        watch_t0 = time.time()
+        while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
+            try:
+                miss = read_miss(cwd / MISS_NAME)
+                tick = {
+                    "ts": int(time.time()),
+                    "miss": bool(miss),
+                    "miss_task": str(miss.get("task") or "") if miss else "",
+                    "ask": ask_path.is_file(),
+                    "elapsed_s": round(time.time() - watch_t0, 2),
+                }
+            except Exception:
+                tick = {"ts": int(time.time()), "miss": None, "ask": None,
+                        "elapsed_s": round(time.time() - watch_t0, 2)}
+            _watch.emit_or_jq(tick, getattr(args, "jq", ""), args.out, quiet=_watch.quiet("JEV_PEER_WATCH_QUIET", args.quiet), bad=bool(tick.get("miss") or tick.get("ask")))
+            ticks += 1
+            sys.stderr.write(
+                "watch tick=%d miss=%s ask=%s\n"
+                % (ticks, tick.get("miss"), tick.get("ask"))
+            )
+            if args.verdict and verdict_ok and not _write_verdict():
+                verdict_ok = False  # warn once, stop retrying
+            if args.fail_fast and (tick.get("miss") or tick.get("ask")):
+                break
+            time.sleep(args.watch)
+        if args.verdict and verdict_ok and not _write_verdict():
+            return 1
+        return 0
     if args.list:
         try:
             peers = peer_skills(dest, home, hermes)
@@ -354,12 +540,31 @@ def main() -> int:
         except Exception:
             pass
         return 0
+    ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
+    if args.verdict:
+        try:
+            miss_now = read_miss(cwd / MISS_NAME)
+            miss_task = str(miss_now.get("task") or "") if miss_now else ""
+            miss_flag = bool(miss_now)
+            ask_now = ask_path.is_file()
+        except Exception:
+            miss_flag, miss_task, ask_now = None, "", None
+        if not _watch.write_verdict(
+            args.verdict,
+            {
+                "verdict": "pending" if (miss_flag or ask_now) else "clean",
+                "ticks": 1,
+                "miss": miss_flag,
+                "miss_task": miss_task,
+                "ask": ask_now,
+            },
+        ):
+            return 1
     if not task.strip():
         sys.stdout.write(
             json.dumps({"outcome": "no_task"}) + "\n" if args.json else "no_task\n"
         )
         return 0
-    ask_path = Path(args.ask_file) if args.ask_file else cwd / ASK_NAME
     try:
         return fill(
             task,

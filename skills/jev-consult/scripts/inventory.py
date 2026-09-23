@@ -106,6 +106,17 @@ SCAN_SCHEMA_ROWS = {
     "item.matched": {"required": False, "type": "list[str] query tokens that hit (--explain only)"},
 }
 
+# decisions.jsonl fill-entry contract shared by the peer_fill/apply_fill/
+# catalog_fill writers (each script's --schema narrows the outcome list).
+FILL_SCHEMA_ROWS = {
+    "ts": {"required": True, "type": "int epoch seconds"},
+    "harness": {"required": True, "type": "string, destination harness"},
+    "jev_status": {"required": True, "type": 'string literal "fill" (marks fill entries)'},
+    "fill": {"required": True, "type": "peer|apply|catalog — writer id"},
+    "outcome": {"required": True, "type": "string, first word of the emitted line; no_task|fail_open are stdout-only"},
+    "prompt_head": {"required": True, "type": "string, first 120 chars of the task"},
+}
+
 
 def user_home() -> Path:
     return Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or Path.home())

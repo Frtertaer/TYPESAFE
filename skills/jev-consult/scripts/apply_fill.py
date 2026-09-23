@@ -35,6 +35,7 @@ from inventory import (  # noqa: E402
     clear_miss,
     clear_scan_cache,
     detect_harness,
+    FILL_SCHEMA_ROWS,
     hermes_home,
     shortlist,
     tokens,
@@ -46,6 +47,22 @@ from peer_fill import read_miss, run_jev  # noqa: E402
 
 ASK_NAME = ".jev-apply-fill.request.json"
 SEARCH_LIMIT = 8
+# Emitted outcome words (first word of every emit() line + the two stdout-only
+# short-circuits); --schema lists them and the drift-guard test pins them.
+OUTCOMES = (
+    "blocked",
+    "dry",
+    "fail_open",
+    "human",
+    "inspect_fail",
+    "install_fail",
+    "installed",
+    "jev_skip",
+    "no_apply",
+    "no_hermes",
+    "no_task",
+    "none",
+)
 MCP_LINE = re.compile(
     r"^\s+(\S+)\s+(available|configured|enabled|disabled|error|installed|connected)\s+(.*\S)\s*$",
     re.I,
@@ -376,6 +393,11 @@ def main() -> int:
         help="Emit the outcome as a JSON object instead of a text line.",
     )
     parser.add_argument(
+        "--schema",
+        action="store_true",
+        help="Print the decisions.jsonl fill-entry contract and exit (--json emits the object).",
+    )
+    parser.add_argument(
         "--watch",
         metavar="S",
         type=float,
@@ -409,6 +431,21 @@ def main() -> int:
         help="Exercise the offline paths in a temp dir (hermes gate, blocked pick, pick match, miss round-trip+stale prune); exit 1 on failure (--json emits the checks).",
     )
     args = parser.parse_args()
+    if args.schema:
+        rows = {key: dict(row) for key, row in FILL_SCHEMA_ROWS.items()}
+        rows["outcome"] = {
+            "required": True,
+            "type": "|".join(OUTCOMES) + " (first word of the emitted line; no_task/fail_open are stdout-only)",
+        }
+        if args.json:
+            sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+        else:
+            for key, row in rows.items():
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (key, row["type"], "required" if row["required"] else "optional")
+                )
+        return 0
     if args.self_test:
         checks: dict = {}
         try:

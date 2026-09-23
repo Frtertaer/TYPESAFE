@@ -32,6 +32,7 @@ from inventory import (  # noqa: E402
     clear_miss,
     clear_scan_cache,
     detect_harness,
+    FILL_SCHEMA_ROWS,
     hermes_home,
     shortlist,
     tokens,
@@ -50,6 +51,22 @@ BLOCK_RE = re.compile(
     re.I,
 )
 BLOCKED_INSPECT = ("blocked scan", "verdict: blocked", "scan blocked", "install blocked")
+# Emitted outcome words (first word of every emit() line + the two stdout-only
+# short-circuits); --schema lists them and the drift-guard test pins them.
+OUTCOMES = (
+    "blocked",
+    "dry",
+    "fail_open",
+    "inspect_fail",
+    "install_fail",
+    "installed",
+    "jev_skip",
+    "no_catalog",
+    "no_hermes",
+    "no_task",
+    "none",
+    "scan_fail",
+)
 
 
 def hermes_bin() -> str | None:
@@ -502,6 +519,11 @@ def main() -> int:
         help="With --list: emit a JSON array of hits; in fill mode emit one JSON object per outcome.",
     )
     parser.add_argument(
+        "--schema",
+        action="store_true",
+        help="Print the decisions.jsonl fill-entry contract and exit (--json emits the object).",
+    )
+    parser.add_argument(
         "--show",
         default="",
         metavar="NAME",
@@ -542,6 +564,21 @@ def main() -> int:
         help="Exercise the cache/search machinery on a temp-dir catalog (no Jev, no Hermes); exits 1 on failure.",
     )
     args = parser.parse_args()
+    if args.schema:
+        rows = {key: dict(row) for key, row in FILL_SCHEMA_ROWS.items()}
+        rows["outcome"] = {
+            "required": True,
+            "type": "|".join(OUTCOMES) + " (first word of the emitted line; no_task/fail_open are stdout-only)",
+        }
+        if args.json:
+            sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+        else:
+            for key, row in rows.items():
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (key, row["type"], "required" if row["required"] else "optional")
+                )
+        return 0
     if args.self_test:
         return _self_test()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()

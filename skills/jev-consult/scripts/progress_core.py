@@ -964,10 +964,23 @@ class Ledger:
         return Path(str(self.path) + ".heads")
 
     def _read_anchor(self):
-        try:
-            anchor = _decode(self._anchor_path().read_text(encoding="utf-8"))
-        except (OSError, ProgressError) as exc:
-            raise ProgressError("STORE_INVALID", "The progress chain anchor file is missing or unreadable") from exc
+        # os.replace on Windows denies a read that lands mid-rename; a short
+        # bounded retry turns that transient into the intended ordering.
+        anchor = None
+        last_exc = None
+        for attempt in range(4):
+            try:
+                anchor = _decode(self._anchor_path().read_text(encoding="utf-8"))
+                break
+            except PermissionError as exc:
+                last_exc = exc
+                if attempt == 3:
+                    raise ProgressError("STORE_INVALID", "The progress chain anchor file is missing or unreadable") from exc
+                time.sleep(0.05 * (attempt + 1))
+            except (OSError, ProgressError) as exc:
+                raise ProgressError("STORE_INVALID", "The progress chain anchor file is missing or unreadable") from exc
+        if anchor is None and last_exc is None:
+            raise ProgressError("STORE_INVALID", "The progress chain anchor file is missing or unreadable")
         if not isinstance(anchor, dict) or not all(
                 isinstance(stage_id, str) and isinstance(seal, str) and HEX64_RE.fullmatch(seal) is not None
                 for stage_id, seal in anchor.items()):

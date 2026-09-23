@@ -1052,6 +1052,31 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(payload["margin"], 2.5)
         self.assertTrue(payload["desc_override"])
 
+    def test_env_reflects_env_overrides(self) -> None:
+        env = {
+            "JEV_TRIGGER_MIN_COVERAGE": "0.5",
+            "JEV_TRIGGER_MIN_COVERS": "2",
+            "JEV_TRIGGER_WATCH_MAX": "7",
+            "JEV_TRIGGER_WATCH_SECS": "30",
+            "JEV_TRIGGER_WATCH_QUIET": "1",
+        }
+        buf = io.StringIO()
+        with patch.dict(os.environ, env):
+            with redirect_stdout(buf):
+                rc = te.main(["--env"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["min_coverage"], 0.5)
+        self.assertEqual(payload["min_covers"], 2)
+        self.assertEqual(payload["watch_max"], 7)
+        self.assertEqual(payload["watch_secs"], 30.0)
+        self.assertTrue(payload["watch_quiet"])
+        buf = io.StringIO()
+        with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_SECS": "junk"}):
+            with redirect_stdout(buf):
+                te.main(["--env"])
+        self.assertEqual(json.loads(buf.getvalue())["watch_secs"], 0.0)
+
     def test_watch_emits_ticks(self) -> None:
         buf = io.StringIO()
         with patch.dict(os.environ, {"JEV_TRIGGER_WATCH_MAX": "2"}):

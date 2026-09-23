@@ -375,6 +375,10 @@ def main(argv: list[str] | None = None) -> int:
             scorer_margin = getattr(
                 _load_scorer(VENDORED_SCORER), "MARGIN", 1.15
             )
+        try:
+            watch_secs = float(os.environ.get("JEV_TRIGGER_WATCH_SECS", "") or 0)
+        except ValueError:
+            watch_secs = 0.0
         report = {
             "cases": args.cases,
             "cases_exists": Path(args.cases).is_file(),
@@ -384,6 +388,11 @@ def main(argv: list[str] | None = None) -> int:
             "margin": args.margin if args.margin is not None else scorer_margin,
             "margin_default": scorer_margin,
             "desc_override": bool(args.desc),
+            "min_coverage": args.min_coverage,
+            "min_covers": args.min_covers,
+            "watch_max": _watch.cap("JEV_TRIGGER_WATCH_MAX", None),
+            "watch_secs": watch_secs,
+            "watch_quiet": _watch.quiet("JEV_TRIGGER_WATCH_QUIET", False),
         }
         if args.jq:
             if args.jq in report:

@@ -47,26 +47,32 @@ class JqContractTests(unittest.TestCase):
                 encoding="utf-8",
             )
             cases = [
-                ("inventory.py", ["--jq", "nope.nope"]),
-                ("inventory_hook.py", ["--env", "--jq", "nope"]),
-                ("doctor.py", ["--jq", "nope"]),
-                ("compare.py", ["--jq", "nope"]),
-                ("smoke.py", ["--only", "policy", "--jq", "nope"]),
-                ("peer_fill.py", ["--status", "--jq", "nope"]),
+                ("inventory.py", ["--jq", "nope.nope"], "counts"),
+                ("inventory_hook.py", ["--env", "--jq", "nope"], "policy"),
+                ("doctor.py", ["--jq", "nope"], "checks"),
+                ("compare.py", ["--jq", "nope"], "rows"),
+                ("smoke.py", ["--only", "policy", "--jq", "nope"], "ok"),
+                ("peer_fill.py", ["--status", "--jq", "nope"], "miss"),
                 (
                     "apply_fill.py",
                     ["--status", "--cwd", str(tmp), "--jq", "nope"],
+                    "miss",
                 ),
-                ("jev.py", ["decide", str(answers), "--jq", "nope"]),
-                ("trigger_eval.py", ["--env", "--jq", "nope"]),
+                ("jev.py", ["decide", str(answers), "--jq", "nope"], "decision"),
+                ("trigger_eval.py", ["--env", "--jq", "nope"], "cases"),
             ]
             problems = []
-            for script, argv in cases:
+            for script, argv, valid_key in cases:
                 proc = _run(script, argv, tmp)
                 if proc.returncode != 2 or "bad --jq key" not in proc.stderr:
                     problems.append(
                         "%s: rc=%d err=%r"
                         % (script, proc.returncode, proc.stderr[:100])
+                    )
+                elif valid_key not in proc.stderr:
+                    problems.append(
+                        "%s: bad-key error names no valid keys: %r"
+                        % (script, proc.stderr[:100])
                     )
             self.assertEqual(problems, [])
 

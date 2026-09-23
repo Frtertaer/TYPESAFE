@@ -295,6 +295,65 @@ class OneshotOutTests(unittest.TestCase):
             self.assertIn("cannot write", buf_err.getvalue())
 
 
+class MutatingVerdictTests(unittest.TestCase):
+    def test_self_test_verdict_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            code, _out = run_cli(["self-test", "--verdict", str(verdict)])
+            self.assertEqual(code, 0)
+            doc = json.loads(verdict.read_text(encoding="utf-8"))
+        self.assertEqual(doc["verdict"], "ok")
+        self.assertEqual(doc["command"], "self-test")
+        self.assertEqual(doc["stage"], "self_test")
+
+    def test_review_verdict_error_on_missing_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            code, _out = run_cli(
+                [
+                    "--repo",
+                    tmp,
+                    "review",
+                    "s",
+                    "--reason",
+                    "r",
+                    "--reviewer",
+                    "rv",
+                    "--verdict",
+                    str(verdict),
+                ]
+            )
+            self.assertEqual(code, 2)
+            doc = json.loads(verdict.read_text(encoding="utf-8"))
+        self.assertEqual(doc["verdict"], "error")
+        self.assertEqual(doc["command"], "review")
+        self.assertIn("code", doc)
+
+    def test_status_verdict_not_double_written(self) -> None:
+        ledger = Mock()
+        ledger.status.return_value = {
+            "stage_id": "s",
+            "action": "continue",
+            "reason": "open",
+            "points": 3,
+            "review_at": 10,
+            "assessment_count": 0,
+            "assessment_limit": 5,
+            "model_attempts": 0,
+            "model_attempt_limit": 10,
+            "awarded_items": [],
+            "blocked_items": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            with patch.object(progress, "Ledger", return_value=ledger):
+                code, _out = run_cli(["status", "s", "--verdict", str(verdict)])
+            self.assertEqual(code, 0)
+            doc = json.loads(verdict.read_text(encoding="utf-8"))
+        self.assertEqual(doc["verdict"], "active")
+        self.assertNotIn("command", doc)  # branch verdict, not the tail one
+
+
 class OutputTests(unittest.TestCase):
     def test_status_result_is_frozen_json(self) -> None:
         frozen = {"stage_id": "sample", "points": 2, "action": "review_required"}

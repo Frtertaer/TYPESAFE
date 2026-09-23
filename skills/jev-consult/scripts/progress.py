@@ -84,10 +84,16 @@ def build_parser():
     lint_p = commands.add_parser("lint", help="Dry-validate a plan against a policy with the same checks as init; writes nothing")
     lint_p.add_argument("plan", help="Stage-plan JSON file")
     for name in commands.choices:
-        commands.choices[name].add_argument(
+        sub = commands.choices[name]
+        sub.add_argument(
             "--jq", metavar="KEY", default="",
             help="Print just this dotted-path field of the result payload (rc 2 on unknown key)",
         )
+        if name in ("init", "evidence", "assess", "invalidate", "restore", "review", "self-test"):
+            sub.add_argument(
+                "--verdict", metavar="PATH", default="",
+                help="Write a slim {verdict: ok|error, command} JSON to PATH after the run (action/points/stage_id when the result has them)",
+            )
     return parser
 
 
@@ -539,7 +545,27 @@ def main(argv=None):
             result = ledger.review(args.stage, args.reason, args.reviewer, approve_finish=args.approve_finish)
     except ProgressError as exc:
         sys.stdout.write(json.dumps({"error": {"code": exc.code, "message": str(exc)}}) + "\n")
+        if getattr(args, "verdict", "") and args.command not in (
+            "status",
+            "history",
+            "report",
+        ):
+            _watch.write_verdict(
+                args.verdict,
+                {"verdict": "error", "command": args.command, "code": exc.code},
+            )
         return 2
+    if getattr(args, "verdict", "") and args.command not in (
+        "status",
+        "history",
+        "report",
+    ):
+        verdict_doc = {"verdict": "ok", "command": args.command}
+        for key in ("action", "points", "stage_id", "stage"):
+            if isinstance(result, dict) and key in result:
+                verdict_doc[key] = result[key]
+        if not _watch.write_verdict(args.verdict, verdict_doc):
+            return 1
     if args.command in ("status", "history") and getattr(args, "out", ""):
         text = json.dumps(result, indent=2) + "\n"
         try:

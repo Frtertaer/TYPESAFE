@@ -96,6 +96,7 @@ class FlagParityTest(unittest.TestCase):
         "inventory_hook.py": [["--help"]],
         "smoke.py": [["--help"]],
         "jev.py": [["ping", "--help"]],
+        "progress.py": [["status", "--help"]],
         "trace.py": [
             ["state", "--help"], ["notes", "--help"],
             ["history", "--help"], ["stats", "--help"],
@@ -130,7 +131,7 @@ class FlagParityTest(unittest.TestCase):
 
         for path in _cli_scripts():
             src = path.read_text(encoding="utf-8")
-            handles_watch = '"--watch" in argv' in src or bool(
+            handles_watch = '"--watch" in argv' in src or 'add_argument("--watch"' in src or bool(
                 re.search(r'^\s*"--watch",\s*$', src, re.M)
             )
             with self.subTest(script=path.name):

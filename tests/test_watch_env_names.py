@@ -29,6 +29,7 @@ EXPECTED = {
     "decisions": "JEV_DECISIONS",
     "doctor": "JEV_DOCTOR",
     "jev": "JEV_PING",
+    "progress": "JEV_PROGRESS",
 }
 
 OTHER_ENVS = re.compile(r'"(JEV_[A-Z]+_WATCH_(?:MAX|SECS|QUIET))"')

@@ -1000,7 +1000,16 @@ class Ledger:
             fd = os.open(temp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(canonical(anchor))
-            os.replace(temp, target)
+            # Windows denies the rename while a concurrent reader holds the
+            # target open — retry the os.replace like _read_anchor does.
+            for attempt in range(4):
+                try:
+                    os.replace(temp, target)
+                    break
+                except PermissionError:
+                    if attempt == 3:
+                        raise
+                    time.sleep(0.05 * (attempt + 1))
         except OSError as exc:
             try:
                 temp.unlink(missing_ok=True)

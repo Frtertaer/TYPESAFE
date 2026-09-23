@@ -10,15 +10,18 @@ import sys
 import tempfile
 import time
 import unittest
+from io import StringIO
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "jev-consult" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
+import progress as progress_cli
 import progress_core as progress
 
 
@@ -1109,6 +1112,91 @@ class GitEvidenceTests(unittest.TestCase):
         self.assertEqual(result["points"], 0)
         self.assertEqual(ledger.history("reliability")["events"][-1]["data"]["reason"], "unchanged_tree")
         ask.assert_not_called()
+
+
+def _watch_args(**over):
+    args = SimpleNamespace(
+        stage="reliability", watch=0.01, max_ticks=0, watch_max=0.0,
+        quiet=False, fail_fast=False, out="", verdict="", jq="",
+    )
+    for key, value in over.items():
+        setattr(args, key, value)
+    return args
+
+
+class _ResolvedLedger:
+    def status(self, _stage):
+        return {
+            "stage_id": "reliability", "action": "finished", "reason": "finished",
+            "points": 12, "review_at": 12, "assessment_count": 6,
+            "model_attempts": 6, "awarded_items": ["i"], "blocked_items": [],
+        }
+
+
+class StatusWatchTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.ledger = progress.Ledger(
+            self.root / "progress.sqlite3", self.root, evidence=FakeEvidence()
+        )
+        self.ledger.initialize(plan(), policy())
+
+    def _run(self, args):
+        out, err = StringIO(), StringIO()
+        with patch("sys.stdout", out), patch("sys.stderr", err):
+            rc = progress_cli._status_watch(self.ledger, args)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_watch_emits_ticks_and_rc1_while_continue(self):
+        verdict = self.root / "verdict.json"
+        args = _watch_args(max_ticks=2, verdict=str(verdict))
+        rc, out, err = self._run(args)
+        self.assertEqual(rc, 1)  # capped while still "continue" = unresolved
+        lines = out.strip().splitlines()
+        self.assertEqual(len(lines), 2)
+        tick = json.loads(lines[0])
+        self.assertEqual(tick["action"], "continue")
+        self.assertEqual(tick["stage"], "reliability")
+        self.assertIn("points", tick)
+        self.assertIn("watch tick=1 action=continue", err)
+        data = json.loads(verdict.read_text(encoding="utf-8"))
+        self.assertEqual(data["verdict"], "active")
+        self.assertEqual(data["ticks"], 2)
+
+    def test_watch_fail_fast_on_missing_stage(self):
+        args = _watch_args(stage="nope", fail_fast=True)
+        rc, out, _err = self._run(args)
+        self.assertEqual(rc, 1)
+        self.assertEqual(len(out.strip().splitlines()), 1)
+        self.assertEqual(json.loads(out.strip())["action"], "error")
+
+    def test_watch_resolved_tick_exits_zero(self):
+        ledger = _ResolvedLedger()
+        out, err = StringIO(), StringIO()
+        args = _watch_args(fail_fast=True, verdict=str(self.root / "v.json"))
+        with patch("sys.stdout", out), patch("sys.stderr", err):
+            rc = progress_cli._status_watch(ledger, args)
+        self.assertEqual(rc, 0)
+        data = json.loads((self.root / "v.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["verdict"], "resolved")
+        self.assertEqual(data["action"], "finished")
+
+    def test_watch_max_env_caps_ticks(self):
+        with patch.dict(os.environ, {"JEV_PROGRESS_WATCH_MAX": "1"}):
+            rc, out, _err = self._run(_watch_args())
+        self.assertEqual(rc, 1)
+        self.assertEqual(len(out.strip().splitlines()), 1)
+
+    def test_watch_jq_prints_named_field(self):
+        _rc, out, _err = self._run(_watch_args(max_ticks=1, jq="action"))
+        self.assertEqual(json.loads(out.strip()), "continue")
+
+    def test_watch_out_appends_ticks(self):
+        target = self.root / "ticks.jsonl"
+        self._run(_watch_args(max_ticks=2, out=str(target)))
+        self.assertEqual(len(target.read_text(encoding="utf-8").strip().splitlines()), 2)
 
 
 if __name__ == "__main__":

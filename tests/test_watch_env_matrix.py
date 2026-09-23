@@ -32,6 +32,7 @@ EXPECTED_PREFIXES = {
     "doctor": "DOCTOR",
     "smoke": "SMOKE",
     "jev": "PING",
+    "progress": "PROGRESS",
 }
 
 ENV_RE = re.compile(r'"(JEV_([A-Z0-9]+)_WATCH_(MAX|SECS|QUIET))"')

@@ -1044,6 +1044,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--json", action="store_true", help="Machine-readable stats")
     parser.add_argument(
+        "--env",
+        action="store_true",
+        help="Print the resolved env config JSON (file, source, exists, count, env) — --jq KEY prints one field, --out PATH also writes it",
+    )
+    parser.add_argument(
         "--schema", action="store_true",
         help="Print the decisions.jsonl entry key contract and exit (--json emits the object)",
     )
@@ -1162,6 +1167,53 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ok else 1
     file_arg = args.file or os.environ.get("JEV_DECISIONS", "").strip()
     path = Path(file_arg) if file_arg else inventory.decisions_log_path()
+    if getattr(args, "env", False):
+        envvars = {
+            key: os.environ[key]
+            for key in sorted(os.environ)
+            if key.startswith("JEV_DECISIONS")
+        }
+        exists = bool(path and path.is_file())
+        if args.file:
+            source = "--file"
+        elif os.environ.get("JEV_DECISIONS", "").strip():
+            source = "env"
+        elif path is None:
+            source = "disabled"
+        else:
+            source = "default"
+        report = {
+            "file": str(path) if path else None,
+            "source": source,
+            "exists": exists,
+            "count": len(load_entries(path)[0]) if exists else 0,
+            "env": envvars,
+        }
+        if args.jq:
+            node = report
+            found = True
+            for part in args.jq.split("."):
+                if isinstance(node, dict) and part in node:
+                    node = node[part]
+                else:
+                    found = False
+                    break
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (env has: %s)\n"
+                    % (args.jq, ", ".join(sorted(report)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+            return 0
+        text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+        sys.stdout.write(text)
+        if args.out:
+            try:
+                _atomic_write(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+        return 0
     if path is None:
         sys.stderr.write("decisions log disabled (JEV_CONSULT_LOG=0)\n")
         return 2

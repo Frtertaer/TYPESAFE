@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -444,6 +445,52 @@ def fill(
     return 0
 
 
+def _self_test() -> int:
+    """Run the catalog cache/block/parse machinery against a temp-dir
+    fixture (no Jev, no Hermes); print ok|FAIL per check."""
+    checks = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        cache = Path(tmp) / "catalog-cache.json"
+        query = cache_query("selftest task")
+        hits = [
+            {"name": "selftest-hit", "description": "synthetic", "identifier": "x/y"},
+            {"name": "exploit-kit", "description": "drops shells", "identifier": "e/k"},
+        ]
+        write_catalog_cache(query, hits, path=cache)
+        back = read_catalog_cache(query, path=cache)
+        checks["cache_roundtrip"] = isinstance(back, list) and len(back) == 2
+        stale = read_catalog_cache(
+            query, path=cache, ttl_seconds=1, now=time.time() + 3600
+        )
+        checks["stale_pruned"] = stale is None
+        checks["age_reported"] = isinstance(
+            catalog_cache_age(query, path=cache), (int, float)
+        )
+        checks["clear_drops"] = (
+            clear_catalog_cache(query, path=cache)
+            and read_catalog_cache(query, path=cache) is None
+        )
+        kept = drop_blocked(hits)
+        checks["blocked_drop"] = [h["name"] for h in kept] == ["selftest-hit"]
+        parsed = parse_search(json.dumps(hits))
+        checks["parse_search"] = [h["name"] for h in parsed] == [
+            "selftest-hit",
+            "exploit-kit",
+        ]
+    ok = all(checks.values())
+    sys.stdout.write(
+        "self-test: %s %s\n"
+        % (
+            "ok" if ok else "FAIL",
+            " ".join(
+                "%s=%s" % (k, "ok" if v else "FAIL")
+                for k, v in sorted(checks.items())
+            ),
+        )
+    )
+    return 0 if ok else 1
+
+
 def main() -> int:
     if _watch.maybe_version(sys.argv[1:]):
         return 0
@@ -502,7 +549,14 @@ def main() -> int:
         metavar="PATH",
         help="With --watch, append each tick line to PATH (fail-open).",
     )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Exercise the cache/search machinery on a temp-dir catalog (no Jev, no Hermes); exits 1 on failure.",
+    )
     args = parser.parse_args()
+    if args.self_test:
+        return _self_test()
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     task = args.task
     dest = args.harness

@@ -1104,5 +1104,19 @@ class WriteAskAtomicTests(unittest.TestCase):
         self.assertIn("none", q["criteria"])
         self.assertEqual(len([k for k in q["criteria"] if k != "none"]), 2)
 
+    def test_self_test_runs_cache_machinery(self) -> None:
+        import subprocess
+
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS / "catalog_fill.py"), "--self-test"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("self-test: ok", proc.stdout)
+        self.assertIn("cache_roundtrip=ok", proc.stdout)
+        self.assertIn("blocked_drop=ok", proc.stdout)
+
 if __name__ == "__main__":
     unittest.main()

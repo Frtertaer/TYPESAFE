@@ -949,6 +949,33 @@ def cmd_export(args: argparse.Namespace) -> int:
                     ]
                 )
         out_text = buf.getvalue()
+    elif getattr(args, "md", False):
+        def _cell(v) -> str:
+            return str(v or "").replace("|", "\\|").replace("\n", " ")
+
+        lines = ["# trace export", "", "file: %s" % data.get("file", ""), ""]
+        history_rows = [h for h in data.get("history") or [] if isinstance(h, dict)]
+        lines.append("## history (%d)" % len(history_rows))
+        lines.append("")
+        lines.append("| pick | ts | iso | kind |")
+        lines.append("| --- | --- | --- | --- |")
+        for h in history_rows:
+            lines.append(
+                "| %s | %s | %s | %s |"
+                % (_cell(h.get("pick")), _cell(h.get("ts")), _cell(h.get("iso")), _cell(h.get("kind")))
+            )
+        note_rows = [n for n in data.get("notes") or [] if isinstance(n, dict)]
+        lines.append("")
+        lines.append("## notes (%d)" % len(note_rows))
+        lines.append("")
+        lines.append("| iso | harness | text | sha |")
+        lines.append("| --- | --- | --- | --- |")
+        for n in note_rows:
+            lines.append(
+                "| %s | %s | %s | %s |"
+                % (_cell(n.get("iso")), _cell(n.get("harness")), _cell(n.get("text")), _cell(n.get("sha")))
+            )
+        out_text = "\n".join(lines) + "\n"
     else:
         out_text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
     out_path = getattr(args, "out", "") or ""
@@ -960,7 +987,10 @@ def cmd_export(args: argparse.Namespace) -> int:
             return 1
         sys.stderr.write(
             "wrote trace export%s to %s\n"
-            % (" (csv)" if getattr(args, "csv", False) else "", out_path)
+            % (
+                " (csv)" if getattr(args, "csv", False) else (" (md)" if getattr(args, "md", False) else ""),
+                out_path,
+            )
         )
         return 0
     sys.stdout.write(out_text)
@@ -1856,6 +1886,7 @@ def build_parser() -> argparse.ArgumentParser:
     export_cmd.add_argument("--since", default=None, help="Only history/notes with ts >= epoch seconds or ISO8601")
     export_cmd.add_argument("--before", default=None, help="Only history/notes with ts <= epoch seconds or ISO8601")
     export_cmd.add_argument("--kinds", default="", help="Comma list of pick kinds to keep in exported history")
+    export_cmd.add_argument("--md", action="store_true", help="Emit a markdown document (history + notes tables) instead of the JSON bundle")
     export_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the export payload (rc 2 on unknown key)")
     export_cmd.set_defaults(func=cmd_export)
     verify_cmd = sub.add_parser(

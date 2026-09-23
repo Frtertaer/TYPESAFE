@@ -3209,6 +3209,46 @@ class NotesFirstTests(unittest.TestCase):
             self.assertEqual(buf.getvalue().splitlines(), ["two", "one"])
 
 
+class ExportMdTests(unittest.TestCase):
+    def test_md_tables(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with redirect_stdout(io.StringIO()):
+                tr.main(["--file", str(path), "init", "--plan", "P"])
+                tr.main(["--file", str(path), "record", "--pick", "alpha", "--note", "has | pipe"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "export", "--md"])
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertIn("# trace export", out)
+            self.assertIn("| pick | ts | iso | kind |", out)
+            self.assertIn("| alpha |", out)
+            self.assertIn("| iso | harness | text | sha |", out)
+            self.assertIn("has \\| pipe", out)
+
+    def test_md_respects_kinds_filter(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with redirect_stdout(io.StringIO()):
+                tr.main(["--file", str(path), "init", "--plan", "P"])
+                tr.main(["--file", str(path), "record", "--pick", "a", "--kind", "kept"])
+                tr.main(["--file", str(path), "record", "--pick", "b", "--kind", "dropped"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "export", "--md", "--kinds", "kept"])
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertIn("| a |", out)
+            self.assertNotIn("| b |", out)
+
+
 class VerifyFixTests(unittest.TestCase):
     def _broken(self, tmp: str) -> Path:
         import hashlib

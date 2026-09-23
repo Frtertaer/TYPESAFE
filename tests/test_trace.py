@@ -3124,6 +3124,48 @@ class UnchangedMaxTests(unittest.TestCase):
             self.assertEqual(len(ticks), 3)
 
 
+class HistoryKindTests(unittest.TestCase):
+    def _mixed(self, tmp: str) -> Path:
+        import io
+        from contextlib import redirect_stdout
+
+        path = Path(tmp) / "trace.json"
+        with redirect_stdout(io.StringIO()):
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            tr.main(["--file", str(path), "record", "--pick", "a", "--kind", "kept"])
+            tr.main(["--file", str(path), "record", "--pick", "b", "--kind", "dropped"])
+            tr.main(["--file", str(path), "record", "--pick", "c", "--kind", "kept"])
+        return path
+
+    def test_kind_filters_exactly(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._mixed(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--kind", "kept", "--field", "pick"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().splitlines(), ["a", "c"])
+
+    def test_kind_composes_with_count_and_uniq(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._mixed(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--kind", "dropped", "--count"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "1")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--kind", "nope", "--count"])
+            self.assertEqual(buf.getvalue().strip(), "0")
+
+
 class HistoryFirstTests(unittest.TestCase):
     def _three_picks(self, tmp: str) -> Path:
         import io

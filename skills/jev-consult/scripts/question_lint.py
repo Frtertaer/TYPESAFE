@@ -82,12 +82,18 @@ RULES = {
     "J015": "choice has fewer than two options",
     "J016": "choice has no 'none'/'other' escape; a forced pick returns a wrong answer",
     "J017": "two options carry identical descriptions; Jev has no basis to tell them apart",
+    "J018": "option key collides with a hatch id modulo case; hatch matching is exact",
     "J020": "state exceeds the 32k-token limit; trim or chunk it first",
     "J021": "state is over 8k tokens; irrelevant state distracts and drops accuracy",
 }
 
 
-def lint_question(qid: str, q: dict, max_options: int = 255) -> list[dict]:
+def lint_question(
+    qid: str,
+    q: dict,
+    max_options: int = 255,
+    hatch: tuple[str, ...] = ("none", "other"),
+) -> list[dict]:
     text = _text_of(q)
     instructions = str(q.get("instructions") or "")
     criteria = q.get("criteria")
@@ -215,6 +221,20 @@ def lint_question(qid: str, q: dict, max_options: int = 255) -> list[dict]:
                 "choice has no 'none'/'other' escape option",
                 "Without an abstain option Jev must pick something — a forced pick returns a confident wrong answer. Add a `none` criterion.",
             )
+        hatch_exact = set(hatch)
+        hatch_lower = {h.lower() for h in hatch_exact}
+        for key in options:
+            if (
+                isinstance(key, str)
+                and key.lower() in hatch_lower
+                and key not in hatch_exact
+            ):
+                add(
+                    "J018",
+                    "warn",
+                    "option key %r collides with a hatch id modulo case" % key,
+                    "Hatch matching is exact — 'None' or 'OTHER' are treated as real options, not the abstain escape. Rename the key or use the exact hatch id.",
+                )
         undescribed = [k for k, v in options.items() if not v]
         if len(undescribed) > len(options) / 2:
             add(
@@ -288,13 +308,19 @@ def lint_state(state) -> list[dict]:
     return findings
 
 
-def lint_request(request: dict, max_options: int = 255) -> list[dict]:
+def lint_request(
+    request: dict,
+    max_options: int = 255,
+    hatch: tuple[str, ...] = ("none", "other"),
+) -> list[dict]:
     findings: list[dict] = []
     questions = request.get("questions") if isinstance(request, dict) else None
     if isinstance(questions, dict):
         for qid, question in questions.items():
             if isinstance(question, dict):
-                findings += lint_question(str(qid), question, max_options=max_options)
+                findings += lint_question(
+                    str(qid), question, max_options=max_options, hatch=hatch
+                )
     if isinstance(request, dict) and "state" in request:
         state = request["state"]
         text = state if isinstance(state, str) else json.dumps(state, ensure_ascii=False)

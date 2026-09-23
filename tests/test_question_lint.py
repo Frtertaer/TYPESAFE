@@ -1148,6 +1148,52 @@ class WatchSecsEnvTests(unittest.TestCase):
         )
         self.assertNotIn(("J017", "warn"), rules(findings))
 
+    def test_case_colliding_hatch_key_warns_j018(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which of these should the coder use?",
+                "criteria": {
+                    "a": "the fast path",
+                    "None": "none of these",
+                },
+            },
+        )
+        self.assertIn(("J018", "warn"), rules(findings))
+        msg = [f for f in findings if f["rule"] == "J018"][0]["message"]
+        self.assertIn("'None'", msg)
+
+    def test_exact_hatch_key_clean_j018(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which of these should the coder use?",
+                "criteria": {
+                    "a": "the fast path",
+                    "none": "none of these",
+                    "other": "something else",
+                },
+            },
+        )
+        self.assertNotIn(("J018", "warn"), rules(findings))
+
+    def test_custom_hatch_ids_respected_j018(self) -> None:
+        findings = question_lint.lint_question(
+            "q",
+            {
+                "type": "choice",
+                "instructions": "Which of these should the coder use?",
+                "criteria": {
+                    "a": "the fast path",
+                    "Skip": "skip this",
+                },
+            },
+            hatch=("skip",),
+        )
+        self.assertIn(("J018", "warn"), rules(findings))
+
 
 class BaselineTests(unittest.TestCase):
     def _bad_request(self, tmp: str) -> Path:

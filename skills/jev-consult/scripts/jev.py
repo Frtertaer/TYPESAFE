@@ -578,11 +578,16 @@ def jq_lookup(obj, path: str):
     return cur, True
 
 
+def _hatch_ids(policy: dict[str, Any]) -> tuple[str, ...]:
+    raw = policy_get(policy, ("choice", "hatch_ids"), default=["none", "other"])
+    if isinstance(raw, (list, tuple)):
+        return tuple(str(h) for h in raw)
+    return ("none", "other")
+
+
 def _all_hatch(answers: dict, policy: dict[str, Any]) -> bool:
     """True when every choice-type answer is a hatch pick (none/other)."""
-    hatch = set(
-        policy_get(policy, ("choice", "hatch_ids"), default=["none", "other"])
-    )
+    hatch = set(_hatch_ids(policy))
     saw_choice = False
     for ans in answers.values():
         if isinstance(ans, dict) and ans.get("type") == "choice":
@@ -605,7 +610,7 @@ def cmd_ask(args: argparse.Namespace) -> int:
     warnings = policy_warnings(policy)
     warnings += validate_questions(questions, policy)
     if question_lint is not None:
-        for finding in question_lint.lint_request(request):
+        for finding in question_lint.lint_request(request, hatch=_hatch_ids(policy)):
             if finding["severity"] in ("error", "warn"):
                 warnings.append(
                     "lint %s %s: %s" % (finding["rule"], finding["qid"], finding["message"])
@@ -745,7 +750,9 @@ def cmd_lint(args: argparse.Namespace) -> int:
     max_options = int(
         policy_get(policy, "choice_option_hard_max", default=255)
     )
-    findings = question_lint.lint_request(request, max_options=max_options)
+    findings = question_lint.lint_request(
+        request, max_options=max_options, hatch=_hatch_ids(policy)
+    )
     errors = sum(1 for f in findings if f["severity"] == "error")
     warns = sum(1 for f in findings if f["severity"] == "warn")
     infos = sum(1 for f in findings if f["severity"] == "info")
@@ -1079,6 +1086,7 @@ def cmd_self_test(args: argparse.Namespace) -> int:
                 max_options=int(
                     policy_get(policy, "choice_option_hard_max", default=255)
                 ),
+                hatch=_hatch_ids(policy),
             )
             checks["lint_clean"] = not any(
                 f.get("severity") == "error" for f in findings
@@ -1139,7 +1147,7 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
             sys.stderr.write("scaffold: cannot write %s: %s\n" % (out, exc))
             return ASK_ESCALATE_EXIT
     if getattr(args, "lint", False) and question_lint is not None:
-        findings = question_lint.lint_request(payload)
+        findings = question_lint.lint_request(payload, hatch=_hatch_ids(policy))
         for finding in findings:
             sys.stderr.write(
                 "lint %s %s: %s\n"

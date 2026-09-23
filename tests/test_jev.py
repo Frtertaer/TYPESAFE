@@ -1146,6 +1146,63 @@ class JevInternalsTests(unittest.TestCase):
             self.assertEqual(len(lines), 1)
             self.assertFalse(json.loads(lines[0])["ok"])
 
+    def test_ping_watch_alert_ms_marks_slow_ticks(self) -> None:
+        slim = {"ok": True, "model": "m1", "noul": 0.9, "ms": 5000}
+        buf = io.StringIO()
+        err = io.StringIO()
+        with patch.object(jev, "_ping_once", return_value=slim), patch.object(
+            sys, "stdout", buf
+        ), patch.object(sys, "stderr", err):
+            rc = jev.main(
+                ["ping", "--watch", "0.01", "--max-ticks", "2", "--alert-ms", "1000"]
+            )
+        self.assertEqual(rc, 0)
+        ticks = [
+            json.loads(line)
+            for line in buf.getvalue().splitlines()
+            if line.startswith('{"ts"')
+        ]
+        self.assertEqual(len(ticks), 2)
+        self.assertTrue(all(t.get("slow") is True for t in ticks))
+        self.assertIn("watch alert: ms=5000 exceeds --alert-ms 1000", err.getvalue())
+
+    def test_ping_watch_alert_ms_quiet_below_threshold(self) -> None:
+        slim = {"ok": True, "model": "m1", "noul": 0.9, "ms": 5}
+        buf = io.StringIO()
+        err = io.StringIO()
+        with patch.object(jev, "_ping_once", return_value=slim), patch.object(
+            sys, "stdout", buf
+        ), patch.object(sys, "stderr", err):
+            rc = jev.main(
+                ["ping", "--watch", "0.01", "--max-ticks", "2", "--alert-ms", "1000"]
+            )
+        self.assertEqual(rc, 0)
+        ticks = [
+            json.loads(line)
+            for line in buf.getvalue().splitlines()
+            if line.startswith('{"ts"')
+        ]
+        self.assertTrue(all("slow" not in t for t in ticks))
+        self.assertNotIn("watch alert", err.getvalue())
+
+    def test_ping_watch_alert_ms_skips_failed_ticks(self) -> None:
+        def boom(*_a, **_k):
+            raise SystemExit("down")
+
+        buf = io.StringIO()
+        err = io.StringIO()
+        with patch.object(jev, "_ping_once", side_effect=boom), patch.object(
+            sys, "stdout", buf
+        ), patch.object(sys, "stderr", err):
+            rc = jev.main(
+                ["ping", "--watch", "0.01", "--max-ticks", "1", "--alert-ms", "1"]
+            )
+        self.assertEqual(rc, 1)
+        tick = json.loads(buf.getvalue().splitlines()[0])
+        self.assertFalse(tick["ok"])
+        self.assertNotIn("slow", tick)
+        self.assertNotIn("watch alert", err.getvalue())
+
     def test_ping_watch_max_env_caps(self) -> None:
         fake = {"model": "m1", "answers": {"ok": {"type": "noul", "noul": 0.9}}}
         buf = io.StringIO()

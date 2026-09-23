@@ -794,6 +794,7 @@ def cmd_ping(args: argparse.Namespace) -> int:
         dead = _watch.deadline("JEV_PING_WATCH_SECS", getattr(args, "watch_max", 0.0))
         quiet = _watch.quiet("JEV_PING_WATCH_QUIET", getattr(args, "quiet", False))
         verdict_path = getattr(args, "verdict", "") or ""
+        alert_ms = getattr(args, "alert_ms", 0.0) or 0.0
         ticks = 0
         last_ok = True
         verdict_ok = True
@@ -834,6 +835,18 @@ def cmd_ping(args: argparse.Namespace) -> int:
                     "elapsed_s": round(now - watch_t0, 2),
                 }
             last_ok = bool(tick.get("ok"))
+            if (
+                alert_ms > 0
+                and last_ok
+                and isinstance(tick.get("ms"), (int, float))
+                and not isinstance(tick.get("ms"), bool)
+                and tick["ms"] > alert_ms
+            ):
+                tick["slow"] = True
+                sys.stderr.write(
+                    "watch alert: ms=%s exceeds --alert-ms %s\n"
+                    % (tick["ms"], alert_ms)
+                )
             _watch.emit_or_jq(
                 tick,
                 getattr(args, "jq", ""),
@@ -1286,6 +1299,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--fail-fast",
         action="store_true",
         help="With --watch: stop after the first failed ping tick",
+    )
+    ping.add_argument(
+        "--alert-ms",
+        metavar="MS",
+        type=float,
+        default=0.0,
+        help="With --watch: mark ok ticks whose ms exceeds MS with slow=true and log a stderr alert",
     )
     ping.add_argument(
         "--unchanged-max",

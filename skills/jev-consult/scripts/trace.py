@@ -693,6 +693,29 @@ def emit_jq(payload: dict, jq: str) -> int | None:
     return 0
 
 
+def cmd_schema(args: argparse.Namespace) -> int:
+    """Print the .jev-trace.json key contract (--json emits the object)."""
+    rows = {
+        "plan": {"required": True, "type": "string, human plan text"},
+        "current_step": {"required": True, "type": "string"},
+        "attempt_count": {"required": True, "type": "int, bump increments"},
+        "last_error": {"required": True, "type": "string, last failure note"},
+        "unknown": {"required": True, "type": "string, unknown-area note"},
+        "inspected": {"required": True, "type": "list[string], files checked"},
+        "last_pick": {"required": True, "type": "string, newest Jev pick"},
+        "history": {"required": True, "type": "list[pick], last 20 records"},
+        "notes": {"required": True, "type": "list[{iso, text}], last 50 notes"},
+    }
+    if getattr(args, "json", False):
+        sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+    else:
+        for key in rows:
+            sys.stdout.write(
+                "%s: %s\n" % (key, rows[key]["type"])
+            )
+    return 0
+
+
 def cmd_self_test(args: argparse.Namespace) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / ".jev-trace.json"
@@ -1311,6 +1334,11 @@ def build_parser() -> argparse.ArgumentParser:
     export_cmd.add_argument("--kinds", default="", help="Comma list of pick kinds to keep in exported history")
     export_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the export payload (rc 2 on unknown key)")
     export_cmd.set_defaults(func=cmd_export)
+    schema_cmd = sub.add_parser(
+        "schema", help="Print the .jev-trace.json key contract and exit"
+    )
+    schema_cmd.add_argument("--json", action="store_true", help="Emit the contract as JSON")
+    schema_cmd.set_defaults(func=cmd_schema)
     selftest = sub.add_parser(
         "self-test",
         help="Record+read a pick on a temp trace; exit 1 when it does not round-trip",

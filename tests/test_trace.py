@@ -2172,6 +2172,23 @@ class AtomicWriteTests(unittest.TestCase):
             req = json.loads(out_path.read_text(encoding="utf-8"))
             self.assertIn("next_move", req["questions"])
 
+    def test_schema_prints_key_contract(self) -> None:
+        import io
+
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            rc = tr.main(["schema"])
+        self.assertEqual(rc, 0)
+        self.assertIn("attempt_count: int", buf.getvalue())
+        self.assertIn("history: list[pick]", buf.getvalue())
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            rc = tr.main(["schema", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        for key in tr.EMPTY:
+            self.assertIn(key, rows)
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

@@ -129,6 +129,20 @@ class EnvReportParityTests(unittest.TestCase):
                     hits, "%s --help names no env report field" % name
                 )
 
+    def test_env_jq_prints_one_field_and_rejects_unknown(self) -> None:
+        for name, keys in sorted(ENV_SCRIPTS.items()):
+            field = sorted(keys)[0]
+            with self.subTest(script=name, field=field):
+                proc = _run(name, ["--env", "--jq", field])
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertTrue(proc.stdout.strip(), "empty --jq output")
+            with self.subTest(script=name, field="bogus"):
+                proc = _run(name, ["--env", "--jq", "no_such_field_xyz"])
+                self.assertEqual(proc.returncode, 2)
+                self.assertIn(
+                    "has:", proc.stderr, "--jq bad key must list valid fields"
+                )
+
     def test_env_out_writes_report_file(self) -> None:
         import tempfile
 

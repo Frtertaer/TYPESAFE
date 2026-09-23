@@ -3209,6 +3209,43 @@ class NotesFirstTests(unittest.TestCase):
             self.assertEqual(buf.getvalue().splitlines(), ["two", "one"])
 
 
+class StateJqTests(unittest.TestCase):
+    def test_one_shot_jq_scalar(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with redirect_stdout(io.StringIO()):
+                tr.main(["--file", str(path), "init", "--plan", "myp"])
+                tr.main(["--file", str(path), "set", "--plan", "deep"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "state", "--jq", "plan"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue()), "deep")
+
+    def test_one_shot_jq_comma_and_bad_key(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with redirect_stdout(io.StringIO()):
+                tr.main(["--file", str(path), "init", "--plan", "myp"])
+                tr.main(["--file", str(path), "set", "--plan", "deep"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "state", "--jq", "plan,attempt_count"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue())["plan"], "deep")
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = tr.main(["--file", str(path), "state", "--jq", "nope"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --jq key", err.getvalue())
+
+
 class ExportMdTests(unittest.TestCase):
     def test_md_tables(self) -> None:
         import io

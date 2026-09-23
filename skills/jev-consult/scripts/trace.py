@@ -1694,6 +1694,28 @@ def cmd_state(args: argparse.Namespace) -> int:
         },
     ):
         return 1
+    jq = getattr(args, "jq", "")
+    if jq:
+        fields = [f.strip() for f in jq.split(",") if f.strip()]
+        values: dict = {}
+        missing = ""
+        for f in fields:
+            value, found = _watch.dig(state, f)
+            if not found:
+                missing = f
+                break
+            values[f] = value
+        if missing:
+            sys.stderr.write(
+                "bad --jq key %r (state has: %s)\n"
+                % (missing, ", ".join(sorted(state)))
+            )
+            return 2
+        if len(fields) == 1:
+            sys.stdout.write(json.dumps(values[fields[0]], ensure_ascii=False) + "\n")
+        else:
+            sys.stdout.write(json.dumps(values, ensure_ascii=False) + "\n")
+        return 0
     if args.out:
         try:
             _atomic_write(
@@ -1782,7 +1804,7 @@ def build_parser() -> argparse.ArgumentParser:
     state_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
     state_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     state_cmd.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
-    state_cmd.add_argument("--jq", metavar="KEY", default="", help="With --watch: print just the named tick field(s) per pass, comma list")
+    state_cmd.add_argument("--jq", metavar="KEY", default="", help="With --watch: print just the named tick field(s) per pass, comma list; without --watch: dig the state payload (comma list, rc 2 on unknown)")
     state_cmd.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick whose state is empty")
     state_cmd.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     state_cmd.add_argument("--verdict", metavar="PATH", default="", help="With --watch: write a slim {verdict: ok|empty, ticks, attempt_count, state} JSON to PATH, refreshed every tick")

@@ -21,10 +21,18 @@ EXAMPLE_REQ = ROOT / "skills" / "jev-consult" / "examples" / "jwt-auth.request.j
 
 # env name -> (script, argv with the watch interval appended)
 WATCH_CAP = {
+    "JEV_APPLY_WATCH_MAX": ("apply_fill.py", ["--watch", "0.05"]),
+    "JEV_CATALOG_WATCH_MAX": (
+        "catalog_fill.py",
+        ["--task", "x", "--watch", "0.05"],
+    ),
     "JEV_COMPARE_WATCH_MAX": ("compare.py", ["--watch", "0.05"]),
     "JEV_DECISIONS_WATCH_MAX": ("decisions.py", ["--watch", "0.05"]),
     "JEV_DOCTOR_WATCH_MAX": ("doctor.py", ["--watch", "0.05"]),
+    "JEV_HOOK_WATCH_MAX": ("inventory_hook.py", ["--watch", "0.05"]),
     "JEV_INV_WATCH_MAX": ("inventory.py", ["--watch", "0.05"]),
+    "JEV_PEER_WATCH_MAX": ("peer_fill.py", ["--watch", "0.05"]),
+    "JEV_PING_WATCH_MAX": ("jev.py", ["ping", "--watch", "0.05"]),
     "JEV_PLINT_WATCH_MAX": ("policy_lint.py", ["--watch", "0.05"]),
     "JEV_QLINT_WATCH_MAX": (
         "question_lint.py",
@@ -34,6 +42,9 @@ WATCH_CAP = {
     "JEV_TLINT_WATCH_MAX": ("trigger_lint.py", ["--watch", "0.05"]),
     "JEV_TRIGGER_WATCH_MAX": ("trigger_eval.py", ["--watch", "0.05"]),
 }
+# JEV_COMPACT_WATCH_MAX needs a transcript fixture (separate test below).
+# JEV_SMOKE_WATCH_MAX is intentionally untested: each tick runs the full
+# smoke step suite, too heavy for a unit test.
 
 
 def _tick_lines(stdout: str) -> int:
@@ -102,6 +113,29 @@ class WatchCapTests(unittest.TestCase):
             )
             self.assertEqual(
                 _tick_lines(proc.stdout), 1, "trace state watch: %s" % proc.stdout[:300]
+            )
+
+    def test_compact_watch_caps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.jsonl"
+            transcript.write_text(
+                '{"role": "user", "content": "hi"}\n'
+                '{"role": "assistant", "content": "yo"}\n',
+                encoding="utf-8",
+            )
+            proc = self._run_watch(
+                "JEV_COMPACT_WATCH_MAX",
+                "compact.py",
+                [
+                    str(transcript),
+                    "--watch",
+                    "0.05",
+                    "--fake",
+                    "--history",
+                ],
+            )
+            self.assertEqual(
+                _tick_lines(proc.stdout), 1, "compact watch: %s" % proc.stdout[:300]
             )
 
     def test_progress_status_watch_caps(self) -> None:

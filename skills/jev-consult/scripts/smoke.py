@@ -6925,6 +6925,7 @@ SCHEMA_SCRIPTS = {
     "skill_lint.py": ("--schema",),
     "trace.py": ("schema",),
     "trigger_eval.py": ("--schema",),
+    "trigger_lint.py": ("--schema",),
 }
 
 

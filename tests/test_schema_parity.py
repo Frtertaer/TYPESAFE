@@ -12,7 +12,7 @@ SCRIPTS_DIR = ROOT / "skills" / "jev-consult" / "scripts"
 # Every script exposing a --schema flag (or trace.py's `schema` subcommand) must
 # print the key contract: text rows "key: type (required|optional)" and, with
 # --json, a {key: {"required": bool, "type": str}} object.
-FLAG_SCHEMA = ("apply_fill.py", "catalog_fill.py", "compact.py", "compare.py", "decisions.py", "doctor.py", "inventory.py", "inventory_hook.py", "jev.py", "peer_fill.py", "policy_lint.py", "progress.py", "question_lint.py", "skill_lint.py", "trigger_eval.py")
+FLAG_SCHEMA = ("apply_fill.py", "catalog_fill.py", "compact.py", "compare.py", "decisions.py", "doctor.py", "inventory.py", "inventory_hook.py", "jev.py", "peer_fill.py", "policy_lint.py", "progress.py", "question_lint.py", "skill_lint.py", "trigger_eval.py", "trigger_lint.py")
 SUBCOMMAND_SCHEMA = {"trace.py": "schema"}
 FILL_SCRIPTS = ("apply_fill.py", "catalog_fill.py", "peer_fill.py")
 
@@ -98,6 +98,21 @@ class SchemaParityTests(unittest.TestCase):
             if meta.get("required")
         }
         self.assertEqual(schema_required, rows_required)
+
+    def test_trigger_lint_schema_required_matches_lint(self) -> None:
+        """--schema required set must equal the keys lint_cases enforces as
+        missing: top-level 'cases' + per-case id/prompt/should_trigger (T003)."""
+        proc = self._run("trigger_lint.py", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr[:200])
+        schema_required = {
+            key
+            for key, meta in json.loads(proc.stdout).items()
+            if meta.get("required")
+        }
+        self.assertEqual(
+            schema_required,
+            {"cases", "case.id", "case.prompt", "case.should_trigger"},
+        )
 
     def test_schema_text_marks_required(self) -> None:
         for name in sorted(FLAG_SCHEMA) + sorted(SUBCOMMAND_SCHEMA):

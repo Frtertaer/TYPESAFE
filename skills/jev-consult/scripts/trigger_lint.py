@@ -171,6 +171,16 @@ RULES = {
     "T011": "a must_ask kind has no positive coverage case",
 }
 
+SCHEMA_ROWS = {
+    "skill": {"required": False, "type": "string, the skill name tag"},
+    "cases": {"required": True, "type": "list[case]"},
+    "case.id": {"required": True, "type": "string, unique; pos-/neg- prefix recommended"},
+    "case.prompt": {"required": True, "type": "string, >= 8 chars"},
+    "case.should_trigger": {"required": True, "type": "boolean"},
+    "case.covers": {"required": False, "type": "list[str] of policy must_ask kinds"},
+    "case.lexical": {"required": False, "type": "boolean, force a lexical match"},
+}
+
 
 def _atomic_write(path, text):
     tmp = path.with_name(path.name + ".tmp")
@@ -185,7 +195,7 @@ def _atomic_write(path, text):
         raise
 
 
-USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]\nLint a trigger-cases fixture file for schema sanity.\nFlags:\n  --policy PATH     lint cases against a specific policy.json\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S      preset severity floor (error|warn|info; JEV_TLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad cases file; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args or unreadable file.\n'
+USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]\nLint a trigger-cases fixture file for schema sanity.\nFlags:\n  --policy PATH     lint cases against a specific policy.json\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the cases-file key contract (--json emits the object)\n  --severity S      preset severity floor (error|warn|info; JEV_TLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad cases file; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args or unreadable file.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -265,6 +275,17 @@ def main(argv: list[str] | None = None) -> int:
         else:
             for r in sorted(RULES):
                 sys.stdout.write("%s: %s\n" % (r, RULES[r]))
+        return 0
+    if "--schema" in argv:
+        if "--json" in argv:
+            sys.stdout.write(json.dumps(SCHEMA_ROWS, indent=2, sort_keys=True) + "\n")
+        else:
+            for key in sorted(SCHEMA_ROWS):
+                row = SCHEMA_ROWS[key]
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (key, row["type"], "required" if row["required"] else "optional")
+                )
         return 0
     out_path = ""
     if "--out" in argv:

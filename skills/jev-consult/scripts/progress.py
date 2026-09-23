@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 import tempfile
 import time
@@ -74,6 +75,12 @@ def build_parser():
     review.add_argument("--reviewer", required=True)
     review.add_argument("--approve-finish", action="store_true", help="Record explicit completion approval; checks and Jev must still permit finishing")
     commands.add_parser("self-test", help="Initialize a scratch ledger with a stub evidence collector and read it back")
+    env_p = commands.add_parser(
+        "env",
+        help="Print the resolved env config JSON",
+        description="Print the resolved env config JSON (repo, db, db_exists, policy, watch_max, watch_secs, watch_quiet) and exit",
+    )
+    env_p.add_argument("--out", metavar="PATH", default="", help="Also write the env report JSON to PATH (fail-open)")
     lint_p = commands.add_parser("lint", help="Dry-validate a plan against a policy with the same checks as init; writes nothing")
     lint_p.add_argument("plan", help="Stage-plan JSON file")
     for name in commands.choices:
@@ -426,6 +433,31 @@ def main(argv=None):
             return 0
         repo = Path(args.repo).resolve()
         database = Path(args.db).resolve() if args.db else repo / ".devin" / "progress.sqlite3"
+        if args.command == "env":
+            try:
+                env_watch_secs = float(os.environ.get("JEV_PROGRESS_WATCH_SECS", "") or 0)
+            except ValueError:
+                env_watch_secs = 0.0
+            report = {
+                "repo": str(repo),
+                "db": str(database),
+                "db_exists": database.is_file(),
+                "policy": args.policy or "default",
+                "watch_max": _watch.cap("JEV_PROGRESS_WATCH_MAX", None),
+                "watch_secs": env_watch_secs,
+                "watch_quiet": _watch.quiet("JEV_PROGRESS_WATCH_QUIET", False),
+            }
+            rc = _emit_jq(report, getattr(args, "jq", ""))
+            if rc is not None:
+                return rc
+            text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+            sys.stdout.write(text)
+            if getattr(args, "out", ""):
+                try:
+                    atomic_write_text(Path(args.out), text)
+                except OSError as exc:
+                    sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+            return 0
         ledger = Ledger(database, repo)
         if args.command == "init":
             policy_path = Path(args.policy) if args.policy else Path(__file__).resolve().parent.parent / "policy.json"

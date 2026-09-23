@@ -699,6 +699,48 @@ def emit_jq(payload: dict, jq: str) -> int | None:
     return 0
 
 
+def cmd_env(args: argparse.Namespace) -> int:
+    """Resolved trace.py environment. Values only — never secrets."""
+    path = Path(args.file) if args.file else default_path()
+    policy = os.environ.get("JEV_POLICY", "").strip()
+    try:
+        watch_secs = float(os.environ.get("JEV_TRACE_WATCH_SECS", "") or 0)
+    except ValueError:
+        watch_secs = 0.0
+    try:
+        fill_timeout = float(os.environ.get("JEV_FILL_TIMEOUT", "") or 90)
+    except ValueError:
+        fill_timeout = 90.0
+    report = {
+        "file": str(path),
+        "exists": path.is_file(),
+        "fill_timeout_seconds": fill_timeout,
+        "plan_set": bool(os.environ.get("JEV_TRACE_PLAN", "").strip()),
+        "policy": policy if policy else "default",
+        "watch_max": _watch.cap("JEV_TRACE_WATCH_MAX", None),
+        "watch_secs": watch_secs,
+        "watch_quiet": _watch.quiet("JEV_TRACE_WATCH_QUIET", False),
+    }
+    if getattr(args, "jq", ""):
+        node, found = _watch.dig(report, args.jq)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (env has: %s)\n"
+                % (args.jq, ", ".join(sorted(report)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
+        return 0
+    text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    sys.stdout.write(text)
+    if getattr(args, "out", ""):
+        try:
+            _atomic_write(Path(args.out), text)
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+    return 0
+
+
 def cmd_schema(args: argparse.Namespace) -> int:
     """Print the .jev-trace.json key contract (--json emits the object)."""
     rows = {
@@ -1346,6 +1388,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     schema_cmd.add_argument("--json", action="store_true", help="Emit the contract as JSON")
     schema_cmd.set_defaults(func=cmd_schema)
+    env_cmd = sub.add_parser(
+        "env",
+        help="Print the resolved env config JSON",
+        description="Print the resolved env config JSON (file, exists, fill_timeout_seconds, plan_set, policy, watch_max, watch_secs, watch_quiet) and exit",
+    )
+    env_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just one dotted-path field of the env report (rc 2 on unknown key)")
+    env_cmd.add_argument("--out", metavar="PATH", default="", help="Also write the env report JSON to PATH (fail-open)")
+    env_cmd.set_defaults(func=cmd_env)
     selftest = sub.add_parser(
         "self-test",
         help="Record+read a pick on a temp trace; exit 1 when it does not round-trip",

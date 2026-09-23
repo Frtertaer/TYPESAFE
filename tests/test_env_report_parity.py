@@ -116,7 +116,35 @@ ENV_SCRIPTS = {
     "skill_lint.py": LINT_ENV_KEYS,
     "question_lint.py": LINT_ENV_KEYS,
     "trigger_lint.py": LINT_ENV_KEYS | {"policy"},
+    "trace.py": {
+        "exists",
+        "file",
+        "fill_timeout_seconds",
+        "plan_set",
+        "policy",
+        "watch_max",
+        "watch_quiet",
+        "watch_secs",
+    },
+    "progress.py": {
+        "db",
+        "db_exists",
+        "policy",
+        "repo",
+        "watch_max",
+        "watch_quiet",
+        "watch_secs",
+    },
 }
+
+# Subcommand CLIs expose `env` instead of a --env flag; jev.py keeps its own
+# dedicated tests (its report names api_key_set, which trips the leak guard).
+ENV_SUBCOMMAND = {"trace.py", "progress.py"}
+
+
+def _env_argv(name, *rest):
+    base = ["env"] if name in ENV_SUBCOMMAND else ["--env"]
+    return base + [str(a) for a in rest]
 
 SECRETISH = ("api_key", "token", "secret", "password")
 
@@ -138,7 +166,7 @@ class EnvReportParityTests(unittest.TestCase):
     def test_every_script_reports_json_object_with_pinned_keys(self) -> None:
         for name, required in ENV_SCRIPTS.items():
             with self.subTest(script=name):
-                proc = _run(name, ["--env"])
+                proc = _run(name, _env_argv(name))
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 report = json.loads(proc.stdout)
                 self.assertIsInstance(report, dict)
@@ -150,7 +178,7 @@ class EnvReportParityTests(unittest.TestCase):
     def test_no_secretish_key_or_key_value_leak(self) -> None:
         for name in ENV_SCRIPTS:
             with self.subTest(script=name):
-                proc = _run(name, ["--env"])
+                proc = _run(name, _env_argv(name))
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 report = json.loads(proc.stdout)
                 for key, value in report.items():
@@ -170,10 +198,10 @@ class EnvReportParityTests(unittest.TestCase):
         for name, required in ENV_SCRIPTS.items():
             first = sorted(required)[0]
             with self.subTest(script=name):
-                proc = _run(name, ["--env", "--jq", first])
+                proc = _run(name, _env_argv(name, "--jq", first))
                 self.assertEqual(proc.returncode, 0, proc.stderr + proc.stdout)
                 json.loads(proc.stdout.strip())
-                proc = _run(name, ["--env", "--jq", "definitely_not_a_key"])
+                proc = _run(name, _env_argv(name, "--jq", "definitely_not_a_key"))
                 self.assertEqual(proc.returncode, 2, name + " bad --jq key must exit 2")
                 self.assertIn("has:", proc.stderr)
 
@@ -181,7 +209,7 @@ class EnvReportParityTests(unittest.TestCase):
         """--env help must name at least one report field (self-documenting)."""
         for name, required in ENV_SCRIPTS.items():
             with self.subTest(script=name):
-                proc = _run(name, ["--help"])
+                proc = _run(name, _env_argv(name, "--help"))
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 help_text = proc.stdout.lower()
                 hits = [k for k in required if k.replace("_", "-") in help_text or k in help_text]
@@ -193,11 +221,11 @@ class EnvReportParityTests(unittest.TestCase):
         for name, keys in sorted(ENV_SCRIPTS.items()):
             field = sorted(keys)[0]
             with self.subTest(script=name, field=field):
-                proc = _run(name, ["--env", "--jq", field])
+                proc = _run(name, _env_argv(name, "--jq", field))
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 self.assertTrue(proc.stdout.strip(), "empty --jq output")
             with self.subTest(script=name, field="bogus"):
-                proc = _run(name, ["--env", "--jq", "no_such_field_xyz"])
+                proc = _run(name, _env_argv(name, "--jq", "no_such_field_xyz"))
                 self.assertEqual(proc.returncode, 2)
                 self.assertIn(
                     "has:", proc.stderr, "--jq bad key must list valid fields"
@@ -209,7 +237,7 @@ class EnvReportParityTests(unittest.TestCase):
         for name in ENV_SCRIPTS:
             with self.subTest(script=name), tempfile.TemporaryDirectory() as tmp:
                 target = Path(tmp) / "env.json"
-                proc = _run(name, ["--env", "--out", str(target)])
+                proc = _run(name, _env_argv(name, "--out", str(target)))
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 saved = json.loads(target.read_text(encoding="utf-8"))
                 self.assertIsInstance(saved, dict)

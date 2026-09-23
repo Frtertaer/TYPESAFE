@@ -630,5 +630,71 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(json.loads(proc.stdout), progress.PLAN_SCHEMA_ROWS)
 
 
+class ReportJsonTests(unittest.TestCase):
+    def _ledger(self):
+        ledger = Mock()
+        ledger.status.return_value = {
+            "stage_id": "s",
+            "action": "continue",
+            "reason": "open",
+            "points": 3,
+            "review_at": 10,
+            "assessment_count": 1,
+            "assessment_limit": 5,
+            "model_attempts": 2,
+            "model_attempt_limit": 10,
+            "awarded_items": ["i1"],
+            "blocked_items": ["i2"],
+            "failed_checks": ["pytest"],
+            "next_direction": "d1",
+        }
+        ledger.history.return_value = {
+            "stage": {"plan": {"goal": "g", "items": []}},
+            "events": [{"kind": "init"}],
+        }
+        return ledger
+
+    def test_report_json_emits_structured(self) -> None:
+        ledger = self._ledger()
+        with patch.object(progress, "Ledger", return_value=ledger):
+            code, out = run_cli(["report", "s", "--json"])
+        self.assertEqual(code, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["stage"], "s")
+        self.assertEqual(payload["goal"], "g")
+        self.assertEqual(payload["points"], 3)
+        self.assertEqual(payload["awarded_items"], ["i1"])
+        self.assertEqual(payload["blocked_items"], ["i2"])
+        self.assertEqual(payload["failed_checks"], ["pytest"])
+        self.assertEqual(payload["next_direction"], "d1")
+        self.assertEqual(payload["events"], 1)
+        self.assertNotIn("# Progress", out)
+
+    def test_report_json_out_writes_json(self) -> None:
+        ledger = self._ledger()
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "report.json"
+            with patch.object(progress, "Ledger", return_value=ledger):
+                code, out = run_cli(["report", "s", "--json", "--out", str(target)])
+            self.assertEqual(code, 0)
+            self.assertIn("wrote", json.loads(out))
+            saved = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(saved["stage"], "s")
+
+    def test_report_json_jq_digs_structured(self) -> None:
+        ledger = self._ledger()
+        with patch.object(progress, "Ledger", return_value=ledger):
+            code, out = run_cli(["report", "s", "--json", "--jq", "action"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out), "continue")
+
+    def test_report_default_still_markdown(self) -> None:
+        ledger = self._ledger()
+        with patch.object(progress, "Ledger", return_value=ledger):
+            code, out = run_cli(["report", "s"])
+        self.assertEqual(code, 0)
+        self.assertIn("# Progress: s", out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

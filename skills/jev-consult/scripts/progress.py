@@ -33,6 +33,7 @@ def build_parser():
         command = commands.add_parser(name)
         command.add_argument("stage")
     report = commands.add_parser("report", help="Print a markdown summary of a stage (plan, credits, events); --out writes it to a file")
+    report.add_argument("--json", action="store_true", help="Emit a structured {stage, goal, action, points, awarded_items, blocked_items, events, ...} object instead of markdown (--out then writes the JSON)")
     report.add_argument("stage")
     report.add_argument("--out", metavar="PATH", default="", help="Write the markdown to PATH instead of stdout (prints {wrote, bytes} JSON); with --watch: append each tick line to PATH instead")
     for name in ("status", "history", "report"):
@@ -532,7 +533,25 @@ def main(argv=None):
                 {"verdict": "steady", "ticks": 1, "chars": len(md), "delta": None},
             ):
                 return 1
-            if args.out:
+            if getattr(args, "json", False):
+                result = {
+                    "stage": summary["stage_id"],
+                    "goal": hist["stage"].get("plan", {}).get("goal", ""),
+                    "action": summary["action"],
+                    "reason": summary["reason"],
+                    "points": summary["points"],
+                    "review_at": summary["review_at"],
+                    "assessment_count": summary["assessment_count"],
+                    "assessment_limit": summary["assessment_limit"],
+                    "model_attempts": summary["model_attempts"],
+                    "model_attempt_limit": summary["model_attempt_limit"],
+                    "awarded_items": summary["awarded_items"],
+                    "blocked_items": summary["blocked_items"],
+                    "failed_checks": summary.get("failed_checks"),
+                    "next_direction": summary.get("next_direction"),
+                    "events": len(hist["events"]),
+                }
+            elif args.out:
                 atomic_write_text(Path(args.out), md)
                 result = {"wrote": args.out, "bytes": len(md.encode("utf-8"))}
             elif args.jq:
@@ -566,7 +585,10 @@ def main(argv=None):
                 verdict_doc[key] = result[key]
         if not _watch.write_verdict(args.verdict, verdict_doc):
             return 1
-    if args.command in ("status", "history") and getattr(args, "out", ""):
+    if (
+        args.command in ("status", "history")
+        or (args.command == "report" and getattr(args, "json", False))
+    ) and getattr(args, "out", ""):
         text = json.dumps(result, indent=2) + "\n"
         try:
             atomic_write_text(Path(args.out), text)

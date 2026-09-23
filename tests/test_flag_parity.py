@@ -75,6 +75,72 @@ class FlagParityTest(unittest.TestCase):
                     unexpected, "%s has unpinned extra flags %s" % (name, sorted(unexpected))
                 )
 
+    WATCH_CORE = {
+        "--watch", "--max-ticks", "--watch-max", "--quiet",
+        "--fail-fast", "--out", "--verdict", "--jq",
+    }
+    # Every help screen that advertises --watch, keyed by script. Flat-CLI
+    # scripts map to one bare --help; subcommand CLIs list each watchable
+    # subcommand so the flag set is pinned where the flag actually lives.
+    WATCH_HELP = {
+        "compact.py": [["--help"]],
+        "decisions.py": [["--help"]],
+        "inventory.py": [["--help"]],
+        "compare.py": [["--help"]],
+        "doctor.py": [["--help"]],
+        "question_lint.py": [["--help"]],
+        "skill_lint.py": [["--help"]],
+        "policy_lint.py": [["--help"]],
+        "trigger_lint.py": [["--help"]],
+        "trigger_eval.py": [["--help"]],
+        "inventory_hook.py": [["--help"]],
+        "smoke.py": [["--help"]],
+        "jev.py": [["ping", "--help"]],
+        "trace.py": [
+            ["state", "--help"], ["notes", "--help"],
+            ["history", "--help"], ["stats", "--help"],
+        ],
+        "apply_fill.py": [["--help"]],
+        "peer_fill.py": [["--help"]],
+        "catalog_fill.py": [["--help"]],
+    }
+
+    def test_watch_helps_advertise_full_flag_set(self) -> None:
+        import re
+
+        for name, argv_variants in self.WATCH_HELP.items():
+            for argv in argv_variants:
+                label = "%s %s" % (name, " ".join(argv).strip())
+                with self.subTest(help=label):
+                    run = subprocess.run(
+                        [sys.executable, str(SCRIPTS / name), *argv],
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertEqual(run.returncode, 0, run.stderr)
+                    found = set(re.findall(r"--[a-z][a-z-]*", run.stdout))
+                    missing = self.WATCH_CORE - found
+                    self.assertFalse(
+                        missing, "%s missing watch flags %s" % (label, sorted(missing))
+                    )
+
+    def test_every_watching_script_is_pinned(self) -> None:
+        """A script whose argv handles --watch must have a WATCH_HELP entry."""
+        import re
+
+        for path in _cli_scripts():
+            src = path.read_text(encoding="utf-8")
+            handles_watch = '"--watch" in argv' in src or bool(
+                re.search(r'^\s*"--watch",\s*$', src, re.M)
+            )
+            with self.subTest(script=path.name):
+                self.assertEqual(
+                    handles_watch,
+                    path.name in self.WATCH_HELP,
+                    "%s watch handling is unpinned (add/remove a WATCH_HELP entry)"
+                    % path.name,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

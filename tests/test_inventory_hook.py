@@ -2542,6 +2542,29 @@ class HookE2ETests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return proc.stdout.strip()
 
+    def test_file_flag_missing_or_unreadable_emits_empty(self) -> None:
+        """--file on a missing path or a directory fails open with {} rc 0."""
+        import subprocess
+
+        for bad in (
+            str(Path(tempfile.gettempdir()) / "no-such-hook-event.json"),
+            tempfile.gettempdir(),  # a directory, not a file
+        ):
+            with self.subTest(path=bad):
+                env = dict(os.environ)
+                env.pop("TYPESAFE_API_KEY", None)
+                env["JEV_CONSULT_LOG"] = "0"
+                proc = subprocess.run(
+                    [sys.executable, str(self.HOOK_PATH), "--file", bad],
+                    input="",
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=60,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(json.loads(proc.stdout.strip()), {})
+
     def test_malformed_stdin_shapes_all_noop(self) -> None:
         """Fail-open contract: every malformed stdin shape exits 0 with {}."""
         for shape in (

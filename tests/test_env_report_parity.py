@@ -270,6 +270,24 @@ class EnvReportParityTests(unittest.TestCase):
                 self.assertIsInstance(saved, dict)
                 self.assertTrue(ENV_SCRIPTS[name] <= set(saved))
 
+    def test_env_out_write_failure_is_fail_open(self) -> None:
+        """--env --out into a missing dir still prints the report and exits 0."""
+        import tempfile
+
+        for name in ENV_SCRIPTS:
+            with self.subTest(script=name), tempfile.TemporaryDirectory() as tmp:
+                target = Path(tmp) / "no-such-dir" / "env.json"
+                proc = _run(name, _env_argv(name, "--out", str(target)))
+                self.assertEqual(
+                    proc.returncode,
+                    0,
+                    "%s --env --out bad path must stay rc 0: %s" % (name, proc.stderr),
+                )
+                self.assertNotIn("Traceback", proc.stderr)
+                self.assertFalse(target.exists())
+                report = json.loads(proc.stdout)
+                self.assertTrue(ENV_SCRIPTS[name] <= set(report))
+
     def test_scripts_without_env_flag_fail_cleanly(self) -> None:
         for path in sorted(SCRIPTS.glob("*.py")):
             if path.name in ENV_SCRIPTS or path.name == "_watch.py":

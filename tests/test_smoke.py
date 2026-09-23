@@ -777,5 +777,97 @@ class WatchDeadlineEnvTests(unittest.TestCase):
         self.assertLessEqual(len(ticks), 10)
         self.assertGreaterEqual(len(ticks), 1)
 
+class EnvFlagTests(unittest.TestCase):
+    def test_env_payload_keys(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--env"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertGreaterEqual(
+            set(payload),
+            {
+                "steps",
+                "only",
+                "repeat",
+                "jobs",
+                "timeout",
+                "watch_max",
+                "watch_secs",
+                "watch_quiet",
+                "policy",
+            },
+        )
+        self.assertEqual(payload["steps"], sorted(payload["steps"]))
+
+    def test_env_jq_field(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--env", "--jq", "jobs"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout), 1)
+
+    def test_env_jq_bad_key_rc2(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--env", "--jq", "bogus"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("bogus", proc.stderr)
+
+    def test_env_out_writes_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "env.json"
+            proc = subprocess.run(
+                [sys.executable, str(SMOKE), "--env", "--out", str(out)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            self.assertIn("steps", payload)
+
+
+class StepsTableTests(unittest.TestCase):
+    def test_steps_names_unique_and_callable(self) -> None:
+        names = [name for name, _fn in MOD.STEPS]
+        self.assertEqual(len(names), len(set(names)))
+        for _name, fn_name in MOD.STEPS:
+            self.assertTrue(callable(getattr(MOD, fn_name)), fn_name)
+
+    def test_list_output_matches_steps_table(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--list", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0)
+        listed = json.loads(proc.stdout.strip())
+        self.assertEqual(listed, sorted(n for n, _f in MOD.STEPS))
+
+    def test_coverage_payload_shape(self) -> None:
+        payload = MOD.coverage_payload()
+        names = {n for n, _f in MOD.STEPS}
+        self.assertEqual(set(payload["step_scripts"]), names)
+        self.assertEqual(payload["steps"], len(MOD.STEPS))
+        self.assertFalse(set(payload["covered"]) & set(payload["uncovered"]))
+        self.assertEqual(
+            payload["scripts"], len(payload["covered"]) + len(payload["uncovered"])
+        )
+        for internal in ("_watch.py", "skill_scanner.py", "progress_core.py"):
+            self.assertNotIn(internal, payload["covered"])
+            self.assertNotIn(internal, payload["uncovered"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

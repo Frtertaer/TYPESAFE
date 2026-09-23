@@ -866,6 +866,65 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify(args: argparse.Namespace) -> int:
+    """Re-check every note's stored `sha` against sha256(text)[:12].
+
+    Integrity audit for the trace file — a rewritten/corrupted note whose
+    sha was not recomputed shows up here. Missing file or unreadable JSON
+    fail the audit (rc 1) rather than reporting a vacuous pass.
+    """
+    path = Path(args.file) if args.file else default_path()
+    payload: dict = {"path": str(path), "ok": True, "notes": 0, "checked": 0, "skipped": 0, "bad": []}
+    if not path.is_file():
+        payload["ok"] = False
+        payload["missing"] = True
+    else:
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raw = None
+        if not isinstance(raw, dict):
+            payload["ok"] = False
+            payload["error"] = "unreadable"
+        else:
+            notes = raw.get("notes")
+            notes = notes if isinstance(notes, list) else []
+            payload["notes"] = len(notes)
+            for i, note in enumerate(notes, 1):
+                if not isinstance(note, dict) or not note.get("sha"):
+                    payload["skipped"] += 1
+                    continue
+                computed = hashlib.sha256(str(note.get("text") or "").encode("utf-8")).hexdigest()[:12]
+                if computed != note["sha"]:
+                    payload["bad"].append({"index": i, "stored": note["sha"], "computed": computed})
+                else:
+                    payload["checked"] += 1
+            payload["ok"] = not payload["bad"]
+    rc = emit_jq(payload, getattr(args, "jq", ""))
+    if rc is not None:
+        return rc
+    out_path = getattr(args, "out", "") or ""
+    if out_path:
+        try:
+            _atomic_write(Path(out_path), json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+            return 1
+    if getattr(args, "json", False):
+        sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    elif payload["ok"]:
+        sys.stdout.write(
+            "verify: ok notes=%d checked=%d skipped=%d\n"
+            % (payload["notes"], payload["checked"], payload["skipped"])
+        )
+    else:
+        detail = payload.get("error") or ("missing" if payload.get("missing") else "bad=%d" % len(payload["bad"]))
+        sys.stdout.write("verify: FAIL %s\n" % detail)
+        for row in payload["bad"][:10]:
+            sys.stdout.write("note %d: stored %s != computed %s\n" % (row["index"], row["stored"], row["computed"]))
+    return 0 if payload["ok"] else 1
+
+
 def cmd_notes(args: argparse.Namespace) -> int:
     path = Path(args.file) if args.file else default_path()
     data = load(path)
@@ -1384,6 +1443,13 @@ def build_parser() -> argparse.ArgumentParser:
     export_cmd.add_argument("--kinds", default="", help="Comma list of pick kinds to keep in exported history")
     export_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the export payload (rc 2 on unknown key)")
     export_cmd.set_defaults(func=cmd_export)
+    verify_cmd = sub.add_parser(
+        "verify", help="Re-check every note's stored sha against sha256(text) — rc 1 on mismatch/missing/unreadable"
+    )
+    verify_cmd.add_argument("--json", action="store_true", help="Emit the verify report as JSON")
+    verify_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the verify payload (rc 2 on unknown key)")
+    verify_cmd.add_argument("--out", metavar="PATH", default="", help="Also write the verify payload JSON to PATH")
+    verify_cmd.set_defaults(func=cmd_verify)
     schema_cmd = sub.add_parser(
         "schema", help="Print the .jev-trace.json key contract and exit"
     )

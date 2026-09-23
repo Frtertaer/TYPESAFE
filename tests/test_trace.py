@@ -272,6 +272,86 @@ class TraceTests(unittest.TestCase):
             data = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(data["notes"][-1]["text"], "héllo ünïcode ☃")
 
+    def test_verify_ok_clean_notes(self) -> None:
+        import tempfile
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                tr.main(["--file", str(path), "record", "--pick", "a", "--note", "one"])
+                tr.main(["--file", str(path), "record", "--pick", "b", "--note", "two"])
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "verify"])
+            self.assertEqual(rc, 0)
+            self.assertIn("verify: ok notes=2 checked=2 skipped=0", buf.getvalue())
+
+    def test_verify_catches_tampered_note(self) -> None:
+        import tempfile
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                tr.main(["--file", str(path), "record", "--pick", "a", "--note", "honest"])
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["notes"][0]["text"] = "tampered"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "verify", "--json"])
+            self.assertEqual(rc, 1)
+            payload = json.loads(buf.getvalue())
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["bad"][0]["index"], 1)
+            self.assertNotEqual(payload["bad"][0]["stored"], payload["bad"][0]["computed"])
+
+    def test_verify_missing_and_unreadable_fail(self) -> None:
+        import tempfile
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "nope.json"
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "verify", "--json"])
+            self.assertEqual(rc, 1)
+            self.assertTrue(json.loads(buf.getvalue())["missing"])
+            path.write_text("{not json", encoding="utf-8")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "verify", "--json"])
+            self.assertEqual(rc, 1)
+            self.assertEqual(json.loads(buf.getvalue())["error"], "unreadable")
+
+    def test_verify_jq_and_out(self) -> None:
+        import tempfile
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            out_f = Path(tmp) / "report.json"
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                tr.main(["--file", str(path), "record", "--pick", "a", "--note", "x"])
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "verify", "--jq", "ok"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "true")
+            with redirect_stdout(StringIO()):
+                rc = tr.main(["--file", str(path), "verify", "--out", str(out_f)])
+            self.assertEqual(rc, 0)
+            self.assertTrue(json.loads(out_f.read_text(encoding="utf-8"))["ok"])
+            buf = StringIO()
+            with redirect_stdout(buf), redirect_stderr(StringIO()):
+                rc = tr.main(["--file", str(path), "verify", "--jq", "nope"])
+            self.assertEqual(rc, 2)
+
     def test_record_note_stamps_sha(self) -> None:
         import hashlib
         import tempfile

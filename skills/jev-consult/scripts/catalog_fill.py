@@ -32,9 +32,11 @@ from inventory import (  # noqa: E402
     clear_miss,
     clear_scan_cache,
     detect_harness,
+    emit_verify,
     FILL_SCHEMA_ROWS,
     hermes_home,
     shortlist,
+    verify_installed,
     tokens,
     user_home,
     write_sidecar,
@@ -595,6 +597,12 @@ def main() -> int:
         action="store_true",
         help="Print the resolved env config JSON ({fill_timeout_seconds, catalog_cache_seconds, watch_max, watch_secs, watch_quiet, policy, miss, ask}) and exit (--jq KEY prints one field, rc 2 on unknown; --out PATH also writes it).",
     )
+    parser.add_argument(
+        "--verify",
+        metavar="NAME",
+        default="",
+        help="Re-scan installed items on the dest harness and exit 0 when NAME (name or id) is installed, 1 otherwise; --json/--jq apply.",
+    )
     args = parser.parse_args()
     if args.schema:
         rows = {key: dict(row) for key, row in FILL_SCHEMA_ROWS.items()}
@@ -641,6 +649,16 @@ def main() -> int:
         task = task or str(miss.get("task") or "")
         if dest == "auto":
             dest = str(miss.get("harness") or "auto")
+    if dest == "auto":
+        dest = detect_harness(Path(__file__))
+    if args.verify:
+        report, _rc = verify_installed(
+            args.verify,
+            dest,
+            home=Path(args.home) if args.home else None,
+            hermes=Path(args.hermes_home) if args.hermes_home else None,
+        )
+        return emit_verify(report, jq=args.jq, as_json=args.json)
     if args.status:
         try:
             now = time.time()

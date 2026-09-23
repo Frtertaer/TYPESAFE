@@ -53,6 +53,53 @@ def write_skill(root: Path, name: str, body: str) -> Path:
 
 
 class PeerFillTests(unittest.TestCase):
+    def test_verify_finds_installed_skill(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hermes = base / "hermes"
+            home = base / "home"
+            write_skill(hermes / "skills", "jwt-auth", JWT_MD)
+            buf = io.StringIO()
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "peer_fill.py", "--verify", "jwt-auth",
+                    "--harness", "hermes",
+                    "--home", str(home),
+                    "--hermes-home", str(hermes),
+                ],
+            ):
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertIn("verified jwt-auth", buf.getvalue())
+
+    def test_verify_missing_rc1(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            buf = io.StringIO()
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "peer_fill.py", "--verify", "nope",
+                    "--harness", "hermes",
+                    "--home", str(base / "home"),
+                    "--hermes-home", str(base / "hermes"),
+                ],
+            ):
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+            self.assertEqual(rc, 1)
+            self.assertIn("not_installed nope", buf.getvalue())
+
     def test_copies_peer_skill_into_empty_harness(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

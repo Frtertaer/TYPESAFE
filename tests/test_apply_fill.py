@@ -105,6 +105,70 @@ class ApplyFillTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("alpha", buf.getvalue())
 
+    def test_verify_installed_rc0(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        items = [
+            FILL.as_item("mcp", "jwt-auth", "Sign and verify JWT"),
+            FILL.as_item("plugin", "fmsg-platform", "auth"),
+        ]
+        with patch.object(FILL, "verify_installed", side_effect=lambda name, *a, **k: ({"verify": name, "installed": True, "matched": ["x"], "scanned": len(items)}, 0)):
+            with patch.object(
+                sys, "argv", ["apply_fill.py", "--verify", "jwt-auth"]
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+        self.assertEqual(rc, 0)
+        self.assertIn("verified jwt-auth", buf.getvalue())
+
+    def test_verify_kind_qualified_match(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        items = [FILL.as_item("mcp", "jwt-auth", "Sign and verify JWT")]
+        with patch.object(FILL, "verify_installed", side_effect=lambda name, *a, **k: ({"verify": name, "installed": True, "matched": ["x"], "scanned": len(items)}, 0)):
+            with patch.object(
+                sys, "argv", ["apply_fill.py", "--verify", "jwt-auth", "--json"]
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertTrue(payload["installed"])
+        self.assertEqual(payload["scanned"], 1)
+
+    def test_verify_missing_rc1(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with patch.object(FILL, "verify_installed", side_effect=lambda name, *a, **k: ({"verify": name, "installed": False, "matched": [], "scanned": 0}, 1)):
+            with patch.object(
+                sys, "argv", ["apply_fill.py", "--verify", "nope"]
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+        self.assertEqual(rc, 1)
+        self.assertIn("not_installed nope", buf.getvalue())
+
+    def test_verify_jq_installed(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        items = [FILL.as_item("plugin", "alpha", "a plugin")]
+        with patch.object(FILL, "verify_installed", side_effect=lambda name, *a, **k: ({"verify": name, "installed": True, "matched": ["x"], "scanned": len(items)}, 0)):
+            with patch.object(
+                sys, "argv", ["apply_fill.py", "--verify", "alpha", "--jq", "installed"]
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().strip(), "true")
+
     def test_self_test_exercises_offline_paths(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

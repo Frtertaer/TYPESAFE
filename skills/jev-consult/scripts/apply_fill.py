@@ -37,6 +37,8 @@ from inventory import (  # noqa: E402
     detect_harness,
     FILL_SCHEMA_ROWS,
     hermes_home,
+    emit_verify,
+    verify_installed,
     shortlist,
     tokens,
     user_home,
@@ -449,6 +451,12 @@ def main() -> int:
         action="store_true",
         help="Exercise the offline paths in a temp dir (hermes gate, blocked pick, pick match, miss round-trip+stale prune); exit 1 on failure (--json emits the checks).",
     )
+    parser.add_argument(
+        "--verify",
+        metavar="NAME",
+        default="",
+        help="Re-scan installed Hermes items and exit 0 when NAME (plugin or MCP, name or kind:name) is installed, 1 otherwise; --json/--jq apply.",
+    )
     args = parser.parse_args()
     if args.schema:
         rows = {key: dict(row) for key, row in FILL_SCHEMA_ROWS.items()}
@@ -565,6 +573,14 @@ def main() -> int:
             )
         return 0 if ok else 1
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
+    if args.verify:
+        report, _rc = verify_installed(
+            args.verify,
+            "hermes",
+            home=Path(args.home).expanduser() if args.home else None,
+            hermes=Path(args.hermes_home).expanduser() if args.hermes_home else None,
+        )
+        return emit_verify(report, jq=args.jq, as_json=args.json)
     if args.status:
         try:
             now = time.time()

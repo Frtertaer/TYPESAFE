@@ -32,12 +32,14 @@ from inventory import (  # noqa: E402
     clear_miss,
     clear_scan_cache,
     detect_harness,
+    emit_verify,
     FILL_SCHEMA_ROWS,
     hermes_home,
     iter_skills,
     read_sidecar,
     roots_for,
     shortlist,
+    verify_installed,
     sidecar_fresh,
     tokens,
     user_home,
@@ -391,6 +393,12 @@ def main() -> int:
         action="store_true",
         help="Exercise the miss/sidecar round-trip in a temp dir (fresh read, stale prune, sidecar names); exit 1 on failure (--json emits the checks).",
     )
+    parser.add_argument(
+        "--verify",
+        metavar="NAME",
+        default="",
+        help="Re-scan installed items on the dest harness and exit 0 when NAME (name or id) is installed, 1 otherwise; --json/--jq apply.",
+    )
     args = parser.parse_args()
     if args.schema:
         rows = {key: dict(row) for key, row in FILL_SCHEMA_ROWS.items()}
@@ -490,6 +498,11 @@ def main() -> int:
     hermes = Path(args.hermes_home) if args.hermes_home else hermes_home()
     if dest == "auto":
         dest = detect_harness(Path(__file__))
+    if args.verify:
+        report, _rc = verify_installed(
+            args.verify, dest, home=home, hermes=hermes
+        )
+        return emit_verify(report, jq=args.jq, as_json=args.json)
     if args.status:
         try:
             miss = read_miss(cwd / MISS_NAME)

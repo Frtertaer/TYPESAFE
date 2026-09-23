@@ -548,6 +548,54 @@ def score_item(item: dict, query: set[str], df: dict[str, int] | None = None) ->
     return score
 
 
+def verify_installed(
+    name: str,
+    harness: str = "auto",
+    home: Path | None = None,
+    hermes: Path | None = None,
+) -> tuple[dict, int]:
+    """Scan for NAME (name or id, case-insensitive); returns (report, rc 0|1)."""
+    try:
+        items = scan(harness, home=home, hermes=hermes)
+    except Exception:
+        items = []
+    needle = name.strip().lower()
+    hits = [
+        item
+        for item in items
+        if str(item.get("name") or "").lower() == needle
+        or str(item.get("id") or "").lower() == needle
+    ]
+    report = {
+        "verify": name,
+        "installed": bool(hits),
+        "matched": sorted(str(i.get("id") or "") for i in hits),
+        "scanned": len(items),
+    }
+    return report, (0 if hits else 1)
+
+
+def emit_verify(report: dict, jq: str = "", as_json: bool = False) -> int:
+    """Print a verify_installed report; returns 0 installed / 1 not / 2 bad jq."""
+    if jq:
+        value, found = _watch.dig(report, jq)
+        if not found:
+            sys.stderr.write(
+                "bad --jq key %r (payload has: %s)\n"
+                % (jq, ", ".join(sorted(report)))
+            )
+            return 2
+        sys.stdout.write(json.dumps(value) + "\n")
+    elif as_json:
+        sys.stdout.write(json.dumps(report, indent=2) + "\n")
+    else:
+        sys.stdout.write(
+            "%s %s\n"
+            % ("verified" if report["installed"] else "not_installed", report["verify"])
+        )
+    return 0 if report["installed"] else 1
+
+
 def explain_item(item: dict, task: str, items: list[dict]) -> dict:
     """Per-token score decomposition for one item against a task."""
     query = sorted(tokens(task))

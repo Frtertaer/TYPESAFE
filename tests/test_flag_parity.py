@@ -51,7 +51,7 @@ class FlagParityTest(unittest.TestCase):
             "--pick", "--from-miss", "--dry-run", "--ask-file", "--json",
             "--jq", "--watch", "--max-ticks", "--watch-max", "--quiet",
             "--fail-fast", "--out", "--verdict", "--schema", "--env", "--help",
-            "--unchanged-max",
+            "--unchanged-max", "--verify",
         }
         extras = {
             "apply_fill.py": {"--status", "--list", "--show", "--self-test"},

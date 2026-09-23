@@ -50,6 +50,50 @@ HITS = [
 
 
 class CatalogFillTests(unittest.TestCase):
+    def test_verify_finds_installed_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            skills = base / "home" / ".claude" / "skills"
+            (skills / "jwt-auth").mkdir(parents=True)
+            (skills / "jwt-auth" / "SKILL.md").write_text(
+                "---\nname: jwt-auth\ndescription: JWT helpers.\n---\n\n# jwt-auth\n",
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py", "--verify", "jwt-auth",
+                    "--harness", "claude-code",
+                    "--home", str(base / "home"),
+                    "--hermes-home", str(base / "hermes"),
+                ],
+            ):
+                with contextlib.redirect_stdout(buf):
+                    rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertIn("verified jwt-auth", buf.getvalue())
+
+    def test_verify_missing_rc1(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            buf = io.StringIO()
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py", "--verify", "nope",
+                    "--harness", "claude-code",
+                    "--home", str(base / "home"),
+                    "--hermes-home", str(base / "hermes"),
+                ],
+            ):
+                with contextlib.redirect_stdout(buf):
+                    rc = FILL.main()
+            self.assertEqual(rc, 1)
+            self.assertIn("not_installed nope", buf.getvalue())
+
     def test_drop_blocked_removes_attacks(self) -> None:
         kept = FILL.drop_blocked(HITS)
         names = {item["name"] for item in kept}

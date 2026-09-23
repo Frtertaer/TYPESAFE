@@ -1156,6 +1156,34 @@ class CompactCliTests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("--history", err.getvalue())
 
+    def test_jsonl_emits_one_decision_per_line(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0", "--jsonl"]
+                )
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+            self.assertTrue(rows)
+            self.assertTrue(all(isinstance(r, dict) for r in rows))
+            self.assertTrue(all("action" in r or "id" in r for r in rows))
+
+    def test_jsonl_out_writes_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            out = Path(tmp) / "decisions.jsonl"
+            with patch.object(sys, "stdout", io.StringIO()):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0", "--jsonl", "-o", str(out)]
+                )
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
+            self.assertTrue(rows)
+
     def test_md_emits_markdown_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

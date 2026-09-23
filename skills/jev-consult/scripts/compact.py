@@ -1643,6 +1643,13 @@ def cmd_compact(args: argparse.Namespace) -> int:
         if isinstance(spill, dict) and spill.get("files"):
             lines.append("- spill files: %d" % len(spill["files"]))
         text = "\n".join(lines) + "\n"
+    elif getattr(args, "jsonl", False):
+        rows = result.get("decisions") if isinstance(result, dict) else None
+        text = "".join(
+            json.dumps(row, ensure_ascii=False) + "\n"
+            for row in (rows or [])
+            if isinstance(row, dict)
+        )
     else:
         text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     if args.output:
@@ -1917,6 +1924,11 @@ def main(argv: list[str] | None = None) -> int:
         "--md",
         action="store_true",
         help="Emit a markdown summary of the compaction stats instead of the JSON payload (-o writes the markdown to the file too)",
+    )
+    parser.add_argument(
+        "--jsonl",
+        action="store_true",
+        help="Emit each per-call decision as one JSON line (for piping; -o writes the lines to the file)",
     )
     parser.add_argument(
         "--json",

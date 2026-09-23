@@ -1748,6 +1748,15 @@ def list_spill(directory: Path | None = None) -> list[tuple[Path, int, float]]:
     return rows
 
 
+def _spill_dirs(directory: Path | None, include_dry: bool) -> list[Path | None]:
+    """[dir] plus its dry/ sibling when --include-dry sweeps it too."""
+    dirs: list[Path | None] = [directory]
+    base = directory if directory is not None else spill_dir_default()
+    if include_dry and base is not None:
+        dirs.append(base / "dry")
+    return dirs
+
+
 def prune_spill(
     directory: Path | None = None,
     older_than: float = 0.0,
@@ -1901,6 +1910,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Unlink spill files older than SECONDS in the spill dir (or --spill-dir) and exit.",
     )
     parser.add_argument("--spill-dir", help="Override spill directory for --prune-spill/--list-spill/--spill-stats.")
+    parser.add_argument(
+        "--include-dry",
+        action="store_true",
+        help="With --list-spill/--prune-spill/--spill-stats: also sweep <spill_dir>/dry/ (compact_hook --dry-run output).",
+    )
     parser.add_argument(
         "--out",
         default="",
@@ -2239,7 +2253,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if getattr(args, "spill_stats", False):
         directory = Path(args.spill_dir) if args.spill_dir else None
-        rows = list_spill(directory)
+        rows = [
+            row
+            for d in _spill_dirs(directory, getattr(args, "include_dry", False))
+            for row in list_spill(d)
+        ]
         stats = {
             "dir": str(directory or spill_dir_default() or ""),
             "count": len(rows),
@@ -2272,7 +2290,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.list_spill:
         directory = Path(args.spill_dir) if args.spill_dir else None
-        rows = list_spill(directory)
+        rows = [
+            row
+            for d in _spill_dirs(directory, getattr(args, "include_dry", False))
+            for row in list_spill(d)
+        ]
         if args.json:
             text = json.dumps(
                 {
@@ -2304,7 +2326,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.prune_spill is not None:
         directory = Path(args.spill_dir) if args.spill_dir else None
-        removed = prune_spill(directory, args.prune_spill)
+        removed = [
+            path
+            for d in _spill_dirs(directory, getattr(args, "include_dry", False))
+            for path in prune_spill(d, args.prune_spill)
+        ]
         if args.json:
             text = json.dumps(
                 {"pruned": [str(path) for path in removed], "count": len(removed)},

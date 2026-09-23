@@ -2808,5 +2808,91 @@ class SchemaTests(unittest.TestCase):
             self.assertTrue(set(message) <= documented_msg, set(message) - documented_msg)
 
 
+class IncludeDryTests(unittest.TestCase):
+    """--include-dry sweeps <spill_dir>/dry/ alongside the live spill dir."""
+
+    def _dirs(self, tmp: str) -> tuple[Path, Path]:
+        spill = Path(tmp) / "spill"
+        dry = spill / "dry"
+        dry.mkdir(parents=True)
+        (spill / "live.txt").write_text("x", encoding="utf-8")
+        (dry / "probe.txt").write_text("y", encoding="utf-8")
+        return spill, dry
+
+    def test_list_spill_include_dry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spill, dry = self._dirs(tmp)
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(
+                    ["--list-spill", "--spill-dir", str(spill), "--include-dry"]
+                )
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertIn("live.txt", out)
+            self.assertIn(str(dry / "probe.txt"), out)
+            self.assertIn("2 spill files", out)
+
+    def test_list_spill_default_skips_dry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spill, dry = self._dirs(tmp)
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                C.main(["--list-spill", "--spill-dir", str(spill)])
+            self.assertNotIn("probe.txt", buf.getvalue())
+            self.assertIn("1 spill files", buf.getvalue())
+
+    def test_prune_spill_include_dry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spill, dry = self._dirs(tmp)
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(
+                    [
+                        "--prune-spill", "0",
+                        "--spill-dir", str(spill),
+                        "--include-dry",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertIn("pruned 2 spill files", buf.getvalue())
+            self.assertFalse((spill / "live.txt").exists())
+            self.assertFalse((dry / "probe.txt").exists())
+
+    def test_prune_spill_default_leaves_dry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spill, dry = self._dirs(tmp)
+            with patch("sys.stdout", io.StringIO()):
+                C.main(["--prune-spill", "0", "--spill-dir", str(spill)])
+            self.assertFalse((spill / "live.txt").exists())
+            self.assertTrue((dry / "probe.txt").is_file())
+
+    def test_spill_stats_include_dry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spill, _dry = self._dirs(tmp)
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(
+                    [
+                        "--spill-stats",
+                        "--spill-dir", str(spill),
+                        "--include-dry",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            stats = json.loads(buf.getvalue())
+            self.assertEqual(stats["count"], 2)
+            self.assertEqual(stats["bytes"], 2)
+
+    def test_spill_dirs_helper_resolves_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"JEV_CONSULT_SPILL": tmp}):
+                dirs = C._spill_dirs(None, include_dry=True)
+            self.assertEqual(dirs, [None, Path(tmp) / "dry"])
+            with patch.dict(os.environ, {"JEV_CONSULT_SPILL": "0"}):
+                self.assertEqual(C._spill_dirs(None, include_dry=True), [None])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

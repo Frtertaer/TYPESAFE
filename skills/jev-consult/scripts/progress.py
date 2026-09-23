@@ -12,7 +12,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import _watch
-from progress_core import Ledger, ProgressError, read_json
+from progress_core import Ledger, ProgressError, read_json, validate_plan, validate_progress_policy
 
 
 def build_parser():
@@ -52,6 +52,8 @@ def build_parser():
     review.add_argument("--reviewer", required=True)
     review.add_argument("--approve-finish", action="store_true", help="Record explicit completion approval; checks and Jev must still permit finishing")
     commands.add_parser("self-test", help="Initialize a scratch ledger with a stub evidence collector and read it back")
+    lint_p = commands.add_parser("lint", help="Dry-validate a plan against a policy with the same checks as init; writes nothing")
+    lint_p.add_argument("plan", help="Stage-plan JSON file")
     return parser
 
 
@@ -141,6 +143,18 @@ def main(argv=None):
         return 0
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "lint":
+            policy_path = Path(args.policy) if args.policy else Path(__file__).resolve().parent.parent / "policy.json"
+            try:
+                policy_doc = read_json(policy_path)
+                plan_doc = read_json(Path(args.plan))
+                validate_progress_policy(policy_doc)
+                validate_plan(plan_doc, policy_doc)
+            except ProgressError as exc:
+                sys.stdout.write(json.dumps({"lint": "invalid", "code": exc.code, "message": str(exc)}) + "\n")
+                return 1
+            sys.stdout.write(json.dumps({"lint": "ok", "stage": plan_doc["id"], "items": len(plan_doc["items"]), "checks": len(plan_doc["checks"])}, indent=2) + "\n")
+            return 0
         repo = Path(args.repo).resolve()
         database = Path(args.db).resolve() if args.db else repo / ".devin" / "progress.sqlite3"
         ledger = Ledger(database, repo)

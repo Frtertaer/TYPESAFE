@@ -41,6 +41,7 @@ class ParserTests(unittest.TestCase):
             ["invalidate", "s", "i", "--reason", "r"],
             ["restore", "s", "i", "--reason", "r", "--reviewer", "v"],
             ["review", "s", "--reason", "r", "--reviewer", "v"],
+            ["lint", "plan.json"],
         ):
             args = parser.parse_args(argv)
             self.assertTrue(args.command)
@@ -252,6 +253,77 @@ class SubprocessTests(unittest.TestCase):
             document = json.loads(proc.stdout)
             self.assertEqual(document["events"], [])
             self.assertEqual(document["stage"]["plan"]["id"], "reliability")
+
+
+class LintTests(unittest.TestCase):
+    def _write_pair(self, base: Path) -> tuple[Path, Path]:
+        plan_path = base / "plan.json"
+        plan_path.write_text(json.dumps(plan(1)), encoding="utf-8")
+        policy_path = base / "policy.json"
+        policy_path.write_text(json.dumps(policy()), encoding="utf-8")
+        return plan_path, policy_path
+
+    def test_lint_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path, policy_path = self._write_pair(Path(tmp))
+            code, out = run_cli(
+                ["--policy", str(policy_path), "lint", str(plan_path)]
+            )
+            self.assertEqual(code, 0)
+            doc = json.loads(out)
+            self.assertEqual(doc["lint"], "ok")
+            self.assertEqual(doc["items"], 1)
+
+    def test_lint_invalid_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path, policy_path = self._write_pair(Path(tmp))
+            broken = plan(1)
+            broken.pop("goal")
+            plan_path.write_text(json.dumps(broken), encoding="utf-8")
+            code, out = run_cli(
+                ["--policy", str(policy_path), "lint", str(plan_path)]
+            )
+            self.assertEqual(code, 1)
+            doc = json.loads(out)
+            self.assertEqual(doc["lint"], "invalid")
+            self.assertTrue(doc["code"])
+
+    def test_lint_invalid_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path, policy_path = self._write_pair(Path(tmp))
+            bad = policy()
+            bad["endpoint"] = "http://example.invalid"
+            policy_path.write_text(json.dumps(bad), encoding="utf-8")
+            code, out = run_cli(
+                ["--policy", str(policy_path), "lint", str(plan_path)]
+            )
+            self.assertEqual(code, 1)
+            self.assertEqual(json.loads(out)["lint"], "invalid")
+
+    def test_lint_unreadable_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _, policy_path = self._write_pair(Path(tmp))
+            code, out = run_cli(
+                ["--policy", str(policy_path), "lint", str(Path(tmp) / "missing.json")]
+            )
+            self.assertEqual(code, 1)
+            self.assertEqual(json.loads(out)["lint"], "invalid")
+
+    def test_lint_writes_no_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            plan_path, policy_path = self._write_pair(base)
+            code, _ = run_cli(
+                [
+                    "--repo", str(base),
+                    "--db", str(base / "progress.sqlite3"),
+                    "--policy", str(policy_path),
+                    "lint", str(plan_path),
+                ]
+            )
+            self.assertEqual(code, 0)
+            self.assertFalse((base / "progress.sqlite3").exists())
+            self.assertFalse((base / ".devin").exists())
 
 
 class SchemaTests(unittest.TestCase):

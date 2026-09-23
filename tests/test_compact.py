@@ -2299,6 +2299,59 @@ class ReindexSpillTests(unittest.TestCase):
             )
 
 
+class IndexCheckTests(unittest.TestCase):
+    def test_clean_index_rc0(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            (target / "a.txt").write_text("x", encoding="utf-8")
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                C.main(["--reindex-spill", str(target)])
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--index-check", "--spill-dir", str(target)])
+            self.assertEqual(rc, 0)
+            self.assertIn("0 stale", buf.getvalue())
+
+    def test_stale_row_rc1_and_named(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            (target / "a.txt").write_text("x", encoding="utf-8")
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                C.main(["--reindex-spill", str(target)])
+            (target / "a.txt").unlink()
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--index-check", "--spill-dir", str(target)])
+            self.assertEqual(rc, 1)
+            self.assertIn("stale: a.txt", buf.getvalue())
+
+    def test_unindexed_file_listed_rc0(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            (target / "fresh.txt").write_text("x", encoding="utf-8")
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--index-check", "--spill-dir", str(target), "--json"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["unindexed"], ["fresh.txt"])
+            self.assertTrue(payload["ok"])
+
+    def test_missing_dir_rc2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = C.main(
+                    ["--index-check", "--spill-dir", str(Path(tmp) / "nope")]
+                )
+            self.assertEqual(rc, 2)
+
+
 class KeepTextTests(unittest.TestCase):
     def setUp(self):
         self._spill_env = patch.dict(os.environ, {"JEV_CONSULT_SPILL": "0"})
@@ -2906,7 +2959,7 @@ class IncludeDryTests(unittest.TestCase):
             with patch("sys.stdout", buf):
                 rc = C.main(
                     [
-                        "--prune-spill", "0",
+                        "--prune-spill", "-1",
                         "--spill-dir", str(spill),
                         "--include-dry",
                     ]

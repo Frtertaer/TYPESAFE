@@ -1784,6 +1784,36 @@ def reindex_spill(directory: Path | None = None) -> tuple[int, Path | None]:
     return len(rows), index_path
 
 
+def check_spill_index(directory: Path | None = None) -> dict[str, Any]:
+    """Drift report between index.jsonl and the files on disk.
+
+    Returns {stale, unindexed, ok, dir}: stale names index rows whose file is
+    gone (needs --reindex-spill); unindexed names live files with no row yet
+    (benign — the index is only an enrichment). dir is None when no spill dir
+    resolved.
+    """
+    target = directory if directory is not None else spill_dir_default()
+    if target is None or not target.is_dir():
+        return {"stale": [], "unindexed": [], "ok": True, "dir": None}
+    live: set[str] = set()
+    for candidate in sorted(target.iterdir()):
+        try:
+            info = candidate.stat()
+        except OSError:
+            continue
+        if stat.S_ISREG(info.st_mode) and candidate.name != SPILL_INDEX_NAME:
+            live.add(candidate.name)
+    indexed = set(_spill_index_rows(target))
+    stale = sorted(indexed - live)
+    unindexed = sorted(live - indexed)
+    return {
+        "stale": stale,
+        "unindexed": unindexed,
+        "ok": not stale,
+        "dir": str(target),
+    }
+
+
 def prune_spill(
     directory: Path | None = None,
     older_than: float = 0.0,
@@ -1979,6 +2009,11 @@ def main(argv: list[str] | None = None) -> int:
         const="",
         default=None,
         help="Rebuild index.jsonl from the spill files on disk (file mtime as ts; DIR or the default spill dir).",
+    )
+    parser.add_argument(
+        "--index-check",
+        action="store_true",
+        help="Report index.jsonl drift vs the files on disk ({stale,unindexed,ok}; rc 1 on stale rows, 2 when no dir resolves).",
     )
     parser.add_argument(
         "--md",
@@ -2304,6 +2339,24 @@ def main(argv: list[str] | None = None) -> int:
                 "reindexed %d spill files in %s\n" % (rows, payload["dir"])
             )
         return 0
+    if getattr(args, "index_check", False):
+        directory = Path(args.spill_dir) if args.spill_dir else None
+        report = check_spill_index(directory)
+        if report["dir"] is None:
+            sys.stderr.write("--index-check: no spill dir resolved\n")
+            return 2
+        if args.json:
+            sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        else:
+            for name in report["stale"]:
+                sys.stdout.write("stale: %s\n" % name)
+            for name in report["unindexed"]:
+                sys.stdout.write("unindexed: %s\n" % name)
+            sys.stdout.write(
+                "%d stale index rows, %d unindexed files\n"
+                % (len(report["stale"]), len(report["unindexed"]))
+            )
+        return 0 if report["ok"] else 1
     if getattr(args, "spill_stats", False):
         directory = Path(args.spill_dir) if args.spill_dir else None
         rows = [

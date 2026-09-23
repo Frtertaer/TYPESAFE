@@ -317,6 +317,21 @@ class PolicyLintTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("0 error(s)", buf.getvalue())
 
+    def test_self_test_finds_p001(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = policy_lint.main(["--self-test"])
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", buf.getvalue())
+        self.assertIn("P001", buf.getvalue())
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = policy_lint.main(["--self-test", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["self_test"], "ok")
+        self.assertIn("P001", payload["rules"])
+
     def test_quiet_suppresses_warn_lines(self) -> None:
         policy = base_policy()
         policy["escalate_if"]["confidene_below"] = 0.4

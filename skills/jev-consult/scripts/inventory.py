@@ -804,8 +804,16 @@ def sidecar_issues(payload: dict) -> list[str]:
 
 
 def _policy_dict() -> dict:
+    """Active policy dict: JEV_POLICY path wins over the bundled policy.json,
+    matching jev.load_policy's precedence. An unreadable explicit override
+    yields {} (defaults), not a silent fallback to the bundled file."""
     try:
-        policy_path = Path(__file__).resolve().parent.parent / "policy.json"
+        env_path = os.environ.get("JEV_POLICY", "").strip()
+        policy_path = (
+            Path(env_path)
+            if env_path
+            else Path(__file__).resolve().parent.parent / "policy.json"
+        )
         data = json.loads(policy_path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):

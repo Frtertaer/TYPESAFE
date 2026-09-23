@@ -238,8 +238,10 @@ def check_common(home: Path, hermes: Path) -> list[dict]:
     )
     out.append(_check("*", "api_key", key_set, "set" if key_set else "missing"))
     policy_ok = False
-    detail = "missing " + str(POLICY_PATH)
-    data = _load_json(POLICY_PATH)
+    env_policy = os.environ.get("JEV_POLICY", "").strip()
+    policy_path = Path(env_policy) if env_policy else POLICY_PATH
+    detail = "missing " + str(policy_path)
+    data = _load_json(policy_path)
     if isinstance(data, dict):
         policy_ok = bool(data.get("question_soft_max"))
         detail = "ok" if policy_ok else "no question_soft_max"

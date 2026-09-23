@@ -372,9 +372,19 @@ class _StubEvidence:
         return ""
 
 
+def _policy_path(flag: str = "") -> Path:
+    """Effective policy path: --policy flag > JEV_POLICY env > bundled file."""
+    if flag:
+        return Path(flag)
+    env_path = os.environ.get("JEV_POLICY", "").strip()
+    if env_path:
+        return Path(env_path)
+    return Path(__file__).resolve().parent.parent / "policy.json"
+
+
 def _self_test(args) -> dict:
     """Exercise initialize/status on a temporary ledger; never contacts Jev."""
-    policy_path = Path(args.policy) if args.policy else Path(__file__).resolve().parent.parent / "policy.json"
+    policy_path = _policy_path(args.policy)
     plan = {
         "id": "self_test",
         "goal": "Exercise initialize and status without touching a real ledger",
@@ -417,7 +427,7 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
         if args.command == "lint":
-            policy_path = Path(args.policy) if args.policy else Path(__file__).resolve().parent.parent / "policy.json"
+            policy_path = _policy_path(args.policy)
             try:
                 policy_doc = read_json(policy_path)
                 plan_doc = read_json(Path(args.plan))
@@ -443,7 +453,7 @@ def main(argv=None):
                 "repo": str(repo),
                 "db": str(database),
                 "db_exists": database.is_file(),
-                "policy": args.policy or "default",
+                "policy": args.policy or os.environ.get("JEV_POLICY", "").strip() or "default",
                 "watch_max": _watch.cap("JEV_PROGRESS_WATCH_MAX", None),
                 "watch_secs": env_watch_secs,
                 "watch_quiet": _watch.quiet("JEV_PROGRESS_WATCH_QUIET", False),
@@ -461,7 +471,7 @@ def main(argv=None):
             return 0
         ledger = Ledger(database, repo)
         if args.command == "init":
-            policy_path = Path(args.policy) if args.policy else Path(__file__).resolve().parent.parent / "policy.json"
+            policy_path = _policy_path(args.policy)
             result = ledger.initialize(read_json(Path(args.plan)), read_json(policy_path))
         elif args.command == "assess":
             result = ledger.assess(args.stage, args.item, args.summary, retry_unavailable=args.retry_unavailable)

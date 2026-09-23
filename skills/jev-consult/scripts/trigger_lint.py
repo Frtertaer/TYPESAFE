@@ -295,7 +295,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         out_path = argv[idx + 1].strip()
         argv = argv[:idx] + argv[idx + 2 :]
-    policy_path = DEFAULT_POLICY
+    env_policy = os.environ.get("JEV_POLICY", "").strip()
+    policy_path = Path(env_policy) if env_policy else DEFAULT_POLICY
     if "--policy" in argv:
         idx = argv.index("--policy")
         if idx + 1 >= len(argv):

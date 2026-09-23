@@ -666,6 +666,22 @@ class RulesCatalogTest(unittest.TestCase):
         rows = json.loads(buf.getvalue())
         self.assertEqual(sorted(r["rule"] for r in rows), sorted(skill_lint.RULES))
 
+    def test_schema_prints_frontmatter_contract(self) -> None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = skill_lint.main(["--schema"])
+        self.assertEqual(rc, 0)
+        self.assertIn("name: slug", buf.getvalue())
+        self.assertIn("(required)", buf.getvalue())
+        self.assertIn("description:", buf.getvalue())
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = skill_lint.main(["--schema", "--json"])
+        self.assertEqual(rc, 0)
+        rows = json.loads(buf.getvalue())
+        self.assertTrue(rows["name"]["required"])
+        self.assertFalse(rows["description"]["required"])
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

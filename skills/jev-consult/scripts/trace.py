@@ -711,7 +711,8 @@ def cmd_schema(args: argparse.Namespace) -> int:
     else:
         for key in rows:
             sys.stdout.write(
-                "%s: %s\n" % (key, rows[key]["type"])
+                "%s: %s (%s)\n"
+                % (key, rows[key]["type"], "required" if rows[key]["required"] else "optional")
             )
     return 0
 

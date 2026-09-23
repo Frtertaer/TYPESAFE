@@ -1302,6 +1302,38 @@ class CompactCliTests(unittest.TestCase):
             out = json.loads(out_f.read_text(encoding="utf-8"))
             self.assertIn("stats", out)
 
+    def test_stdin_dash_decodes_utf8_bytes(self) -> None:
+        """`compact -` reads stdin as UTF-8 bytes — a cp1252 console must not
+        mangle non-ASCII transcript content."""
+        import subprocess
+
+        script = Path(__file__).resolve().parents[1] / "skills" / "jev-consult" / "scripts" / "compact.py"
+        transcript = self._transcript()
+        transcript[0]["content"] = "read the file é ü ï ☃"
+        with tempfile.TemporaryDirectory() as tmp:
+            out_f = Path(tmp) / "out.json"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "-",
+                    "--history",
+                    "--fake",
+                    "-o",
+                    str(out_f),
+                    "--min-reduction",
+                    "0",
+                ],
+                input=json.dumps(transcript).encode("utf-8"),
+                capture_output=True,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr[:200])
+            out = json.loads(out_f.read_text(encoding="utf-8"))
+            self.assertIn("stats", out)
+            blob = out_f.read_text(encoding="utf-8")
+            self.assertIn("é", blob, "non-ASCII stdin mangled")
+
     def test_min_reduction_fallback_restores(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

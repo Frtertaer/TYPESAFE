@@ -244,6 +244,34 @@ class TraceTests(unittest.TestCase):
             self.assertTrue(payload["exists"])
             self.assertIn("wrote", err.getvalue())
 
+    def test_record_note_dash_reads_utf8_stdin(self) -> None:
+        """`record --note -` decodes stdin as UTF-8 even on a cp1252 console —
+        fix_stdio now covers stdin, so non-ASCII notes are not mojibake."""
+        import subprocess
+
+        script = ROOT / "skills" / "jev-consult" / "scripts" / "trace.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--file",
+                    str(path),
+                    "record",
+                    "--pick",
+                    "a",
+                    "--note",
+                    "-",
+                ],
+                input="héllo ünïcode ☃".encode("utf-8"),
+                capture_output=True,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr[:200])
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["notes"][-1]["text"], "héllo ünïcode ☃")
+
     def test_record_note_stamps_sha(self) -> None:
         import hashlib
         import tempfile

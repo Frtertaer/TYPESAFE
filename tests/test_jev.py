@@ -801,6 +801,35 @@ class JevInternalsTests(unittest.TestCase):
         with patch.object(sys, "stdin", io.StringIO('{"b": 2}')):
             self.assertEqual(jev.read_json_arg("-"), {"b": 2})
 
+    def test_decide_dash_decodes_utf8_stdin(self) -> None:
+        """`decide -` decodes stdin as UTF-8: a non-ASCII qid must survive
+        into the generated notes, not mojibake under a cp1252 console."""
+        import subprocess
+
+        script = Path(__file__).resolve().parents[1] / "skills" / "jev-consult" / "scripts" / "jev.py"
+        answers = {
+            "answers": {
+                "qé": {
+                    "type": "choice",
+                    "choice": "a",
+                    "confidence": 0.9,
+                    "probabilities": {"a": 0.9, "b": 0.1},
+                }
+            }
+        }
+        proc = subprocess.run(
+            [sys.executable, str(script), "decide", "-"],
+            input=json.dumps(answers).encode("utf-8"),
+            capture_output=True,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[:200])
+        payload = json.loads(proc.stdout.decode("utf-8"))
+        self.assertTrue(
+            any("qé" in note for note in payload["decision"]["notes"]),
+            payload["decision"]["notes"],
+        )
+
     def test_emit_writes_json(self) -> None:
         buf = io.StringIO()
         with patch.object(sys, "stdout", buf):

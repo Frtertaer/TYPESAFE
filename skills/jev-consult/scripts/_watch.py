@@ -18,9 +18,10 @@ from pathlib import Path
 def fix_stdio() -> None:
     """Windows consoles default to cp1252 — reconfigure stdout/stderr to
     utf-8 with errors='replace' so a non-ASCII payload (unicode prompt,
-    path, --where text) can never crash a print. No-op where the stream
-    lacks reconfigure (py<3.7, already-wrapped captures)."""
-    for stream in (sys.stdout, sys.stderr):
+    path, --where text) can never crash a print. stdin joins so
+    sys.stdin.read() decodes utf-8 like the hooks' buffer read. No-op
+    where the stream lacks reconfigure (py<3.7, wrapped captures)."""
+    for stream in (sys.stdout, sys.stderr, sys.stdin):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure:
             try:

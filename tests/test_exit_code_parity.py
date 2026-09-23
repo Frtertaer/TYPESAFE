@@ -108,6 +108,16 @@ class ExitCodeParityTests(unittest.TestCase):
                         self.assertNotIn("Traceback", blob)
                         self.assertTrue(blob.strip())
 
+    def test_unknown_subcommand_rc2_clean(self) -> None:
+        """Subcommand CLIs exit 2 with a usage/error line on a bogus verb."""
+        for name in ("decisions.py", "trace.py", "progress.py", "jev.py"):
+            with self.subTest(script=name):
+                proc = _run(name, "bogus-subcommand")
+                self.assertEqual(
+                    proc.returncode, 2, "%s rc=%d" % (name, proc.returncode)
+                )
+                self.assertNotIn("Traceback", proc.stderr + proc.stdout)
+
     def test_every_script_classified(self) -> None:
         covered = USAGE_RC | FAIL_OPEN_RC0
         present = {

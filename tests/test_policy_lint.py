@@ -940,6 +940,78 @@ class PolicyKeyUsageTests(unittest.TestCase):
         self.assertEqual([], unused, "escalate_if sub-keys never read: %s" % unused)
 
 
+class HatchIdsTests(unittest.TestCase):
+    def test_custom_hatch_ids_suppress_hatch_findings(self) -> None:
+        policy = base_policy()
+        policy["choice"] = {"hatch_ids": ["skip"]}
+        for template in policy["templates"].values():
+            criteria = template.get("criteria")
+            if isinstance(criteria, dict):
+                for hid in ("none", "other"):
+                    criteria.pop(hid, None)
+                criteria["skip"] = "skip this slot"
+        findings = policy_lint.lint_policy(policy)
+        template_findings = [f for f in findings if f["path"].startswith("templates.")]
+        self.assertEqual(
+            [f["rule"] for f in template_findings if f["rule"] in ("P009", "P014")],
+            [],
+        )
+        self.assertNotIn("P016", rule_ids(findings))
+
+    def test_default_hatch_ids_still_flag_missing_hatch(self) -> None:
+        policy = base_policy()
+        for template in policy["templates"].values():
+            criteria = template.get("criteria")
+            if isinstance(criteria, dict) and len(criteria) >= 2:
+                criteria.pop("none", None)
+                criteria.pop("other", None)
+        self.assertIn("P009", rule_ids(policy_lint.lint_policy(policy)))
+
+    def test_custom_hatch_ids_removed_fires_p009(self) -> None:
+        policy = base_policy()
+        policy["choice"] = {"hatch_ids": ["skip"]}
+        for template in policy["templates"].values():
+            criteria = template.get("criteria")
+            if isinstance(criteria, dict) and len(criteria) >= 2:
+                criteria.pop("none", None)
+                criteria.pop("other", None)
+        # "skip" not present in criteria -> still flags under custom ids
+        self.assertIn("P009", rule_ids(policy_lint.lint_policy(policy)))
+
+    def test_hatch_ids_not_list_errors(self) -> None:
+        policy = base_policy()
+        policy["choice"] = {"hatch_ids": "none"}
+        findings = policy_lint.lint_policy(policy)
+        self.assertIn("P016", rule_ids(findings))
+
+    def test_hatch_ids_empty_errors(self) -> None:
+        policy = base_policy()
+        policy["choice"] = {"hatch_ids": []}
+        self.assertIn("P016", rule_ids(policy_lint.lint_policy(policy)))
+
+    def test_hatch_ids_non_string_member_errors(self) -> None:
+        policy = base_policy()
+        policy["choice"] = {"hatch_ids": ["none", 3]}
+        self.assertIn("P016", rule_ids(policy_lint.lint_policy(policy)))
+
+    def test_hatch_ids_duplicates_error(self) -> None:
+        policy = base_policy()
+        policy["choice"] = {"hatch_ids": ["None", "none"]}
+        self.assertIn("P016", rule_ids(policy_lint.lint_policy(policy)))
+
+    def test_choice_section_non_object_errors(self) -> None:
+        policy = base_policy()
+        policy["choice"] = "yes"
+        findings = policy_lint.lint_policy(policy)
+        self.assertIn("P003", rule_ids(findings))
+
+    def test_choice_key_not_unknown(self) -> None:
+        policy = base_policy()
+        policy["choice"] = {"hatch_ids": ["none", "other"]}
+        findings = policy_lint.lint_policy(policy)
+        self.assertNotIn("P011", rule_ids(findings))
+
+
 class BaselineTests(unittest.TestCase):
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(

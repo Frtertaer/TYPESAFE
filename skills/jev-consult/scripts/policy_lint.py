@@ -83,6 +83,7 @@ KNOWN_ESCALATE_KEYS = ESCALATE_PROB_FIELDS + ESCALATE_BOOL_FIELDS
 KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "catalog_cache_seconds",
     "catalogs",
+    "choice",
     "dedupe_ttl_seconds",
     "hallucination",
     "hook_budget_seconds",
@@ -115,6 +116,7 @@ RULES = {
     "P013": "template not listed in must_ask; the trigger layer never auto-asks it",
     "P014": "require_hatch is off and a closed choice list (2+ options) has no none/other escape hatch",
     "P015": "a known policy key is never referenced by any pack script - dead knob or consumer drift (only with --usage)",
+    "P016": "choice.hatch_ids malformed (not a list, empty, non-string member, or duplicates) - jev.py falls back to none/other silently",
 }
 
 
@@ -142,6 +144,7 @@ def schema_rows() -> dict:
     rows["stop_words"]["type"] = "list[str]"
     rows["hallucination"]["type"] = "object{claim}"
     rows["progress"]["type"] = "object{points,review_points,max_*}"
+    rows["choice"]["type"] = "object{hatch_ids?: list[str]}"
     return {k: rows[k] for k in sorted(rows)}
 
 
@@ -194,6 +197,39 @@ def lint_policy(policy) -> list[dict]:
     escalate = policy.get("escalate_if")
     if escalate is not None and not isinstance(escalate, dict):
         add("P003", "error", "escalate_if", "escalate_if must be an object", "expected an object of thresholds")
+    choice_sec = policy.get("choice")
+    if choice_sec is not None and not isinstance(choice_sec, dict):
+        add("P003", "error", "choice", "choice must be an object", "expected an object of choice-mode settings")
+    hatch_ids = {"none", "other"}
+    if isinstance(choice_sec, dict):
+        raw_hatch = choice_sec.get("hatch_ids")
+        if raw_hatch is not None:
+            if not isinstance(raw_hatch, (list, tuple)) or not raw_hatch:
+                add(
+                    "P016",
+                    "error",
+                    "choice.hatch_ids",
+                    "hatch_ids must be a non-empty list of strings, got %r" % (raw_hatch,),
+                    "jev.py falls back to none/other when this key is unusable",
+                )
+            elif not all(isinstance(h, str) and h.strip() for h in raw_hatch):
+                add(
+                    "P016",
+                    "error",
+                    "choice.hatch_ids",
+                    "hatch_ids members must be non-empty strings, got %r" % (raw_hatch,),
+                    "jev.py falls back to none/other when this key is unusable",
+                )
+            elif len({h.lower() for h in raw_hatch}) != len(raw_hatch):
+                add(
+                    "P016",
+                    "error",
+                    "choice.hatch_ids",
+                    "hatch_ids has case-insensitive duplicates %r" % (raw_hatch,),
+                    "duplicate hatch ids change no behavior; drop one",
+                )
+            else:
+                hatch_ids = {str(h) for h in raw_hatch}
     if isinstance(escalate, dict):
         for key in ESCALATE_PROB_FIELDS:
             value = escalate.get(key)
@@ -329,7 +365,6 @@ def lint_policy(policy) -> list[dict]:
     if templates is not None and not isinstance(templates, dict):
         add("P003", "error", "templates", "templates must be an object", "expected a map of template id -> question template")
     require_hatch = bool(policy.get("require_hatch", True))
-    hatch_ids = {"none", "other"}
     if isinstance(templates, dict):
         seen_instructions: dict[str, str] = {}
         for tid, template in templates.items():

@@ -1352,6 +1352,8 @@ def schema_rows() -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if _watch:
+        _watch.fix_stdio()
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.schema:

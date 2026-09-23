@@ -241,6 +241,7 @@ USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.
 
 
 def main(argv: list[str] | None = None) -> int:
+    _watch.fix_stdio()
     argv = list(sys.argv[1:] if argv is None else argv)
     if _watch.maybe_version(argv):
         return 0

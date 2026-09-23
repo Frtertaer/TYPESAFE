@@ -399,6 +399,7 @@ def _self_test(args) -> dict:
 
 
 def main(argv=None):
+    _watch.fix_stdio()
     argv = sys.argv[1:] if argv is None else argv
     if _watch.maybe_version(argv):
         return 0

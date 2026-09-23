@@ -181,6 +181,7 @@ def _read_stdin() -> str:
 
 
 def main() -> int:
+    _watch.fix_stdio()
     if _watch.maybe_version(sys.argv[1:]):
         return 0
     if "-h" in sys.argv[1:] or "--help" in sys.argv[1:]:

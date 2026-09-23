@@ -360,6 +360,7 @@ USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev q
 
 
 def main(argv: list[str] | None = None) -> int:
+    _watch.fix_stdio()
     """Standalone CLI: python question_lint.py request.json [--json] [--fix]"""
     argv = list(sys.argv[1:] if argv is None else argv)
     if _watch.maybe_version(argv):

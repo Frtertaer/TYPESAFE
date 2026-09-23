@@ -6991,6 +6991,7 @@ def step_coverage(tmp: Path) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _watch.fix_stdio()
     if _watch.maybe_version(sys.argv[1:] if argv is None else argv):
         return 0
     parser = argparse.ArgumentParser(description="Offline sanity for the jev-consult pack.")

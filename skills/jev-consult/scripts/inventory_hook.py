@@ -713,6 +713,7 @@ PAYLOAD_SCHEMA = {
 
 
 def main(argv: list[str] | None = None) -> int:
+    _watch.fix_stdio()
     argv = sys.argv[1:] if argv is None else argv
     if _watch.maybe_version(list(argv)):
         return 0

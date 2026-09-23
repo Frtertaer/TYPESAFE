@@ -189,6 +189,7 @@ USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]\nLint a trigger-
 
 
 def main(argv: list[str] | None = None) -> int:
+    _watch.fix_stdio()
     argv = list(sys.argv[1:] if argv is None else argv)
     if _watch.maybe_version(argv):
         return 0

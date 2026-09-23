@@ -380,6 +380,7 @@ def fill(
 
 
 def main() -> int:
+    _watch.fix_stdio()
     if _watch.maybe_version(sys.argv[1:]):
         return 0
     parser = argparse.ArgumentParser()

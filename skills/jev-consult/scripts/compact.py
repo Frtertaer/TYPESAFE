@@ -1758,6 +1758,7 @@ def _atomic_write(path, text):
 
 
 def main(argv: list[str] | None = None) -> int:
+    _watch.fix_stdio()
     parser = argparse.ArgumentParser(
         description="LIVE_FAT is the default. Session-history drop needs --history."
     )

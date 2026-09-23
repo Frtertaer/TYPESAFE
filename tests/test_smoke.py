@@ -29,7 +29,7 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         out = json.loads(proc.stdout)
         self.assertTrue(out["ok"])
-        self.assertEqual(len(out["steps"]), 23)
+        self.assertEqual(len(out["steps"]), 24)
         names = {s["name"] for s in out["steps"]}
         self.assertEqual(
             names,
@@ -57,6 +57,7 @@ class SmokeTests(unittest.TestCase):
                 "ask_verdict",
                 "install",
                 "self_test",
+                "coverage",
             },
         )
 
@@ -296,7 +297,7 @@ class SmokeTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0)
         names = set(proc.stdout.strip().splitlines())
-        self.assertEqual(len(names), 23)
+        self.assertEqual(len(names), 24)
         self.assertIn("doctor_json", names)
         self.assertIn("hook", names)
         self.assertIn("perf", names)
@@ -310,7 +311,7 @@ class SmokeTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0)
         names = json.loads(proc.stdout.strip())
-        self.assertEqual(len(names), 23)
+        self.assertEqual(len(names), 24)
         self.assertIn("doctor_json", names)
         self.assertIn("perf", names)
         self.assertEqual(names, sorted(names))
@@ -325,7 +326,7 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         payload = json.loads(proc.stdout)
         self.assertEqual(payload["uncovered"], [])
-        self.assertEqual(payload["steps"], 23)
+        self.assertEqual(payload["steps"], 24)
         self.assertIn("inventory_hook.py", payload["covered"])
         self.assertIn("smoke.py", payload["step_scripts"]["self_test"])
         proc = subprocess.run(
@@ -337,6 +338,14 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertIn("coverage:", proc.stdout)
         self.assertNotIn("uncovered:", proc.stdout)
+
+    def test_coverage_step_passes(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            row = MOD.step_coverage(Path(tmp))
+        self.assertTrue(row["ok"], row)
+        self.assertEqual(row["name"], "coverage")
 
     def test_self_test_step_passes(self) -> None:
         import tempfile

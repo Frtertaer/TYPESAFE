@@ -6866,6 +6866,7 @@ STEPS = (
     ("ask_verdict", "step_ask_verdict"),
     ("perf", "step_perf"),
     ("self_test", "step_self_test"),
+    ("coverage", "step_coverage"),
 )
 
 
@@ -6916,6 +6917,22 @@ def step_self_test(tmp: Path) -> dict:
     )
     ok = ok and rc2 == 0 and out2.splitlines()[0].startswith("self-test: ok")
     return _step("self_test", ok, out.strip()[:120] or "rc=%d" % rc)
+
+
+def step_coverage(tmp: Path) -> dict:
+    """Run `smoke.py --coverage` in a subprocess; fails when uncovered."""
+    rc, out = _run(
+        [str(Path(__file__).resolve()), "--coverage", "--json"],
+        cwd=tmp,
+    )
+    detail = "all covered"
+    if rc != 0:
+        try:
+            payload = json.loads(out)
+            detail = "uncovered: %s" % ",".join(payload.get("uncovered", []))
+        except ValueError:
+            detail = "coverage rc=%d" % rc
+    return _step("coverage", rc == 0, detail)
 
 
 def main(argv: list[str] | None = None) -> int:

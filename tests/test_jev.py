@@ -758,6 +758,21 @@ class JevInternalsTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("0 error(s)", buf.getvalue())
 
+    def test_cmd_self_test_roundtrips_offline(self) -> None:
+        buf = io.StringIO()
+        with patch.object(sys, "stdout", buf):
+            rc = jev.main(["self-test"])
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", buf.getvalue())
+
+        buf = io.StringIO()
+        with patch.object(sys, "stdout", buf):
+            rc = jev.main(["self-test", "--json"])
+        self.assertEqual(rc, 0)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["self_test"], "ok")
+        self.assertTrue(all(out["checks"].values()))
+
     def test_cmd_lint_errors(self) -> None:
         request = {
             "state": {"task": "t"},

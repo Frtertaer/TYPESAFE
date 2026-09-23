@@ -10,6 +10,7 @@ import math
 import os
 import re
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -903,6 +904,56 @@ def scaffold_request(
     return {"state": state, "questions": questions}
 
 
+def cmd_self_test(args: argparse.Namespace) -> int:
+    """Offline sanity: scaffold a request, round-trip it through disk, lint it."""
+    checks: dict[str, bool] = {}
+    try:
+        policy = load_policy(args.policy)
+        checks["policy_templates"] = bool(policy.get("templates"))
+        payload = scaffold_request(
+            policy,
+            ["approach"],
+            {"task": "self-test", "plan": "self-test"},
+            {"approach": {"selftest": "self-test option"}},
+        )
+        questions = payload.get("questions") or {}
+        checks["scaffold"] = "approach" in questions
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "req.json"
+            _atomic_write(req, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+            back = read_json_arg(str(req))
+        checks["roundtrip"] = back == payload
+        if question_lint is None:
+            checks["lint_clean"] = False
+        else:
+            findings = question_lint.lint_request(
+                back,
+                max_options=int(
+                    policy_get(policy, "choice_option_hard_max", default=255)
+                ),
+            )
+            checks["lint_clean"] = not any(
+                f.get("severity") == "error" for f in findings
+            )
+    except Exception:
+        checks = {"raised": False}
+    ok = bool(checks) and all(checks.values())
+    if args.json:
+        emit({"self_test": "ok" if ok else "FAIL", "checks": checks})
+    else:
+        sys.stdout.write(
+            "self-test: %s %s\n"
+            % (
+                "ok" if ok else "FAIL",
+                " ".join(
+                    "%s=%s" % (k, "ok" if v else "FAIL")
+                    for k, v in sorted(checks.items())
+                ),
+            )
+        )
+    return 0 if ok else 1
+
+
 def cmd_scaffold(args: argparse.Namespace) -> int:
     policy = load_policy(args.policy)
     if getattr(args, "list", False):
@@ -1118,6 +1169,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="ID=key:label extra choice option (repeatable)",
     )
     scaffold.set_defaults(func=cmd_scaffold)
+    selftest = sub.add_parser(
+        "self-test",
+        help="Offline scaffold+lint round-trip in a temp dir; exit 1 on failure",
+    )
+    selftest.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the self-test payload as JSON.",
+    )
+    selftest.set_defaults(func=cmd_self_test)
     return parser
 
 

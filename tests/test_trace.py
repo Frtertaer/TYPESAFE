@@ -2790,5 +2790,64 @@ class SetDryRunTests(unittest.TestCase):
             self.assertFalse(path.exists())
 
 
+class HistoryUniqTests(unittest.TestCase):
+    def _trace(self, tmp: str) -> Path:
+        import io
+        from contextlib import redirect_stdout
+
+        path = Path(tmp) / "trace.json"
+        with redirect_stdout(io.StringIO()):
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            tr.main(["--file", str(path), "record", "--pick", "a", "--kind", "k1"])
+            tr.main(["--file", str(path), "record", "--pick", "b"])
+            tr.main(["--file", str(path), "record", "--pick", "a", "--kind", "k1"])
+            tr.main(["--file", str(path), "record", "--pick", "a", "--kind", "k2"])
+            tr.main(["--file", str(path), "record", "--pick", "b"])
+        return path
+
+    def test_uniq_dedupes_by_pick_and_kind(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--json", "--uniq"])
+            self.assertEqual(rc, 0)
+            rows = json.loads(buf.getvalue())
+            self.assertEqual(
+                [(r["pick"], r.get("kind") or "") for r in rows],
+                [("a", "k1"), ("b", ""), ("a", "k2")],
+            )
+
+    def test_uniq_applies_before_limit(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "history", "--json", "--uniq", "--limit", "2"]
+                )
+            self.assertEqual(rc, 0)
+            rows = json.loads(buf.getvalue())
+            self.assertEqual([r["pick"] for r in rows], ["b", "a"])
+
+    def test_no_uniq_keeps_duplicates(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--json"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(json.loads(buf.getvalue())), 5)
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

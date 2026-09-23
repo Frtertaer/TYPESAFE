@@ -505,6 +505,16 @@ def cmd_history(args: argparse.Namespace) -> int:
                 and not isinstance(h.get("ts"), bool)
                 and (h["ts"] >= bound_ts if op == ">=" else h["ts"] <= bound_ts)
             ]
+        if getattr(args, "uniq", False):
+            seen_picks: set[tuple[str, str]] = set()
+            deduped = []
+            for h in items:
+                key = (str(h.get("pick") or ""), str(h.get("kind") or ""))
+                if key in seen_picks:
+                    continue
+                seen_picks.add(key)
+                deduped.append(h)
+            items = deduped
         limit = getattr(args, "limit", None)
         if isinstance(limit, int) and limit >= 0:
             items = items[-limit:] if limit else []
@@ -1669,6 +1679,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--reverse", action="store_true", help="List picks newest-first")
     hist_cmd.add_argument("--field", default="", help="Print only this field per pick (a.b digs into nested objects)")
     hist_cmd.add_argument("--kinds", action="store_true", help="Print distinct history kinds with counts, sorted desc (empty kind shown as '-')")
+    hist_cmd.add_argument("--uniq", action="store_true", help="Dedupe picks by pick+kind (first occurrence wins; applied before --limit)")
     hist_cmd.add_argument("--rate", action="store_true", help="Print pick-rate stats over the filtered history: per-day UTC buckets plus picks_per_day")
     hist_cmd.add_argument("--since", default=None, help="Only picks with ts >= epoch seconds or ISO8601")
     hist_cmd.add_argument("--grep", default="", help="Only picks whose pick/kind contains SUBSTR (case-insensitive; default JEV_TRACE_HISTORY_GREP)")

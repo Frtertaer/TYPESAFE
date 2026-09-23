@@ -154,6 +154,78 @@ class DispatchTests(unittest.TestCase):
         cls.assert_called_once_with(db.resolve(), repo.resolve())
 
 
+class OneshotVerdictTests(unittest.TestCase):
+    def _ledger(self):
+        ledger = Mock()
+        ledger.status.return_value = {
+            "stage_id": "s",
+            "action": "continue",
+            "reason": "open",
+            "points": 3,
+            "review_at": 10,
+            "assessment_count": 0,
+            "assessment_limit": 5,
+            "model_attempts": 0,
+            "model_attempt_limit": 10,
+            "awarded_items": [],
+            "blocked_items": [],
+        }
+        ledger.history.return_value = {
+            "stage": {"plan": {"goal": "g", "items": []}},
+            "events": [{"kind": "init"}, {"kind": "note"}],
+        }
+        return ledger
+
+    def test_status_verdict_without_watch(self) -> None:
+        ledger = self._ledger()
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            with patch.object(progress, "Ledger", return_value=ledger):
+                code, _out = run_cli(["status", "s", "--verdict", str(verdict)])
+            self.assertEqual(code, 0)
+            doc = json.loads(verdict.read_text(encoding="utf-8"))
+        self.assertEqual(doc["verdict"], "active")
+        self.assertEqual(doc["ticks"], 1)
+        self.assertEqual(doc["action"], "continue")
+        self.assertEqual(doc["points"], 3)
+        self.assertIn("ts", doc)
+
+    def test_status_verdict_resolved(self) -> None:
+        ledger = self._ledger()
+        ledger.status.return_value["action"] = "finish"
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            with patch.object(progress, "Ledger", return_value=ledger):
+                code, _out = run_cli(["status", "s", "--verdict", str(verdict)])
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(verdict.read_text(encoding="utf-8"))["verdict"], "resolved")
+
+    def test_history_verdict_without_watch(self) -> None:
+        ledger = self._ledger()
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            with patch.object(progress, "Ledger", return_value=ledger):
+                code, _out = run_cli(["history", "s", "--verdict", str(verdict)])
+            self.assertEqual(code, 0)
+            doc = json.loads(verdict.read_text(encoding="utf-8"))
+        self.assertEqual(doc["verdict"], "steady")
+        self.assertEqual(doc["events"], 2)
+        self.assertIsNone(doc["delta"])
+
+    def test_report_verdict_without_watch(self) -> None:
+        ledger = self._ledger()
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = Path(tmp) / "v.json"
+            with patch.object(progress, "Ledger", return_value=ledger):
+                code, _out = run_cli(["report", "s", "--verdict", str(verdict)])
+            self.assertEqual(code, 0)
+            doc = json.loads(verdict.read_text(encoding="utf-8"))
+        self.assertEqual(doc["verdict"], "steady")
+        self.assertEqual(doc["ticks"], 1)
+        self.assertGreater(doc["chars"], 0)
+        self.assertIsNone(doc["delta"])
+
+
 class OutputTests(unittest.TestCase):
     def test_status_result_is_frozen_json(self) -> None:
         frozen = {"stage_id": "sample", "points": 2, "action": "review_required"}

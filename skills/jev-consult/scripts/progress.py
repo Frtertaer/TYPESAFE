@@ -51,7 +51,7 @@ def build_parser():
             sub.add_argument("--out", metavar="PATH", default="",
                              help="With --watch: append each tick line to PATH (fail-open)")
         sub.add_argument("--verdict", metavar="PATH", default="",
-                         help="With --watch: write a slim verdict JSON to PATH, refreshed every tick")
+                         help="Write a slim verdict JSON to PATH (with --watch: refreshed every tick)")
     replay = commands.add_parser("evidence", help="Rebuild the exact Jev input recorded for an assessment or review event")
     replay.add_argument("stage")
     replay.add_argument("sequence", type=int, help="Event sequence number from history")
@@ -479,10 +479,34 @@ def main(argv=None):
             if args.watch and args.watch > 0:
                 return _status_watch(ledger, args)
             result = ledger.status(args.stage)
+            if args.verdict and not _watch.write_verdict(
+                args.verdict,
+                {
+                    "verdict": "resolved"
+                    if result.get("action") not in (None, "continue", "error")
+                    else "active",
+                    "ticks": 1,
+                    "action": result.get("action"),
+                    "points": result.get("points"),
+                },
+            ):
+                return 1
         elif args.command == "history":
             if args.watch and args.watch > 0:
                 return _history_watch(ledger, args)
             result = ledger.history(args.stage)
+            if args.verdict:
+                events = result.get("events") if isinstance(result, dict) else None
+                if not _watch.write_verdict(
+                    args.verdict,
+                    {
+                        "verdict": "steady",
+                        "ticks": 1,
+                        "events": len(events) if isinstance(events, list) else 0,
+                        "delta": None,
+                    },
+                ):
+                    return 1
         elif args.command == "evidence":
             result = ledger.evidence(args.stage, args.sequence)
         elif args.command == "invalidate":
@@ -497,6 +521,11 @@ def main(argv=None):
             summary = ledger.status(args.stage)
             hist = ledger.history(args.stage)
             md = _report_md(summary, hist)
+            if args.verdict and not _watch.write_verdict(
+                args.verdict,
+                {"verdict": "steady", "ticks": 1, "chars": len(md), "delta": None},
+            ):
+                return 1
             if args.out:
                 atomic_write_text(Path(args.out), md)
                 result = {"wrote": args.out, "bytes": len(md.encode("utf-8"))}

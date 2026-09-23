@@ -105,6 +105,28 @@ class ApplyFillTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("alpha", buf.getvalue())
 
+    def test_self_test_exercises_offline_paths(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with patch.object(sys, "argv", ["apply_fill.py", "--self-test", "--json"]):
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = FILL.main()
+        self.assertEqual(rc, 0)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["self_test"], "ok")
+        self.assertEqual(
+            out["checks"],
+            {
+                "hermes_gate": True,
+                "blocked_pick": True,
+                "pick_match": True,
+                "miss_roundtrip": True,
+                "stale_pruned": True,
+            },
+        )
+
     def test_list_json_emits_rows(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

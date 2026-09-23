@@ -9,13 +9,16 @@ Never clone kitze/skillbox. Other harness markets stay human. Fail open.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+from contextlib import redirect_stdout
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -35,6 +38,7 @@ from inventory import (  # noqa: E402
     shortlist,
     tokens,
     user_home,
+    write_miss,
     write_sidecar,
 )
 from peer_fill import read_miss, run_jev  # noqa: E402
@@ -411,7 +415,91 @@ def main() -> int:
         metavar="PATH",
         help="Write a slim {verdict: pending|clean, ticks, miss, ask} JSON to PATH — refreshed every tick with --watch; without it, a one-shot {ticks: 1} payload.",
     )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Exercise the offline paths in a temp dir (hermes gate, blocked pick, pick match, miss round-trip+stale prune); exit 1 on failure (--json emits the checks).",
+    )
     args = parser.parse_args()
+    if args.self_test:
+        checks: dict = {}
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                ask_path = tmp_path / "ask.json"
+                old_log = os.environ.get("JEV_CONSULT_LOG")
+                os.environ["JEV_CONSULT_LOG"] = str(tmp_path / "decisions.jsonl")
+                try:
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        fill(
+                            "self-test task",
+                            "claude",
+                            tmp_path,
+                            None,
+                            True,
+                            ask_path,
+                        )
+                    checks["hermes_gate"] = "human" in buf.getvalue()
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        fill(
+                            "self-test task",
+                            "hermes",
+                            tmp_path,
+                            "exploit-kit",
+                            True,
+                            ask_path,
+                        )
+                    checks["blocked_pick"] = "blocked" in buf.getvalue()
+                    hit = as_item("plugin", "selftest-item")
+                    checks["pick_match"] = (
+                        item_for_pick("plugin:selftest-item", [hit]) is hit
+                    )
+                    miss_path = tmp_path / MISS_NAME
+                    write_miss(miss_path, "hermes", "self-test task")
+                    checks["miss_roundtrip"] = (
+                        str(read_miss(miss_path).get("task") or "")
+                        == "self-test task"
+                    )
+                    miss_path.unlink()
+                    write_miss(
+                        miss_path,
+                        "hermes",
+                        "self-test task",
+                        extra={"written_at": 1},
+                    )
+                    checks["stale_pruned"] = (
+                        not read_miss(miss_path) and not miss_path.is_file()
+                    )
+                finally:
+                    if old_log is None:
+                        os.environ.pop("JEV_CONSULT_LOG", None)
+                    else:
+                        os.environ["JEV_CONSULT_LOG"] = old_log
+        except Exception:
+            checks = {"raised": False}
+        ok = bool(checks) and all(checks.values())
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {"self_test": "ok" if ok else "FAIL", "checks": checks},
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "self-test: %s %s\n"
+                % (
+                    "ok" if ok else "FAIL",
+                    " ".join(
+                        "%s=%s" % (k, "ok" if v else "FAIL")
+                        for k, v in sorted(checks.items())
+                    ),
+                )
+            )
+        return 0 if ok else 1
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     if args.status:
         try:

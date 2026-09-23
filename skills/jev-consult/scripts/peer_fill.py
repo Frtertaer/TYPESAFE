@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -38,6 +39,7 @@ from inventory import (  # noqa: E402
     sidecar_fresh,
     tokens,
     user_home,
+    write_miss,
     write_sidecar,
 )
 
@@ -351,7 +353,63 @@ def main() -> int:
         metavar="PATH",
         help="Write a slim {verdict: pending|clean, ticks, miss, miss_task, ask} JSON to PATH — refreshed every tick with --watch; without it, a one-shot {ticks: 1} payload.",
     )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Exercise the miss/sidecar round-trip in a temp dir (fresh read, stale prune, sidecar names); exit 1 on failure (--json emits the checks).",
+    )
     args = parser.parse_args()
+    if args.self_test:
+        checks: dict = {}
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                miss_path = Path(tmp) / MISS_NAME
+                write_miss(miss_path, "hermes", "self-test task")
+                fresh = read_miss(miss_path)
+                checks["fresh_miss"] = (
+                    str(fresh.get("task") or "") == "self-test task"
+                    and str(fresh.get("harness") or "") == "hermes"
+                )
+                miss_path.unlink()
+                write_miss(miss_path, "hermes", "self-test task", extra={"written_at": 1})
+                stale = read_miss(miss_path)
+                checks["stale_miss_pruned"] = not stale and not miss_path.is_file()
+                sidecar_path = Path(tmp) / SIDECAR_NAME
+                write_sidecar(
+                    sidecar_path,
+                    "hermes",
+                    "self-test task",
+                    [{"kind": KIND_SKILL, "name": "self-test-item"}],
+                )
+                names = [
+                    n.get("name")
+                    for n in (read_sidecar(sidecar_path).get("names") or [])
+                    if isinstance(n, dict)
+                ]
+                checks["sidecar_roundtrip"] = names == ["self-test-item"]
+        except Exception:
+            checks = {"raised": False}
+        ok = bool(checks) and all(checks.values())
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {"self_test": "ok" if ok else "FAIL", "checks": checks},
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            sys.stdout.write(
+                "self-test: %s %s\n"
+                % (
+                    "ok" if ok else "FAIL",
+                    " ".join(
+                        "%s=%s" % (k, "ok" if v else "FAIL")
+                        for k, v in sorted(checks.items())
+                    ),
+                )
+            )
+        return 0 if ok else 1
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     task = args.task
     dest = args.harness

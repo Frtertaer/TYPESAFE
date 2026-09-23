@@ -78,6 +78,27 @@ class PeerFillTests(unittest.TestCase):
             sidecar = json.loads((cwd / INV.SIDECAR_NAME).read_text(encoding="utf-8"))
             self.assertEqual(sidecar["names"][0]["name"], "jwt-auth")
 
+    def test_self_test_roundtrips_miss_and_sidecar(self) -> None:
+        import subprocess
+
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPTS / "peer_fill.py"), "--self-test", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertEqual(out["self_test"], "ok")
+        self.assertEqual(
+            out["checks"],
+            {
+                "fresh_miss": True,
+                "stale_miss_pruned": True,
+                "sidecar_roundtrip": True,
+            },
+        )
+
     def test_list_prints_peer_items(self) -> None:
         import io
         import subprocess

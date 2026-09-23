@@ -1665,6 +1665,17 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(report["watch_max"], 4)
         self.assertTrue(report["watch_quiet"])
 
+    def test_cmd_env_out_writes_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "env.json"
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = jev.main(["env", "--out", str(target)])
+            self.assertEqual(rc, 0)
+            saved = json.loads(target.read_text(encoding="utf-8"))
+            self.assertIn("api_key_set", saved)
+            self.assertEqual(saved["policy"], "default")
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

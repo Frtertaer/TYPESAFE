@@ -1365,7 +1365,13 @@ def main(argv: list[str] | None = None) -> int:
                 % (args.jq, ", ".join(sorted(report)))
             )
             return 2
-        sys.stdout.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+        sys.stdout.write(text)
+        if getattr(args, "out", ""):
+            try:
+                atomic_write_text(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
         return 0
     if args.schema:
         if args.json:

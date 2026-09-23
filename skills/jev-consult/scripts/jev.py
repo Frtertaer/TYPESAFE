@@ -993,7 +993,13 @@ def cmd_env(args: argparse.Namespace) -> int:
             % (args.jq, ", ".join(sorted(report)))
         )
         return 2
-    sys.stdout.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    sys.stdout.write(text)
+    if getattr(args, "out", ""):
+        try:
+            _atomic_write(Path(args.out), text)
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
     return 0
 
 
@@ -1309,6 +1315,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="KEY",
         default="",
         help="Print just one field of the env report.",
+    )
+    env_cmd.add_argument(
+        "--out",
+        metavar="PATH",
+        default="",
+        help="Also write the env report JSON to PATH (fail-open).",
     )
     env_cmd.set_defaults(func=cmd_env)
     return parser

@@ -410,7 +410,13 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
             return 0
-        sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+        sys.stdout.write(text)
+        if getattr(args, "out", ""):
+            try:
+                _atomic_write(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
         return 0
 
     def collect() -> list[dict]:

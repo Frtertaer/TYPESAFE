@@ -129,6 +129,18 @@ class EnvReportParityTests(unittest.TestCase):
                     hits, "%s --help names no env report field" % name
                 )
 
+    def test_env_out_writes_report_file(self) -> None:
+        import tempfile
+
+        for name in ENV_SCRIPTS:
+            with self.subTest(script=name), tempfile.TemporaryDirectory() as tmp:
+                target = Path(tmp) / "env.json"
+                proc = _run(name, ["--env", "--out", str(target)])
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                saved = json.loads(target.read_text(encoding="utf-8"))
+                self.assertIsInstance(saved, dict)
+                self.assertTrue(ENV_SCRIPTS[name] <= set(saved))
+
     def test_scripts_without_env_flag_fail_cleanly(self) -> None:
         for path in sorted(SCRIPTS.glob("*.py")):
             if path.name in ENV_SCRIPTS or path.name in ("smoke.py", "_watch.py"):

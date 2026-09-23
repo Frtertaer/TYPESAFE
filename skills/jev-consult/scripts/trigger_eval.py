@@ -403,7 +403,13 @@ def main(argv: list[str] | None = None) -> int:
                 % (args.jq, ", ".join(sorted(report)))
             )
             return 2
-        sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        text = json.dumps(report, indent=2) + "\n"
+        sys.stdout.write(text)
+        if getattr(args, "out", ""):
+            try:
+                _atomic_write(Path(args.out), text)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
         return 0
     if args.desc_tokens:
         if not VENDORED_SCORER.is_file():

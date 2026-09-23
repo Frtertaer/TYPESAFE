@@ -592,6 +592,39 @@ def quiet_gaps(entries: list[dict], min_seconds: float) -> list[dict]:
     return gaps
 
 
+def silent_harnesses(
+    entries: list[dict], seconds: float, now: float | None = None
+) -> list[dict]:
+    """Harnesses whose newest filtered entry is older than `seconds` ago."""
+    now = now if now is not None else time.time()
+    last: dict[str, float] = {}
+    for item in entries:
+        ts = _entry_ts(item)
+        if ts is None:
+            continue
+        harness = str(item.get("harness") or "-")
+        if harness not in last or ts > last[harness]:
+            last[harness] = ts
+    rows = [
+        {"harness": harness, "last_ts": ts, "age_s": round(now - ts, 1)}
+        for harness, ts in last.items()
+        if now - ts > seconds
+    ]
+    return sorted(rows, key=lambda row: -row["age_s"])
+
+
+def format_silent(rows: list[dict], seconds: float) -> str:
+    if not rows:
+        return "silent: none (threshold %ss)" % int(seconds)
+    lines = []
+    for row in rows:
+        lines.append(
+            "%s last=%s age=%ss"
+            % (row["harness"], _iso_full(row["last_ts"]) or "?", int(row["age_s"]))
+        )
+    return "\n".join(lines)
+
+
 def status_streaks(entries: list[dict]) -> list[dict]:
     """Per harness: current and longest runs of consecutive same jev_status."""
     by_harness: dict[str, list[dict]] = {}
@@ -977,6 +1010,13 @@ def main(argv: list[str] | None = None) -> int:
         "--streaks",
         action="store_true",
         help="Print per-harness current/longest runs of consecutive same jev_status (--json emits {streaks: [...]})",
+    )
+    parser.add_argument(
+        "--silent-since",
+        metavar="S",
+        type=float,
+        default=None,
+        help="List harnesses whose newest filtered entry is older than S seconds ago (rc 1 when any; --json emits {silent: [...]})",
     )
     parser.add_argument(
         "--count",
@@ -1552,6 +1592,13 @@ def main(argv: list[str] | None = None) -> int:
         else:
             sys.stdout.write(format_streaks(rows) + "\n")
         return 0
+    if getattr(args, "silent_since", None) is not None:
+        rows = silent_harnesses(entries, float(args.silent_since))
+        if args.json:
+            sys.stdout.write(json.dumps({"silent": rows}, indent=2) + "\n")
+        else:
+            sys.stdout.write(format_silent(rows, float(args.silent_since)) + "\n")
+        return 1 if rows else 0
     if getattr(args, "fill_gaps", False):
         rows = fill_gaps(entries)
         if args.json:

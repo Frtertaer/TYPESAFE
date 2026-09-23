@@ -3269,6 +3269,73 @@ class FillGapsTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
 
 
+class SilentSinceTests(unittest.TestCase):
+    def test_silent_since_flags_quiet_harness_rc1(self) -> None:
+        import time
+
+        now = time.time()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": now - 7200, "harness": "hermes", "jev_status": "ok"},
+                    {"ts": now - 60, "harness": "codex", "jev_status": "ok"},
+                ],
+            )
+            proc = run_cli("--file", str(path), "--silent-since", "3600")
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("hermes", proc.stdout)
+            self.assertNotIn("codex", proc.stdout)
+
+    def test_silent_since_none_quiet_rc0(self) -> None:
+        import time
+
+        now = time.time()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [{"ts": now - 60, "harness": "codex", "jev_status": "ok"}],
+            )
+            proc = run_cli("--file", str(path), "--silent-since", "3600")
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn("silent: none", proc.stdout)
+
+    def test_silent_since_json_payload(self) -> None:
+        import time
+
+        now = time.time()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [{"ts": now - 7200, "harness": "hermes", "jev_status": "ok"}],
+            )
+            proc = run_cli("--file", str(path), "--silent-since", "3600", "--json")
+            self.assertEqual(proc.returncode, 1)
+            rows = json.loads(proc.stdout)["silent"]
+            self.assertEqual(rows[0]["harness"], "hermes")
+            self.assertGreater(rows[0]["age_s"], 7100)
+
+    def test_silent_harnesses_unit(self) -> None:
+        rows = decisions.silent_harnesses(
+            [
+                {"ts": 100.0, "harness": "h1"},
+                {"ts": 200.0, "harness": "h1"},
+                {"ts": 50.0, "harness": "h2"},
+                {"harness": "h3"},  # no ts — ignored
+            ],
+            seconds=150.0,
+            now=300.0,
+        )
+        # h1 age=100 < 150 → not silent; h2 age=250 → silent; h3 no ts → skipped
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["harness"], "h2")
+        self.assertEqual(rows[0]["last_ts"], 50.0)
+        self.assertEqual(rows[0]["age_s"], 250.0)
+
+
 class EvidenceTest(unittest.TestCase):
     def _log(self, tmp: str) -> Path:
         path = Path(tmp) / "decisions.jsonl"

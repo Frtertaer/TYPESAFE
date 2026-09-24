@@ -1206,6 +1206,23 @@ class JsonlEmitTests(unittest.TestCase):
             self.assertTrue({r["file"] for r in rows} <= {str(good), str(bad)})
             self.assertTrue(any(r["file"] == str(bad) for r in rows))
 
+    def test_jsonl_keys_projects_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            policy = base_policy()
+            policy["noul_yes"] = 1.7
+            bad = Path(tmp) / "policy.json"
+            bad.write_text(json.dumps(policy), encoding="utf-8")
+            proc = self._run(str(bad), "--jsonl", "--keys", "rule,file")
+            self.assertEqual(proc.returncode, 1)
+            rows = [
+                json.loads(l) for l in proc.stdout.splitlines() if l.strip()
+            ]
+            self.assertTrue(rows)
+            for row in rows:
+                self.assertEqual(set(row), {"rule", "file"})
+            proc = self._run(str(bad), "--jsonl", "--keys", " ,")
+            self.assertEqual(proc.returncode, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

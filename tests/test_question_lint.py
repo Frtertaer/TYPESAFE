@@ -1370,6 +1370,31 @@ class BaselineTests(unittest.TestCase):
             self.assertEqual(data["verdict"], "pass")
             self.assertGreater(data["suppressed"], 0)
 
+    def test_baseline_dash_reads_stdin(self) -> None:
+        """--baseline - reads the suppress-list JSON from stdin."""
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = self._bad_request(tmp)
+            baseline = Path(tmp) / "baseline.json"
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                question_lint.main(
+                    [str(bad), "--baseline-write", str(baseline)]
+                )
+            stdin_text = baseline.read_text(encoding="utf-8")
+            verdict = Path(tmp) / "verdict.json"
+            err = io.StringIO()
+            with mock.patch.object(sys, "stdin", io.StringIO(stdin_text)):
+                with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                    rc = question_lint.main(
+                        [str(bad), "--baseline", "-", "--strict",
+                         "--verdict", str(verdict)]
+                    )
+            self.assertEqual(rc, 0)
+            self.assertIn("suppressed", err.getvalue())
+            data = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertGreater(data["suppressed"], 0)
+
 
 class DiffTests(unittest.TestCase):
     REQ_A = {

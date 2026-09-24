@@ -183,5 +183,48 @@ class EmitOrJqTests(unittest.TestCase):
         self.assertEqual(buf.getvalue().strip(), "1")
 
 
+class BaselineStdinTests(unittest.TestCase):
+    """load_baseline('-') reads the suppress-list JSON from stdin."""
+
+    def _with_stdin(self, text):
+        import io
+        from unittest import mock
+
+        return mock.patch.object(sys, "stdin", io.StringIO(text))
+
+    def test_dash_reads_findings_object(self) -> None:
+        payload = {"findings": [{"path": "p", "rule": "J001", "message": "m"}]}
+        with self._with_stdin(json.dumps(payload)):
+            keys = _watch.load_baseline("-")
+        self.assertEqual(keys, {("p", "J001", "m")})
+
+    def test_dash_bare_list(self) -> None:
+        with self._with_stdin('[{"id": "pos-1"}]'):
+            keys = _watch.load_baseline("-", ("id",))
+        self.assertEqual(keys, {("pos-1",)})
+
+    def test_dash_bad_json_warns_and_returns_empty(self) -> None:
+        import io
+        from contextlib import redirect_stderr
+
+        err = io.StringIO()
+        with self._with_stdin("not json"), redirect_stderr(err):
+            keys = _watch.load_baseline("-")
+        self.assertEqual(keys, set())
+        self.assertIn("unreadable", err.getvalue())
+
+    def test_dash_second_consumer_sees_empty_stream(self) -> None:
+        import io
+        from contextlib import redirect_stderr
+
+        err = io.StringIO()
+        with self._with_stdin('{"findings": []}'), redirect_stderr(err):
+            first = _watch.load_baseline("-")
+            second = _watch.load_baseline("-")
+        self.assertEqual(first, set())
+        self.assertEqual(second, set())
+        self.assertIn("unreadable", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

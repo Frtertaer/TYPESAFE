@@ -196,10 +196,16 @@ def baseline_key(row: dict, fields) -> tuple:
 
 def load_baseline(path: str, fields=("path", "rule", "message")) -> set:
     """Load a baseline findings file written by a lint's --baseline-write/--out.
-    Accepts {"findings": [...]} or a bare list; missing/corrupt warns and
-    returns an empty set so every finding still counts."""
+    Accepts {"findings": [...]} or a bare list; '-' reads the baseline JSON
+    from stdin (one read — a second '-' consumer sees an empty stream).
+    Missing/corrupt warns and returns an empty set so every finding still
+    counts."""
     try:
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        raw = json.loads(
+            sys.stdin.read()
+            if str(path) == "-"
+            else Path(path).read_text(encoding="utf-8")
+        )
     except FileNotFoundError:
         sys.stderr.write("baseline %s not found; all findings count\n" % path)
         return set()

@@ -7097,7 +7097,7 @@ def main(argv: list[str] | None = None) -> int:
         "--baseline",
         metavar="PATH",
         default="",
-        help="Suppress step failures named in a baseline file ({findings:[{name}]}); suppressed steps still run and print but do not fail the run, ticks, verdict, report, or junit.",
+        help="Suppress step failures named in a baseline file ({findings:[{name}]}); suppressed steps still run and print but do not fail the run, ticks, verdict, report, or junit. '-' reads the baseline JSON from stdin.",
     )
     parser.add_argument(
         "--baseline-write",

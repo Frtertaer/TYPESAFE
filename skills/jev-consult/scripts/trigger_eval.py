@@ -449,7 +449,7 @@ def main(argv: list[str] | None = None) -> int:
         "--baseline",
         metavar="PATH",
         default="",
-        help="Suppress failing cases whose ids are recorded in PATH (written by --baseline-write); they still print, marked suppressed.",
+        help="Suppress failing cases whose ids are recorded in PATH (written by --baseline-write); they still print, marked suppressed. '-' reads the baseline JSON from stdin.",
     )
     parser.add_argument(
         "--baseline-write",

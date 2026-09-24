@@ -347,6 +347,11 @@ def main() -> int:
         help="With --list: emit a JSON array of items; in fill mode emit one JSON object per outcome.",
     )
     parser.add_argument(
+        "--jsonl",
+        action="store_true",
+        help="With --list: emit one {kind, name, path} JSON row per line instead of the array.",
+    )
+    parser.add_argument(
         "--schema",
         action="store_true",
         help="Print the decisions.jsonl fill-entry contract and exit (--json emits the object).",
@@ -632,6 +637,19 @@ def main() -> int:
                     for item in items
                 ]
                 sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+            elif getattr(args, "jsonl", False):
+                for item in items:
+                    sys.stdout.write(
+                        json.dumps(
+                            {
+                                "kind": item.get("kind") or "skill",
+                                "name": item.get("name") or "?",
+                                "path": item.get("path") or "",
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
             else:
                 for item in items:
                     sys.stdout.write(

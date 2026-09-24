@@ -55,7 +55,7 @@ class FlagParityTest(unittest.TestCase):
         }
         extras = {
             "apply_fill.py": {"--status", "--list", "--show", "--self-test"},
-            "peer_fill.py": {"--status", "--list", "--show", "--self-test"},
+            "peer_fill.py": {"--status", "--list", "--show", "--self-test", "--jsonl"},
             "catalog_fill.py": {"--clear", "--status", "--list", "--show", "--self-test"},
         }
         for name, allowed in extras.items():

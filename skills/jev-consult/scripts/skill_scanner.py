@@ -715,6 +715,9 @@ def main(argv=None):
                     help="With --watch, stop after N ticks.")
     ap.add_argument("--unchanged-max", metavar="N", type=int, default=0,
                     help="With --watch, stop after N consecutive identical ticks.")
+    ap.add_argument("--top", metavar="N", type=int, default=0,
+                    help="Print at most N findings (summary counts still "
+                         "reflect the full scan; with --watch applies per tick).")
     ap.add_argument("--jsonl", action="store_true",
                     help="Emit one compact JSON line per finding (with --watch: per tick).")
     ap.add_argument("--quiet", action="store_true",
@@ -815,7 +818,8 @@ def main(argv=None):
         tick += 1
         skills, all_findings, suppressed, counts = _collect(
             root, args, skip, sev_want, only)
-        payload = _payload_for(root, skills, all_findings, suppressed, counts)
+        shown = all_findings[:args.top] if args.top else all_findings
+        payload = _payload_for(root, skills, shown, suppressed, counts)
 
         if tick == 1 and args.baseline_write:
             try:
@@ -854,6 +858,10 @@ def main(argv=None):
                    counts["INFO"], suppressed, len(all_findings))
             unchanged = unchanged + 1 if key == prev_key else 0
             prev_key = key
+            if not (quiet and not counts["CRITICAL"]) and args.top and \
+                    len(all_findings) > args.top:
+                sys.stderr.write("top: showing %d of %d findings\n"
+                                 % (args.top, len(all_findings)))
             if not (quiet and not counts["CRITICAL"]):
                 tick_payload = dict(payload, tick=tick)
                 if args.jq:
@@ -888,6 +896,9 @@ def main(argv=None):
                 break
             continue
 
+        if args.top and len(all_findings) > args.top:
+            sys.stderr.write("top: showing %d of %d findings\n"
+                             % (args.top, len(all_findings)))
         if args.jq:
             val, found = _dig(payload, args.jq)
             if not found:
@@ -902,11 +913,11 @@ def main(argv=None):
             for f in payload["findings"]:
                 print(json.dumps(f, ensure_ascii=False))
         elif args.md:
-            _print_md(root, skills, all_findings, suppressed, counts)
+            _print_md(root, skills, shown, suppressed, counts)
         elif args.csv:
-            _print_csv(all_findings)
+            _print_csv(shown)
         else:
-            _print_report(root, skills, all_findings, suppressed, counts)
+            _print_report(root, skills, shown, suppressed, counts)
         break
     rank = SEV_RANK[fail_on]
     return 1 if any(counts[s] for s, r in SEV_RANK.items() if r >= rank) else 0

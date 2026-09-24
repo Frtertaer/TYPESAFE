@@ -927,6 +927,33 @@ class JsonlFlagTests(unittest.TestCase):
             self.assertEqual(len(payload["findings"]), 1)
             self.assertEqual(rc, 1)
 
+    def test_top_caps_rows_keeps_full_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = make_skill(tmp, self.BAD)
+            full = scanner.scan_skill(skill)
+            self.assertGreaterEqual(len(full), 2)
+            rc, out, err = self._run(
+                [str(skill), "--top", "1", "--json"])
+            payload = json.loads(out)
+            self.assertEqual(len(payload["findings"]), 1)
+            want = {}
+            for f in full:
+                want[f.severity] = want.get(f.severity, 0) + 1
+            for sev, n in want.items():
+                self.assertEqual(payload["summary"][sev], n)
+            self.assertIn("top:", err)
+            self.assertEqual(rc, 1)
+
+    def test_top_applies_to_md_and_jsonl(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = make_skill(tmp, self.BAD)
+            rc, out, _ = self._run([str(skill), "--top", "1", "--jsonl"])
+            self.assertEqual(len([l for l in out.splitlines() if l.strip()]), 1)
+            _, md_out, _ = self._run([str(skill), "--top", "1", "--md"])
+            rows = [l for l in md_out.splitlines()
+                    if l.startswith("| CRITICAL")]
+            self.assertEqual(len(rows), 1)
+
     def test_diff_and_baseline_are_mutually_exclusive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             skill = make_skill(tmp, self.BAD)

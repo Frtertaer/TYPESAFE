@@ -1638,6 +1638,24 @@ class JevInternalsTests(unittest.TestCase):
             self.assertEqual(out["state"]["task"], "t")
             self.assertIn("q", out["questions"])
 
+    def test_cmd_ask_rejects_malformed_requests(self) -> None:
+        # non-object JSON, missing state, empty questions all exit clean
+        # (SystemExit, never a traceback) and never reach post_systemone
+        with tempfile.TemporaryDirectory() as tmp:
+            for body in ("[1,2]", '{"questions": {"q": {}}}', '{"state": {}, "questions": {}}'):
+                req = Path(tmp) / "bad.json"
+                req.write_text(body, encoding="utf-8")
+                with patch.object(jev, "post_systemone", side_effect=AssertionError("posted")), self.assertRaises(SystemExit):
+                    jev.main(["ask", str(req), "--dry"])
+
+    def test_cmd_ask_non_object_request_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "list.json"
+            req.write_text("[1]", encoding="utf-8")
+            with self.assertRaises(SystemExit) as ctx:
+                jev.main(["ask", str(req), "--dry"])
+            self.assertIn("object", str(ctx.exception))
+
     def test_cmd_ask_jq_prints_one_field(self) -> None:
         req_obj = {
             "state": {"task": "t"},

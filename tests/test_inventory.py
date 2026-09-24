@@ -2116,6 +2116,37 @@ class HookRetriesEnvTests(unittest.TestCase):
         )
         self.assertEqual(code, 2)
 
+    def test_cli_csv_keys_drives_columns(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness", "hermes",
+                    "--hermes-home", str(FIXTURE),
+                    "--task", "jwt",
+                    "--csv", "--keys", "name,id",
+                ]
+            )
+        self.assertEqual(code, 0)
+        lines = buf.getvalue().strip().splitlines()
+        self.assertEqual(lines[0], "name,id")
+        self.assertEqual(lines[1].split(","), ["jwt-auth", "skill_jwt_auth"])
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness", "hermes",
+                    "--hermes-home", str(FIXTURE),
+                    "--task", "jwt",
+                    "--md", "--keys", "name",
+                ]
+            )
+        self.assertEqual(code, 0)
+        self.assertIn("| name |", buf.getvalue())
+
     def test_cli_md_emits_table(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

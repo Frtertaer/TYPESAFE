@@ -515,6 +515,17 @@ def uniquify(items: list[dict]) -> list[dict]:
     return out
 
 
+def _keys_or_exit(args) -> list | None:
+    """Parse --keys a,b into a field list; [] when absent, None on an
+    empty selection (stderr already written, caller returns rc 2)."""
+    key_sel = getattr(args, "keys", "") or ""
+    keys = [k.strip() for k in key_sel.split(",") if k.strip()]
+    if key_sel and not keys:
+        sys.stderr.write("--keys names no fields\n")
+        return None
+    return keys
+
+
 def name_df(items: list[dict], query: set[str]) -> dict[str, int]:
     df = {token: 0 for token in query}
     for item in items:
@@ -1391,7 +1402,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scores", action="store_true", help="Add IDF score to each shortlist item.")
     parser.add_argument("--csv", action="store_true", help="Emit the shortlist as CSV rows instead of JSON.")
     parser.add_argument("--jsonl", action="store_true", help="Emit the shortlist as JSON lines, one item per row (for piping).")
-    parser.add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these item keys in each row (rc 2 on an empty list)")
+    parser.add_argument("--keys", metavar="a,b", default="", help="With --jsonl/--csv/--md: keep only these item keys as the row keys/columns (rc 2 on an empty list)")
     parser.add_argument("--md", action="store_true", help="Emit the shortlist as a Markdown table (id/kind/name[+score]).")
     parser.add_argument("--jq", metavar="KEY", default="", help="Print just one dotted-path field of the JSON payload (e.g. counts.skill); unknown key exits 2. With --watch: print just the named tick field(s) per pass, comma list")
     parser.add_argument("--out", metavar="PATH", default="", help="Write the payload JSON to PATH instead of stdout.")
@@ -1879,10 +1890,8 @@ def main(argv: list[str] | None = None) -> int:
         for item in payload["shortlist"]:
             sys.stdout.write("%s\n" % item.get("id"))
     elif getattr(args, "jsonl", False):
-        key_sel = getattr(args, "keys", "") or ""
-        keys = [k.strip() for k in key_sel.split(",") if k.strip()]
-        if key_sel and not keys:
-            sys.stderr.write("--keys names no fields\n")
+        keys = _keys_or_exit(args)
+        if keys is None:
             return 2
         for item in payload["shortlist"]:
             row = (
@@ -1892,26 +1901,44 @@ def main(argv: list[str] | None = None) -> int:
             )
             sys.stdout.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
     elif getattr(args, "md", False):
-        cols = ["id", "kind", "name"] + (["score"] if args.scores else [])
+        keys = _keys_or_exit(args)
+        if keys is None:
+            return 2
+        cols = keys or (["id", "kind", "name"] + (["score"] if args.scores else []))
         sys.stdout.write("| " + " | ".join(cols) + " |\n")
         sys.stdout.write("|" + "|".join(" --- " for _ in cols) + "|\n")
         for item in payload["shortlist"]:
-            row = [item.get("id") or "", item.get("kind") or "", item.get("name") or ""]
-            if args.scores:
-                row.append("%.4f" % (item.get("score") or 0))
+            if keys:
+                row = [
+                    str(item.get(k) if item.get(k) is not None else "")
+                    for k in cols
+                ]
+            else:
+                row = [item.get("id") or "", item.get("kind") or "", item.get("name") or ""]
+                if args.scores:
+                    row.append("%.4f" % (item.get("score") or 0))
             sys.stdout.write("| " + " | ".join(row) + " |\n")
     elif getattr(args, "csv", False):
         import csv as _csv
 
+        keys = _keys_or_exit(args)
+        if keys is None:
+            return 2
         writer = _csv.writer(sys.stdout, lineterminator="\n")
-        header = ["id", "kind", "name"]
-        if args.scores:
+        header = keys or ["id", "kind", "name"]
+        if not keys and args.scores:
             header.append("score")
         writer.writerow(header)
         for item in payload["shortlist"]:
-            row = [item.get("id") or "", item.get("kind") or "", item.get("name") or ""]
-            if args.scores:
-                row.append("%.4f" % (item.get("score") or 0))
+            if keys:
+                row = [
+                    str(item.get(k) if item.get(k) is not None else "")
+                    for k in header
+                ]
+            else:
+                row = [item.get("id") or "", item.get("kind") or "", item.get("name") or ""]
+                if args.scores:
+                    row.append("%.4f" % (item.get("score") or 0))
             writer.writerow(row)
     else:
         watching_jq = bool(getattr(args, "watch", 0.0)) and getattr(args, "jq", "")

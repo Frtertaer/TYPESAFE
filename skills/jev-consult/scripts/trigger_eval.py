@@ -43,6 +43,22 @@ def _load_scorer(path: Path):
     return module
 
 
+_STDIN_CASES: str | None = None
+
+
+def _cases_text(path: Path) -> str | None:
+    """Cases-file text; '-' reads stdin once (cached for repeat calls)."""
+    global _STDIN_CASES
+    if str(path) == "-":
+        if _STDIN_CASES is None:
+            _STDIN_CASES = sys.stdin.read()
+        return _STDIN_CASES
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
 def evaluate(
     cases_path: Path,
     skill_dir: Path,
@@ -53,11 +69,15 @@ def evaluate(
 ) -> dict | None:
     """Per-case scores plus the aggregate margin verdict; None on missing inputs.
     With `case_id`, only that case is evaluated (margin still computed across it).
-    With `desc_text`, prompts score against that text instead of SKILL.md."""
-    if not VENDORED_SCORER.is_file() or not cases_path.is_file():
+    With `desc_text`, prompts score against that text instead of SKILL.md.
+    `cases_path` '-' reads the cases JSON from stdin (cached across calls)."""
+    if not VENDORED_SCORER.is_file():
+        return None
+    text = _cases_text(cases_path)
+    if text is None:
         return None
     scorer = _load_scorer(VENDORED_SCORER)
-    cases = json.loads(cases_path.read_text(encoding="utf-8"))["cases"]
+    cases = json.loads(text)["cases"]
     if case_id:
         cases = [case for case in cases if case.get("id") == case_id]
     desc_tokens = scorer.tokens(
@@ -234,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Score jev-consult trigger cases lexically (per-case rows)."
     )
-    parser.add_argument("--cases", default=str(DEFAULT_CASES))
+    parser.add_argument("--cases", default=str(DEFAULT_CASES), help="Cases JSON file ('-' reads it from stdin; no --watch)")
     parser.add_argument("--skill", default=str(SKILL_DIR))
     parser.add_argument(
         "--score",
@@ -475,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
             watch_secs = 0.0
         report = {
             "cases": args.cases,
-            "cases_exists": Path(args.cases).is_file(),
+            "cases_exists": args.cases != "-" and Path(args.cases).is_file(),
             "skill": args.skill,
             "scorer": str(VENDORED_SCORER),
             "scorer_exists": VENDORED_SCORER.is_file(),
@@ -576,6 +596,9 @@ def main(argv: list[str] | None = None) -> int:
                 "self-test: %s score=%.3f\n" % ("ok" if ok else "FAIL", score)
             )
         return 0 if ok else 1
+    if args.cases == "-" and args.watch and args.watch > 0:
+        sys.stderr.write("--cases - (stdin) does not support --watch\n")
+        return 2
     try:
         result = evaluate(
             Path(args.cases),

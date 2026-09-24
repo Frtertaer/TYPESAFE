@@ -1665,5 +1665,51 @@ class BaselineTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertIn("not found", err.getvalue())
 
+
+class StdinCasesTests(unittest.TestCase):
+    """`--cases -` reads the cases JSON from stdin (cached)."""
+
+    def setUp(self):
+        self._prev = te._STDIN_CASES
+        te._STDIN_CASES = None
+
+    def tearDown(self):
+        te._STDIN_CASES = self._prev
+
+    def test_evaluate_stdin_cases(self):
+        text = FIXTURE.read_text(encoding="utf-8")
+        with patch("sys.stdin", io.StringIO(text)):
+            file_result = te.evaluate(FIXTURE, SKILL)
+            stdin_result = te.evaluate(Path("-"), SKILL)
+        self.assertIsNotNone(stdin_result)
+        self.assertEqual(
+            [r["id"] for r in file_result["cases"]],
+            [r["id"] for r in stdin_result["cases"]],
+        )
+
+    def test_stdin_cases_cached_across_calls(self):
+        with patch("sys.stdin", io.StringIO('{"cases": []}')):
+            first = te.evaluate(Path("-"), SKILL)
+            second = te.evaluate(Path("-"), SKILL)
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        self.assertEqual(first["cases"], [])
+        self.assertEqual(second["cases"], [])
+
+    def test_stdin_cases_watch_rejected(self):
+        buf = io.StringIO()
+        with patch("sys.stdin", io.StringIO('{"cases": []}')):
+            with redirect_stderr(buf):
+                rc = te.main(["--cases", "-", "--watch", "1"])
+        self.assertEqual(rc, 2)
+        self.assertIn("stdin", buf.getvalue())
+
+    def test_env_reports_stdin_cases_not_exists(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--cases", "-", "--env", "--jq", "cases_exists"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(buf.getvalue()), False)
+
 if __name__ == "__main__":
     unittest.main()

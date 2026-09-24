@@ -570,6 +570,31 @@ class DiffFlagTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("JSON objects", buf.getvalue())
 
+    def test_diff_dash_reads_other_from_stdin(self) -> None:
+        policy = json.loads(policy_lint.DEFAULT_POLICY.read_text(encoding="utf-8"))
+        other = dict(policy)
+        other.pop("model")
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("sys.stdin", io.StringIO(json.dumps(other))):
+            with redirect_stdout(buf):
+                rc = policy_lint.main(["--diff", "-"])
+        out = buf.getvalue()
+        self.assertEqual(rc, 0)
+        self.assertIn("diff - ->", out)
+        self.assertIn("+ model =", out)
+
+    def test_diff_dash_bad_json_rc2(self) -> None:
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("sys.stdin", io.StringIO("{bad")):
+            with redirect_stdout(buf):
+                rc = policy_lint.main(["--diff", "-"])
+        self.assertEqual(rc, 2)
+        self.assertIn("cannot parse -", buf.getvalue())
+
 
 class WatchFlagTests(unittest.TestCase):
     def test_watch_emits_ticks(self) -> None:

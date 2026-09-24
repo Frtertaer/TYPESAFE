@@ -386,6 +386,17 @@ class LintSkillTests(unittest.TestCase):
             self.assertIn("name: myskill", path.read_text(encoding="utf-8"))
             self.assertIn("fixed S008", buf.getvalue())
 
+    def test_fix_dry_run_reports_without_writing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = write_skill(root, "MySkill", GOOD.format(name="MySkill"))
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = skill_lint.main([str(path), "--fix", "--dry-run"])
+            self.assertEqual(rc, 0)
+            self.assertIn("would fix S008", buf.getvalue())
+            self.assertIn("name: MySkill", path.read_text(encoding="utf-8"))
+
     def test_long_description_s006(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

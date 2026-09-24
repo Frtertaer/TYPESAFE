@@ -843,6 +843,26 @@ class StandaloneCliTests(unittest.TestCase):
             fixed["questions"]["q"]["criteria"]["none"], "custom abstain"
         )
 
+    def test_fix_dry_run_reports_without_writing(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {
+                "q": {
+                    "type": "choice",
+                    "instructions": "Which of these should the coder use?",
+                    "criteria": {"a": "the fast path", "b": "the safe path"},
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            proc = self._run(str(path), "--fix", "--dry-run")
+            after = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("would fix J016", proc.stderr)
+        self.assertNotIn("none", after["questions"]["q"]["criteria"])
+
     def test_fix_noul_identical_criteria(self) -> None:
         request = {
             "state": {"task": "x"},

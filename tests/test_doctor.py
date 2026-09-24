@@ -401,6 +401,14 @@ class DoctorTests(unittest.TestCase):
             self.assertIn("errors=", lint["detail"])
             self.assertEqual(lint["hint"], DOC.HINTS["policy_lint"])
 
+    def test_smoke_self_test_check(self) -> None:
+        rc, out, _ = run_main(
+            ["--only", "smoke_self_test"]
+        )
+        check = check_of(out, "smoke_self_test")
+        self.assertTrue(check["ok"], check)
+        self.assertIn("self-test: ok", check["detail"])
+
     def test_only_filters_checks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rc, out, _ = run_main(

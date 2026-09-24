@@ -19,6 +19,7 @@ import re
 import sqlite3
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -51,6 +52,7 @@ CHECK_NAMES = (
     "api_key",
     "policy",
     "policy_lint",
+    "smoke_self_test",
     "decisions_log",
     "progress_ledger",
 )
@@ -80,6 +82,7 @@ HINTS = {
     "api_key": "set TYPESAFE_API_KEY in the environment or a .env file",
     "policy": "restore skills/jev-consult/policy.json",
     "policy_lint": "fix the flagged keys in skills/jev-consult/policy.json (python skills/jev-consult/scripts/policy_lint.py)",
+    "smoke_self_test": "run python skills/jev-consult/scripts/smoke.py --self-test and fix the failing synthetic step",
     "hooks_json": "fix or delete the malformed hooks file; it blocks hook registration",
 }
 
@@ -278,6 +281,27 @@ def check_common(home: Path, hermes: Path) -> list[dict]:
                 first.get("message") or "?",
             )
         out.append(_check("*", "policy_lint", errors == 0, lint_detail))
+    smoke = SCRIPT_DIR / "smoke.py"
+    if smoke.is_file():
+        # in-process run keeps watch ticks fast; the policy cap still bounds it
+        ok = False
+        detail = "self-test crashed"
+        deadline = time.monotonic() + _policy_float_key("smoke_selftest_timeout_seconds", 60.0)
+        try:
+            import smoke as _smoke
+            from contextlib import redirect_stdout as _ro, redirect_stderr as _re
+            buf = io.StringIO()
+            with _ro(buf), _re(buf):
+                src = _smoke.main(["--self-test"])
+            ok = src == 0 and "self-test: ok" in buf.getvalue()
+            lines = buf.getvalue().strip().splitlines()
+            detail = lines[-1][:120] if lines else "rc=%d" % src
+        except Exception as exc:
+            detail = "unrunnable: %s" % exc
+        if time.monotonic() > deadline:
+            ok = False
+            detail = "over smoke_selftest_timeout_seconds"
+        out.append(_check("*", "smoke_self_test", ok, detail))
     raw_log = os.environ.get("JEV_CONSULT_LOG") or ""
     if raw_log.strip() == "0":
         out.append(_check("*", "decisions_log", True, "disabled (JEV_CONSULT_LOG=0)"))
@@ -450,6 +474,7 @@ def main(argv: list[str] | None = None) -> int:
             "watch_quiet": _watch.quiet("JEV_DOCTOR_WATCH_QUIET", False),
             "policy": os.environ.get("JEV_POLICY", "").strip() or "default",
             "env_file_max_bytes": _env_file_max_bytes(),
+            "smoke_selftest_timeout_seconds": int(_policy_float_key("smoke_selftest_timeout_seconds", 60.0)),
         }
         if getattr(args, "jq", ""):
             node, found = _watch.dig(payload, args.jq)

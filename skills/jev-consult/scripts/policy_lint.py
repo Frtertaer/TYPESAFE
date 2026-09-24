@@ -86,6 +86,7 @@ NONNEG_NUM_FIELDS = (
     "scan_cache_seconds",
     "sidecar_ttl_seconds",
     "smoke_perf_budget_seconds",
+    "smoke_selftest_timeout_seconds",
     "spill_max_bytes",
     "spill_max_files",
 )
@@ -112,6 +113,7 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "scan_cache_seconds",
     "sidecar_task_max_chars",
     "smoke_perf_budget_seconds",
+    "smoke_selftest_timeout_seconds",
     "spill_max_bytes",
     "spill_max_files",
     "stop_words",
@@ -144,6 +146,7 @@ INIT_POLICY = {
     "catalog_cache_max_queries": 50,
     "env_file_max_bytes": 65536,
     "sidecar_task_max_chars": 500,
+    "smoke_selftest_timeout_seconds": 60,
     "must_ask": ["approach"],
     "never_ask": [
         "tool_checkable_fact",

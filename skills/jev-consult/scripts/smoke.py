@@ -5193,7 +5193,8 @@ def step_doctor(tmp: Path) -> dict:
         ok = rc == 2
         if ok:
             # --watch-max bounds elapsed: tick N+1 fires after the sleep,
-            # sees the deadline passed, and stops — 2 ticks total here
+            # sees the deadline passed, and stops — 2 ticks when the check
+            # pass is fast, 1 when a slow first tick already blew the budget
             rc, out = _run(
                 [
                     str(SCRIPTS / "doctor.py"),
@@ -5212,7 +5213,7 @@ def step_doctor(tmp: Path) -> dict:
                 ]
             )
             ticks = [ln for ln in out.splitlines() if '"failed"' in ln]
-            ok = len(ticks) == 2
+            ok = 1 <= len(ticks) <= 2 and "watch tick=3" not in out
         if ok:
             # --agents accepts a comma list; both harnesses get checks
             rc, out = _run(

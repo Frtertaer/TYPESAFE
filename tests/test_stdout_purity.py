@@ -113,6 +113,19 @@ class StdoutPurityTests(unittest.TestCase):
         assert_no_stdout_diagnostics(self, proc)
         json.loads(proc.stdout)
 
+    def test_wrote_diagnostics_are_stderr_in_source(self) -> None:
+        """Every 'wrote ...' emit must be a stderr write, never stdout/print."""
+        bad = []
+        for path in sorted(SCRIPTS.glob("*.py")):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            for i, line in enumerate(lines):
+                if '"wrote ' not in line and "'wrote " not in line:
+                    continue
+                ctx = "\n".join(lines[max(0, i - 4):i + 1])
+                if "stderr" not in ctx:
+                    bad.append("%s: %s" % (path.name, line.strip()[:80]))
+        self.assertEqual(bad, [])
+
 
 if __name__ == "__main__":
     unittest.main()

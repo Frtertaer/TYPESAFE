@@ -30,6 +30,9 @@ EXPECTED = {
     "doctor": "JEV_DOCTOR",
     "jev": "JEV_PING",
     "progress": "JEV_PROGRESS",
+    # skill_scanner is standalone (no _watch import) but still wires its own
+    # JEV_SCAN_WATCH_* triplet inline.
+    "skill_scanner": "JEV_SCAN",
 }
 
 OTHER_ENVS = re.compile(r'"(JEV_[A-Z]+_WATCH_(?:MAX|SECS|QUIET))"')

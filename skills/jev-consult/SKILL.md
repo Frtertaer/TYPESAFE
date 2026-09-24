@@ -191,7 +191,7 @@ One-glance index of every `JEV_*` / `TYPESAFE_API_KEY` / `HERMES_HOME` env var t
 | `JEV_POLICY` | policy.json override path for every script and hook |
 | `JEV_TIMEOUT`, `JEV_FILL_TIMEOUT` | `jev.py` HTTP timeout / peer_fill+trace ask timeout |
 | `JEV_HOOK_*` | hook knobs: `OFF`, `TTL`, `DEDUPE_TTL`, `TIMEOUT`, `RETRIES`, `BUDGET`, `LIMIT`, `HARNESS`, `CWD`, `PROMPT`, `NOTE`, `NOTE_LIMIT`, `EVENT`, `EVENTS`, `SKIP_EVENTS`, `WINNER`, `MAX_PROMPT`, `MAX_PAYLOAD`, `MAX_AGE`, `DEBUG`, `DEBUG_FILE`, `NOSIDECAR`, `NOMISS`, `WATCH_DEDUPE` |
-| `JEV_*_WATCH_MAX`, `JEV_*_WATCH_SECS`, `JEV_*_WATCH_QUIET` | per-script `--watch` caps — `*` in `HOOK`, `PEER`, `CATALOG`, `APPLY`, `INV`, `DECISIONS`, `COMPACT`, `COMPARE`, `DOCTOR`, `PLINT`, `SLINT`, `QLINT`, `TLINT`, `TRIGGER`, `PING`, `SMOKE`, `PROGRESS`, `TRACE` |
+| `JEV_*_WATCH_MAX`, `JEV_*_WATCH_SECS`, `JEV_*_WATCH_QUIET` | per-script `--watch` caps — `*` in `HOOK`, `PEER`, `CATALOG`, `APPLY`, `INV`, `DECISIONS`, `COMPACT`, `COMPARE`, `DOCTOR`, `PLINT`, `SLINT`, `QLINT`, `TLINT`, `TRIGGER`, `PING`, `SMOKE`, `PROGRESS`, `TRACE`, `SCAN` |
 | `JEV_CONSULT_LOG`, `JEV_CONSULT_SPILL` | decisions.jsonl / spill dir path, `0` disables |
 | `JEV_DECISIONS`, `JEV_DECISIONS_*` | decisions.py log path + per-flag presets (`TAIL`, `FIRST`, `TOP`, `DAYS`, filters, grouping, `UNIQ`, `LAST`, `OLDEST`, `MISSING`, …) |
 | `JEV_TRACE`, `JEV_TRACE_*` | trace.py file path + `PLAN`/`HARNESS`/`NOTE`/`GREP`/`HISTORY_GREP` defaults |

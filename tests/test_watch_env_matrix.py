@@ -33,6 +33,8 @@ EXPECTED_PREFIXES = {
     "smoke": "SMOKE",
     "jev": "PING",
     "progress": "PROGRESS",
+    # Standalone vendored script — wires JEV_SCAN_WATCH_* inline (no _watch).
+    "skill_scanner": "SCAN",
 }
 
 ENV_RE = re.compile(r'"(JEV_([A-Z0-9]+)_WATCH_(MAX|SECS|QUIET))"')

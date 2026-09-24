@@ -144,10 +144,7 @@ class JqParityTests(unittest.TestCase):
         # not index lists or resolve dot-containing keys.
         import re
 
-        # _watch.dig itself + jev fallback; skill_scanner is a standalone
-        # vendored script that cannot import _watch and carries an identical
-        # longest-literal loop instead.
-        allowed = {"_watch.py", "jev.py", "skill_scanner.py"}
+        allowed = {"_watch.py", "jev.py"}  # _watch.dig itself + jev fallback
         loop_re = re.compile(r'for part in .+\.split\("\."\)')
         offenders = []
         for path in sorted(SCRIPTS_DIR.glob("*.py")):

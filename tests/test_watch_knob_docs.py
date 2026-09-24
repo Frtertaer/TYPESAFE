@@ -16,6 +16,7 @@ PREFIXES = [
     "HOOK", "PEER", "CATALOG", "APPLY", "INV", "DECISIONS", "COMPACT",
     "COMPARE", "DOCTOR", "PLINT", "SLINT", "QLINT", "TLINT", "TRIGGER",
     "PING", "SMOKE", "PROGRESS", "TRACE",
+    "SCAN",  # skill_scanner wires JEV_SCAN_WATCH_* inline (standalone)
 ]
 KNOBS = ["MAX", "SECS", "QUIET"]
 

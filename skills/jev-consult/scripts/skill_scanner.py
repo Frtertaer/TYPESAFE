@@ -308,6 +308,22 @@ def _csv_arg(value):
     return [part.strip() for part in value.split(",") if part.strip()]
 
 
+def _watch_env(name, cast, default, want, fallback):
+    """Read a JEV_SCAN_WATCH_* knob; a bad value warns on stderr, then default.
+
+    Standalone mirror of the pack's _watch.cap/deadline/quiet env reads —
+    JEV_SCAN_WATCH_MAX (tick cap), JEV_SCAN_WATCH_SECS (deadline seconds),
+    JEV_SCAN_WATCH_QUIET (0/1 quiet preset)."""
+    raw = os.environ.get(name, "")
+    if raw == "":
+        return default
+    try:
+        return cast(raw)
+    except (TypeError, ValueError):
+        sys.stderr.write("bad %s %r (want %s); %s\n" % (name, raw, want, fallback))
+        return default
+
+
 def discover_skills(root, skip=None):
     """Return a list of skill directories (dirs containing SKILL.md)."""
     skip = SKIP_DIRS if skip is None else skip
@@ -523,6 +539,79 @@ def self_test():
     return 0
 
 
+def _collect(root, args, skip, sev_want, only):
+    """One scan pass: discover, scan, filter, baseline-mark, count."""
+    skills = discover_skills(root, skip=skip)
+    findings = []
+    for sd in sorted(skills):
+        findings.extend(scan_skill(
+            sd, include_fixtures=args.include_fixtures, skip=skip))
+    if sev_want is not None:
+        findings = [f for f in findings if f.severity in sev_want]
+    if only:
+        findings = [f for f in findings if f.check in only]
+    suppressed = 0
+    if args.baseline:
+        baseline_keys = _load_baseline(args.baseline)
+        for f in findings:
+            if _baseline_key(f) in baseline_keys:
+                f.suppressed = True
+                suppressed += 1
+        if suppressed:
+            sys.stderr.write(
+                "baseline: suppressed %d known finding(s)\n" % suppressed)
+    counts = {"CRITICAL": 0, "WARN": 0, "INFO": 0}
+    for f in findings:
+        if not f.suppressed:
+            counts[f.severity] += 1
+    return skills, findings, suppressed, counts
+
+
+def _payload_for(root, skills, findings, suppressed, counts):
+    return {
+        "scanner": "skill_scanner", "version": VERSION,
+        "root": str(root), "skills_scanned": [str(s) for s in sorted(skills)],
+        "findings": [f.as_dict() for f in findings],
+        "summary": dict(counts, suppressed=suppressed),
+        "verdict": "REJECT-PENDING-REVIEW" if counts["CRITICAL"] else
+                   ("REVIEW-WARNINGS" if counts["WARN"] else "PASS"),
+    }
+
+
+def _print_report(root, skills, all_findings, suppressed, counts):
+    print("agent-skill security scan v%s — %d skill(s) under %s\n" % (
+        VERSION, len(skills), root))
+    by_skill = {}
+    for f in all_findings:
+        by_skill.setdefault(f.skill, []).append(f)
+    for sd in sorted(skills):
+        fs = by_skill.get(sd.name, [])
+        print("=== %s (%s) ===" % (sd.name, sd))
+        if not fs:
+            print("  clean — no findings\n")
+            continue
+        for f in fs:
+            loc = "%s:%s" % (f.file, f.line) if f.line else f.file
+            tag = " suppressed" if f.suppressed else ""
+            print("  [%s]%s %s %s\n      %s" % (
+                f.severity, tag, f.check, loc, f.message))
+            if f.evidence:
+                print("      > %s" % f.evidence)
+        print()
+    print("Summary: %d CRITICAL, %d WARN, %d INFO" %
+          (counts["CRITICAL"], counts["WARN"], counts["INFO"]) + (
+              " (%d suppressed)" % suppressed if suppressed else ""))
+    if counts["CRITICAL"]:
+        print("Verdict guidance: CRITICAL findings present — do not install/run this skill "
+              "until a human reviews every flagged line. See references/skill-supply-chain.md.")
+    elif counts["WARN"]:
+        print("Verdict guidance: warnings present — read each flagged file before approving. "
+              "A clean pattern scan is necessary but not sufficient (OWASP AST08).")
+    else:
+        print("Verdict guidance: no pattern hits. Still read SKILL.md end-to-end — "
+              "natural-language attacks evade pattern scanners (OWASP AST08).")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Static security scanner for agent skills (OWASP AST01-AST10 aligned).")
@@ -567,6 +656,14 @@ def main(argv=None):
     ap.add_argument("--verdict", metavar="PATH", default="",
                     help="Write a slim verdict JSON ({verdict, skills, suppressed, "
                          "CRITICAL, WARN, INFO}) to PATH; '-' prints it to stdout.")
+    ap.add_argument("--watch", metavar="SECONDS", type=float, default=0,
+                    help="Repeat the scan every SECONDS until a stop flag hits.")
+    ap.add_argument("--max-ticks", metavar="N", type=int, default=0,
+                    help="With --watch, stop after N ticks.")
+    ap.add_argument("--unchanged-max", metavar="N", type=int, default=0,
+                    help="With --watch, stop after N consecutive identical ticks.")
+    ap.add_argument("--quiet", action="store_true",
+                    help="With --watch, only emit ticks that have CRITICAL findings.")
     args = ap.parse_args(argv)
 
     if args.self_test:
@@ -628,116 +725,112 @@ def main(argv=None):
             return 2
     skip = SKIP_DIRS | set(_csv_arg(args.exclude_dir)) if args.exclude_dir else SKIP_DIRS
 
-    skills = discover_skills(root, skip=skip)
-    if not skills:
+    if not discover_skills(root, skip=skip):
         print("error: no SKILL.md found under %s\n"
               "Fix: agent skills are directories with a SKILL.md at their root. "
               "If you meant to scan a single file, name it SKILL.md or pass its parent directory." % root,
               file=sys.stderr)
         return 2
 
-    all_findings = []
-    for sd in sorted(skills):
-        all_findings.extend(scan_skill(
-            sd, include_fixtures=args.include_fixtures, skip=skip))
-    if sev_want is not None:
-        all_findings = [f for f in all_findings if f.severity in sev_want]
-    if only:
-        all_findings = [f for f in all_findings if f.check in only]
+    watch_max = args.max_ticks or _watch_env(
+        "JEV_SCAN_WATCH_MAX", int, 0, "int ticks", "uncapped")
+    watch_secs = _watch_env(
+        "JEV_SCAN_WATCH_SECS", float, 0.0, "seconds", "no deadline")
+    quiet = args.quiet or bool(_watch_env(
+        "JEV_SCAN_WATCH_QUIET", int, 0, "0/1", "loud"))
+    watch_deadline = (time.time() + watch_secs) if watch_secs else None
 
-    if args.baseline_write:
-        try:
-            _atomic_write(
-                args.baseline_write,
-                json.dumps({"findings": [f.as_dict() for f in all_findings]}, indent=2) + "\n",
-            )
-            sys.stderr.write(
-                "wrote baseline %s (%d findings)\n"
-                % (args.baseline_write, len(all_findings))
-            )
-        except OSError as exc:
-            print("cannot write --baseline-write %s: %s" % (
-                args.baseline_write, exc), file=sys.stderr)
-            return 1
-
-    suppressed = 0
-    if args.baseline:
-        baseline_keys = _load_baseline(args.baseline)
-        for f in all_findings:
-            if _baseline_key(f) in baseline_keys:
-                f.suppressed = True
-                suppressed += 1
-        if suppressed:
-            print("baseline: suppressed %d known finding(s)" % suppressed,
-                  file=sys.stderr)
-
+    tick = 0
+    prev_key = None
+    unchanged = 0
     counts = {"CRITICAL": 0, "WARN": 0, "INFO": 0}
-    for f in all_findings:
-        if not f.suppressed:
-            counts[f.severity] += 1
+    while True:
+        tick += 1
+        skills, all_findings, suppressed, counts = _collect(
+            root, args, skip, sev_want, only)
+        payload = _payload_for(root, skills, all_findings, suppressed, counts)
 
-    payload = {
-        "scanner": "skill_scanner", "version": VERSION,
-        "root": str(root), "skills_scanned": [str(s) for s in sorted(skills)],
-        "findings": [f.as_dict() for f in all_findings],
-        "summary": dict(counts, suppressed=suppressed),
-        "verdict": "REJECT-PENDING-REVIEW" if counts["CRITICAL"] else
-                   ("REVIEW-WARNINGS" if counts["WARN"] else "PASS"),
-    }
+        if tick == 1 and args.baseline_write:
+            try:
+                _atomic_write(
+                    args.baseline_write,
+                    json.dumps({"findings": [f.as_dict() for f in all_findings]},
+                               indent=2) + "\n",
+                )
+                sys.stderr.write(
+                    "wrote baseline %s (%d findings)\n"
+                    % (args.baseline_write, len(all_findings))
+                )
+            except OSError as exc:
+                print("cannot write --baseline-write %s: %s" % (
+                    args.baseline_write, exc), file=sys.stderr)
+                return 1
 
-    if args.out:
-        try:
-            _atomic_write(args.out, json.dumps(payload, indent=2) + "\n")
-        except OSError as exc:
-            print("cannot write --out %s: %s" % (args.out, exc), file=sys.stderr)
-            return 1
+        if args.out:
+            try:
+                _atomic_write(args.out, json.dumps(payload, indent=2) + "\n")
+            except OSError as exc:
+                print("cannot write --out %s: %s" % (args.out, exc),
+                      file=sys.stderr)
+                return 1
 
-    if args.verdict:
-        slim = dict({"verdict": payload["verdict"], "skills": len(skills)},
-                    **payload["summary"])
-        if not write_verdict(args.verdict, slim):
-            return 1
+        if args.verdict:
+            slim = dict({"verdict": payload["verdict"], "skills": len(skills)},
+                        **payload["summary"])
+            if not write_verdict(args.verdict, slim):
+                return 1
 
-    if args.jq:
-        val, found = _dig(payload, args.jq)
-        if not found:
-            print("unknown key %r (payload keys: %s)" % (
-                args.jq, ", ".join(payload)), file=sys.stderr)
-            return 2
-        print(json.dumps(val, indent=2) if isinstance(val, (dict, list)) else val)
-    elif args.json:
-        print(json.dumps(payload, indent=2))
-    else:
-        print("agent-skill security scan v%s — %d skill(s) under %s\n" % (VERSION, len(skills), root))
-        by_skill = {}
-        for f in all_findings:
-            by_skill.setdefault(f.skill, []).append(f)
-        for sd in sorted(skills):
-            fs = by_skill.get(sd.name, [])
-            print("=== %s (%s) ===" % (sd.name, sd))
-            if not fs:
-                print("  clean — no findings\n")
-                continue
-            for f in fs:
-                loc = "%s:%s" % (f.file, f.line) if f.line else f.file
-                tag = " suppressed" if f.suppressed else ""
-                print("  [%s]%s %s %s\n      %s" % (
-                    f.severity, tag, f.check, loc, f.message))
-                if f.evidence:
-                    print("      > %s" % f.evidence)
-            print()
-        print("Summary: %d CRITICAL, %d WARN, %d INFO" %
-              (counts["CRITICAL"], counts["WARN"], counts["INFO"]) + (
-                  " (%d suppressed)" % suppressed if suppressed else ""))
-        if counts["CRITICAL"]:
-            print("Verdict guidance: CRITICAL findings present — do not install/run this skill "
-                  "until a human reviews every flagged line. See references/skill-supply-chain.md.")
-        elif counts["WARN"]:
-            print("Verdict guidance: warnings present — read each flagged file before approving. "
-                  "A clean pattern scan is necessary but not sufficient (OWASP AST08).")
+        if args.watch:
+            sys.stderr.write("watch tick=%d findings=%d suppressed=%d\n"
+                             % (tick, len(all_findings), suppressed))
+            key = (payload["verdict"], counts["CRITICAL"], counts["WARN"],
+                   counts["INFO"], suppressed, len(all_findings))
+            unchanged = unchanged + 1 if key == prev_key else 0
+            prev_key = key
+            if not (quiet and not counts["CRITICAL"]):
+                tick_payload = dict(payload, tick=tick)
+                if args.jq:
+                    val, found = _dig(tick_payload, args.jq)
+                    if not found:
+                        print("unknown key %r (payload keys: %s)" % (
+                            args.jq, ", ".join(tick_payload)), file=sys.stderr)
+                        return 2
+                    print(json.dumps(val, indent=2)
+                          if isinstance(val, (dict, list)) else val)
+                elif args.json:
+                    print(json.dumps(tick_payload))
+                else:
+                    print(json.dumps(dict(
+                        {"tick": tick, "verdict": payload["verdict"],
+                         "skills": len(skills)}, **payload["summary"])))
+            if args.unchanged_max and unchanged >= args.unchanged_max:
+                sys.stderr.write(
+                    "watch: %d consecutive identical ticks\n" % unchanged)
+                break
+            if watch_max and tick >= watch_max:
+                break
+            if watch_deadline and time.time() >= watch_deadline:
+                sys.stderr.write("watch: deadline hit after %d ticks\n" % tick)
+                break
+            try:
+                time.sleep(args.watch)
+            except KeyboardInterrupt:
+                break
+            continue
+
+        if args.jq:
+            val, found = _dig(payload, args.jq)
+            if not found:
+                print("unknown key %r (payload keys: %s)" % (
+                    args.jq, ", ".join(payload)), file=sys.stderr)
+                return 2
+            print(json.dumps(val, indent=2)
+                  if isinstance(val, (dict, list)) else val)
+        elif args.json:
+            print(json.dumps(payload, indent=2))
         else:
-            print("Verdict guidance: no pattern hits. Still read SKILL.md end-to-end — "
-                  "natural-language attacks evade pattern scanners (OWASP AST08).")
+            _print_report(root, skills, all_findings, suppressed, counts)
+        break
     return 1 if counts["CRITICAL"] else 0
 
 

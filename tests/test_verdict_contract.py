@@ -32,8 +32,11 @@ class VerdictContractTests(unittest.TestCase):
     def test_every_watch_script_emits_via_shared_helper(self) -> None:
         offenders = []
         count = 0
+        # skill_scanner.py is a standalone vendored script (no _watch import
+        # possible); it mirrors the emit contract inline instead.
+        standalone = {"skill_scanner.py"}
         for f in sorted(SCRIPTS.glob("*.py")):
-            if f.name.startswith("_"):
+            if f.name.startswith("_") or f.name in standalone:
                 continue
             src = f.read_text(encoding="utf-8")
             has_watch = '"--watch"' in src or "'--watch'" in src
@@ -50,9 +53,11 @@ class VerdictContractTests(unittest.TestCase):
     def test_watch_knob_flags_route_through_helpers(self) -> None:
         # --quiet presets read via _watch.quiet; --max-ticks via _watch.cap;
         # --watch-max via _watch.deadline — so env overrides stay uniform.
+        # skill_scanner.py is standalone (no _watch import possible).
+        standalone = {"skill_scanner.py"}
         offenders = []
         for f in sorted(SCRIPTS.glob("*.py")):
-            if f.name.startswith("_"):
+            if f.name.startswith("_") or f.name in standalone:
                 continue
             src = f.read_text(encoding="utf-8")
             for flag, helper in (

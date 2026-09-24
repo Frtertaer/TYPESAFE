@@ -819,7 +819,7 @@ def filter_until(entries: list[dict], until: float | None) -> list[dict]:
     return out
 
 
-def prune_entries(path: Path, apply_filters, retries: int = 8) -> dict | None:
+def prune_entries(path: Path, apply_filters, retries: int = 8, archive=None) -> dict | None:
     """Rewrite `path` keeping entries that pass `apply_filters`.
 
     Snapshot-checked: the log is append-only, so the rewrite happens only
@@ -828,6 +828,10 @@ def prune_entries(path: Path, apply_filters, retries: int = 8) -> dict | None:
     snapshot. A file that does not end in a newline may have a line being
     appended right now and is treated as busy. Returns a stats dict or
     None when the log kept changing underneath us.
+
+    With `archive` set, the dropped entries are appended to that JSONL path
+    just before the rewrite commits (a crash between the two may re-archive
+    them on the next run -- dedupe-safe, never lossy).
     """
     for _ in range(retries):
         snap = path.read_bytes()
@@ -836,6 +840,8 @@ def prune_entries(path: Path, apply_filters, retries: int = 8) -> dict | None:
             continue
         entries, bad = _parse_jsonl(snap.decode("utf-8", errors="replace"))
         kept = apply_filters(entries)
+        kept_ids = {id(item) for item in kept}
+        dropped = [item for item in entries if id(item) not in kept_ids]
         fd, tmp = tempfile.mkstemp(
             prefix=path.name + ".", dir=str(path.parent), suffix=".tmp"
         )
@@ -844,12 +850,17 @@ def prune_entries(path: Path, apply_filters, retries: int = 8) -> dict | None:
                 for item in kept:
                     out.write(json.dumps(item, sort_keys=True) + "\n")
             if path.read_bytes() == snap:
+                if archive is not None and dropped:
+                    with Path(archive).open("a", encoding="utf-8", newline="\n") as fh:
+                        for item in dropped:
+                            fh.write(json.dumps(item, sort_keys=True) + "\n")
                 os.replace(tmp, str(path))
                 return {
                     "total": len(entries),
                     "kept": len(kept),
                     "dropped": len(entries) - len(kept),
                     "bad": bad,
+                    "archived": len(dropped) if archive is not None else 0,
                 }
             os.unlink(tmp)
         except OSError:
@@ -1182,6 +1193,12 @@ def main(argv: list[str] | None = None) -> int:
         help="With --prune/--drop-bad: report what would be dropped without rewriting the log",
     )
     parser.add_argument(
+        "--archive",
+        metavar="PATH",
+        default="",
+        help="With --prune: append the dropped entries to PATH as JSONL before rewriting the log (lossless prune)",
+    )
+    parser.add_argument(
         "--drop-bad",
         action="store_true",
         help="Rewrite the log dropping unparseable lines (keeps all well-formed entries)",
@@ -1377,6 +1394,9 @@ def main(argv: list[str] | None = None) -> int:
         or getattr(args, "follow", 0.0)
     ):
         sys.stderr.write("--file - (stdin) supports neither --prune, --drop-bad, --watch nor --follow\n")
+        return 2
+    if getattr(args, "archive", "") and not args.prune:
+        sys.stderr.write("--archive requires --prune\n")
         return 2
     if str(path) != "-" and not path.is_file():
         sys.stderr.write("no decisions log at %s\n" % path)
@@ -2026,7 +2046,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
         else:
             try:
-                result = prune_entries(path, _filtered)
+                result = prune_entries(
+                    path, _filtered, archive=args.archive or None
+                )
             except OSError as exc:
                 sys.stderr.write("prune failed: %s\n" % exc)
                 return 1
@@ -2036,8 +2058,16 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return 1
             sys.stderr.write(
-                "pruned %d of %d entries (kept %d, dropped %d bad line(s))\n"
-                % (result["dropped"], result["total"], result["kept"], result["bad"])
+                "pruned %d of %d entries (kept %d, dropped %d bad line(s)%s)\n"
+                % (
+                    result["dropped"],
+                    result["total"],
+                    result["kept"],
+                    result["bad"],
+                    ", archived %d to %s" % (result["archived"], args.archive)
+                    if args.archive
+                    else "",
+                )
             )
     if args.errors:
         bad_rows = load_bad_lines(path)

@@ -1834,6 +1834,47 @@ class PruneTest(unittest.TestCase):
             kept = path.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(kept), 1)
 
+    def test_archive_saves_pruned_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            archive = Path(tmp) / "archive.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1.0, "harness": "a", "jev_status": "idf"},
+                    {"ts": 2.0, "harness": "b", "jev_status": "winner"},
+                    {"ts": 3.0, "harness": "a", "jev_status": "ok"},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path),
+                "--prune", "--harness", "a",
+                "--archive", str(archive),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("archived 1", proc.stderr)
+            kept = [
+                json.loads(l)["harness"]
+                for l in path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(kept, ["a", "a"])
+            dropped = [
+                json.loads(l)["harness"]
+                for l in archive.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(dropped, ["b"])
+
+    def test_archive_requires_prune(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1.0, "jev_status": "idf"}])
+            proc = self.run_cli(
+                "--file", str(path), "--archive", str(Path(tmp) / "a.jsonl")
+            )
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("--archive requires --prune", proc.stderr)
+            self.assertEqual(len(path.read_text().splitlines()), 1)
+
     def test_prune_entries_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

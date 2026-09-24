@@ -134,6 +134,22 @@ class DoctorTests(unittest.TestCase):
             self.assertIn("| api_key |", text)
             self.assertIn("| NO |", text)
 
+    def test_md_prints_markdown_table_to_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(
+                [
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--md",
+                ],
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 1)
+            self.assertIn("# doctor report", text)
+            self.assertIn("verdict: fail", text)
+            self.assertIn("| api_key |", text)
+            self.assertIn("| NO |", text)
+
     def test_full_install_ok(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"

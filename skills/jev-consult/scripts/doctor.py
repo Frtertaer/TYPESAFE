@@ -351,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--schema", action="store_true", help="Print the {ok,checks} payload key contract and check-name catalog (--json emits the object) and exit")
     parser.add_argument("--json", action="store_true", help="With --schema: emit the contract object instead of text rows (the normal payload is already JSON)")
     parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown report (verdict line + per-check table with hints) to PATH")
+    parser.add_argument("--md", action="store_true", help="Print the same markdown report to stdout instead of the JSON payload")
     parser.add_argument("--jsonl", action="store_true", help="Print each check as one JSON line instead of the {ok,checks} payload (for piping)")
     parser.add_argument("--baseline", metavar="PATH", default="", help="Mark checks recorded as failing in PATH (written by --baseline-write) as suppressed: they still print but do not fail the run, watch ticks, or verdict; '-' reads the baseline JSON from stdin")
     parser.add_argument("--baseline-write", metavar="PATH", default="", help="Snapshot the currently failing checks to PATH for later --baseline runs")
@@ -652,7 +653,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         sys.stdout.write(json.dumps(node, ensure_ascii=False) + "\n")
         return 0
-    if getattr(args, "report", ""):
+    def _report_lines() -> list:
         rep = [
             "# doctor report",
             "",
@@ -671,12 +672,18 @@ def main(argv: list[str] | None = None) -> int:
                     c.get("hint") or "",
                 )
             )
+        return rep
+
+    if getattr(args, "report", ""):
         try:
-            _atomic_write(Path(args.report), "\n".join(rep) + "\n")
+            _atomic_write(Path(args.report), "\n".join(_report_lines()) + "\n")
         except OSError as exc:
             sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
             return 1
         sys.stderr.write("wrote %s\n" % args.report)
+    if getattr(args, "md", False):
+        sys.stdout.write("\n".join(_report_lines()) + "\n")
+        return 0 if ok else 1
     if getattr(args, "jsonl", False):
         for c in shown:
             sys.stdout.write(json.dumps(c, ensure_ascii=False, sort_keys=True) + "\n")

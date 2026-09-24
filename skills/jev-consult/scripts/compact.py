@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
+import io
 import json
 import math
 import os
@@ -1653,6 +1654,18 @@ def cmd_compact(args: argparse.Namespace) -> int:
         if isinstance(spill, dict) and spill.get("files"):
             lines.append("- spill files: %d" % len(spill["files"]))
         text = "\n".join(lines) + "\n"
+    elif getattr(args, "csv", False):
+        keys = _key_projection(args)
+        if keys is None:
+            return 2
+        rows = result.get("decisions") if isinstance(result, dict) else None
+        sio = io.StringIO()
+        _watch.csv_table(
+            [row for row in (rows or []) if isinstance(row, dict)],
+            keys or ["id", "tool", "keepCall", "keepResult", "action", "reason"],
+            out=sio,
+        )
+        text = sio.getvalue()
     elif getattr(args, "jsonl", False):
         keys = _key_projection(args)
         if keys is None:
@@ -2049,10 +2062,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Emit each per-call decision as one JSON line (for piping; -o writes the lines to the file); with --diff emits one {type: changed|only_a|only_b, ...} row per differing call",
     )
     parser.add_argument(
+        "--csv",
+        action="store_true",
+        help="Emit the per-call decisions as CSV rows (--keys picks the columns; -o writes the rows to the file); with --diff emits type,id,tool,a,b rows",
+    )
+    parser.add_argument(
         "--keys",
         metavar="a,b",
         default="",
-        help="With --jsonl: keep only these keys in each emitted row (rc 2 on an empty list)",
+        help="With --jsonl/--csv: keep only these keys in each emitted row / as the columns (rc 2 on an empty list)",
     )
     parser.add_argument(
         "--json",
@@ -2295,6 +2313,14 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write(
                     json.dumps(_proj({"type": "only_b", "id": ident}), ensure_ascii=False) + "\n"
                 )
+        elif getattr(args, "csv", False):
+            keys = _key_projection(args)
+            if keys is None:
+                return 2
+            rows = [{"type": "changed", **row} for row in payload["changed"]]
+            rows += [{"type": "only_a", "id": ident} for ident in payload["only_a"]]
+            rows += [{"type": "only_b", "id": ident} for ident in payload["only_b"]]
+            _watch.csv_table(rows, keys or ["type", "id", "tool", "a", "b"])
         else:
             sys.stdout.write(
                 "diff: same=%d changed=%d only_a=%d only_b=%d\n"

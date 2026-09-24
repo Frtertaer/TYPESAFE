@@ -1211,6 +1211,61 @@ class CompactCliTests(unittest.TestCase):
                 )
             self.assertEqual(rc, 2)
 
+    def test_csv_emits_decision_rows(self) -> None:
+        import csv as _csv
+
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [str(f), "--history", "--fake", "--min-reduction", "0", "--csv"]
+                )
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(io.StringIO(buf.getvalue())))
+            self.assertEqual(
+                rows[0],
+                ["id", "tool", "keepCall", "keepResult", "action", "reason"],
+            )
+            self.assertGreater(len(rows), 1)
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [
+                        str(f), "--history", "--fake", "--min-reduction", "0",
+                        "--csv", "--keys", "id,action",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(io.StringIO(buf.getvalue())))
+            self.assertEqual(rows[0], ["id", "action"])
+
+    def test_diff_csv_emits_row_table(self) -> None:
+        import csv as _csv
+
+        with tempfile.TemporaryDirectory() as tmp:
+            a = Path(tmp) / "a.json"
+            b = Path(tmp) / "b.json"
+            a.write_text(json.dumps({"decisions": [
+                {"id": "t1", "tool": "read", "action": "keep", "reason": "pinned"},
+                {"id": "t2", "tool": "edit", "action": "drop_call", "reason": "call_dropped"},
+            ]}), encoding="utf-8")
+            b.write_text(json.dumps({"decisions": [
+                {"id": "t1", "tool": "read", "action": "keep", "reason": "pinned"},
+                {"id": "t2", "tool": "edit", "action": "keep", "reason": "kept"},
+            ]}), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(["--diff", str(a), str(b), "--csv"])
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(io.StringIO(buf.getvalue())))
+            self.assertEqual(rows[0], ["type", "id", "tool", "a", "b"])
+            self.assertEqual(
+                [r[0] for r in rows[1:]], ["changed"]
+            )
+            self.assertEqual(rows[1][1:5], ["t2", "edit", "drop_call", "keep"])
+
     def test_md_emits_markdown_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

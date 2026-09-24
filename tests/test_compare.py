@@ -317,6 +317,18 @@ class CliTest(unittest.TestCase):
         rows = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
         self.assertEqual([r["id"] for r in rows], ["drift_case", "stall_case"])
 
+    def test_cli_jsonl_keys_projects_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            proc = self.run_cli("--cases", str(path), "--jsonl", "--keys", "id,defect")
+            bad = self.run_cli("--cases", str(path), "--jsonl", "--keys", " ,")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        rows = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+        self.assertEqual(set(rows[0]), {"id", "defect"})
+        self.assertEqual(rows[0]["id"], "drift_case")
+        self.assertEqual(bad.returncode, 2)
+
     def test_cli_out_writes_result_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cases.json"

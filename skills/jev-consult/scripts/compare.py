@@ -386,6 +386,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the result payload (e.g. failures); unknown key exits 2")
     parser.add_argument("--md", action="store_true", help="Print rows as a Markdown table")
     parser.add_argument("--jsonl", action="store_true", help="Print one row JSON per line")
+    parser.add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these keys in each emitted row (rc 2 on an empty list)")
     parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH")
     parser.add_argument("--report", metavar="PATH", default="", help="Write a markdown compare report (verdict + per-case table) to PATH; with --json writes the report object instead")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, cases, failures} JSON to PATH (in --watch mode refreshed every tick) '-' prints it to stdout.")
@@ -749,7 +750,14 @@ def main(argv: list[str] | None = None) -> int:
     elif args.md:
         sys.stdout.write(format_md(result["rows"], live=args.live))
     elif args.jsonl:
+        key_sel = getattr(args, "keys", "") or ""
+        proj = [k.strip() for k in key_sel.split(",") if k.strip()] if key_sel else []
+        if key_sel and not proj:
+            sys.stderr.write("--keys names no fields\n")
+            return 2
         for row in result["rows"]:
+            if proj and isinstance(row, dict):
+                row = {k: row.get(k) for k in proj}
             sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
     else:
         sys.stdout.write(format_table(result["rows"], live=args.live))

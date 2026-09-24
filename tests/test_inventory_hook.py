@@ -1357,7 +1357,9 @@ class InventoryHookTests(unittest.TestCase):
         self.assertEqual(out, {})
         self.assertEqual(sidecar["jev_pick"]["name"], "jwt-auth")
 
-    def test_cyrillic_prompt_does_not_write_miss(self) -> None:
+    def test_cyrillic_prompt_writes_miss(self) -> None:
+        # Cyrillic task text yields tokens (unicode tokenizer), so an empty
+        # catalog takes the same miss path as a Latin prompt.
         with tempfile.TemporaryDirectory() as tmp:
             out = HOOK.handle(
                 {
@@ -1370,8 +1372,8 @@ class InventoryHookTests(unittest.TestCase):
                 pick_fn=skip_pick,
             )
             miss = Path(tmp) / ".jev-tools-miss.json"
-            self.assertEqual(out, {})
-            self.assertFalse(miss.is_file())
+            self.assertTrue(miss.is_file())
+        self.assertIn("from-miss", json.dumps(out))
 
     def test_latin_empty_shortlist_writes_miss(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

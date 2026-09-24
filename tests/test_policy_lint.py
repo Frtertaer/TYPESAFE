@@ -1160,6 +1160,15 @@ class StdinDashTests(unittest.TestCase):
             self.assertEqual(rows[1]["path"], "<stdin>")
             self.assertEqual(rc, 0)
 
+    def test_init_prints_lint_clean_policy(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = policy_lint.main(["--init"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertTrue(set(policy_lint.REQUIRED_KEYS) <= set(payload))
+        self.assertEqual(policy_lint.lint_policy(payload), [])
+
 
 if __name__ == "__main__":
     unittest.main()

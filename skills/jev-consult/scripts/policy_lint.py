@@ -98,6 +98,49 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "stop_words",
 )
 
+# --init prints this minimal lint-clean policy: every required key, the
+# shipped defaults, one must_ask template (choice criteria stay empty —
+# options are injected per request at scaffold time).
+INIT_POLICY = {
+    "version": 3,
+    "model": "jev-latest",
+    "endpoint": "https://api.typesafe.ai/v1/systemone",
+    "role": "decision_maker",
+    "coder_role": "inspect_and_implement",
+    "default": "ask_jev",
+    "question_soft_max": 8,
+    "question_hard_max": 32,
+    "choice_option_hard_max": 255,
+    "confidence_floor": 0.55,
+    "noul_yes": 0.7,
+    "noul_no": 0.3,
+    "noul_unsure": 0.5,
+    "strong_pick": 0.85,
+    "tight_gap": 0.08,
+    "sidecar_ttl_seconds": 14400,
+    "must_ask": ["approach"],
+    "never_ask": [
+        "tool_checkable_fact",
+        "file_contents",
+        "command_output",
+        "secret_value",
+    ],
+    "require_hatch": True,
+    "escalate_if": {
+        "confidence_below": 0.55,
+        "noul_near": 0.5,
+        "choice_gap_below": 0.08,
+        "irreversible": True,
+    },
+    "templates": {
+        "approach": {
+            "type": "choice",
+            "instructions": "Which approach should the coder take?",
+            "criteria": {},
+        }
+    },
+}
+
 
 RULES = {
     "P000": "policy file is not a JSON object",
@@ -576,7 +619,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python policy_lint.py [POLICY.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch/--diff).\nStatic checks for policy.json (required keys, ranges, ordering, template).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --diff PATH       diff this policy against another JSON file (+/-/~ lines; "-" reads it from stdin)\n  --show            print the effective policy JSON and exit\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_PLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the known policy.json key/type table (--json emits an object)\n  --usage           flag known keys no pack script reads (P015, info; scans scripts dir)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad policy dict; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python policy_lint.py [POLICY.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch/--diff).\nStatic checks for policy.json (required keys, ranges, ordering, template).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --diff PATH       diff this policy against another JSON file (+/-/~ lines; "-" reads it from stdin)\n  --show            print the effective policy JSON and exit\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_PLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the known policy.json key/type table (--json emits an object)\n  --usage           flag known keys no pack script reads (P015, info; scans scripts dir)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad policy dict; exit 1 when no findings\n  --init            print a minimal lint-clean policy.json skeleton and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -683,18 +726,8 @@ def main(argv: list[str] | None = None) -> int:
                 "self-test: %s rules=%s\n" % ("ok" if ok else "FAIL", ",".join(found))
             )
         return 0 if ok else 1
-    if "--rules" in argv:
-        if "--json" in argv:
-            sys.stdout.write(
-                json.dumps(
-                    [{"rule": r, "description": RULES[r]} for r in sorted(RULES)],
-                    indent=2,
-                )
-                + "\n"
-            )
-        else:
-            for r in sorted(RULES):
-                sys.stdout.write("%s: %s\n" % (r, RULES[r]))
+    if "--init" in argv:
+        sys.stdout.write(json.dumps(INIT_POLICY, indent=2) + "\n")
         return 0
     if "--schema" in argv:
         rows = schema_rows()

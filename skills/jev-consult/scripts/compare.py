@@ -32,9 +32,12 @@ def cases_path() -> Path:
     return HERE.parent / "examples" / "compare-cases.json"
 
 
-def load_cases(path: Path | None = None) -> dict[str, Any]:
+def load_cases(path: Path | str | None = None) -> dict[str, Any]:
     try:
-        data = json.loads((path or cases_path()).read_text(encoding="utf-8"))
+        if path is not None and str(path) == "-":
+            data = json.loads(sys.stdin.read())
+        else:
+            data = json.loads((Path(path) if path else cases_path()).read_text(encoding="utf-8"))
     except OSError as exc:
         raise SystemExit("cannot read cases: %s" % exc)
     except ValueError as exc:
@@ -343,10 +346,10 @@ def env_report(args) -> dict:
         watch_secs = float(os.environ.get("JEV_COMPARE_WATCH_SECS", "") or 0)
     except ValueError:
         watch_secs = 0.0
-    cases = Path(args.cases) if args.cases else cases_path()
+    cases = args.cases or str(cases_path())
     return {
         "cases": str(cases),
-        "cases_exists": cases.is_file(),
+        "cases_exists": cases != "-" and Path(cases).is_file(),
         "only": args.only,
         "live": bool(args.live),
         "strict": bool(args.strict),
@@ -385,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH")
     parser.add_argument("--report", metavar="PATH", default="", help="Write a markdown compare report (verdict + per-case table) to PATH; with --json writes the report object instead")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, cases, failures} JSON to PATH (in --watch mode refreshed every tick)")
-    parser.add_argument("--cases", default=os.environ.get("JEV_COMPARE_CASES", "") or None, help="Path to compare-cases.json")
+    parser.add_argument("--cases", default=os.environ.get("JEV_COMPARE_CASES", "") or None, help="Path to compare-cases.json ('-' reads cases JSON from stdin; needs a file for --watch/--diff)")
     parser.add_argument("--schema", action="store_true", help="Print the compare-cases.json key contract and exit (--json emits the object)")
     parser.add_argument(
         "--only",
@@ -524,6 +527,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0 if ok else 1
     only = {s.strip() for s in args.only.split(",") if s.strip()} or None
+    if args.cases == "-" and (args.watch or args.diff):
+        sys.stderr.write("--cases - (stdin) supports neither --watch nor --diff\n")
+        return 2
     if args.watch and args.watch > 0:
         import time as _time
 
@@ -539,7 +545,7 @@ def main(argv: list[str] | None = None) -> int:
             cur = run(
                 live=args.live,
                 as_json=args.as_json,
-                path=Path(args.cases) if args.cases else None,
+                path=args.cases or None,
                 only=only,
             )
             failing = strict_failures(cur["rows"], args.live)
@@ -577,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
     result = run(
         live=args.live,
         as_json=args.as_json,
-        path=Path(args.cases) if args.cases else None,
+        path=args.cases or None,
         only=only,
     )
     if args.baseline:

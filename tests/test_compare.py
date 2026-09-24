@@ -894,5 +894,33 @@ class TrendTest(unittest.TestCase):
             self.assertEqual(payload["trend"], [])
 
 
+class StdinCasesTests(unittest.TestCase):
+    def run_cli(self, *argv: str, stdin: str = "") -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(COMPARE), *argv],
+            capture_output=True,
+            text=True,
+            input=stdin,
+        )
+
+    CASES = Path(__file__).resolve().parent.parent / "skills" / "jev-consult" / "examples" / "compare-cases.json"
+
+    def test_cases_stdin(self) -> None:
+        proc = self.run_cli("--cases", "-", "--json", stdin=self.CASES.read_text(encoding="utf-8"))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertTrue(payload["rows"])
+
+    def test_cases_stdin_bad_json(self) -> None:
+        proc = self.run_cli("--cases", "-", stdin="{bad")
+        self.assertNotEqual(proc.returncode, 0)
+
+    def test_cases_stdin_rejects_watch_and_diff(self) -> None:
+        for extra in (["--watch", "1"], ["--diff", "x.json"]):
+            proc = self.run_cli("--cases", "-", *extra, stdin=self.CASES.read_text(encoding="utf-8"))
+            self.assertEqual(proc.returncode, 2, extra)
+            self.assertIn("stdin", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

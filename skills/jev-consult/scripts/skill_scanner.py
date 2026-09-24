@@ -552,15 +552,27 @@ def _collect(root, args, skip, sev_want, only):
     if only:
         findings = [f for f in findings if f.check in only]
     suppressed = 0
-    if args.baseline:
-        baseline_keys = _load_baseline(args.baseline)
-        for f in findings:
-            if _baseline_key(f) in baseline_keys:
-                f.suppressed = True
-                suppressed += 1
-        if suppressed:
-            sys.stderr.write(
-                "baseline: suppressed %d known finding(s)\n" % suppressed)
+    if args.baseline or args.diff:
+        baseline_keys = _load_baseline(args.diff or args.baseline)
+        if args.diff:
+            kept = []
+            for f in findings:
+                if _baseline_key(f) in baseline_keys:
+                    suppressed += 1
+                else:
+                    kept.append(f)
+            findings = kept
+            if suppressed:
+                sys.stderr.write(
+                    "diff: %d known finding(s) hidden\n" % suppressed)
+        else:
+            for f in findings:
+                if _baseline_key(f) in baseline_keys:
+                    f.suppressed = True
+                    suppressed += 1
+            if suppressed:
+                sys.stderr.write(
+                    "baseline: suppressed %d known finding(s)\n" % suppressed)
     counts = {"CRITICAL": 0, "WARN": 0, "INFO": 0}
     for f in findings:
         if not f.suppressed:
@@ -671,6 +683,10 @@ def main(argv=None):
     ap.add_argument("--baseline-write", metavar="PATH", default="",
                     help="Snapshot the current findings to PATH for later "
                          "--baseline runs (output/rc unchanged).")
+    ap.add_argument("--diff", metavar="PATH", default="",
+                    help="Hide findings recorded in PATH (a --baseline-write "
+                         "file) and report only new ones; '-' reads stdin. "
+                         "Mutually exclusive with --baseline.")
     ap.add_argument("--severity", metavar="LIST", default="",
                     help="Only report these severities (comma list; '-' reads stdin).")
     ap.add_argument("--only", metavar="LIST", default="",
@@ -749,6 +765,9 @@ def main(argv=None):
         print("error: path does not exist: %s\n"
               "Fix: pass the skill directory itself (the one containing SKILL.md), "
               "e.g. python3 skill_scanner.py PATH/skills/some-skill" % root, file=sys.stderr)  # skillscan:allow
+        return 2
+    if args.diff and args.baseline:
+        print("--diff and --baseline are mutually exclusive", file=sys.stderr)
         return 2
     sev_want = None
     if args.severity:

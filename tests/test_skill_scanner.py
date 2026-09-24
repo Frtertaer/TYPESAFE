@@ -900,6 +900,43 @@ class JsonlFlagTests(unittest.TestCase):
                 {(r["severity"], r["check"], r["line"]) for r in jsonl_rows},
                 {(r[0], r[1], int(r[3])) for r in csv_rows})
 
+    def test_diff_hides_known_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = make_skill(tmp, self.BAD)
+            base = Path(tmp) / "base.json"
+            base.write_text(json.dumps(
+                {"findings": [f.as_dict() for f in scanner.scan_skill(skill)]}),
+                encoding="utf-8")
+            rc, out, err = self._run(
+                [str(skill), "--diff", str(base)])
+            self.assertEqual(rc, 0)
+            self.assertIn("0 CRITICAL", out)
+            self.assertNotIn("[CRITICAL]", out)
+            self.assertIn("diff:", err)
+
+    def test_diff_reports_only_new_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = make_skill(tmp, self.BAD)
+            base = Path(tmp) / "base.json"
+            keep = [f.as_dict() for f in scanner.scan_skill(skill)]
+            base.write_text(json.dumps({"findings": keep[:-1]}),
+                            encoding="utf-8")
+            rc, out, _ = self._run(
+                [str(skill), "--diff", str(base), "--json"])
+            payload = json.loads(out)
+            self.assertEqual(len(payload["findings"]), 1)
+            self.assertEqual(rc, 1)
+
+    def test_diff_and_baseline_are_mutually_exclusive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = make_skill(tmp, self.BAD)
+            base = Path(tmp) / "base.json"
+            base.write_text("{}", encoding="utf-8")
+            rc, _out, err = self._run(
+                [str(skill), "--diff", str(base), "--baseline", str(base)])
+            self.assertEqual(rc, 2)
+            self.assertIn("mutually exclusive", err)
+
     def test_version_flag(self) -> None:
         rc, out, _ = self._run(["--version"])
         self.assertEqual(rc, 0)

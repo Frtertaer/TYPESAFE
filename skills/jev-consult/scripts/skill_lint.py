@@ -249,19 +249,21 @@ def lint_skill(path: Path) -> list[dict]:
                     "message": "scripts/%s never mentioned in SKILL.md" % script,
                 }
             )
+        exposed: dict[str, set] = {}
+        for p in scripts_dir.glob("*.py"):
+            try:
+                src = p.read_text(encoding="utf-8-sig", errors="replace")
+            except OSError:
+                continue
+            flags = set(re.findall(r"""add_argument\([^)]*["'](--[a-z][a-z0-9-]+)["']""", src))
+            flags |= set(re.findall(r"""["'](--[a-z][a-z0-9-]+)["']\s+in\s+argv""", src))
+            flags |= set(re.findall(r"""argv\[\w*\]\s*==\s*["'](--[a-z][a-z0-9-]+)["']""", src))
+            flags |= set(re.findall(r"""_flag_value\([^)]*["'](--[a-z][a-z0-9-]+)["']""", src))
+            exposed[p.name] = flags
         for script in sorted(p.name for p in scripts_dir.glob("*.py")):
             if script.startswith("_") or script not in mentioned:
                 continue
-            try:
-                src = (scripts_dir / script).read_text(
-                    encoding="utf-8-sig", errors="replace"
-                )
-            except OSError:
-                continue
-            flags = set(re.findall(r"""add_argument\(\s*["'](--[a-z][a-z0-9-]+)""", src))
-            flags |= set(re.findall(r"""["'](--[a-z][a-z0-9-]+)["']\s+in\s+argv""", src))
-            flags |= set(re.findall(r"""argv\[\w*\]\s*==\s*["'](--[a-z][a-z0-9-]+)["']""", src))
-            for flag in sorted(flags):
+            for flag in sorted(exposed.get(script, set())):
                 if flag in ("--help", "--version", "--") or flag in text:
                     continue
                 findings.append(
@@ -271,6 +273,24 @@ def lint_skill(path: Path) -> list[dict]:
                         "message": "scripts/%s exposes %s but SKILL.md never documents it" % (script, flag),
                     }
                 )
+        doc_flags = set(re.findall(r"--[a-z][a-z0-9-]+", text))
+        exposed_all = set().union(*exposed.values()) if exposed else set()
+        exempt = {
+            "--" + n
+            for n in (
+                "help", "version", "-", "force", "yes", "enable",
+                "no-enable", "no-verify", "no-gpg-sign",
+                "uninstall", "check-key",
+            )
+        }
+        for flag in sorted(doc_flags - exposed_all - exempt):
+            findings.append(
+                {
+                    "rule": "S013",
+                    "severity": "warn",
+                    "message": "SKILL.md documents %s but no scripts/*.py exposes it" % flag,
+                }
+            )
     return findings
 
 
@@ -347,6 +367,7 @@ RULES = {
     "S010": "scripts/*.py file is never mentioned in SKILL.md (skips _* and [vendored] scripts)",
     "S011": "policy.json key is never mentioned in SKILL.md",
     "S012": "a mentioned scripts/*.py exposes a --flag that SKILL.md never documents",
+    "S013": "SKILL.md documents a --flag that no scripts/*.py exposes",
 }
 
 

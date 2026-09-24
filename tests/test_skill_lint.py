@@ -181,6 +181,41 @@ class LintSkillTests(unittest.TestCase):
             findings = skill_lint.lint_skill(path)
             self.assertNotIn("S012", {f["rule"] for f in findings})
 
+    def test_s013_fires_on_documented_but_missing_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(
+                tmp,
+                "x",
+                GOOD.format(name="x") + "\n`scripts/real.py` takes `--ghost-flag`.\n",
+            )
+            scripts = path.parent / "scripts"
+            scripts.mkdir()
+            (scripts / "real.py").write_text(
+                "import argparse\np = argparse.ArgumentParser()\np.add_argument('--real-flag')\n",
+                encoding="utf-8",
+            )
+            findings = skill_lint.lint_skill(path)
+            s013 = [f for f in findings if f["rule"] == "S013"]
+            self.assertEqual(len(s013), 1)
+            self.assertIn("--ghost-flag", s013[0]["message"])
+            self.assertEqual(s013[0]["severity"], "warn")
+
+    def test_s013_quiet_when_flag_exposed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(
+                tmp,
+                "x",
+                GOOD.format(name="x") + "\n`scripts/real.py` takes `--real-flag`.\n",
+            )
+            scripts = path.parent / "scripts"
+            scripts.mkdir()
+            (scripts / "real.py").write_text(
+                "import argparse\np = argparse.ArgumentParser()\np.add_argument('--real-flag')\n",
+                encoding="utf-8",
+            )
+            findings = skill_lint.lint_skill(path)
+            self.assertNotIn("S013", {f["rule"] for f in findings})
+
     def test_s012_ignores_unmentioned_and_subprocess_args(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = write_skill(

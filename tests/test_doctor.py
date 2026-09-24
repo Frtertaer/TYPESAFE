@@ -934,6 +934,34 @@ class DoctorSchemaTests(unittest.TestCase):
             self.assertIsInstance(row["ok"], bool)
         self.assertNotIn('"checks"', text)
 
+    def test_jsonl_keys_projects_check_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(
+                [
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--jsonl", "--keys", "check,ok",
+                ],
+                cwd=tmp,
+            )
+        self.assertIn(rc, (0, 1))
+        lines = [json.loads(l) for l in text.splitlines() if l.strip()]
+        self.assertGreater(len(lines), 0)
+        for row in lines:
+            self.assertEqual(set(row), {"check", "ok"})
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with patch.object(sys, "stderr", buf):
+                rc, _, _ = run_main(
+                    [
+                        "--home", tmp,
+                        "--hermes-home", str(Path(tmp) / "h"),
+                        "--jsonl", "--keys", " ,",
+                    ],
+                    cwd=tmp,
+                )
+            self.assertEqual(rc, 2)
+
 
 class DoctorBaselineTests(unittest.TestCase):
     def _empty_home(self, tmp: str) -> Path:

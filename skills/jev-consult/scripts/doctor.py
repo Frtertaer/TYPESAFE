@@ -353,6 +353,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown report (verdict line + per-check table with hints) to PATH")
     parser.add_argument("--md", action="store_true", help="Print the same markdown report to stdout instead of the JSON payload")
     parser.add_argument("--jsonl", action="store_true", help="Print each check as one JSON line instead of the {ok,checks} payload (for piping)")
+    parser.add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these check keys in each row (rc 2 on an empty list)")
     parser.add_argument("--baseline", metavar="PATH", default="", help="Mark checks recorded as failing in PATH (written by --baseline-write) as suppressed: they still print but do not fail the run, watch ticks, or verdict; '-' reads the baseline JSON from stdin")
     parser.add_argument("--baseline-write", metavar="PATH", default="", help="Snapshot the currently failing checks to PATH for later --baseline runs")
     parser.add_argument("--self-test", action="store_true", help="Run every check against a synthetic empty HOME; exit 1 when no check fails")
@@ -685,8 +686,18 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("\n".join(_report_lines()) + "\n")
         return 0 if ok else 1
     if getattr(args, "jsonl", False):
+        key_sel = getattr(args, "keys", "") or ""
+        keys = [k.strip() for k in key_sel.split(",") if k.strip()]
+        if key_sel and not keys:
+            sys.stderr.write("--keys names no fields\n")
+            return 2
         for c in shown:
-            sys.stdout.write(json.dumps(c, ensure_ascii=False, sort_keys=True) + "\n")
+            row = (
+                {k: c.get(k) for k in keys}
+                if keys and isinstance(c, dict)
+                else c
+            )
+            sys.stdout.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
         return 0 if ok else 1
     sys.stdout.write(text)
     return 0 if ok else 1

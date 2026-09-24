@@ -273,10 +273,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Print rows as CSV: id,should_trigger,lexical,score,ok.",
     )
     parser.add_argument(
+        "--md",
+        action="store_true",
+        help="Print rows as a Markdown table (columns follow --keys).",
+    )
+    parser.add_argument(
         "--keys",
         metavar="a,b",
         default="",
-        help="With --jsonl/--csv: keep only these keys/columns per row (rc 2 on an empty list; rc 2 on unknown key).",
+        help="With --jsonl/--csv/--md: keep only these keys/columns per row (rc 2 on an empty list; rc 2 on unknown key).",
     )
     parser.add_argument(
         "--covers",
@@ -1172,6 +1177,21 @@ def main(argv: list[str] | None = None) -> int:
                 "ok": row["ok"],
             }
             sys.stdout.write(",".join(str(cells[k]) for k in row_keys) + "\n")
+        return 0 if result["ok"] else 1
+    if getattr(args, "md", False):
+        _watch.md_table(
+            [
+                {
+                    "id": row["id"],
+                    "should_trigger": row["should_trigger"],
+                    "lexical": row["lexical"],
+                    "score": "" if row["score"] is None else "%.3f" % row["score"],
+                    "ok": row["ok"],
+                }
+                for row in _rows()
+            ],
+            row_keys,
+        )
         return 0 if result["ok"] else 1
     if args.json:
         if args.summary:

@@ -573,6 +573,27 @@ class TriggerEvalTests(unittest.TestCase):
         self.assertEqual(lines[0], "score,id")
         self.assertTrue(lines[1].endswith(",pos-approach"))
 
+    def test_md_prints_table(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--md"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(
+            lines[0], "| id | should_trigger | lexical | score | ok |"
+        )
+        self.assertTrue(lines[1].startswith("|"))
+        self.assertGreater(len(lines), 3)
+        self.assertTrue(any("pos-approach" in l for l in lines))
+
+    def test_md_honors_keys(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--md", "--keys", "id,score"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(lines[0], "| id | score |")
+
     def test_keys_rejects_empty_and_unknown(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

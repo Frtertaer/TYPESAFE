@@ -2778,6 +2778,34 @@ class EmitJqTests(unittest.TestCase):
 
 
 class SetDryRunTests(unittest.TestCase):
+    def test_init_plan_dash_reads_stdin(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with patch.object(sys, "stdin", io.StringIO("plan from pipe\n")):
+                with redirect_stdout(io.StringIO()):
+                    rc = tr.main(["--file", str(path), "init", "--plan", "-"])
+            self.assertEqual(rc, 0)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["plan"], "plan from pipe")
+
+    def test_set_plan_dash_reads_stdin(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with redirect_stdout(io.StringIO()):
+                tr.main(["--file", str(path), "init", "--plan", "P"])
+            with patch.object(sys, "stdin", io.StringIO("new plan\n")):
+                with redirect_stdout(io.StringIO()):
+                    rc = tr.main(["--file", str(path), "set", "--plan", "-"])
+            self.assertEqual(rc, 0)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["plan"], "new plan")
+
     def test_set_dry_run_emits_without_writing(self) -> None:
         import io
         from contextlib import redirect_stdout

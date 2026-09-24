@@ -273,7 +273,7 @@ def emit(payload: Any, jq: str = "") -> int:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    plan = args.plan if args.plan is not None else os.environ.get("JEV_TRACE_PLAN", "")
+    plan = _watch.text_arg(args.plan) if args.plan is not None else os.environ.get("JEV_TRACE_PLAN", "")
     if not plan.strip():
         sys.stderr.write("trace init requires --plan or JEV_TRACE_PLAN\n")
         return 2
@@ -358,7 +358,7 @@ def cmd_set(args: argparse.Namespace) -> int:
     path = Path(args.file) if args.file else default_path()
     data = load(path)
     if args.plan is not None:
-        data["plan"] = args.plan
+        data["plan"] = _watch.text_arg(args.plan)
     if args.step is not None:
         data["current_step"] = args.step
     if args.unknown is not None:
@@ -1831,7 +1831,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--file", help="Trace JSON path (default JEV_TRACE or .jev-trace.json; '-' reads the trace JSON from stdin — read-only, no --watch)")
     sub = parser.add_subparsers(dest="command", required=True)
     init = sub.add_parser("init", help="Create a trace from the human plan")
-    init.add_argument("--plan", default=None, help="Plan text (default JEV_TRACE_PLAN env)")
+    init.add_argument("--plan", default=None, help="Plan text (default JEV_TRACE_PLAN env; '-' reads it from stdin)")
     init.add_argument("--step", default="")
     init.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
     init.set_defaults(func=cmd_init)
@@ -1842,7 +1842,7 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("--out", default="", help="Write the show JSON to PATH instead of stdout (ignored with --key/--pretty)")
     show.set_defaults(func=cmd_show)
     setter = sub.add_parser("set", help="Update fields")
-    setter.add_argument("--plan")
+    setter.add_argument("--plan", help="Plan text ('-' reads it from stdin)")
     setter.add_argument("--step")
     setter.add_argument("--unknown")
     setter.add_argument("--error")

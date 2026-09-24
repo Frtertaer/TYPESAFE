@@ -1387,7 +1387,10 @@ def _diff_results(a_path: str, b_path: str) -> dict | None:
     sides = []
     for label, raw_path in (("a", a_path), ("b", b_path)):
         try:
-            data = json.loads(Path(raw_path).read_text(encoding="utf-8"))
+            if raw_path == "-":
+                data = json.loads(sys.stdin.read())
+            else:
+                data = json.loads(Path(raw_path).read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             sys.stderr.write("--diff %s unreadable: %s\n" % (label, exc))
             return None
@@ -1608,14 +1611,7 @@ def cmd_compact(args: argparse.Namespace) -> int:
         )
         return 0
     if getattr(args, "jq", ""):
-        node = result
-        found = True
-        for part in args.jq.split("."):
-            if isinstance(node, dict) and part in node:
-                node = node[part]
-            else:
-                found = False
-                break
+        node, found = _watch.dig(result, args.jq)
         if not found:
             sys.stderr.write(
                 "bad --jq key %r (payload has: %s)\n"
@@ -2156,14 +2152,7 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "env", False):
         report = env_report(args)
         if getattr(args, "jq", ""):
-            node = report
-            found = True
-            for part in args.jq.split("."):
-                if isinstance(node, dict) and part in node:
-                    node = node[part]
-                else:
-                    found = False
-                    break
+            node, found = _watch.dig(report, args.jq)
             if not found:
                 sys.stderr.write(
                     "bad --jq key %r (env has: %s)\n"
@@ -2269,19 +2258,15 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("jev-consult (policy v%s)\n" % version)
         return 0
     if args.diff:
+        if args.diff[0] == "-" and args.diff[1] == "-":
+            sys.stderr.write("--diff: only one side may be - (stdin)\n")
+            return 2
         payload_or_none = _diff_results(args.diff[0], args.diff[1])
         if payload_or_none is None:
             return 1
         payload = payload_or_none
         if getattr(args, "jq", ""):
-            node = payload
-            found = True
-            for part in args.jq.split("."):
-                if isinstance(node, dict) and part in node:
-                    node = node[part]
-                else:
-                    found = False
-                    break
+            node, found = _watch.dig(payload, args.jq)
             if not found:
                 sys.stderr.write(
                     "bad --jq key %r (diff has: %s)\n"

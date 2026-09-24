@@ -1511,6 +1511,50 @@ class CompactCliTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 2)
             self.assertIn(b"bad --jq key", proc.stderr)
 
+    def test_diff_stdin_side(self) -> None:
+        import subprocess
+
+        script = Path(__file__).resolve().parents[1] / "skills" / "jev-consult" / "scripts" / "compact.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            a = Path(tmp) / "a.json"
+            a.write_text(json.dumps({"decisions": [
+                {"id": "t1", "tool": "read", "action": "keep"},
+            ]}), encoding="utf-8")
+            b_json = json.dumps({"decisions": [
+                {"id": "t1", "tool": "read", "action": "drop_call"},
+                {"id": "t2", "tool": "bash", "action": "keep"},
+            ]})
+            proc = subprocess.run(
+                [sys.executable, str(script), "--diff", str(a), "-", "--json"],
+                input=b_json.encode("utf-8"), capture_output=True, timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr[:200])
+            payload = json.loads(proc.stdout.decode("utf-8"))
+            self.assertEqual(payload["changed"], [{"id": "t1", "tool": "read", "a": "keep", "b": "drop_call"}])
+            self.assertEqual(payload["only_b"], ["t2"])
+            # "-" on the a side works too
+            proc = subprocess.run(
+                [sys.executable, str(script), "--diff", "-", str(a), "--json"],
+                input=b_json.encode("utf-8"), capture_output=True, timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr[:200])
+            payload = json.loads(proc.stdout.decode("utf-8"))
+            self.assertEqual(payload["only_a"], ["t2"])
+            # both - is rejected (stdin feeds one side only)
+            proc = subprocess.run(
+                [sys.executable, str(script), "--diff", "-", "-"],
+                input=b_json.encode("utf-8"), capture_output=True, timeout=30,
+            )
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn(b"only one side", proc.stderr)
+            # --jq on the diff payload digs lists numerically
+            proc = subprocess.run(
+                [sys.executable, str(script), "--diff", str(a), "-", "--jq", "changed.0.id"],
+                input=b_json.encode("utf-8"), capture_output=True, timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr[:200])
+            self.assertEqual(json.loads(proc.stdout.decode("utf-8")), "t1")
+
     def test_diff_jsonl_emits_rows_per_divergence(self) -> None:
         import subprocess
 

@@ -354,6 +354,21 @@ def fix_case(path: Path) -> bool:
     return True
 
 
+# --init prints this minimal skeleton; the S005 name==directory rule means it
+# only lints clean under a directory named 'my-skill' — rename as needed.
+INIT_DOC = (
+    "---\n"
+    "name: my-skill\n"
+    "description: one line saying what this skill does and when to use it\n"
+    "---\n"
+    "\n"
+    "# my-skill\n"
+    "\n"
+    "## Usage\n"
+    "\n"
+    "Describe the workflow steps here.\n"
+)
+
 RULES = {
     "S001": "SKILL.md file not found or unreadable",
     "S002": "no YAML frontmatter block",
@@ -395,7 +410,7 @@ def _atomic_write(path, text):
         raise
 
 
-USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_SLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  -                 read SKILL.md content from stdin (no --fix/--watch/--diff)\n  --diff PATH       diff this SKILL.md against another (frontmatter/cited_scripts/body_lines/body_sha1; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_SLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  -                 read SKILL.md content from stdin (no --fix/--watch/--diff)\n  --diff PATH       diff this SKILL.md against another (frontmatter/cited_scripts/body_lines/body_sha1; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --init            print a minimal SKILL.md skeleton (name it after its directory) and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -506,18 +521,8 @@ def main(argv: list[str] | None = None) -> int:
                 "self-test: %s rules=%s\n" % ("ok" if ok else "FAIL", ",".join(rules))
             )
         return 0 if ok else 1
-    if "--rules" in argv:
-        if "--json" in argv:
-            sys.stdout.write(
-                json.dumps(
-                    [{"rule": r, "description": RULES[r]} for r in sorted(RULES)],
-                    indent=2,
-                )
-                + "\n"
-            )
-        else:
-            for r in sorted(RULES):
-                sys.stdout.write("%s: %s\n" % (r, RULES[r]))
+    if "--init" in argv:
+        sys.stdout.write(INIT_DOC)
         return 0
     if "--schema" in argv:
         rows = {

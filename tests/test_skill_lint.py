@@ -1052,5 +1052,17 @@ class DiffFlagTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("readable", err)
 
+    def test_init_skeleton_lints_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / "my-skill"
+            skill_dir.mkdir()
+            doc = skill_dir / "SKILL.md"
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = skill_lint.main(["--init"])
+            self.assertEqual(rc, 0)
+            doc.write_text(buf.getvalue(), encoding="utf-8")
+            self.assertEqual(skill_lint.lint_skill(doc), [])
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

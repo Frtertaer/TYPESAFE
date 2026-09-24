@@ -1402,12 +1402,23 @@ def main(argv: list[str] | None = None) -> int:
             source = "disabled"
         else:
             source = "default"
+        try:
+            env_watch_secs = float(
+                os.environ.get("JEV_DECISIONS_WATCH_SECS", "") or 0
+            )
+        except (TypeError, ValueError):
+            env_watch_secs = 0.0
         report = {
             "file": str(path) if path else None,
             "source": source,
             "exists": exists,
             "count": len(load_entries(path)[0]) if exists else 0,
             "env": envvars,
+            "watch_max": _watch.cap("JEV_DECISIONS_WATCH_MAX", None),
+            "watch_secs": env_watch_secs,
+            "watch_quiet": _watch.quiet(
+                "JEV_DECISIONS_WATCH_QUIET", args.quiet
+            ),
         }
         if args.jq:
             node = report

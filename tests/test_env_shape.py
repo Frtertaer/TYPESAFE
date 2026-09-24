@@ -4,8 +4,7 @@
 
 New env knobs must land deliberately: adding a key here means the
 report changed. Note: decisions --env nests set JEV_DECISIONS_* vars
-under the `env` key and has no `watch_quiet` (divergence pinned, not
-a bug — it pre-dates watch knobs).
+under the `env` key (the others report flat keys).
 """
 from __future__ import annotations
 
@@ -23,7 +22,8 @@ SCRIPTS = ROOT / "skills" / "jev-consult" / "scripts"
 WATCH_KEYS = {"watch_max", "watch_quiet", "watch_secs"}
 
 EXPECTED = {
-    "decisions": {"count", "env", "exists", "file", "source"},
+    "decisions": {"count", "env", "exists", "file",
+                  "source"} | WATCH_KEYS,
     "compact": {"keep_first", "keep_threshold", "min_messages",
                 "min_reduction", "policy", "preserve_recent", "spill_dir",
                 "spill_disabled", "spill_max_bytes", "spill_max_files",

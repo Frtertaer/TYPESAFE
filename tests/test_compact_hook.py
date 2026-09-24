@@ -586,5 +586,32 @@ class SimulateEventTests(unittest.TestCase):
         self.assertIn("below live-fat threshold", proc.stderr)
 
 
+class SchemaFlagTests(unittest.TestCase):
+    def _run(self, argv):
+        import subprocess
+
+        return subprocess.run(
+            [sys.executable, str(HOOK_PATH), *argv],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_schema_lists_payload_keys(self) -> None:
+        proc = self._run(["--schema"])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("hookSpecificOutput.hookEventName", proc.stdout)
+        self.assertIn("hookSpecificOutput.updatedToolOutput", proc.stdout)
+
+    def test_schema_json_emits_object(self) -> None:
+        proc = self._run(["--schema", "--json"])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        schema = json.loads(proc.stdout)
+        self.assertTrue(schema["hookSpecificOutput.updatedToolOutput"]["required"])
+
+    def test_schema_no_stdin_needed(self) -> None:
+        proc = self._run(["--schema"])
+        self.assertNotIn("hook", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

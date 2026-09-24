@@ -900,6 +900,12 @@ class JsonlFlagTests(unittest.TestCase):
                 {(r["severity"], r["check"], r["line"]) for r in jsonl_rows},
                 {(r[0], r[1], int(r[3])) for r in csv_rows})
 
+    def test_version_flag(self) -> None:
+        rc, out, _ = self._run(["--version"])
+        self.assertEqual(rc, 0)
+        self.assertIn("skill_scanner", out)
+        self.assertIn(scanner.VERSION, out)
+
     def test_jsonl_watch_tick_lines(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             skill = make_skill(tmp, self.BAD)

@@ -654,6 +654,8 @@ def main(argv=None):
                     help="Also scan evals/fixtures/ inside each skill (skipped by "
                          "default because fixtures may be deliberately malicious "
                          "test payloads).")
+    ap.add_argument("--version", action="store_true",
+                    help="Print the scanner version and exit.")
     ap.add_argument("--self-test", action="store_true",
                     help="Scan a synthetic known-bad skill and exit 1 when no "
                          "CRITICAL finding fires (offline probe; needs no path).")
@@ -702,6 +704,10 @@ def main(argv=None):
     ap.add_argument("--quiet", action="store_true",
                     help="With --watch, only emit ticks that have CRITICAL findings.")
     args = ap.parse_args(argv)
+
+    if args.version:
+        print("skill_scanner %s" % VERSION)
+        return 0
 
     if args.self_test:
         return self_test()

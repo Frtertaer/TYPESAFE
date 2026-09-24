@@ -1184,6 +1184,33 @@ class CompactCliTests(unittest.TestCase):
             rows = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
             self.assertTrue(rows)
 
+    def test_jsonl_keys_projects_decision_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps(self._transcript()), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [
+                        str(f), "--history", "--fake", "--min-reduction", "0",
+                        "--jsonl", "--keys", "id,action",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+            self.assertTrue(rows)
+            for row in rows:
+                self.assertEqual(set(row) - {"id", "action"}, set())
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(
+                    [
+                        str(f), "--history", "--fake", "--min-reduction", "0",
+                        "--jsonl", "--keys", " ,",
+                    ]
+                )
+            self.assertEqual(rc, 2)
+
     def test_md_emits_markdown_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

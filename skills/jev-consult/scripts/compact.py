@@ -1654,9 +1654,16 @@ def cmd_compact(args: argparse.Namespace) -> int:
             lines.append("- spill files: %d" % len(spill["files"]))
         text = "\n".join(lines) + "\n"
     elif getattr(args, "jsonl", False):
+        keys = _key_projection(args)
+        if keys is None:
+            return 2
         rows = result.get("decisions") if isinstance(result, dict) else None
         text = "".join(
-            json.dumps(row, ensure_ascii=False) + "\n"
+            json.dumps(
+                {k: row.get(k) for k in keys} if keys else row,
+                ensure_ascii=False,
+            )
+            + "\n"
             for row in (rows or [])
             if isinstance(row, dict)
         )
@@ -1874,6 +1881,17 @@ def env_report(args) -> dict:
     }
 
 
+def _key_projection(args) -> list | None:
+    """Parse --keys a,b into a field list; [] when absent, None on an
+    empty selection (stderr already written, caller returns rc 2)."""
+    key_sel = getattr(args, "keys", "") or ""
+    keys = [k.strip() for k in key_sel.split(",") if k.strip()]
+    if key_sel and not keys:
+        sys.stderr.write("--keys names no fields\n")
+        return None
+    return keys
+
+
 def _atomic_write(path, text):
     tmp = path.with_name(path.name + ".tmp")
     try:
@@ -2029,6 +2047,12 @@ def main(argv: list[str] | None = None) -> int:
         "--jsonl",
         action="store_true",
         help="Emit each per-call decision as one JSON line (for piping; -o writes the lines to the file); with --diff emits one {type: changed|only_a|only_b, ...} row per differing call",
+    )
+    parser.add_argument(
+        "--keys",
+        metavar="a,b",
+        default="",
+        help="With --jsonl: keep only these keys in each emitted row (rc 2 on an empty list)",
     )
     parser.add_argument(
         "--json",
@@ -2252,17 +2276,24 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(args, "json", False):
             sys.stdout.write(text)
         elif getattr(args, "jsonl", False):
+            keys = _key_projection(args)
+            if keys is None:
+                return 2
+
+            def _proj(row: dict) -> dict:
+                return {k: row.get(k) for k in keys} if keys else row
+
             for row in payload["changed"]:
                 sys.stdout.write(
-                    json.dumps({"type": "changed", **row}, ensure_ascii=False) + "\n"
+                    json.dumps(_proj({"type": "changed", **row}), ensure_ascii=False) + "\n"
                 )
             for ident in payload["only_a"]:
                 sys.stdout.write(
-                    json.dumps({"type": "only_a", "id": ident}, ensure_ascii=False) + "\n"
+                    json.dumps(_proj({"type": "only_a", "id": ident}), ensure_ascii=False) + "\n"
                 )
             for ident in payload["only_b"]:
                 sys.stdout.write(
-                    json.dumps({"type": "only_b", "id": ident}, ensure_ascii=False) + "\n"
+                    json.dumps(_proj({"type": "only_b", "id": ident}), ensure_ascii=False) + "\n"
                 )
         else:
             sys.stdout.write(

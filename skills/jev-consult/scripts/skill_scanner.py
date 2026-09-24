@@ -697,6 +697,8 @@ def main(argv=None):
                     help="With --watch, stop after N ticks.")
     ap.add_argument("--unchanged-max", metavar="N", type=int, default=0,
                     help="With --watch, stop after N consecutive identical ticks.")
+    ap.add_argument("--jsonl", action="store_true",
+                    help="Emit one compact JSON line per finding (with --watch: per tick).")
     ap.add_argument("--quiet", action="store_true",
                     help="With --watch, only emit ticks that have CRITICAL findings.")
     args = ap.parse_args(argv)
@@ -839,6 +841,9 @@ def main(argv=None):
                           if isinstance(val, (dict, list)) else val)
                 elif args.json:
                     print(json.dumps(tick_payload))
+                elif args.jsonl:
+                    for f in tick_payload["findings"]:
+                        print(json.dumps(dict(f, tick=tick), ensure_ascii=False))
                 else:
                     print(json.dumps(dict(
                         {"tick": tick, "verdict": payload["verdict"],
@@ -868,6 +873,9 @@ def main(argv=None):
                   if isinstance(val, (dict, list)) else val)
         elif args.json:
             print(json.dumps(payload, indent=2))
+        elif args.jsonl:
+            for f in payload["findings"]:
+                print(json.dumps(f, ensure_ascii=False))
         elif args.md:
             _print_md(root, skills, all_findings, suppressed, counts)
         elif args.csv:

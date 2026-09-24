@@ -3380,6 +3380,18 @@ class FillGapsTest(unittest.TestCase):
             self.assertEqual(len(bodies), 2)
             self.assertTrue(bodies[0].startswith("claude-code") or bodies[0].startswith("hermes"))
 
+    def test_fill_gaps_md_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._log(tmp)
+            proc = run_cli("--file", str(path), "--fill-gaps", "--md")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(
+                proc.stdout.startswith(
+                    "| harness | misses | filled | open | fill_rate | age_s | examples |"
+                )
+            )
+            self.assertIn("| claude-code | 1 | 0 | 1 |", proc.stdout)
+
     def test_fill_gaps_empty_when_no_misses(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"
@@ -3536,6 +3548,23 @@ class SilentSinceTests(unittest.TestCase):
             self.assertEqual(rows[0]["harness"], "hermes")
             self.assertGreater(rows[0]["age_s"], 7100)
 
+    def test_silent_since_md_table(self) -> None:
+        import time
+
+        now = time.time()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [{"ts": now - 7200, "harness": "hermes", "jev_status": "ok"}],
+            )
+            proc = run_cli("--file", str(path), "--silent-since", "3600", "--md")
+            self.assertEqual(proc.returncode, 1)
+            self.assertTrue(
+                proc.stdout.startswith("| harness | last | age_s |")
+            )
+            self.assertIn("| hermes |", proc.stdout)
+
     def test_silent_harnesses_unit(self) -> None:
         rows = decisions.silent_harnesses(
             [
@@ -3666,6 +3695,13 @@ class GapTest(unittest.TestCase):
             self.assertEqual(gaps[0], {"from_ts": 1010.0, "to_ts": 5000.0, "seconds": 3990.0})
             self.assertEqual(gaps[1]["seconds"], 3990.0)
 
+    def test_gap_md_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli("--file", str(self._log(tmp)), "--gap", "1000", "--md")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(proc.stdout.startswith("| from | to | seconds |"))
+            self.assertIn("| 1970-01-01 00:16:50Z | 1970-01-01 01:23:20Z | 3990", proc.stdout)
+
     def test_gap_under_threshold_empty(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             proc = run_cli("--file", str(self._log(tmp)), "--gap", "10000")
@@ -3742,6 +3778,17 @@ class StreakTest(unittest.TestCase):
             self.assertIn("hermes", proc.stdout)
             self.assertIn("okx3", proc.stdout)
             self.assertIn("errorx2", proc.stdout)
+
+    def test_streaks_md_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli("--file", str(self._log(tmp)), "--streaks", "--md")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(
+                proc.stdout.startswith(
+                    "| harness | entries | current_status | current_streak |"
+                )
+            )
+            self.assertIn("| hermes | 6 | ok | 3 | ok | 3 |", proc.stdout)
 
     def test_streaks_empty_log(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

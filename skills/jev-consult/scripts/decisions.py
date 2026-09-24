@@ -1728,6 +1728,18 @@ def main(argv: list[str] | None = None) -> int:
         gaps = quiet_gaps(entries, float(args.gap))
         if args.json:
             sys.stdout.write(json.dumps({"gaps": gaps}, indent=2) + "\n")
+        elif getattr(args, "md", False):
+            _watch.md_table(
+                [
+                    {
+                        "from": _iso_full(g["from_ts"]) or "?",
+                        "to": _iso_full(g["to_ts"]) or "?",
+                        "seconds": g["seconds"],
+                    }
+                    for g in gaps
+                ],
+                ["from", "to", "seconds"],
+            )
         else:
             sys.stdout.write(format_gaps(gaps) + "\n")
         return 0
@@ -1735,6 +1747,14 @@ def main(argv: list[str] | None = None) -> int:
         rows = status_streaks(entries)
         if args.json:
             sys.stdout.write(json.dumps({"streaks": rows}, indent=2) + "\n")
+        elif getattr(args, "md", False):
+            _watch.md_table(
+                rows,
+                [
+                    "harness", "entries", "current_status",
+                    "current_streak", "best_status", "best_streak",
+                ],
+            )
         else:
             sys.stdout.write(format_streaks(rows) + "\n")
         return 0
@@ -1742,6 +1762,18 @@ def main(argv: list[str] | None = None) -> int:
         rows = silent_harnesses(entries, float(args.silent_since))
         if args.json:
             sys.stdout.write(json.dumps({"silent": rows}, indent=2) + "\n")
+        elif getattr(args, "md", False):
+            _watch.md_table(
+                [
+                    {
+                        "harness": r["harness"],
+                        "last": _iso_full(r["last_ts"]) or "?",
+                        "age_s": r["age_s"],
+                    }
+                    for r in rows
+                ],
+                ["harness", "last", "age_s"],
+            )
         else:
             sys.stdout.write(format_silent(rows, float(args.silent_since)) + "\n")
         return 1 if rows else 0
@@ -1773,6 +1805,26 @@ def main(argv: list[str] | None = None) -> int:
         rows = fill_gaps(entries)
         if args.json:
             sys.stdout.write(json.dumps({"fill_gaps": rows}, indent=2) + "\n")
+        elif getattr(args, "md", False):
+            _watch.md_table(
+                [
+                    {
+                        "harness": r["harness"],
+                        "misses": r["misses"],
+                        "filled": r["filled"],
+                        "open": r["open"],
+                        "fill_rate": (
+                            "-" if r.get("fill_rate") is None
+                            else "%.3f" % r["fill_rate"]
+                        ),
+                        "age_s": "-" if r.get("age_s") is None else r["age_s"],
+                        "examples": "; ".join(r["examples"]),
+                    }
+                    for r in rows
+                ],
+                ["harness", "misses", "filled", "open",
+                 "fill_rate", "age_s", "examples"],
+            )
         else:
             sys.stdout.write(format_fill_gaps(rows) + "\n")
         open_total = sum(row["open"] for row in rows)

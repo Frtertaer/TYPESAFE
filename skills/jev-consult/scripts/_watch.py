@@ -235,7 +235,7 @@ def md_table(rows: list, cols: list, out=None) -> None:
     stream.write("| " + " | ".join(cols) + " |\n")
     stream.write("|" + "|".join(" --- " for _ in cols) + "|\n")
     for r in rows:
-        cells = [str(r.get(c) or "") for c in cols]
+        cells = ["" if r.get(c) is None else str(r.get(c)) for c in cols]
         stream.write(
             "| "
             + " | ".join(c.replace("|", "\\|").replace("\n", " ") for c in cells)

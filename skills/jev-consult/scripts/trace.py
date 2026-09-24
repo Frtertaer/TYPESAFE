@@ -1227,6 +1227,43 @@ def cmd_notes(args: argparse.Namespace) -> int:
         except OSError as exc:
             sys.stderr.write("edit failed: %s\n" % exc)
             return 1
+        notes = data["notes"]
+    drop = getattr(args, "drop", "") or ""
+    if drop:
+        spec = drop.strip()
+        lo = hi = 0
+        if "-" in spec.lstrip("-"):
+            parts = spec.split("-", 1)
+            try:
+                lo, hi = int(parts[0]), int(parts[1])
+            except (TypeError, ValueError):
+                sys.stderr.write("bad --drop range: %s\n" % drop)
+                return 2
+            if lo > hi:
+                lo, hi = hi, lo
+        else:
+            try:
+                lo = hi = int(spec)
+            except (TypeError, ValueError):
+                sys.stderr.write("bad --drop index: %s\n" % drop)
+                return 2
+        if lo < 1 or hi > len(notes):
+            sys.stderr.write(
+                "--drop %s out of range (%d notes)\n" % (spec, len(notes))
+            )
+            return 2
+        del notes[lo - 1 : hi]
+        data["notes"] = notes
+        try:
+            save(data, path)
+            sys.stderr.write(
+                "note %d dropped\n" % lo
+                if lo == hi
+                else "notes %d-%d dropped\n" % (lo, hi)
+            )
+        except OSError as exc:
+            sys.stderr.write("drop failed: %s\n" % exc)
+            return 1
     context = getattr(args, "context", None)
     if context is not None:
         try:
@@ -1976,6 +2013,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--first", type=int, default=None, help="Show only the earliest N notes (applied before --limit/--reverse)")
     notes_cmd.add_argument("--prune", type=int, help="Rewrite the trace keeping only the last N notes")
     notes_cmd.add_argument("--edit", nargs=2, metavar=("I", "TEXT"), help="Rewrite note I (1-based, into the unfiltered list) — or every note in range I-J — with TEXT; keeps ts/iso/harness, recomputes sha; rc 2 out of range")
+    notes_cmd.add_argument("--drop", metavar="I", default="", help="Delete note I (1-based, into the unfiltered list) or range I-J; rc 2 out of range")
     notes_cmd.add_argument("--context", metavar="I", default=None, help="Print the notes surrounding index I (1-based, into the unfiltered list; other filters ignored)")
     notes_cmd.add_argument("--around", metavar="K", type=int, default=2, help="With --context: show K notes on each side (default 2)")
     notes_cmd.add_argument("--since", default=None, help="Only notes with ts >= epoch seconds or ISO8601")

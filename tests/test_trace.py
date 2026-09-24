@@ -2569,6 +2569,47 @@ class NotesModeTests(unittest.TestCase):
             note["ts"] = stamp
         path.write_text(json.dumps(data), encoding="utf-8")
 
+    def test_notes_drop_removes_range(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace_with_notes(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(buf):
+                rc = tr.main(["--file", str(path), "notes", "--drop", "1-2"])
+            self.assertEqual(rc, 0)
+            self.assertIn("notes 1-2 dropped", buf.getvalue())
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual([n["text"] for n in data["notes"]], ["n3"])
+
+            buf = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(buf):
+                rc = tr.main(["--file", str(path), "notes", "--drop", "1"])
+            self.assertEqual(rc, 0)
+            self.assertIn("note 1 dropped", buf.getvalue())
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["notes"], [])
+
+    def test_notes_drop_out_of_range(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace_with_notes(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(buf):
+                rc = tr.main(["--file", str(path), "notes", "--drop", "9"])
+            self.assertEqual(rc, 2)
+            self.assertIn("out of range (3 notes)", buf.getvalue())
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(len(data["notes"]), 3)
+            buf = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(buf):
+                rc = tr.main(["--file", str(path), "notes", "--drop", "x"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --drop index", buf.getvalue())
+
     def test_notes_by_harness_counts(self) -> None:
         import io
         from contextlib import redirect_stdout

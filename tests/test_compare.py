@@ -308,6 +308,15 @@ class CliTest(unittest.TestCase):
         self.assertIn("| case | defect | before_jev |", proc.stdout)
         self.assertIn("drift_case", proc.stdout)
 
+    def test_cli_jsonl_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            proc = self.run_cli("--cases", str(path), "--jsonl")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        rows = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+        self.assertEqual([r["id"] for r in rows], ["drift_case", "stall_case"])
+
     def test_cli_out_writes_result_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cases.json"

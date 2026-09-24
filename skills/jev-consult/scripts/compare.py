@@ -385,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the result payload (e.g. failures); unknown key exits 2")
     parser.add_argument("--md", action="store_true", help="Print rows as a Markdown table")
+    parser.add_argument("--jsonl", action="store_true", help="Print one row JSON per line")
     parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH")
     parser.add_argument("--report", metavar="PATH", default="", help="Write a markdown compare report (verdict + per-case table) to PATH; with --json writes the report object instead")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, cases, failures} JSON to PATH (in --watch mode refreshed every tick) '-' prints it to stdout.")
@@ -747,6 +748,9 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("\n")
     elif args.md:
         sys.stdout.write(format_md(result["rows"], live=args.live))
+    elif args.jsonl:
+        for row in result["rows"]:
+            sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
     else:
         sys.stdout.write(format_table(result["rows"], live=args.live))
     if result.get("error"):

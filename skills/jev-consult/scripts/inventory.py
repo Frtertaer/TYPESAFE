@@ -1427,7 +1427,7 @@ def main(argv: list[str] | None = None) -> int:
         "--diff",
         metavar="OLD.json",
         default="",
-        help="Compare the current scan's item ids against a payload saved via --out (uses installed_names when present, else shortlist ids); prints {added,removed} JSON and exits.",
+        help="Compare the current scan's item ids against a payload saved via --out (uses installed_names when present, else shortlist ids); prints {added,removed} JSON and exits. '-' reads OLD.json from stdin.",
     )
     parser.add_argument(
         "--self-test",
@@ -1755,7 +1755,11 @@ def main(argv: list[str] | None = None) -> int:
     }
     if args.diff:
         try:
-            old = json.loads(Path(args.diff).read_text(encoding="utf-8"))
+            old = json.loads(
+                sys.stdin.read()
+                if args.diff == "-"
+                else Path(args.diff).read_text(encoding="utf-8")
+            )
         except (OSError, json.JSONDecodeError) as exc:
             sys.stderr.write("cannot read %s: %s\n" % (args.diff, exc))
             return 1

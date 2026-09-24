@@ -863,6 +863,59 @@ class InventoryTests(unittest.TestCase):
             )
         self.assertEqual(code, 1)
 
+    def test_diff_dash_reads_old_payload_from_stdin(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        items = [
+            {"id": "s1", "kind": "skill", "name": "a"},
+            {"id": "m1", "kind": "mcp", "name": "c"},
+        ]
+        buf = StringIO()
+        stdin_text = json.dumps({"installed_names": ["skill:a", "plugin:b"]})
+        with patch.object(inv, "scan", return_value=items):
+            with patch.object(sys, "stdin", StringIO(stdin_text)):
+                with redirect_stdout(buf):
+                    code = inv.main(
+                        [
+                            "--harness",
+                            "hermes",
+                            "--hermes-home",
+                            str(FIXTURE),
+                            "--diff",
+                            "-",
+                        ]
+                    )
+        self.assertEqual(code, 0)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["added"], ["mcp:c"])
+        self.assertEqual(out["removed"], ["plugin:b"])
+
+    def test_diff_dash_bad_stdin_rc1(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from contextlib import redirect_stderr
+        from unittest.mock import patch
+
+        items = [{"id": "s1", "kind": "skill", "name": "a"}]
+        err = StringIO()
+        with patch.object(inv, "scan", return_value=items):
+            with patch.object(sys, "stdin", StringIO("not json")):
+                with redirect_stdout(StringIO()), redirect_stderr(err):
+                    code = inv.main(
+                        [
+                            "--harness",
+                            "hermes",
+                            "--hermes-home",
+                            str(FIXTURE),
+                            "--diff",
+                            "-",
+                        ]
+                    )
+        self.assertEqual(code, 1)
+        self.assertIn("cannot read -", err.getvalue())
+
     def test_cli_json_shortlist(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

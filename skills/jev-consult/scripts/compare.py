@@ -413,7 +413,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick with failures.")
     parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     parser.add_argument("--baseline", metavar="PATH", default="", help="Write the current rows to PATH as a baseline file for a later --diff")
-    parser.add_argument("--diff", metavar="PATH", default="", help="Load a --baseline file and add a diff block (regressions/improved/changed/added/removed) to the result payload; regressions also join the --strict failure list")
+    parser.add_argument("--diff", metavar="PATH", default="", help="Load a --baseline file and add a diff block (regressions/improved/changed/added/removed) to the result payload; regressions also join the --strict failure list ('-' reads the baseline JSON from stdin; needs a file --cases, no --watch)")
     parser.add_argument("--trend", metavar="DIR", default="", help="Diff the current rows against every *.json baseline in DIR; adds a trend list ({file,ts,regressions,improved,changed,added,removed,unchanged} sorted by ts) to the payload and one stderr line per baseline")
     parser.add_argument(
         "--self-test",
@@ -530,6 +530,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.cases == "-" and (args.watch or args.diff):
         sys.stderr.write("--cases - (stdin) supports neither --watch nor --diff\n")
         return 2
+    if args.diff == "-" and (args.watch or args.cases == "-"):
+        sys.stderr.write(
+            "--diff - (stdin) needs a file --cases and no --watch\n"
+        )
+        return 2
     if args.watch and args.watch > 0:
         import time as _time
 
@@ -607,7 +612,11 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("wrote %s\n" % args.baseline)
     if args.diff:
         try:
-            raw = json.loads(Path(args.diff).read_text(encoding="utf-8"))
+            raw = json.loads(
+                sys.stdin.read()
+                if args.diff == "-"
+                else Path(args.diff).read_text(encoding="utf-8")
+            )
         except (OSError, ValueError) as exc:
             sys.stderr.write("cannot read baseline %s: %s\n" % (args.diff, exc))
             return 2

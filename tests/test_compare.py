@@ -922,5 +922,46 @@ class StdinCasesTests(unittest.TestCase):
             self.assertIn("stdin", proc.stderr)
 
 
+class DiffStdinTests(unittest.TestCase):
+    """`--diff -` reads the baseline JSON from stdin."""
+
+    def run_cli(self, *argv: str, stdin: str = "") -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(COMPARE), *argv],
+            capture_output=True,
+            text=True,
+            input=stdin,
+        )
+
+    CASES = Path(__file__).resolve().parent.parent / "skills" / "jev-consult" / "examples" / "compare-cases.json"
+
+    def test_diff_stdin_baseline(self) -> None:
+        proc = self.run_cli(
+            "--cases", str(self.CASES), "--diff", "-", "--json",
+            stdin='{"rows": []}',
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        counts = payload["diff"]["counts"]
+        self.assertEqual(counts["added"], len(payload["rows"]))
+        self.assertEqual(counts["regressions"], 0)
+
+    def test_diff_stdin_bad_json_rc2(self) -> None:
+        proc = self.run_cli(
+            "--cases", str(self.CASES), "--diff", "-", stdin="{bad"
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("cannot read baseline", proc.stderr)
+
+    def test_diff_stdin_rejects_stdin_cases_and_watch(self) -> None:
+        for argv in (
+            ["--cases", "-", "--diff", "-"],
+            ["--cases", str(self.CASES), "--diff", "-", "--watch", "1"],
+        ):
+            proc = self.run_cli(*argv, stdin='{"rows": []}')
+            self.assertEqual(proc.returncode, 2, argv)
+            self.assertIn("stdin", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

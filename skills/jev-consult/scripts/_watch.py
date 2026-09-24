@@ -194,6 +194,15 @@ def baseline_key(row: dict, fields) -> tuple:
     return tuple(str(row.get(f)) for f in fields)
 
 
+def text_arg(value: str) -> str:
+    """'-' reads the argument text from stdin (trailing newline stripped);
+    any other value passes through unchanged. stdin is single-use — a
+    second '-' consumer sees an empty string."""
+    if value == "-":
+        return sys.stdin.read().rstrip("\n")
+    return value
+
+
 def load_baseline(path: str, fields=("path", "rule", "message")) -> set:
     """Load a baseline findings file written by a lint's --baseline-write/--out.
     Accepts {"findings": [...]} or a bare list; '-' reads the baseline JSON

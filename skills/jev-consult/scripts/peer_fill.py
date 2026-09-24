@@ -327,7 +327,7 @@ def main() -> int:
     if _watch.maybe_version(sys.argv[1:]):
         return 0
     parser = argparse.ArgumentParser()
-    parser.add_argument("--task", default="")
+    parser.add_argument("--task", default="", help="Task text; '-' reads it from stdin")
     parser.add_argument("--harness", default="auto")
     parser.add_argument("--home", default="")
     parser.add_argument("--hermes-home", default="")
@@ -400,6 +400,7 @@ def main() -> int:
         help="Re-scan installed items on the dest harness and exit 0 when NAME (name or id) is installed, 1 otherwise; --json/--jq apply.",
     )
     args = parser.parse_args()
+    args.task = _watch.text_arg(args.task)
     if args.schema:
         rows = {key: dict(row) for key, row in FILL_SCHEMA_ROWS.items()}
         rows["outcome"] = {

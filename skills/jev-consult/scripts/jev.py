@@ -948,6 +948,7 @@ def parse_option(raw: str) -> tuple[str, str, str]:
 
 
 def load_scaffold_state(path: str | None, plan: str | None) -> dict[str, Any]:
+    plan = _watch.text_arg(plan) if plan else plan
     state: dict[str, Any] = {}
     if path:
         raw = read_json_arg(path)
@@ -1366,7 +1367,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scaffold.add_argument("--out", help="Path to write request.json")
     scaffold.add_argument("--state", help="JSON file or - for stdin (object becomes state)")
-    scaffold.add_argument("--plan", help="Copied into state.plan (and state.task if missing)")
+    scaffold.add_argument("--plan", help="Copied into state.plan (and state.task if missing); '-' reads it from stdin")
     scaffold.add_argument(
         "--option",
         action="append",

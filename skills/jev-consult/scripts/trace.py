@@ -449,8 +449,9 @@ def cmd_suggest(args: argparse.Namespace) -> int:
         "last_pick": trace.get("last_pick"),
         "inspected": trace.get("inspected") or [],
     }
-    if args.task:
-        state["task"] = args.task
+    task = _watch.text_arg(args.task)
+    if task:
+        state["task"] = task
     request = {"state": state, "questions": {question_name: question}}
     if args.out:
         try:
@@ -1972,7 +1973,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ask Jev for the next move (policy template + trace state) and record the pick",
     )
     sug.add_argument("--template", default="next_move", help="policy.json templates key (default next_move)")
-    sug.add_argument("--task", default="", help="Task text folded into the ask state")
+    sug.add_argument("--task", default="", help="Task text folded into the ask state; '-' reads it from stdin")
     sug.add_argument("--ask-file", default="", help="Write the ask request JSON to PATH (default <trace>.jev-suggest.ask.json)")
     sug.add_argument("--out", default="", help="Also write the ask request JSON to PATH")
     sug.add_argument("--dry-run", action="store_true", help="Print the ask request without calling Jev or recording")

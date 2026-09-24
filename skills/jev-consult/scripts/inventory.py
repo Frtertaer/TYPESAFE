@@ -1297,7 +1297,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--task",
         default=os.environ.get("JEV_TASK", ""),
-        help="Task text used to filter the shortlist (default JEV_TASK env).",
+        help="Task text used to filter the shortlist (default JEV_TASK env; '-' reads the text from stdin).",
     )
     parser.add_argument(
         "--harness",
@@ -1435,6 +1435,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Scan a temp-dir home with a synthetic catalog through the real machinery and exit 1 on failure.",
     )
     args = parser.parse_args(argv)
+    args.task = _watch.text_arg(args.task)
     if (args.baseline or args.baseline_write) and not args.dupes:
         sys.stderr.write("--baseline/--baseline-write only apply with --dupes\n")
         return 2

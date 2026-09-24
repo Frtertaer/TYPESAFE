@@ -940,6 +940,32 @@ class InventoryTests(unittest.TestCase):
         self.assertIn("jwt-auth", names)
         self.assertNotIn("ascii-art", names)
 
+    def test_cli_task_dash_reads_stdin(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        buf = StringIO()
+        with patch.object(sys, "stdin", StringIO("jwt tokens\n")):
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(FIXTURE),
+                        "--task",
+                        "-",
+                        "--limit",
+                        "8",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["task"], "jwt tokens")
+        names = [item["name"] for item in payload["shortlist"]]
+        self.assertIn("jwt-auth", names)
+
     def test_cli_jq_prints_one_field(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout, redirect_stderr

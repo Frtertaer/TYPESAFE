@@ -183,6 +183,30 @@ class EmitOrJqTests(unittest.TestCase):
         self.assertEqual(buf.getvalue().strip(), "1")
 
 
+class TextArgTests(unittest.TestCase):
+    """text_arg('-') reads the argument text from stdin."""
+
+    def _with_stdin(self, text):
+        import io
+        from unittest import mock
+
+        return mock.patch.object(sys, "stdin", io.StringIO(text))
+
+    def test_plain_value_passes_through(self) -> None:
+        self.assertEqual(_watch.text_arg("build the thing"), "build the thing")
+
+    def test_empty_value_passes_through(self) -> None:
+        self.assertEqual(_watch.text_arg(""), "")
+
+    def test_dash_reads_stdin_and_strips_newline(self) -> None:
+        with self._with_stdin("task from pipe\n"):
+            self.assertEqual(_watch.text_arg("-"), "task from pipe")
+
+    def test_dash_empty_stdin_gives_empty(self) -> None:
+        with self._with_stdin(""):
+            self.assertEqual(_watch.text_arg("-"), "")
+
+
 class BaselineStdinTests(unittest.TestCase):
     """load_baseline('-') reads the suppress-list JSON from stdin."""
 

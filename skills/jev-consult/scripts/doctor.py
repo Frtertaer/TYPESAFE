@@ -27,7 +27,12 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import _watch  # noqa: E402
-from inventory import _policy_float_key  # noqa: E402
+from inventory import (  # noqa: E402
+    MISS_NAME,
+    SIDECAR_NAME,
+    _policy_float_key,
+    sidecar_status,
+)
 from policy_lint import lint_policy  # noqa: E402
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -55,6 +60,7 @@ CHECK_NAMES = (
     "smoke_self_test",
     "decisions_log",
     "decisions_verify",
+    "sidecars",
     "progress_ledger",
 )
 
@@ -85,6 +91,7 @@ HINTS = {
     "policy_lint": "fix the flagged keys in skills/jev-consult/policy.json (python skills/jev-consult/scripts/policy_lint.py)",
     "smoke_self_test": "run python skills/jev-consult/scripts/smoke.py --self-test and fix the failing synthetic step",
     "decisions_verify": "run python skills/jev-consult/scripts/decisions.py --verify and fix the flagged log lines",
+    "sidecars": "delete the unparseable .jev-tools*.json sidecar in the cwd; the hook rewrites it",
     "hooks_json": "fix or delete the malformed hooks file; it blocks hook registration",
 }
 
@@ -304,6 +311,16 @@ def check_common(home: Path, hermes: Path) -> list[dict]:
             ok = False
             detail = "over smoke_selftest_timeout_seconds"
         out.append(_check("*", "smoke_self_test", ok, detail))
+    tools_status = sidecar_status(Path.cwd() / SIDECAR_NAME)
+    miss_status = sidecar_status(Path.cwd() / MISS_NAME)
+    out.append(
+        _check(
+            "*",
+            "sidecars",
+            "invalid" not in (tools_status, miss_status),
+            "%s=%s %s=%s" % (SIDECAR_NAME, tools_status, MISS_NAME, miss_status),
+        )
+    )
     raw_log = os.environ.get("JEV_CONSULT_LOG") or ""
     if raw_log.strip() == "0":
         out.append(_check("*", "decisions_log", True, "disabled (JEV_CONSULT_LOG=0)"))

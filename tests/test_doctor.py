@@ -459,6 +459,50 @@ class DoctorTests(unittest.TestCase):
             self.assertTrue(check["ok"], check)
             self.assertIn("verify: ok", check["detail"])
 
+    def test_sidecars_missing_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run_main(
+                ["--only", "sidecars", "--home", tmp, "--hermes-home", tmp],
+                cwd=tmp,
+            )
+        check = check_of(out, "sidecars")
+        self.assertTrue(check["ok"], check)
+        self.assertIn("missing", check["detail"])
+
+    def test_sidecars_fresh_and_stale(self) -> None:
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".jev-tools.json").write_text(
+                '{"written_at": %d}' % _time.time(), encoding="utf-8"
+            )
+            (root / ".jev-tools-miss.json").write_text(
+                '{"written_at": 1}', encoding="utf-8"
+            )
+            rc, out, _ = run_main(
+                ["--only", "sidecars", "--home", tmp, "--hermes-home", tmp],
+                cwd=tmp,
+            )
+        check = check_of(out, "sidecars")
+        self.assertTrue(check["ok"], check)
+        self.assertIn("fresh", check["detail"])
+        self.assertIn("stale", check["detail"])
+
+    def test_sidecars_invalid_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".jev-tools.json").write_text("{not json", encoding="utf-8")
+            rc, out, _ = run_main(
+                ["--only", "sidecars", "--home", tmp, "--hermes-home", tmp],
+                cwd=tmp,
+            )
+        check = check_of(out, "sidecars")
+        self.assertFalse(check["ok"])
+        self.assertIn("invalid", check["detail"])
+        self.assertEqual(rc, 1)
+        self.assertEqual(check["hint"], DOC.HINTS["sidecars"])
+
     def test_only_filters_checks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rc, out, _ = run_main(

@@ -183,6 +183,17 @@ def _dig(item: dict, key: str):
     return node
 
 
+def _key_projection(args) -> list | None:
+    """Parse --keys a,b into a field list; [] when absent, None on an
+    empty selection (stderr already written, caller returns rc 2)."""
+    key_sel = getattr(args, "keys", "") or ""
+    keys = [k.strip() for k in key_sel.split(",") if k.strip()]
+    if key_sel and not keys:
+        sys.stderr.write("--keys names no fields\n")
+        return None
+    return keys
+
+
 def _ts_arg(raw: str) -> float | None:
     """Parse an epoch-seconds or ISO8601 timestamp argument. Empty -> 0."""
     text = (raw or "").strip()
@@ -755,8 +766,16 @@ def cmd_history(args: argparse.Namespace) -> int:
         sys.stdout.write(json.dumps(history, ensure_ascii=False, indent=2) + "\n")
         return 0
     if getattr(args, "jsonl", False):
+        keys = _key_projection(args)
+        if keys is None:
+            return 2
         for entry in history:
-            sys.stdout.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            row = (
+                {k: entry.get(k) for k in keys}
+                if keys and isinstance(entry, dict)
+                else entry
+            )
+            sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
         return 0
     for entry in history:
         kind = str(entry.get("kind") or "")
@@ -1553,8 +1572,15 @@ def cmd_notes(args: argparse.Namespace) -> int:
     elif getattr(args, "json", False):
         out_text = json.dumps(notes, ensure_ascii=False, indent=2) + "\n"
     elif getattr(args, "jsonl", False):
+        keys = _key_projection(args)
+        if keys is None:
+            return 2
         out_text = "".join(
-            json.dumps(n, ensure_ascii=False) + "\n"
+            json.dumps(
+                {k: n.get(k) for k in keys} if keys else n,
+                ensure_ascii=False,
+            )
+            + "\n"
             for n in notes
             if isinstance(n, dict)
         )
@@ -2034,6 +2060,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd = sub.add_parser("notes", help="List recorded notes (iso + text)")
     notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")
     notes_cmd.add_argument("--jsonl", action="store_true", help="Emit each note as one JSON line (for piping)")
+    notes_cmd.add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these note keys in each row (rc 2 on an empty list)")
     notes_cmd.add_argument("--limit", type=int, help="Show only the last N notes")
     notes_cmd.add_argument("--first", type=int, default=None, help="Show only the earliest N notes (applied before --limit/--reverse)")
     notes_cmd.add_argument("--prune", type=int, help="Rewrite the trace keeping only the last N notes")
@@ -2066,6 +2093,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")
     hist_cmd.add_argument("--jsonl", action="store_true", help="Emit each pick as one JSON line (for piping)")
+    hist_cmd.add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these entry keys in each row (rc 2 on an empty list)")
     hist_cmd.add_argument("--limit", type=int, help="Show only the last N picks")
     hist_cmd.add_argument("--first", type=int, default=None, help="Show only the earliest N picks (applied before --limit/--reverse)")
     hist_cmd.add_argument("--reverse", action="store_true", help="List picks newest-first")

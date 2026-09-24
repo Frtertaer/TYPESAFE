@@ -704,6 +704,27 @@ class TraceTests(unittest.TestCase):
             rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
             self.assertEqual([r["text"] for r in rows], ["old", "new"])
 
+    def test_notes_jsonl_keys_projects_rows(self) -> None:
+        import time
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            now = time.time()
+            tr.save(
+                {"notes": [{"ts": now, "text": "n1", "sha": "s1"}]},
+                path,
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--jsonl", "--keys", "text"])
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+            self.assertEqual(rows, [{"text": "n1"}])
+            rc = tr.main(["--file", str(path), "notes", "--jsonl", "--keys", " ,"])
+            self.assertEqual(rc, 2)
+
     def test_history_reverse_lists_newest_first(self) -> None:
         import time
         from io import StringIO
@@ -3261,6 +3282,25 @@ class CountFlagTests(unittest.TestCase):
                 rc = tr.main(["--file", str(path), "history", "--jsonl", "--uniq"])
             self.assertEqual(rc, 0)
             self.assertEqual(len(buf.getvalue().strip().splitlines()), 2)
+
+    def test_history_jsonl_keys_projects_rows(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "history", "--jsonl", "--keys", "pick"]
+                )
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+            self.assertEqual(rows, [{"pick": "a"}, {"pick": "b"}, {"pick": "a"}])
+            rc = tr.main(
+                ["--file", str(path), "history", "--jsonl", "--keys", " ,"]
+            )
+            self.assertEqual(rc, 2)
 
     def test_notes_count(self) -> None:
         import io

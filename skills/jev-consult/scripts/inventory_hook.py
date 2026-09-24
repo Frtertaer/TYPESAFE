@@ -506,7 +506,10 @@ def handle(
             if picked or env_no_miss:
                 clear_miss(miss_path)
             elif tokens(prompt):
-                write_miss(miss_path, harness, prompt, {"note": note_tag} if note_tag else None)
+                miss_extra = {"note": note_tag} if note_tag else {}
+                if stale_match and sidecar_age_s is not None:
+                    miss_extra["stale_sidecar_age_s"] = sidecar_age_s
+                write_miss(miss_path, harness, prompt, miss_extra or None)
                 note = format_miss_note(FILL_SCRIPT)
             else:
                 clear_miss(miss_path)

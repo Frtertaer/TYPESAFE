@@ -1391,6 +1391,54 @@ class InventoryHookTests(unittest.TestCase):
             self.assertTrue(miss.is_file())
         self.assertIn("from-miss", json.dumps(out))
 
+    def test_miss_records_stale_sidecar_age(self) -> None:
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            prompt = "Add JWT access tokens in Python"
+            sidecar = Path(tmp) / ".jev-tools.json"
+            INV.write_sidecar(
+                sidecar,
+                "claude-code",
+                prompt,
+                [{"id": "x", "kind": "skill", "name": "jwt", "description": "", "path": ""}],
+            )
+            data = json.loads(sidecar.read_text(encoding="utf-8"))
+            data["written_at"] = int(_time.time() - 999999)
+            sidecar.write_text(json.dumps(data), encoding="utf-8")
+            HOOK.handle(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": prompt,
+                    "cwd": tmp,
+                },
+                items=[],
+                harness="claude-code",
+                pick_fn=skip_pick,
+            )
+            miss = Path(tmp) / ".jev-tools-miss.json"
+            self.assertTrue(miss.is_file())
+            miss_data = json.loads(miss.read_text(encoding="utf-8"))
+            self.assertIsInstance(miss_data.get("stale_sidecar_age_s"), int)
+            self.assertGreater(miss_data["stale_sidecar_age_s"], 900000)
+
+    def test_miss_without_prior_sidecar_has_no_age_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            HOOK.handle(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "Add JWT access tokens in Python",
+                    "cwd": tmp,
+                },
+                items=[],
+                harness="claude-code",
+                pick_fn=skip_pick,
+            )
+            miss_data = json.loads(
+                (Path(tmp) / ".jev-tools-miss.json").read_text(encoding="utf-8")
+            )
+            self.assertNotIn("stale_sidecar_age_s", miss_data)
+
 
     def test_explicit_single_mention_wins_without_jev(self) -> None:
         items = [

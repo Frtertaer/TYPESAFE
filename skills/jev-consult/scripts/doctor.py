@@ -354,6 +354,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="With --schema: emit the contract object instead of text rows (the normal payload is already JSON)")
     parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown report (verdict line + per-check table with hints) to PATH")
     parser.add_argument("--md", action="store_true", help="Print the same markdown report to stdout instead of the JSON payload")
+    parser.add_argument("--matrix", action="store_true", help="Print a check-name x harness markdown grid instead of the JSON payload (cells: yes/NO/suppressed/-; '--' column is the wildcard '*' agent; with --json emits a {check: {agent: status}} object)")
     parser.add_argument("--jsonl", action="store_true", help="Print each check as one JSON line instead of the {ok,checks} payload (for piping)")
     parser.add_argument("--csv", action="store_true", help="Print the checks as CSV rows (check,agent,ok,hint; --keys a,b overrides the columns) instead of the JSON payload")
     parser.add_argument("--keys", metavar="a,b", default="", help="With --jsonl/--csv: keep only these check keys in each row / as the columns (rc 2 on an empty list)")
@@ -688,6 +689,39 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "md", False):
         sys.stdout.write("\n".join(_report_lines()) + "\n")
         return 0 if ok else 1
+    if getattr(args, "matrix", False):
+        agents = list(ALLOWED) + ["*"]
+        grid: dict[str, dict[str, str]] = {}
+        for c in shown:
+            cell = (
+                "suppressed" if c.get("suppressed")
+                else "yes" if c.get("ok")
+                else "NO"
+            )
+            grid.setdefault(c["check"], {})[c["agent"]] = cell
+        if getattr(args, "json", False):
+            matrix = {
+                name: {a: grid[name].get(a, "-") for a in agents}
+                for name in CHECK_NAMES
+                if name in grid
+            }
+            sys.stdout.write(json.dumps(matrix, indent=2, sort_keys=True) + "\n")
+            return 0 if ok else 1
+        col = "--"  # '*' renders as an md list marker; use -- for the wildcard column
+        lines = [
+            "| check | " + " | ".join(agents[:-1] + [col]) + " |",
+            "| --- |" + " --- |" * len(agents),
+        ]
+        for name in CHECK_NAMES:
+            if name not in grid:
+                continue
+            row = grid[name]
+            lines.append(
+                "| %s | %s |"
+                % (name, " | ".join(row.get(a, "-") for a in agents))
+            )
+        sys.stdout.write("\n".join(lines) + "\n")
+        return 0 if ok else 1
     key_sel = getattr(args, "keys", "") or ""
     keys = [k.strip() for k in key_sel.split(",") if k.strip()]
     if (getattr(args, "jsonl", False) or getattr(args, "csv", False)) and key_sel and not keys:
@@ -734,4 +768,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _watch.exit_safely(main())

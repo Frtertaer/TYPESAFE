@@ -1045,4 +1045,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _watch.exit_safely(main())

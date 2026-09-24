@@ -150,6 +150,80 @@ class DoctorTests(unittest.TestCase):
             self.assertIn("| api_key |", text)
             self.assertIn("| NO |", text)
 
+    def test_matrix_prints_check_by_harness_grid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(
+                [
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--matrix",
+                ],
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 1)
+            self.assertIn("| check | hermes | claude-code | codex | grok | -- |", text)
+            self.assertIn("| api_key |", text)
+            self.assertIn("| skill |", text)
+            # wildcard-only checks must mark harness cells '-'
+            api_row = next(
+                line for line in text.splitlines()
+                if line.startswith("| api_key |")
+            )
+            self.assertTrue(api_row.endswith("| NO |"))  # no key in test env
+
+    def test_matrix_json_emits_check_agent_map(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run_main(
+                [
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--matrix", "--json",
+                ],
+                cwd=tmp,
+            )
+            self.assertEqual(rc, 1)
+            self.assertIsInstance(out, dict)
+            self.assertIn("api_key", out)
+            self.assertEqual(out["api_key"]["*"], "NO")
+            self.assertEqual(out["api_key"]["hermes"], "-")
+
+    def test_matrix_ok_run_exits_0(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            hermes = Path(tmp) / "hermes"
+            make_hermes(hermes)
+            make_skill(home / ".claude" / "skills")
+            make_claude_hooks(home)
+            make_skill(home / ".grok" / "skills")
+            hooks_dir = home / ".grok" / "hooks"
+            hooks_dir.mkdir(parents=True)
+            for name, mark in (
+                ("jev-compact.json", "compact_hook.py"),
+                ("jev-tools.json", "inventory_hook.py"),
+            ):
+                (hooks_dir / name).write_text(
+                    json.dumps({"hooks": {"x": [{"command": mark}]}}),
+                    encoding="utf-8",
+                )
+            make_skill(home / ".codex" / "skills")
+            codex = home / ".codex"
+            codex.mkdir(parents=True, exist_ok=True)
+            (codex / "config.toml").write_text("[x]\n", encoding="utf-8")
+            (codex / "hooks.json").write_text(
+                json.dumps({"hooks": {"x": [{"command": "inventory_hook.py"}]}}),
+                encoding="utf-8",
+            )
+            rc, _, text = run_main(
+                [
+                    "--home", str(home),
+                    "--hermes-home", str(hermes),
+                    "--matrix",
+                ],
+                cwd=tmp,
+                env_extra={"TYPESAFE_API_KEY": "test-key"},
+            )
+            self.assertIn("| check |", text)
+
     def test_full_install_ok(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"

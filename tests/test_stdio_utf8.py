@@ -36,5 +36,33 @@ class StdioUtf8Tests(unittest.TestCase):
         self.assertIn('errors="replace"', body)
 
 
+    def test_fix_stdio_pins_lf_newline(self) -> None:
+        src = (SCRIPTS / "_watch.py").read_text(encoding="utf-8")
+        body = src.split("def fix_stdio", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('newline="\\n"', body)
+
+    def test_emitters_output_raw_lf_bytes(self) -> None:
+        """Subprocess-level: on Windows text-mode stdout would emit CRLF;
+        the pin must hold for binary consumers (pipes into jq/etc.)."""
+        import os
+        import subprocess
+        import sys
+        env = dict(os.environ)
+        env["JEV_CONSULT_LOG"] = "0"
+        env.setdefault("TYPESAFE_API_KEY", "test-key")
+        for argv in (
+            ["decisions.py", "--env"],
+            ["skill_lint.py", "--version"],
+            ["doctor.py", "--version"],
+        ):
+            with self.subTest(argv=argv):
+                proc = subprocess.run(
+                    [sys.executable, str(SCRIPTS / argv[0])] + argv[1:],
+                    capture_output=True, env=env, timeout=60,
+                )
+                self.assertNotIn(b"\r", proc.stdout,
+                                 "%s emitted CR bytes" % argv[0])
+
+
 if __name__ == "__main__":
     unittest.main()

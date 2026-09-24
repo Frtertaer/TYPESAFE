@@ -30,6 +30,16 @@ def fix_stdio() -> None:
                 reconfigure(encoding="utf-8", errors="replace")
             except (ValueError, OSError):
                 pass
+    # Keep LF endings on Windows too: text-mode stdout/stderr translate
+    # \n -> \r\n, which violates the one-JSON-object-per-line contract for
+    # binary consumers of --jsonl and watch ticks.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure:
+            try:
+                reconfigure(newline="\n")
+            except (ValueError, OSError):
+                pass
 
 
 def cap(env_name: str, override=None) -> int:
@@ -166,6 +176,19 @@ def maybe_version(argv: list, out=None) -> bool:
         return False
     (out or sys.stdout).write("jev-consult (policy v%s)\n" % policy_version())
     return True
+
+
+def exit_safely(rc: int) -> "SystemExit":
+    """Exit with rc after flushing stdout; if the consumer already closed
+    the pipe (BrokenPipeError / Windows EINVAL OSError at flush), redirect
+    stdout to devnull so interpreter shutdown doesn't die with rc 120.
+    Hooks use this to keep their fail-open rc0 contract."""
+    try:
+        sys.stdout.flush()
+    except OSError:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+    raise SystemExit(rc)
 
 
 def atomic_replace(tmp, target, attempts: int = 5) -> None:

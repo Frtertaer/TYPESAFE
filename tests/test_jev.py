@@ -772,6 +772,76 @@ class PostSystemoneTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self._post([bad])
 
+    def test_non_object_response_blocked(self) -> None:
+        with self.assertRaises(SystemExit):
+            jev.validate_response([1, 2], self.QUESTIONS)
+
+    def test_answers_non_object_blocked(self) -> None:
+        with self.assertRaises(SystemExit):
+            jev.validate_response({"answers": "nope"}, self.QUESTIONS)
+
+    def test_unexpected_answer_qid_blocked(self) -> None:
+        bad = json.loads(json.dumps(self.GOOD))
+        bad["answers"]["sneaky"] = {"type": "noul", "noul": 0.5}
+        with self.assertRaises(SystemExit):
+            jev.validate_response(bad, self.QUESTIONS)
+
+    def test_missing_answer_qid_blocked(self) -> None:
+        bad = json.loads(json.dumps(self.GOOD))
+        del bad["answers"]["sure"]
+        with self.assertRaises(SystemExit):
+            jev.validate_response(bad, self.QUESTIONS)
+
+    def test_type_mismatch_blocked(self) -> None:
+        bad = json.loads(json.dumps(self.GOOD))
+        bad["answers"]["pick"] = {"type": "noul", "noul": 0.9}
+        with self.assertRaises(SystemExit):
+            jev.validate_response(bad, self.QUESTIONS)
+
+    def test_probabilities_key_set_blocked(self) -> None:
+        bad = json.loads(json.dumps(self.GOOD))
+        bad["answers"]["pick"]["probabilities"] = {"a": 0.6, "b": 0.4}
+        with self.assertRaises(SystemExit):
+            jev.validate_response(bad, self.QUESTIONS)
+
+    def test_probability_out_of_range_blocked(self) -> None:
+        bad = json.loads(json.dumps(self.GOOD))
+        bad["answers"]["pick"]["probabilities"] = {"a": 1.5, "b": 0.05, "none": 0.05}
+        # sum!=1 may fire first; either way it must exit
+        with self.assertRaises(SystemExit):
+            jev.validate_response(bad, self.QUESTIONS)
+
+    def test_score_answer_validates(self) -> None:
+        questions = {
+            "s": {"type": "score", "instructions": "rate?"},
+        }
+        ok = {
+            "model": "m",
+            "answers": {"s": {"type": "score", "score": 7.5, "confidence": 0.9}},
+        }
+        result = jev.validate_response(ok, questions)
+        self.assertEqual(result["answers"]["s"]["score"], 7.5)
+        bad_conf = json.loads(json.dumps(ok))
+        bad_conf["answers"]["s"]["confidence"] = 1.2
+        with self.assertRaises(SystemExit):
+            jev.validate_response(bad_conf, questions)
+        non_finite = json.loads(json.dumps(ok))
+        non_finite["answers"]["s"]["score"] = "lots"
+        with self.assertRaises(SystemExit):
+            jev.validate_response(non_finite, questions)
+
+    def test_usage_negative_tokens_blocked(self) -> None:
+        bad = json.loads(json.dumps(self.GOOD))
+        bad["usage"]["output_tokens"] = -3
+        with self.assertRaises(SystemExit):
+            jev.validate_response(bad, self.QUESTIONS)
+
+    def test_usage_absent_is_fine(self) -> None:
+        ok = json.loads(json.dumps(self.GOOD))
+        del ok["usage"]
+        result = jev.validate_response(ok, self.QUESTIONS)
+        self.assertIsNone(result["usage"])
+
     def test_503_then_200_retries_once(self) -> None:
         result, opener = self._post([_http_error(503), self.GOOD], retries=1)
         self.assertEqual(opener.calls, 2)

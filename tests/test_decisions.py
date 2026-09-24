@@ -3118,6 +3118,22 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(report["bad_lines"], 1)
             self.assertEqual(len(report["problems"]), 3)
 
+    def test_verify_verbose_lists_all_problems(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text("\n".join("not json" for _ in range(25)) + "\n", encoding="utf-8")
+            proc = self.run_cli("--file", str(path), "--verify")
+            self.assertEqual(proc.returncode, 1)
+            self.assertEqual(proc.stdout.count("unparseable"), 20)
+            self.assertIn("and 5 more", proc.stdout)
+            proc = self.run_cli("--file", str(path), "--verify", "--verbose")
+            self.assertEqual(proc.returncode, 1)
+            self.assertEqual(proc.stdout.count("unparseable"), 25)
+            self.assertNotIn("and", proc.stdout.splitlines()[-1])
+            proc = self.run_cli("--file", str(path), "--verbose")
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("--verbose requires --verify", proc.stderr)
+
     def test_verify_jq_digs_report(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

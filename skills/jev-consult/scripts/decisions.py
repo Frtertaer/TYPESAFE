@@ -1231,6 +1231,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Append entries from another decisions.jsonl that are not already in the log (identity = sha/ts/dump key), then continue into the normal report",
     )
     parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="With --verify: print every problem line instead of the first 20",
+    )
+    parser.add_argument(
         "--rotate",
         type=int,
         default=None,
@@ -1446,6 +1451,9 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "archive", "") and not args.prune and args.rotate is None:
         sys.stderr.write("--archive requires --prune or --rotate\n")
         return 2
+    if getattr(args, "verbose", False) and not getattr(args, "verify", False):
+        sys.stderr.write("--verbose requires --verify\n")
+        return 2
     if getattr(args, "merge", ""):
         if str(path) == "-":
             sys.stderr.write("--file - (stdin) does not support --merge\n")
@@ -1528,8 +1536,16 @@ def main(argv: list[str] | None = None) -> int:
                     len(report["problems"]),
                 )
             )
-            for row in report["problems"][:20]:
+            shown = (
+                report["problems"]
+                if getattr(args, "verbose", False)
+                else report["problems"][:20]
+            )
+            for row in shown:
                 sys.stdout.write("  line %d: %s\n" % (row["line"], row["issue"]))
+            extra = len(report["problems"]) - len(shown)
+            if extra:
+                sys.stdout.write("  ... and %d more (--verbose lists all)\n" % extra)
         return 0 if report["ok"] else 1
     all_entries, bad = load_entries(path)
     if getattr(args, "validate", False):

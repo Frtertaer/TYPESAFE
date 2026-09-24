@@ -196,7 +196,7 @@ def _atomic_write_surrogate(path: Path, text: str) -> None:
             os.chmod(tmp, 0o600)
         except OSError:
             pass
-        os.replace(tmp, path)
+        _watch.atomic_replace(tmp, path)
     finally:
         try:
             tmp.unlink()
@@ -1909,7 +1909,7 @@ def _atomic_write(path, text):
     tmp = path.with_name(path.name + ".tmp")
     try:
         tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, path)
+        _watch.atomic_replace(tmp, path)
     except OSError:
         try:
             tmp.unlink(missing_ok=True)

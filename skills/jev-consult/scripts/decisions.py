@@ -854,7 +854,7 @@ def prune_entries(path: Path, apply_filters, retries: int = 8, archive=None) -> 
                     with Path(archive).open("a", encoding="utf-8", newline="\n") as fh:
                         for item in dropped:
                             fh.write(json.dumps(item, sort_keys=True) + "\n")
-                os.replace(tmp, str(path))
+                _watch.atomic_replace(tmp, str(path))
                 return {
                     "total": len(entries),
                     "kept": len(kept),
@@ -903,7 +903,7 @@ def _atomic_write(path, text):
     tmp = path.with_name(path.name + ".tmp")
     try:
         tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, path)
+        _watch.atomic_replace(tmp, path)
     except OSError:
         try:
             tmp.unlink(missing_ok=True)

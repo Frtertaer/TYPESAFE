@@ -1007,15 +1007,8 @@ class Ledger:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(canonical(anchor))
             # Windows denies the rename while a concurrent reader holds the
-            # target open — retry the os.replace like _read_anchor does.
-            for attempt in range(4):
-                try:
-                    os.replace(temp, target)
-                    break
-                except PermissionError:
-                    if attempt == 3:
-                        raise
-                    time.sleep(0.05 * (attempt + 1))
+            # target open — retry like _read_anchor does.
+            _watch.atomic_replace(temp, target, attempts=4)
         except OSError as exc:
             try:
                 temp.unlink(missing_ok=True)

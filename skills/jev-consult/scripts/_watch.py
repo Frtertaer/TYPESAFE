@@ -168,6 +168,23 @@ def maybe_version(argv: list, out=None) -> bool:
     return True
 
 
+def atomic_replace(tmp, target, attempts: int = 5) -> None:
+    """os.replace(tmp, target) with a brief PermissionError retry.
+
+    Windows raises ERROR_ACCESS_DENIED when the destination is momentarily
+    held open by a concurrent reader or an antivirus scan; POSIX rename is
+    unaffected. Retrying a few times turns that transient race into the
+    atomic swap callers already assume."""
+    for attempt in range(max(1, attempts)):
+        try:
+            os.replace(tmp, target)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.05)
+
+
 def write_verdict(path: str, payload: dict, stream=None) -> bool:
     """Write a slim verdict JSON to path; False (with stderr note) on failure.
 
@@ -185,7 +202,7 @@ def write_verdict(path: str, payload: dict, stream=None) -> bool:
     tmp = target.with_name(target.name + ".tmp")
     try:
         tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp, target)
+        atomic_replace(tmp, target)
     except OSError as exc:
         try:
             tmp.unlink(missing_ok=True)

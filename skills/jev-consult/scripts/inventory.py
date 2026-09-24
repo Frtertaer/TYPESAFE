@@ -730,7 +730,7 @@ def atomic_write_text(path: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as out:
             out.write(text)
-        os.replace(tmp, str(path))
+        _watch.atomic_replace(tmp, str(path))
     except OSError:
         try:
             os.unlink(tmp)

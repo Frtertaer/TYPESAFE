@@ -72,7 +72,60 @@ class AtomicWriteGuardTest(unittest.TestCase):
                 body = src[body_start : nxt if nxt > 0 else len(src)]
                 with self.subTest(file=path.name, helper=m.group(1)):
                     self.assertIn(".tmp", body)
-                    self.assertIn("os.replace", body)
+                    self.assertTrue(
+                        "os.replace" in body or "atomic_replace(" in body,
+                        "helper %s in %s must rename via os.replace/"
+                        "_watch.atomic_replace" % (m.group(1), path.name),
+                    )
+
+    def test_tmp_file_is_sibling_of_target(self) -> None:
+        """Atomic helpers must create the tmp file in the target's own
+        directory — os.replace across filesystems is not atomic (and on
+        some platforms raises). Pin: tmp derives via ``with_name(`` /
+        ``dir=str(<target>.parent)``."""
+        helper_re = re.compile(
+            r"def (_atomic_write\w*|atomic_write_text|write_verdict"
+            r"|_write_anchor|_atomic_write_surrogate)\("
+        )
+        offenders = []
+        for path in sorted(SCRIPTS.glob("*.py")):
+            src = path.read_text(encoding="utf-8")
+            for m in helper_re.finditer(src):
+                body_start = m.end()
+                nxt = src.find("\ndef ", body_start)
+                nxt_m = src.find("\n    def ", body_start)
+                stops = [s for s in (nxt, nxt_m) if s > 0]
+                body = src[body_start : min(stops) if stops else len(src)]
+                if "replace" not in body:
+                    continue
+                with self.subTest(file=path.name, helper=m.group(1)):
+                    ok = (
+                        ".with_name(" in body
+                        or "dir=str(" in body
+                        or "dir=" in body and "parent" in body
+                    )
+                    if not ok:
+                        offenders.append(
+                            "%s:%s tmp not sibling-derived" % (path.name, m.group(1))
+                        )
+        self.assertEqual(offenders, [])
+
+    def test_no_bare_os_replace_in_scripts(self) -> None:
+        """Every rename goes through _watch.atomic_replace (PermissionError
+        retry on Windows); only _watch.atomic_replace itself may call
+        os.replace."""
+        offenders = []
+        for path in sorted(SCRIPTS.glob("*.py")):
+            if path.name == "_watch.py":
+                continue
+            for lineno, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1
+            ):
+                if re.search(r"(?<![\w.])os\.replace\(", line):
+                    offenders.append("%s:%d %s" % (path.name, lineno, line.strip()))
+        self.assertEqual(
+            offenders, [], "bare os.replace calls: %s" % offenders
+        )
 
     def test_no_bare_open_write_outside_helpers_and_self_tests(self) -> None:
         """open(..., "w") is banned outside atomic helpers and self-test/

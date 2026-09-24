@@ -1059,5 +1059,51 @@ class EnvReportApplyTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
 
 
+class HermesInstallTimeoutTests(unittest.TestCase):
+    def test_default_is_180(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("JEV_POLICY", None)
+            self.assertEqual(FILL.hermes_install_timeout(), 180)
+
+    def test_policy_override_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pol = Path(tmp) / "policy.json"
+            pol.write_text(
+                json.dumps({"hermes_install_timeout_seconds": 7}),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"JEV_POLICY": str(pol)}):
+                self.assertEqual(FILL.hermes_install_timeout(), 7)
+
+    def test_install_one_passes_policy_timeout(self) -> None:
+        seen = {}
+
+        def fake(argv, timeout=120):
+            seen["timeout"] = timeout
+            return 0, "ok"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pol = Path(tmp) / "policy.json"
+            pol.write_text(
+                json.dumps({"hermes_install_timeout_seconds": 3}),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"JEV_POLICY": str(pol)}):
+                with patch.object(FILL, "run_hermes", side_effect=fake):
+                    self.assertTrue(FILL.install_one("mcp", "jwt-auth", dry_run=False))
+        self.assertEqual(seen["timeout"], 3)
+
+    def test_env_report_includes_timeout(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("JEV_POLICY", None)
+            self.assertEqual(
+                FILL.env_report()["hermes_install_timeout_seconds"], 180
+            )
+
+    def test_no_hardcoded_install_timeout_in_source(self) -> None:
+        src = (SCRIPTS / "apply_fill.py").read_text(encoding="utf-8")
+        self.assertNotIn("timeout=180", src)
+
+
 if __name__ == "__main__":
     unittest.main()

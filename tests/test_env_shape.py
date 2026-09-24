@@ -55,9 +55,11 @@ EXPECTED = {
                        "max_prompt_chars", "miss_present", "note_limit",
                        "policy", "sidecar_present", "ttl_seconds",
                        "watch_dedupe"} | WATCH_KEYS,
-    "apply_fill": {"fill_timeout_seconds", "policy"} | WATCH_KEYS,
+    "apply_fill": {"fill_timeout_seconds", "hermes_install_timeout_seconds",
+                   "policy"} | WATCH_KEYS,
     "catalog_fill": {"ask", "catalog_cache_seconds",
-                     "fill_timeout_seconds", "miss", "policy"} | WATCH_KEYS,
+                     "fill_timeout_seconds", "hermes_install_timeout_seconds",
+                     "miss", "policy"} | WATCH_KEYS,
     "peer_fill": {"fill_timeout_seconds", "policy"} | WATCH_KEYS,
 }
 

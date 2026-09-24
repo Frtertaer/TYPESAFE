@@ -67,6 +67,7 @@ POSITIVE_INT_FIELDS = ("version", "question_soft_max", "question_hard_max", "cho
 NONNEG_NUM_FIELDS = (
     "catalog_cache_seconds",
     "dedupe_ttl_seconds",
+    "hermes_install_timeout_seconds",
     "hook_budget_seconds",
     "hook_jev_retries",
     "hook_jev_timeout_seconds",
@@ -86,6 +87,7 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "choice",
     "dedupe_ttl_seconds",
     "hallucination",
+    "hermes_install_timeout_seconds",
     "hook_budget_seconds",
     "hook_jev_retries",
     "hook_jev_timeout_seconds",
@@ -118,6 +120,7 @@ INIT_POLICY = {
     "strong_pick": 0.85,
     "tight_gap": 0.08,
     "sidecar_ttl_seconds": 14400,
+    "hermes_install_timeout_seconds": 180,
     "must_ask": ["approach"],
     "never_ask": [
         "tool_checkable_fact",

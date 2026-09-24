@@ -137,6 +137,12 @@ def catalog_cache_seconds() -> float:
     return _policy_float_key("catalog_cache_seconds", DEFAULT_CATALOG_CACHE_SECONDS)
 
 
+def hermes_install_timeout() -> int:
+    """Seconds budget for the hermes install call. Threshold lives in
+    policy.json (hermes_install_timeout_seconds, 180 default)."""
+    return int(_policy_float_key("hermes_install_timeout_seconds", 180.0))
+
+
 def env_report() -> dict:
     """Resolved catalog_fill environment. Values only -- never secrets."""
     policy = os.environ.get("JEV_POLICY", "").strip()
@@ -147,6 +153,7 @@ def env_report() -> dict:
     return {
         "fill_timeout_seconds": fill_timeout_seconds(),
         "catalog_cache_seconds": catalog_cache_seconds(),
+        "hermes_install_timeout_seconds": hermes_install_timeout(),
         "watch_max": _watch.cap("JEV_CATALOG_WATCH_MAX", None),
         "watch_secs": watch_secs,
         "watch_quiet": _watch.quiet("JEV_CATALOG_WATCH_QUIET", False),
@@ -299,7 +306,7 @@ def install_one(identifier: str, dry_run: bool) -> bool:
     argv = install_argv(identifier)
     if "--force" in argv:
         return False
-    code, _out = run_hermes(argv, timeout=180)
+    code, _out = run_hermes(argv, timeout=hermes_install_timeout())
     return code == 0
 
 

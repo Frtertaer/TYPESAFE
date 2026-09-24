@@ -44,11 +44,18 @@ from inventory import (  # noqa: E402
     user_home,
     write_miss,
     write_sidecar,
+    _policy_float_key,
 )
 from peer_fill import read_miss, run_jev, fill_timeout_seconds  # noqa: E402
 
 ASK_NAME = ".jev-apply-fill.request.json"
 SEARCH_LIMIT = 8
+
+
+def hermes_install_timeout() -> int:
+    """Seconds budget for the hermes install call. Threshold lives in
+    policy.json (hermes_install_timeout_seconds, 180 default)."""
+    return int(_policy_float_key("hermes_install_timeout_seconds", 180.0))
 
 
 def env_report() -> dict:
@@ -60,6 +67,7 @@ def env_report() -> dict:
         watch_secs = 0.0
     return {
         "fill_timeout_seconds": fill_timeout_seconds(),
+        "hermes_install_timeout_seconds": hermes_install_timeout(),
         "watch_max": _watch.cap("JEV_APPLY_WATCH_MAX", None),
         "watch_secs": watch_secs,
         "watch_quiet": _watch.quiet("JEV_APPLY_WATCH_QUIET", False),
@@ -250,7 +258,7 @@ def install_one(kind: str, name: str, dry_run: bool) -> bool:
         return False
     if dry_run:
         return True
-    code, _out = run_hermes(argv, timeout=180)
+    code, _out = run_hermes(argv, timeout=hermes_install_timeout())
     return code == 0
 
 

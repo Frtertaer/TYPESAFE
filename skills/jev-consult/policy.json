@@ -279,5 +279,6 @@
     "max_items": 24
   },
   "spill_max_files": 200,
-  "spill_max_bytes": 268435456
+  "spill_max_bytes": 268435456,
+  "hermes_install_timeout_seconds": 180
 }

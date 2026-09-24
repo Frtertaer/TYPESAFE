@@ -127,6 +127,28 @@ LURE_PROSE_RE = re.compile(
 
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
+# Check catalog for --rules/--explain. Keep in sync with the pattern tables and
+# the inline add() checks below — tests pin the id set to the source literals.
+CHECKS = {
+    "EXEC01": "remote content piped directly into a shell or interpreter (curl|sh, IEX over downloads)",  # skillscan:allow
+    "EXEC02": "base64-decoded data piped into a shell or interpreter",
+    "OBF01": "long base64-like literal; encoded payloads hide from review",
+    "OBF02": "exec/eval of decoded (base64/hex/rot13) data; classic staged payload",
+    "NET01": "script makes network calls not declared via frontmatter 'compatibility'",
+    "CRED01": "reads credential material (SSH keys, cloud creds, keychains, dotfiles)",
+    "CRED02": "enumerates or dumps the whole process environment",
+    "PIN01": "unpinned package install; the version can drift to a compromised release",
+    "LURE01": "install/prerequisite section fetches and runs a remote script (ClawHavoc vector)",
+    "LURE02": "SKILL.md contains a command fetching remote content outside an install section",
+    "LURE03": "prose instructs running a command to initialize/activate; install-lure pattern",
+    "META01": "SKILL.md has no YAML frontmatter; agents cannot discover it safely",
+    "META02": "frontmatter name missing or violates spec (lowercase a-z, 0-9, hyphens)",
+    "META03": "frontmatter name differs from the directory name; typosquat signal",
+    "META04": "frontmatter missing 'description'",
+    "META05": "description exceeds the 1024-char spec limit",
+    "EXFIL01": "same file touches credentials and makes network calls; exfiltration shape",
+}
+
 
 class Finding:
     def __init__(self, skill, check, severity, file, line, message, evidence):
@@ -408,10 +430,34 @@ def main(argv=None):
     ap.add_argument("--self-test", action="store_true",
                     help="Scan a synthetic known-bad skill and exit 1 when no "
                          "CRITICAL finding fires (offline probe; needs no path).")
+    ap.add_argument("--rules", action="store_true",
+                    help="Print the check catalog (id: meaning) and exit "
+                         "(with --json emits a list).")
+    ap.add_argument("--explain", metavar="CHECK", default="",
+                    help="Print one check's meaning and exit (rc 2 on unknown).")
     args = ap.parse_args(argv)
 
     if args.self_test:
         return self_test()
+
+    if args.rules:
+        if args.json:
+            print(json.dumps(
+                [{"rule": k, "description": v} for k, v in sorted(CHECKS.items())],
+                indent=2))
+        else:
+            for key in sorted(CHECKS):
+                print("%s: %s" % (key, CHECKS[key]))
+        return 0
+
+    if args.explain:
+        check = args.explain.strip().upper()
+        if check not in CHECKS:
+            print("unknown check %r (checks: %s)" % (
+                check, ", ".join(sorted(CHECKS))), file=sys.stderr)
+            return 2
+        print("%s: %s" % (check, CHECKS[check]))
+        return 0
 
     if args.schema:
         if args.json:

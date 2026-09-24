@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import sys
@@ -33,7 +34,9 @@ def build_parser():
         command = commands.add_parser(name)
         command.add_argument("stage")
     commands.choices["history"].add_argument("--jsonl", action="store_true", help="Emit each event as one JSON line instead of the wrapped object")
-    commands.choices["history"].add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these keys in each event row (rc 2 on an empty list)")
+    commands.choices["history"].add_argument("--csv", action="store_true", help="Emit events as a CSV table (dict cells as JSON; --keys picks the columns)")
+    commands.choices["history"].add_argument("--md", action="store_true", help="Emit events as a Markdown table (--keys picks the columns)")
+    commands.choices["history"].add_argument("--keys", metavar="a,b", default="", help="With --jsonl/--csv/--md: keep only these keys in each event row / pick the columns (rc 2 on an empty list)")
     report = commands.add_parser("report", help="Print a markdown summary of a stage (plan, credits, events); --out writes it to a file")
     report.add_argument("--json", action="store_true", help="Emit a structured {stage, goal, action, points, awarded_items, blocked_items, events, ...} object instead of markdown (--out then writes the JSON)")
     report.add_argument("stage")
@@ -623,7 +626,7 @@ def main(argv=None):
                 verdict_doc[key] = result[key]
         if not _watch.write_verdict(args.verdict, verdict_doc):
             return 1
-    if args.command == "history" and getattr(args, "jsonl", False) and not getattr(args, "jq", ""):
+    if args.command == "history" and (getattr(args, "jsonl", False) or getattr(args, "csv", False) or getattr(args, "md", False)) and not getattr(args, "jq", ""):
         events = result.get("events") if isinstance(result, dict) else []
         rows = [e for e in events if isinstance(e, dict)] if isinstance(events, list) else []
         key_sel = getattr(args, "keys", "") or ""
@@ -631,13 +634,22 @@ def main(argv=None):
         if key_sel and not keys:
             sys.stderr.write("--keys names no fields\n")
             return 2
-        text = "".join(
-            json.dumps(
-                {k: e.get(k) for k in keys} if keys else e, ensure_ascii=False
+        if getattr(args, "csv", False) or getattr(args, "md", False):
+            cols = keys or ["sequence", "kind", "data", "seal"]
+            buf = io.StringIO()
+            if getattr(args, "csv", False):
+                _watch.csv_table(rows, cols, out=buf)
+            else:
+                _watch.md_table(rows, cols, out=buf)
+            text = buf.getvalue()
+        else:
+            text = "".join(
+                json.dumps(
+                    {k: e.get(k) for k in keys} if keys else e, ensure_ascii=False
+                )
+                + "\n"
+                for e in rows
             )
-            + "\n"
-            for e in rows
-        )
         out_path = getattr(args, "out", "") or ""
         if out_path:
             try:

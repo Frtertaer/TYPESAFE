@@ -1395,6 +1395,30 @@ class HistoryKeysTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("--keys names no fields", err)
 
+    def test_history_csv_and_md_emit_event_tables(self):
+        import csv as _csv
+
+        rc, out, _err = self._main(["history", "reliability", "--csv"])
+        self.assertEqual(rc, 0)
+        rows = list(_csv.reader(StringIO(out)))
+        self.assertEqual(rows[0], ["sequence", "kind", "data", "seal"])
+        self.assertGreater(len(rows), 1)
+        rc, out, _err = self._main(
+            ["history", "reliability", "--csv", "--keys", "kind,sequence"]
+        )
+        self.assertEqual(rc, 0)
+        rows = list(_csv.reader(StringIO(out)))
+        self.assertEqual(rows[0], ["kind", "sequence"])
+        self.assertTrue(all(len(r) == 2 for r in rows[1:]))
+        rc, out, _err = self._main(["history", "reliability", "--md"])
+        self.assertEqual(rc, 0)
+        self.assertIn("| sequence | kind | data | seal |", out)
+        rc, _out, err = self._main(
+            ["history", "reliability", "--csv", "--keys", " ,"]
+        )
+        self.assertEqual(rc, 2)
+        self.assertIn("--keys names no fields", err)
+
 
 class StdinPlanTests(unittest.TestCase):
     """`progress.py lint -` / `init -` read the plan JSON from stdin."""

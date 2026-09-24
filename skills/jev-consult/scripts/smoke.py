@@ -7068,6 +7068,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--junit", metavar="PATH", default="", help="Write a JUnit XML <testsuite> for the step results to PATH (in --watch mode, the final pass).")
     parser.add_argument("--tag", metavar="T", default="", help="Label this run: lands in the verdict payload as tag and in the junit testsuite name")
     parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
+    parser.add_argument("--jsonl", action="store_true", help="Emit one step-result JSON row per line instead of the wrapped payload (--out writes the rows; --jq still digs the wrapped payload)")
     parser.add_argument(
         "--repeat",
         metavar="N",
@@ -7425,7 +7426,10 @@ def main(argv: list[str] | None = None) -> int:
     payload = {"ok": ok, "steps": steps, "suppressed": suppressed}
     if args.tag:
         payload["tag"] = args.tag
-    text = json.dumps(payload, indent=2) + "\n"
+    if getattr(args, "jsonl", False) and not args.jq:
+        text = "".join(json.dumps(s, ensure_ascii=False) + "\n" for s in steps)
+    else:
+        text = json.dumps(payload, indent=2) + "\n"
     if args.jq:
         value, found = jq_lookup(payload, args.jq)
         if not found:

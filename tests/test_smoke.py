@@ -109,6 +109,33 @@ class SmokeTests(unittest.TestCase):
         out = json.loads(proc.stdout)
         self.assertEqual({s["name"] for s in out["steps"]}, {"policy"})
 
+    def test_jsonl_emits_one_row_per_step(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "policy", "--jsonl"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        rows = [json.loads(l) for l in proc.stdout.splitlines() if l.strip()]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "policy")
+        self.assertTrue(rows[0]["ok"])
+
+    def test_jsonl_out_writes_step_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "steps.jsonl"
+            proc = subprocess.run(
+                [sys.executable, str(SMOKE), "--only", "policy", "--jsonl", "--out", str(target)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            rows = [json.loads(l) for l in target.read_text(encoding="utf-8").splitlines() if l.strip()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["name"], "policy")
+
     def test_jobs_runs_subset_in_step_order(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(SMOKE), "--only", "trace,policy,decisions",

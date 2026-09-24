@@ -648,6 +648,9 @@ def main(argv=None):
     ap.add_argument("--exclude-dir", metavar="LIST", default="",
                     help="Skip these directory names in addition to the built-ins "
                          "(comma list; '-' reads stdin).")
+    ap.add_argument("--fail-on", metavar="SEV", default="",
+                    help="Exit 1 on findings at this severity or above "
+                         "(CRITICAL, WARN, INFO; default CRITICAL).")
     ap.add_argument("--jq", metavar="KEY", default="",
                     help="Print just this dotted-path field of the report payload "
                          "(e.g. verdict or summary.CRITICAL); unknown key exits 2.")
@@ -715,6 +718,11 @@ def main(argv=None):
             print("unknown severity %r (severities: %s)" % (
                 sorted(bad)[0], ", ".join(SEV_RANK)), file=sys.stderr)
             return 2
+    fail_on = args.fail_on.upper() if args.fail_on else "CRITICAL"
+    if args.fail_on and fail_on not in SEV_RANK:
+        print("unknown severity %r (severities: %s)" % (
+            args.fail_on, ", ".join(SEV_RANK)), file=sys.stderr)
+        return 2
     only = set()
     if args.only:
         only = set(_csv_arg(args.only))
@@ -831,7 +839,8 @@ def main(argv=None):
         else:
             _print_report(root, skills, all_findings, suppressed, counts)
         break
-    return 1 if counts["CRITICAL"] else 0
+    rank = SEV_RANK[fail_on]
+    return 1 if any(counts[s] for s, r in SEV_RANK.items() if r >= rank) else 0
 
 
 if __name__ == "__main__":

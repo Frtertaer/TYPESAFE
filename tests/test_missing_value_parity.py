@@ -78,6 +78,7 @@ MISSING_VALUE_RC2 = {
         "--watch",
         "--max-ticks",
         "--unchanged-max",
+        "--fail-on",
     ],
     "smoke.py": ["--only", "--repeat", "--jobs", "--timeout", "--baseline", "--baseline-write"],
     "trace.py": ["--file"],

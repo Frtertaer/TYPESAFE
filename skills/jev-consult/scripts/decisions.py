@@ -1352,6 +1352,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON to PATH — with --watch a {verdict, count, added, removed, ticks} payload refreshed every tick; with --verify a {verdict: ok|fail, entries, bad_lines, problems} payload; without either a one-shot {verdict: ok|empty, count, ticks: 1} probe of the filtered entries. '-' prints it to stdout.")
     parser.add_argument("--self-test", action="store_true", help="Parse a synthetic 3-entry log + 1 bad line; exit 1 when the counts do not match")
     parser.add_argument("--verify", action="store_true", help="Chain check the raw log: unparseable lines, missing ts/jev_status, missing required schema keys on full routing/fill entries, ts regressions; rc 1 on any problem (--jq KEY digs the report, rc 2 on unknown; --out PATH writes the report JSON)")
+    parser.add_argument("--fix", action="store_true", help="With --verify: rewrite the log dropping unparseable / non-object lines, then re-verify (report gains `fixed`; rc 2 on --file -)")
     args = parser.parse_args(argv)
     args.grep = _watch.text_arg(args.grep)
     if getattr(args, "schema", False):
@@ -1504,6 +1505,32 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if getattr(args, "verify", False):
         report = verify_log(path)
+        if getattr(args, "fix", False):
+            if str(path) == "-":
+                sys.stderr.write("--fix cannot rewrite a stdin log\n")
+                return 2
+            fixable = {"unparseable", "not an object"}
+            to_drop = {
+                p["line"]
+                for p in report["problems"]
+                if p.get("issue") in fixable
+            }
+            if to_drop:
+                text = _log_text(path) or ""
+                kept = [
+                    line
+                    for i, line in enumerate(text.splitlines(), 1)
+                    if i not in to_drop
+                ]
+                try:
+                    _atomic_write(
+                        path, "\n".join(kept) + ("\n" if kept else "")
+                    )
+                except OSError as exc:
+                    sys.stderr.write("cannot fix %s: %s\n" % (path, exc))
+                    return 1
+                report = verify_log(path)
+            report["fixed"] = len(to_drop)
         if args.verdict:
             _watch.write_verdict(
                 args.verdict,

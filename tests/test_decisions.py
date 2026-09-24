@@ -3252,6 +3252,51 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(report["bad_lines"], 1)
             self.assertEqual(len(report["problems"]), 3)
 
+    def test_verify_fix_drops_unrecoverable_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('{"ts": 1, "jev_status": "ok"}\n')
+                fh.write("not json\n")
+                fh.write('{"ts": 2, "jev_status": "none"}\n')
+                fh.write("[1, 2]\n")
+            proc = self.run_cli("--file", str(path), "--verify", "--fix", "--json")
+            self.assertEqual(proc.returncode, 0)
+            report = json.loads(proc.stdout)
+            self.assertTrue(report["ok"])
+            self.assertEqual(report["fixed"], 2)
+            self.assertEqual(report["entries"], 2)
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 2)
+            self.assertEqual(json.loads(lines[0])["ts"], 1)
+            # idempotent: nothing left to fix
+            proc = self.run_cli("--file", str(path), "--verify", "--fix", "--json")
+            report = json.loads(proc.stdout)
+            self.assertEqual(report["fixed"], 0)
+
+    def test_verify_fix_keeps_unrepairable_problems(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('{"ts": 5, "jev_status": "ok"}\n')
+                fh.write("junk\n")
+                fh.write('{"ts": 4}\n')  # regression + missing jev_status
+            proc = self.run_cli("--file", str(path), "--verify", "--fix", "--json")
+            self.assertEqual(proc.returncode, 1)
+            report = json.loads(proc.stdout)
+            self.assertEqual(report["fixed"], 1)
+            issues = [p["issue"] for p in report["problems"]]
+            self.assertIn("ts regression", issues)
+            self.assertIn("missing jev_status", issues)
+            self.assertNotIn("unparseable", issues)
+            self.assertEqual(len(path.read_text(encoding="utf-8").splitlines()), 2)
+
+    def test_verify_fix_rc2_on_stdin(self):
+        proc = self.run_cli("--file", "-", "--verify", "--fix",
+                            stdin_text='{"ts": 1, "jev_status": "ok"}\n')
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("stdin", proc.stderr)
+
     def test_verify_verbose_lists_all_problems(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

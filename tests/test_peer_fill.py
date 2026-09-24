@@ -385,6 +385,41 @@ class PeerFillTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 2)
 
+    def test_list_md_emits_table(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hermes = base / "hermes"
+            home = base / "home"
+            write_skill(hermes / "skills", "jwt-auth", JWT_MD)
+            env = dict(__import__("os").environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env["JEV_CONSULT_LOG"] = "0"
+            env["USERPROFILE"] = str(home)
+            env["HOME"] = str(home)
+            argv = [
+                sys.executable,
+                str(SCRIPTS / "peer_fill.py"),
+                "--harness", "claude-code",
+                "--home", str(home),
+                "--hermes-home", str(hermes),
+                "--list", "--md",
+            ]
+            proc = subprocess.run(
+                argv, capture_output=True, text=True, env=env, cwd=str(base)
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("| kind | name | path |", proc.stdout)
+            self.assertIn("| skill | jwt-auth |", proc.stdout)
+            proc = subprocess.run(
+                argv + ["--keys", "name"],
+                capture_output=True, text=True, env=env, cwd=str(base),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("| name |", proc.stdout)
+            self.assertNotIn("| kind |", proc.stdout)
+
     def test_json_fill_emits_outcome_object(self) -> None:
         import subprocess
 

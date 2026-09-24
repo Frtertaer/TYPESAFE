@@ -557,10 +557,15 @@ def main() -> int:
         help="With --list: emit the items as CSV rows (name,identifier header).",
     )
     parser.add_argument(
+        "--md",
+        action="store_true",
+        help="With --list: emit the items as a Markdown table (name/identifier columns).",
+    )
+    parser.add_argument(
         "--keys",
         metavar="a,b",
         default="",
-        help="With --list --jsonl/--csv: keep only these keys in each row / as the columns (rc 2 on an empty list).",
+        help="With --list --jsonl/--csv/--md: keep only these keys in each row / as the columns (rc 2 on an empty list).",
     )
     parser.add_argument(
         "--schema",
@@ -838,6 +843,20 @@ def main() -> int:
                 if keys is None:
                     return 2
                 _watch.csv_table(
+                    [
+                        {
+                            "name": item.get("name") or "?",
+                            "identifier": item.get("identifier") or "",
+                        }
+                        for item in (hits or [])
+                    ],
+                    keys or ["name", "identifier"],
+                )
+            elif getattr(args, "md", False):
+                keys = _watch.key_projection(args)
+                if keys is None:
+                    return 2
+                _watch.md_table(
                     [
                         {
                             "name": item.get("name") or "?",

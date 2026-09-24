@@ -417,10 +417,15 @@ def main() -> int:
         help="With --list: emit the items as CSV rows (kind,name,id header).",
     )
     parser.add_argument(
+        "--md",
+        action="store_true",
+        help="With --list: emit the items as a Markdown table (kind/name/id columns).",
+    )
+    parser.add_argument(
         "--keys",
         metavar="a,b",
         default="",
-        help="With --list --jsonl/--csv: keep only these keys in each row / as the columns (rc 2 on an empty list).",
+        help="With --list --jsonl/--csv/--md: keep only these keys in each row / as the columns (rc 2 on an empty list).",
     )
     parser.add_argument(
         "--json",
@@ -737,6 +742,21 @@ def main() -> int:
                     if keys is None:
                         return 2
                     _watch.csv_table(
+                        [
+                            {
+                                "kind": item.get("kind") or "?",
+                                "name": item.get("name") or "?",
+                                "id": item.get("id") or "",
+                            }
+                            for item in items
+                        ],
+                        keys or ["kind", "name", "id"],
+                    )
+                elif getattr(args, "md", False):
+                    keys = _watch.key_projection(args)
+                    if keys is None:
+                        return 2
+                    _watch.md_table(
                         [
                             {
                                 "kind": item.get("kind") or "?",

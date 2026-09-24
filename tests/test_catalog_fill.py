@@ -528,6 +528,33 @@ class CatalogFillTests(unittest.TestCase):
             rows = list(_csv.reader(io.StringIO(buf.getvalue())))
             self.assertEqual(rows[0], ["identifier"])
 
+    def test_list_md_emits_table(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hits = [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            argv = [
+                "catalog_fill.py", "--task", "jwt", "--harness",
+                "claude-code", "--cwd", str(base), "--list", "--md",
+            ]
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                sys, "argv", argv
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertIn("| name | identifier |", buf.getvalue())
+            self.assertIn("| jwt-auth | owner/jwt-auth |", buf.getvalue())
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                sys, "argv", argv + ["--keys", "identifier"]
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertIn("| identifier |", buf.getvalue())
+            self.assertNotIn("| name |", buf.getvalue())
+
     def test_watch_fail_fast_breaks_on_first_hit(self) -> None:
         import io
 

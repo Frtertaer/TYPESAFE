@@ -271,6 +271,34 @@ class ApplyFillTests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("--keys names no fields", err.getvalue())
 
+    def test_list_md_emits_table(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        hits = [FILL.as_item("mcp", "beta", "b mcp")]
+        with patch.object(FILL, "search_hits", return_value=hits):
+            with patch.object(
+                sys, "argv", ["apply_fill.py", "--task", "beta", "--list", "--md"]
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertIn("| kind | name | id |", buf.getvalue())
+            self.assertIn("| mcp | beta |", buf.getvalue())
+            with patch.object(
+                sys,
+                "argv",
+                ["apply_fill.py", "--task", "beta", "--list",
+                 "--md", "--keys", "name"],
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+            self.assertEqual(rc, 0)
+            self.assertIn("| name |", buf.getvalue())
+            self.assertNotIn("kind", buf.getvalue())
+
     def test_show_prints_matching_record(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

@@ -1391,6 +1391,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scores", action="store_true", help="Add IDF score to each shortlist item.")
     parser.add_argument("--csv", action="store_true", help="Emit the shortlist as CSV rows instead of JSON.")
     parser.add_argument("--jsonl", action="store_true", help="Emit the shortlist as JSON lines, one item per row (for piping).")
+    parser.add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these item keys in each row (rc 2 on an empty list)")
     parser.add_argument("--md", action="store_true", help="Emit the shortlist as a Markdown table (id/kind/name[+score]).")
     parser.add_argument("--jq", metavar="KEY", default="", help="Print just one dotted-path field of the JSON payload (e.g. counts.skill); unknown key exits 2. With --watch: print just the named tick field(s) per pass, comma list")
     parser.add_argument("--out", metavar="PATH", default="", help="Write the payload JSON to PATH instead of stdout.")
@@ -1878,8 +1879,18 @@ def main(argv: list[str] | None = None) -> int:
         for item in payload["shortlist"]:
             sys.stdout.write("%s\n" % item.get("id"))
     elif getattr(args, "jsonl", False):
+        key_sel = getattr(args, "keys", "") or ""
+        keys = [k.strip() for k in key_sel.split(",") if k.strip()]
+        if key_sel and not keys:
+            sys.stderr.write("--keys names no fields\n")
+            return 2
         for item in payload["shortlist"]:
-            sys.stdout.write(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n")
+            row = (
+                {k: item.get(k) for k in keys}
+                if keys and isinstance(item, dict)
+                else item
+            )
+            sys.stdout.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
     elif getattr(args, "md", False):
         cols = ["id", "kind", "name"] + (["score"] if args.scores else [])
         sys.stdout.write("| " + " | ".join(cols) + " |\n")

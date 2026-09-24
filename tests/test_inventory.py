@@ -2089,6 +2089,33 @@ class HookRetriesEnvTests(unittest.TestCase):
         self.assertEqual(rows[0]["id"], "skill_jwt_auth")
         self.assertEqual(rows[0]["name"], "jwt-auth")
 
+    def test_cli_jsonl_keys_projects_rows(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness", "hermes",
+                    "--hermes-home", str(FIXTURE),
+                    "--task", "jwt",
+                    "--jsonl", "--keys", "id,name",
+                ]
+            )
+        self.assertEqual(code, 0)
+        rows = [json.loads(line) for line in buf.getvalue().strip().splitlines()]
+        self.assertEqual(rows, [{"id": "skill_jwt_auth", "name": "jwt-auth"}])
+        code = inv.main(
+            [
+                "--harness", "hermes",
+                "--hermes-home", str(FIXTURE),
+                "--task", "jwt",
+                "--jsonl", "--keys", " ,",
+            ]
+        )
+        self.assertEqual(code, 2)
+
     def test_cli_md_emits_table(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

@@ -1274,6 +1274,28 @@ def cmd_notes(args: argparse.Namespace) -> int:
             sys.stderr.write("prune failed: %s\n" % exc)
             return 1
         notes = data["notes"]
+    older = getattr(args, "prune_older_than", None)
+    if older is not None:
+        cutoff = time.time() - float(older)
+        kept = [
+            n
+            for n in notes
+            if not isinstance(n, dict)
+            or not isinstance(n.get("ts"), (int, float))
+            or isinstance(n.get("ts"), bool)
+            or float(n["ts"]) >= cutoff
+        ]
+        data["notes"] = kept
+        try:
+            save(data, path)
+            sys.stderr.write(
+                "notes pruned to %d (dropped %d older than %ss)\n"
+                % (len(kept), len(notes) - len(kept), older)
+            )
+        except OSError as exc:
+            sys.stderr.write("prune failed: %s\n" % exc)
+            return 1
+        notes = kept
     edit = getattr(args, "edit", None)
     if edit:
         spec = str(edit[0]).strip()
@@ -2207,6 +2229,12 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--limit", type=int, help="Show only the last N notes")
     notes_cmd.add_argument("--first", type=int, default=None, help="Show only the earliest N notes (applied before --limit/--reverse)")
     notes_cmd.add_argument("--prune", type=int, help="Rewrite the trace keeping only the last N notes")
+    notes_cmd.add_argument(
+        "--prune-older-than",
+        metavar="S",
+        type=float,
+        help="Rewrite the trace dropping notes whose ts is older than S seconds ago (notes with no readable ts are kept)",
+    )
     notes_cmd.add_argument("--edit", nargs=2, metavar=("I", "TEXT"), help="Rewrite note I (1-based, into the unfiltered list) — or every note in range I-J — with TEXT; keeps ts/iso/harness, recomputes sha; rc 2 out of range")
     notes_cmd.add_argument("--drop", metavar="I", default="", help="Delete note I (1-based, into the unfiltered list) or range I-J; rc 2 out of range")
     notes_cmd.add_argument("--context", metavar="I", default=None, help="Print the notes surrounding index I (1-based, into the unfiltered list; other filters ignored)")

@@ -329,6 +329,36 @@ class CliTest(unittest.TestCase):
         self.assertEqual(rows[0]["id"], "drift_case")
         self.assertEqual(bad.returncode, 2)
 
+    def test_cli_csv_emits_case_rows(self) -> None:
+        import csv as _csv
+        import io as _io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            proc = self.run_cli("--cases", str(path), "--csv")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        rows = list(_csv.reader(_io.StringIO(proc.stdout)))
+        self.assertEqual(rows[0], ["id", "defect", "before_jev", "after_jev", "after_pick"])
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[1][0], "drift_case")
+        self.assertEqual(rows[2][0], "stall_case")
+
+    def test_cli_csv_keys_drives_columns(self) -> None:
+        import csv as _csv
+        import io as _io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            proc = self.run_cli("--cases", str(path), "--csv", "--keys", "id,score")
+            bad = self.run_cli("--cases", str(path), "--csv", "--keys", " ,")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        rows = list(_csv.reader(_io.StringIO(proc.stdout)))
+        self.assertEqual(rows[0], ["id", "score"])
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(bad.returncode, 2)
+
     def test_cli_out_writes_result_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "cases.json"

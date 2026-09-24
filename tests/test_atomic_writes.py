@@ -74,6 +74,54 @@ class AtomicWriteGuardTest(unittest.TestCase):
                     self.assertIn(".tmp", body)
                     self.assertIn("os.replace", body)
 
+    def test_no_bare_open_write_outside_helpers_and_self_tests(self) -> None:
+        """open(..., "w") is banned outside atomic helpers and self-test/
+        tempfile fixture blocks — same rule as bare .write_text but for
+        the open() form. Known fixture sites are pinned by stripped line
+        text so the allowlist only shrinks."""
+        open_w = re.compile(r'\bopen\([^)]*["\']w["\']')
+        known_fixture_sites = {
+            "decisions.py": [
+                'with open(log, "w", encoding="utf-8") as fh:',
+            ],
+            "skill_lint.py": [
+                'with open(bad, "w", encoding="utf-8") as fh:',
+            ],
+            "trigger_lint.py": [
+                'with open(p, "w", encoding="utf-8") as fh:',
+            ],
+        }
+        seen: dict[str, set[str]] = {}
+        offenders = []
+        for path in sorted(SCRIPTS.glob("*.py")):
+            if path.name in ALLOW_BARE or path.name == "_watch.py":
+                continue
+            for lineno, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1
+            ):
+                if not open_w.search(line):
+                    continue
+                stripped = line.strip()
+                if stripped in known_fixture_sites.get(path.name, []):
+                    seen.setdefault(path.name, set()).add(stripped)
+                    continue
+                # os.fdopen inside mkstemp-based atomic writers is fine
+                if "os.fdopen" in stripped or "mkstemp" in stripped:
+                    continue
+                offenders.append("%s:%d %s" % (path.name, lineno, stripped))
+        self.assertEqual(
+            offenders, [], "bare open(w) output writes: %s" % offenders
+        )
+        unused = {
+            name: sorted(set(sites) - seen.get(name, set()))
+            for name, sites in known_fixture_sites.items()
+        }
+        self.assertEqual(
+            {k: v for k, v in unused.items() if v},
+            {},
+            "allowlisted fixture writes no longer present — shrink the set",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

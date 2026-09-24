@@ -2050,7 +2050,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--md",
         action="store_true",
-        help="Emit a markdown summary of the compaction stats instead of the JSON payload (-o writes the markdown to the file too)",
+        help="Emit a markdown summary of the compaction stats instead of the JSON payload (-o writes the markdown to the file too); with --diff emits a {type,id,tool,a,b} markdown table (--keys picks the columns)",
     )
     parser.add_argument(
         "--jsonl",
@@ -2306,6 +2306,14 @@ def main(argv: list[str] | None = None) -> int:
             rows += [{"type": "only_a", "id": ident} for ident in payload["only_a"]]
             rows += [{"type": "only_b", "id": ident} for ident in payload["only_b"]]
             _watch.csv_table(rows, keys or ["type", "id", "tool", "a", "b"])
+        elif getattr(args, "md", False):
+            keys = _key_projection(args)
+            if keys is None:
+                return 2
+            rows = [{"type": "changed", **row} for row in payload["changed"]]
+            rows += [{"type": "only_a", "id": ident} for ident in payload["only_a"]]
+            rows += [{"type": "only_b", "id": ident} for ident in payload["only_b"]]
+            _watch.md_table(rows, keys or ["type", "id", "tool", "a", "b"])
         else:
             sys.stdout.write(
                 "diff: same=%d changed=%d only_a=%d only_b=%d\n"

@@ -1283,6 +1283,32 @@ class CompactCliTests(unittest.TestCase):
             )
             self.assertEqual(rows[1][1:5], ["t2", "edit", "drop_call", "keep"])
 
+    def test_diff_md_emits_row_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            a = Path(tmp) / "a.json"
+            b = Path(tmp) / "b.json"
+            a.write_text(json.dumps({"decisions": [
+                {"id": "t1", "tool": "read", "action": "keep"},
+                {"id": "t2", "tool": "edit", "action": "drop_call"},
+            ]}), encoding="utf-8")
+            b.write_text(json.dumps({"decisions": [
+                {"id": "t1", "tool": "read", "action": "keep"},
+                {"id": "t3", "tool": "spill", "action": "spill"},
+            ]}), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(["--diff", str(a), str(b), "--md"])
+            self.assertEqual(rc, 0)
+            lines = buf.getvalue().splitlines()
+            self.assertEqual(lines[0], "| type | id | tool | a | b |")
+            self.assertIn("| only_a | t2 |", buf.getvalue())
+            self.assertIn("| only_b | t3 |", buf.getvalue())
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = C.main(["--diff", str(a), str(b), "--md", "--keys", "type,id"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().splitlines()[0], "| type | id |")
+
     def test_md_emits_markdown_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

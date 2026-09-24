@@ -1415,6 +1415,38 @@ class TraceTests(unittest.TestCase):
             # the stale note is dropped; the ts-less note is kept (conservative)
             self.assertEqual([n["text"] for n in data["notes"]], ["new", "no-ts"])
 
+    def test_cli_history_prune_older_than_drops_stale(self) -> None:
+        import io
+        import time
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            for pick in ("old", "new"):
+                tr.main(["--file", str(path), "record", "--pick", pick])
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["history"][0]["ts"] = time.time() - 99999
+            data["history"].append({"pick": "no-ts"})
+            path.write_text(json.dumps(data), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "history", "--prune-older-than", "60"]
+                )
+            self.assertEqual(rc, 0)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual([h["pick"] for h in data["history"]], ["new", "no-ts"])
+            # stdin traces cannot be rewritten
+            import io as _io2
+
+            with patch.object(sys, "stdin", _io2.StringIO(json.dumps(data))):
+                with patch.object(sys, "stderr", _io2.StringIO()):
+                    rc = tr.main(
+                        ["--file", "-", "history", "--prune-older-than", "60"]
+                    )
+            self.assertEqual(rc, 2)
+
     def test_cli_notes_edit_rewrites_text_and_sha(self) -> None:
         import hashlib as _hl
 

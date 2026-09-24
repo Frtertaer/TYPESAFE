@@ -523,6 +523,30 @@ def cmd_history(args: argparse.Namespace) -> int:
     data = load(path)
     history = data.get("history")
     history = [h for h in history if isinstance(h, dict)] if isinstance(history, list) else []
+    older = getattr(args, "prune_older_than", None)
+    if older is not None and str(path) == "-":
+        sys.stderr.write("--prune-older-than cannot rewrite a stdin trace\n")
+        return 2
+    if older is not None:
+        cutoff = time.time() - float(older)
+        kept = [
+            h
+            for h in history
+            if not isinstance(h.get("ts"), (int, float))
+            or isinstance(h.get("ts"), bool)
+            or float(h["ts"]) >= cutoff
+        ]
+        data["history"] = kept
+        try:
+            save(data, path)
+            sys.stderr.write(
+                "history pruned to %d (dropped %d older than %ss)\n"
+                % (len(kept), len(history) - len(kept), older)
+            )
+        except OSError as exc:
+            sys.stderr.write("prune failed: %s\n" % exc)
+            return 1
+        history = kept
     def _filtered(items: list) -> list | None:
         needle = (
             _watch.text_arg(getattr(args, "grep", ""))
@@ -2279,6 +2303,12 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--since", default=None, help="Only picks with ts >= epoch seconds or ISO8601")
     hist_cmd.add_argument("--grep", default="", help="Only picks whose pick/kind contains SUBSTR (case-insensitive; default JEV_TRACE_HISTORY_GREP; '-' reads SUBSTR from stdin)")
     hist_cmd.add_argument("--before", default=None, help="Only picks with ts <= epoch seconds or ISO8601")
+    hist_cmd.add_argument(
+        "--prune-older-than",
+        metavar="S",
+        type=float,
+        help="Rewrite the trace dropping picks whose ts is older than S seconds ago (picks with no readable ts are kept; rc 2 on --file -)",
+    )
     hist_cmd.add_argument("--gap", metavar="S", type=float, default=0.0, help="List consecutive-pick gaps wider than S seconds ({index,gap_s,prev_pick,pick} rows; --json emits {gaps})")
     hist_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,picks} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     hist_cmd.add_argument("--jq", metavar="KEY", default="", help="With --watch: print just the named tick field(s) per pass, comma list")

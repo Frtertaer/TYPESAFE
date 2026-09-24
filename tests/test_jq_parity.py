@@ -137,6 +137,26 @@ class JqParityTests(unittest.TestCase):
                     self.assertEqual(mod.jq_lookup(payload, path), (want, found), path)
                     self.assertEqual(watch.dig(payload, path), (want, found), path)
 
+    def test_no_inline_dotted_dig_loops(self) -> None:
+        # Every --jq dig must go through _watch.dig (or jq_lookup, which
+        # delegates to it). A raw `for part in X.split(".")` descent is the
+        # drift this pack already hit: dict-only copies that silently could
+        # not index lists or resolve dot-containing keys.
+        import re
+
+        allowed = {"_watch.py", "jev.py"}  # _watch.dig itself + jev fallback
+        loop_re = re.compile(r'for part in .+\.split\("\."\)')
+        offenders = []
+        for path in sorted(SCRIPTS_DIR.glob("*.py")):
+            if path.name in allowed:
+                continue
+            hits = loop_re.findall(path.read_text(encoding="utf-8"))
+            if hits:
+                offenders.append("%s: %s" % (path.name, hits[0].strip()))
+        # install.py lives outside the pack and cannot import _watch; it
+        # carries an identical longest-literal loop instead.
+        self.assertEqual(offenders, [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1003,14 +1003,7 @@ def main(argv: list[str] | None = None) -> int:
         if idx + 1 >= len(argv):
             sys.stderr.write("--jq needs a KEY value\n")
             return 2
-        node = out
-        found = True
-        for part in argv[idx + 1].split("."):
-            if isinstance(node, dict) and part in node:
-                node = node[part]
-            else:
-                found = False
-                break
+        node, found = _watch.dig(out, argv[idx + 1])
         if not found:
             sys.stderr.write(
                 "bad --jq key %r (payload has: %s)\n"

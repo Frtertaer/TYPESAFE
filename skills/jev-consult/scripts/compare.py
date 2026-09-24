@@ -454,14 +454,7 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "env", False):
         report = env_report(args)
         if getattr(args, "jq", ""):
-            node = report
-            found = True
-            for part in args.jq.split("."):
-                if isinstance(node, dict) and part in node:
-                    node = node[part]
-                else:
-                    found = False
-                    break
+            node, found = _watch.dig(report, args.jq)
             if not found:
                 sys.stderr.write(
                     "bad --jq key %r (env has: %s)\n"
@@ -732,14 +725,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         sys.stderr.write("wrote %s\n" % args.report)
     if getattr(args, "jq", ""):
-        node = result
-        found = True
-        for part in args.jq.split("."):
-            if isinstance(node, dict) and part in node:
-                node = node[part]
-            else:
-                found = False
-                break
+        node, found = _watch.dig(result, args.jq)
         if not found:
             sys.stderr.write(
                 "bad --jq key %r (payload has: %s)\n"

@@ -175,12 +175,8 @@ def _present(value: Any) -> bool:
 
 
 def _dig(item: dict, key: str):
-    node = item
-    for part in key.split("."):
-        if not isinstance(node, dict):
-            return None
-        node = node.get(part)
-    return node
+    value, found = _watch.dig(item, key)
+    return value if found else None
 
 
 def _key_projection(args) -> list | None:

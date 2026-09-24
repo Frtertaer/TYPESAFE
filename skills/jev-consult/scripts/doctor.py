@@ -424,14 +424,7 @@ def main(argv: list[str] | None = None) -> int:
             "policy": os.environ.get("JEV_POLICY", "").strip() or "default",
         }
         if getattr(args, "jq", ""):
-            node: object = payload
-            found = True
-            for part in args.jq.split("."):
-                if isinstance(node, dict) and part in node:
-                    node = node[part]
-                else:
-                    found = False
-                    break
+            node, found = _watch.dig(payload, args.jq)
             if not found:
                 sys.stderr.write(
                     "bad --jq key %r (payload has: %s)\n"
@@ -523,14 +516,7 @@ def main(argv: list[str] | None = None) -> int:
                 "checks": len(checks),
                 "failed": failed,
             }
-            node: object = payload
-            found = True
-            for part in args.jq.split("."):
-                if isinstance(node, dict) and part in node:
-                    node = node[part]
-                else:
-                    found = False
-                    break
+            node, found = _watch.dig(payload, args.jq)
             if not found:
                 sys.stderr.write(
                     "bad --jq key %r (payload has: %s)\n"
@@ -642,14 +628,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.verdict and not _write_verdict(checks):
         return 1
     if getattr(args, "jq", ""):
-        node = payload
-        found = True
-        for part in args.jq.split("."):
-            if isinstance(node, dict) and part in node:
-                node = node[part]
-            else:
-                found = False
-                break
+        node, found = _watch.dig(payload, args.jq)
         if not found:
             sys.stderr.write(
                 "bad --jq key %r (payload has: %s)\n"

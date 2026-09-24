@@ -388,23 +388,15 @@ def filter_field(entries: list[dict], spec: str | None) -> list[dict]:
     value = value.strip()
 
     def dig(item: dict):
-        node = item
-        for part in key.split("."):
-            if not isinstance(node, dict):
-                return None
-            node = node.get(part)
-        return node
+        value, found = _watch.dig(item, key)
+        return value if found else None
 
     return [item for item in entries if str(dig(item) or "") == value]
 
 
 def _dig(item: dict, key: str):
-    node = item
-    for part in key.split("."):
-        if not isinstance(node, dict):
-            return None
-        node = node.get(part)
-    return node
+    value, found = _watch.dig(item, key)
+    return value if found else None
 
 
 def group_by(entries: list[dict], field: str) -> dict[str, int]:
@@ -1426,14 +1418,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
         }
         if args.jq:
-            node = report
-            found = True
-            for part in args.jq.split("."):
-                if isinstance(node, dict) and part in node:
-                    node = node[part]
-                else:
-                    found = False
-                    break
+            node, found = _watch.dig(report, args.jq)
             if not found:
                 sys.stderr.write(
                     "bad --jq key %r (env has: %s)\n"
@@ -1515,20 +1500,7 @@ def main(argv: list[str] | None = None) -> int:
                 },
             )
         if args.jq:
-            node = report
-            found = True
-            for part in args.jq.split("."):
-                if isinstance(node, dict) and part in node:
-                    node = node[part]
-                elif isinstance(node, list):
-                    try:
-                        node = node[int(part)]
-                    except (ValueError, IndexError):
-                        found = False
-                        break
-                else:
-                    found = False
-                    break
+            node, found = _watch.dig(report, args.jq)
             if not found:
                 sys.stderr.write(
                     "bad --jq key %r (verify has: %s)\n"

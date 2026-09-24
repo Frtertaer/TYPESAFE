@@ -716,14 +716,7 @@ def main() -> int:
                 except OSError as exc:
                     sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
             if args.jq:
-                cur = report
-                found = True
-                for part in args.jq.split("."):
-                    if isinstance(cur, dict) and part in cur:
-                        cur = cur[part]
-                    else:
-                        found = False
-                        break
+                cur, found = _watch.dig(report, args.jq)
                 if not found:
                     sys.stderr.write(
                         "bad --jq key %r (payload has: %s)\n"

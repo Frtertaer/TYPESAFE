@@ -654,11 +654,31 @@ def emit_env(report: dict, jq: str | None, out: str | None) -> int:
         sys.stdout.write(text)
         return 0
     value = report
-    for part in jq.split("."):
+    parts = jq.split(".")
+    i = 0
+    while i < len(parts):
+        part = parts[i]
         if isinstance(value, dict) and part in value:
             value = value[part]
+            i += 1
         elif isinstance(value, list) and part.isdigit() and int(part) < len(value):
             value = value[int(part)]
+            i += 1
+        elif isinstance(value, dict):
+            hit = False
+            for j in range(len(parts), i + 1, -1):
+                literal = ".".join(parts[i:j])
+                if literal in value:
+                    value = value[literal]
+                    i = j
+                    hit = True
+                    break
+            if not hit:
+                sys.stderr.write(
+                    "install.py env: unknown jq key %r; env has: %s\n"
+                    % (jq, ", ".join(sorted(report)))
+                )
+                return 2
         else:
             sys.stderr.write(
                 "install.py env: unknown jq key %r; env has: %s\n"

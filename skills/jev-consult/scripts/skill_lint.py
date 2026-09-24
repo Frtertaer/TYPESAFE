@@ -6,6 +6,7 @@ Exit 0 clean/warn, 1 on any error, 2 on bad args.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -69,6 +70,62 @@ def _skill_text(path: Path) -> str | None:
         return path.read_text(encoding="utf-8-sig", errors="replace")
     except OSError:
         return None
+
+
+def _skill_summary(path: Path) -> dict:
+    """Compact comparable view of one SKILL.md ('-' reads stdin)."""
+    text = _skill_text(path)
+    if text is None:
+        return {"readable": False}
+    meta = raw_frontmatter(text)
+    body = text
+    if meta is not None:
+        end = _fm_end(text, text.index("---") + 3)
+        if end >= 0:
+            close_end = text.find("\n", end + 1)
+            body = text[close_end + 1 :] if close_end > 0 else ""
+    return {
+        "readable": True,
+        "has_frontmatter": meta is not None,
+        "frontmatter": meta or {},
+        "cited_scripts": sorted(
+            set(re.findall(r"`?scripts/([A-Za-z0-9_-]+\.py)`?", text))
+        ),
+        "body_lines": len(body.splitlines()),
+        "body_sha1": hashlib.sha1(body.encode("utf-8")).hexdigest()[:12],
+    }
+
+
+def diff_skill(a: dict, b: dict) -> list[str]:
+    """+/-/~ lines comparing two _skill_summary dicts."""
+    lines: list[str] = []
+    for key in sorted(set(a) | set(b)):
+        if key == "frontmatter":
+            fa = a.get(key) or {}
+            fb = b.get(key) or {}
+            for fk in sorted(set(fa) | set(fb)):
+                if fk not in fa:
+                    lines.append("+ frontmatter.%s = %s" % (fk, fb[fk]))
+                elif fk not in fb:
+                    lines.append("- frontmatter.%s = %s" % (fk, fa[fk]))
+                elif fa[fk] != fb[fk]:
+                    lines.append(
+                        "~ frontmatter.%s: %s -> %s" % (fk, fa[fk], fb[fk])
+                    )
+        elif key == "cited_scripts":
+            sa = set(a.get(key) or [])
+            sb = set(b.get(key) or [])
+            for item in sorted(sb - sa):
+                lines.append("+ cited_scripts.%s" % item)
+            for item in sorted(sa - sb):
+                lines.append("- cited_scripts.%s" % item)
+        elif key not in a:
+            lines.append("+ %s = %s" % (key, b[key]))
+        elif key not in b:
+            lines.append("- %s = %s" % (key, a[key]))
+        elif a[key] != b[key]:
+            lines.append("~ %s: %s -> %s" % (key, a[key], b[key]))
+    return lines
 
 
 def lint_skill(path: Path) -> list[dict]:
@@ -294,7 +351,7 @@ def _atomic_write(path, text):
         raise
 
 
-USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S      preset severity floor (error|warn|info; JEV_SLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  -                 read SKILL.md content from stdin (no --fix/--watch)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S      preset severity floor (error|warn|info; JEV_SLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  -                 read SKILL.md content from stdin (no --fix/--watch/--diff)\n  --diff PATH       diff this SKILL.md against another (frontmatter/cited_scripts/body_lines/body_sha1; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -414,6 +471,14 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         out_path = argv[idx + 1].strip()
         argv = argv[:idx] + argv[idx + 2 :]
+    diff_path = None
+    if "--diff" in argv:
+        idx = argv.index("--diff")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--diff needs a PATH value\n")
+            return 2
+        diff_path = argv[idx + 1]
+        argv = argv[:idx] + argv[idx + 2 :]
     watch_seconds = 0.0
     if "--watch" in argv:
         idx = argv.index("--watch")
@@ -529,8 +594,8 @@ def main(argv: list[str] | None = None) -> int:
     if unknown:
         sys.stderr.write("unknown flag(s): %s\n" % ", ".join(unknown))
         return 2
-    if "-" in argv and (do_fix or watch_seconds > 0):
-        sys.stderr.write("- (stdin) supports neither --fix nor --watch\n")
+    if "-" in argv and (do_fix or watch_seconds > 0 or diff_path is not None):
+        sys.stderr.write("- (stdin) supports neither --fix, --watch nor --diff\n")
         return 2
     rc = 0
     paths: list[Path] = []
@@ -540,6 +605,21 @@ def main(argv: list[str] | None = None) -> int:
             paths.extend(sorted(path.rglob("SKILL.md")))
         else:
             paths.append(path)
+    if diff_path is not None:
+        if len(paths) != 1:
+            sys.stderr.write("--diff needs exactly one SKILL.md path\n")
+            return 2
+        other = _skill_summary(Path(diff_path))
+        this = _skill_summary(paths[0])
+        if not (other.get("readable") and this.get("readable")):
+            sys.stderr.write("--diff needs readable SKILL.md docs on both sides\n")
+            return 2
+        lines = diff_skill(other, this)
+        sys.stdout.write("diff %s -> %s\n" % (diff_path, paths[0]))
+        for line in lines:
+            sys.stdout.write(line + "\n")
+        sys.stdout.write("%d difference(s)\n" % len(lines))
+        return 0
     baseline_keys: set | None = None
     if baseline_write:
         snapshot = [

@@ -866,5 +866,73 @@ class StdinDashTests(unittest.TestCase):
             self.assertFalse(any(r["severity"] == "error" and r["path"].endswith("SKILL.md") for r in rows))
 
 
+
+class DiffFlagTests(unittest.TestCase):
+    """`--diff PATH` compares two SKILL.md docs; '-' reads stdin side."""
+
+    A = "---\nname: a\ndescription: A one.\n---\nuses `scripts/jev.py`\n"
+    B = ("---\nname: b\ndescription: A two.\n---\n"
+         "uses `scripts/jev.py` and `scripts/decisions.py`\n")
+
+    def _files(self, tmp: str):
+        a = write_skill(tmp, "a", self.A)
+        b = write_skill(tmp, "b", self.B)
+        return a, b
+
+    def _run(self, argv, stdin_text=""):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.stdin", io.StringIO(stdin_text)):
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = skill_lint.main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_diff_identical_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, _b = self._files(tmp)
+            rc, out, _ = self._run([str(a), "--diff", str(a)])
+        self.assertEqual(rc, 0)
+        self.assertIn("0 difference(s)", out)
+
+    def test_diff_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = self._files(tmp)
+            rc, out, _ = self._run([str(b), "--diff", str(a)])
+        self.assertEqual(rc, 0)
+        self.assertIn("~ frontmatter.name: a -> b", out)
+        self.assertIn("~ frontmatter.description:", out)
+        self.assertIn("+ cited_scripts.decisions.py", out)
+        self.assertIn("~ body_sha1:", out)
+
+    def test_diff_dash_side_stdin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = self._files(tmp)
+            rc, out, _ = self._run([str(b), "--diff", "-"], stdin_text=self.A)
+        self.assertEqual(rc, 0)
+        self.assertIn("diff - ->", out)
+        self.assertIn("+ cited_scripts.decisions.py", out)
+
+    def test_diff_stdin_main_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, _b = self._files(tmp)
+            rc, _o, err = self._run(["-", "--diff", str(a)], stdin_text=self.A)
+        self.assertEqual(rc, 2)
+        self.assertIn("--diff", err)
+
+    def test_diff_multi_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = self._files(tmp)
+            rc, _o, err = self._run([str(a), str(b), "--diff", str(a)])
+        self.assertEqual(rc, 2)
+        self.assertIn("--diff", err)
+
+    def test_diff_unreadable_rc2(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, _b = self._files(tmp)
+            rc, _o, err = self._run(
+                [str(a), "--diff", str(Path(tmp) / "none.md")]
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("readable", err)
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

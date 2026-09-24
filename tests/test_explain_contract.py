@@ -63,6 +63,23 @@ class ExplainContractTests(unittest.TestCase):
                 )
         self.assertEqual(problems, [])
 
+    def test_explain_dash_reads_rule_from_stdin(self) -> None:
+        problems = []
+        for script, prefix in sorted(LINTS.items()):
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPTS / script), "--explain", "-"],
+                input="%s001\n" % prefix,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if proc.returncode != 0 or not proc.stdout.startswith("%s001:" % prefix):
+                problems.append(
+                    "%s: rc=%d out=%r"
+                    % (script, proc.returncode, proc.stdout[:80])
+                )
+        self.assertEqual(problems, [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -576,7 +576,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python policy_lint.py [POLICY.json ...] [flags]\nStatic checks for policy.json (required keys, ranges, ordering, template).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --diff            print a unified diff after --fix\n  --show            print the effective policy JSON and exit\n  --severity S      preset severity floor (error|warn|info; JEV_PLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the known policy.json key/type table (--json emits an object)\n  --usage           flag known keys no pack script reads (P015, info; scans scripts dir)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad policy dict; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python policy_lint.py [POLICY.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch/--diff).\nStatic checks for policy.json (required keys, ranges, ordering, template).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --diff            print a unified diff after --fix\n  --show            print the effective policy JSON and exit\n  --severity S      preset severity floor (error|warn|info; JEV_PLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the known policy.json key/type table (--json emits an object)\n  --usage           flag known keys no pack script reads (P015, info; scans scripts dir)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad policy dict; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -811,12 +811,18 @@ def main(argv: list[str] | None = None) -> int:
         n_suppressed = 0
         snapshot = []
         for arg in argv:
-            fpath = Path(arg)
-            try:
-                fpol = json.loads(fpath.read_text(encoding="utf-8-sig"))
-            except (OSError, ValueError) as exc:
-                sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (fpath, exc))
-                return 2
+            if arg == "-":
+                try:
+                    fpol = json.loads(sys.stdin.read())
+                except ValueError as exc:
+                    sys.stdout.write("ERROR P000 $: cannot parse stdin (%s)\n" % exc)
+                    return 2
+            else:
+                try:
+                    fpol = json.loads(Path(arg).read_text(encoding="utf-8-sig"))
+                except (OSError, ValueError) as exc:
+                    sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (arg, exc))
+                    return 2
             ffind = lint_policy(fpol)
             if usage:
                 ffind += usage_findings(fpol)
@@ -837,7 +843,7 @@ def main(argv: list[str] | None = None) -> int:
             ]
             results.append(
                 {
-                    "path": str(fpath),
+                    "path": "<stdin>" if arg == "-" else arg,
                     "findings": fshown,
                     "errors": ferr,
                     "warnings": fwarn,
@@ -873,11 +879,21 @@ def main(argv: list[str] | None = None) -> int:
         any_warn = any(r["warnings"] for r in results)
         return 1 if any_err or (strict and any_warn) else 0
     path = Path(argv[0]) if argv else DEFAULT_POLICY
-    try:
-        policy = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError) as exc:
-        sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (path, exc))
-        return 2
+    if argv and argv[0] == "-":
+        if do_fix or watch_seconds > 0 or diff_path:
+            sys.stderr.write("- (stdin) supports neither --fix, --watch nor --diff\n")
+            return 2
+        try:
+            policy = json.loads(sys.stdin.read())
+        except ValueError as exc:
+            sys.stdout.write("ERROR P000 $: cannot parse stdin (%s)\n" % exc)
+            return 2
+    else:
+        try:
+            policy = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as exc:
+            sys.stdout.write("ERROR P000 $: cannot parse %s (%s)\n" % (path, exc))
+            return 2
     if do_fix:
         applied = fix_policy(policy)
         if applied and not dry_run:
@@ -1006,7 +1022,7 @@ def main(argv: list[str] | None = None) -> int:
     warns = sum(1 for f in findings if f["severity"] == "warn")
     infos = sum(1 for f in findings if f["severity"] == "info")
     payload = {
-        "path": str(path),
+        "path": "<stdin>" if argv and argv[0] == "-" else str(path),
         "findings": shown_rows,
         "errors": errors,
         "warnings": warns,

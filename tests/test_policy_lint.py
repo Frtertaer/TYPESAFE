@@ -1059,5 +1059,45 @@ class BaselineTests(unittest.TestCase):
             self.assertIn("not found", proc.stderr)
 
 
+class StdinDashTests(unittest.TestCase):
+    def _feed(self, argv, stdin_text):
+        buf, err = io.StringIO(), io.StringIO()
+        with patch("sys.stdin", io.StringIO(stdin_text)):
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = policy_lint.main(argv)
+        return rc, buf.getvalue(), err.getvalue()
+
+    def test_stdin_single(self) -> None:
+        rc, out, _err = self._feed(["-", "--json"], json.dumps(base_policy()))
+        payload = json.loads(out)
+        self.assertEqual(payload["path"], "<stdin>")
+        self.assertEqual(rc, 0)
+
+    def test_stdin_bad_json_is_p000(self) -> None:
+        rc, out, _err = self._feed(["-"], "{bad")
+        self.assertIn("P000", out)
+        self.assertEqual(rc, 2)
+
+    def test_stdin_fix_and_watch_rejected(self) -> None:
+        cases = [
+            ["-", "--fix"],
+            ["-", "--watch", "1"],
+            ["-", "--diff", str(POLICY_PATH)],
+        ]
+        for argv in cases:
+            rc, _o, err = self._feed(argv, json.dumps(base_policy()))
+            self.assertEqual(rc, 2, argv)
+            self.assertIn("stdin", err)
+
+    def test_stdin_multi_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            other = Path(tmp) / "p2.json"
+            other.write_text(json.dumps(base_policy()), encoding="utf-8")
+            rc, out, _err = self._feed([str(other), "-", "--json"], json.dumps(base_policy()))
+            rows = json.loads(out)
+            self.assertEqual(rows[1]["path"], "<stdin>")
+            self.assertEqual(rc, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -634,5 +634,43 @@ class BaselineTests(unittest.TestCase):
             self.assertIn("not found", err.getvalue())
 
 
+class StdinDashTests(unittest.TestCase):
+    def _feed(self, argv, stdin_text):
+        buf, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.stdin", io.StringIO(stdin_text)):
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = trigger_lint.main(argv)
+        return rc, buf.getvalue(), err.getvalue()
+
+    CASES = {"cases": [{"id": "pos-a", "prompt": "run the migration now", "should_trigger": True}]}
+
+    def test_stdin_single(self) -> None:
+        rc, out, _err = self._feed(["-", "--json"], json.dumps(self.CASES))
+        payload = json.loads(out)
+        self.assertEqual(payload["path"], "<stdin>")
+        self.assertEqual(rc, 0)
+
+    def test_stdin_bad_json_finds_t001(self) -> None:
+        rc, out, _err = self._feed(["-", "--json"], "{bad")
+        payload = json.loads(out)
+        self.assertTrue(any(f["rule"] == "T001" for f in payload["findings"]))
+        self.assertEqual(rc, 1)
+
+    def test_stdin_fix_rejected(self) -> None:
+        rc, _o, err = self._feed(["-", "--fix"], json.dumps(self.CASES))
+        self.assertEqual(rc, 2)
+        self.assertIn("stdin", err)
+
+    def test_stdin_multi_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            good = write_cases(tmp, [{"id": "pos-b", "prompt": "deploy the build now", "should_trigger": True}])
+            rc, out, _err = self._feed(
+                [str(good), "-", "--json"], json.dumps(self.CASES)
+            )
+            rows = json.loads(out)
+            self.assertEqual(rows[1]["path"], "<stdin>")
+            self.assertIn(rc, (0, 1))
+
+
 if __name__ == "__main__":
     unittest.main()

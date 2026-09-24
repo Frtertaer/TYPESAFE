@@ -38,14 +38,14 @@ def _must_ask_kinds(policy_path: Path = DEFAULT_POLICY) -> set[str] | None:
     return {str(k) for k in kinds}
 
 
-def lint_cases(path: Path, policy_path: Path = DEFAULT_POLICY) -> list[dict]:
+def lint_cases(path: Path, policy_path: Path = DEFAULT_POLICY, text: str | None = None) -> list[dict]:
     findings: list[dict] = []
 
     def add(rule: str, severity: str, cid: str, message: str) -> None:
         findings.append({"rule": rule, "severity": severity, "id": cid, "message": message})
 
     try:
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        data = json.loads(path.read_text(encoding="utf-8-sig")) if text is None else json.loads(text)
     except (OSError, ValueError) as exc:
         add("T001", "error", "-", "cannot parse %s: %s" % (path, exc))
         return findings
@@ -223,7 +223,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]\nLint a trigger-cases fixture file for schema sanity.\nFlags:\n  --policy PATH     lint cases against a specific policy.json\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the cases-file key contract (--json emits the object)\n  --severity S      preset severity floor (error|warn|info; JEV_TLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad cases file; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args or unreadable file.\n'
+USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch).\nLint a trigger-cases fixture file for schema sanity.\nFlags:\n  --policy PATH     lint cases against a specific policy.json\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the cases-file key contract (--json emits the object)\n  --severity S      preset severity floor (error|warn|info; JEV_TLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad cases file; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args or unreadable file.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -455,7 +455,7 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
         return 0
     argv = [a for a in argv if a != "--env"]
-    unknown = [a for a in argv if a.startswith("-")]
+    unknown = [a for a in argv if a.startswith("-") and a != "-"]
     if unknown:
         sys.stderr.write("unknown flag(s): %s\n" % ", ".join(unknown))
         return 2
@@ -470,8 +470,10 @@ def main(argv: list[str] | None = None) -> int:
         n_suppressed = 0
         snapshot = []
         for arg in argv:
-            fpath = Path(arg)
-            frows = lint_cases(fpath, policy_path=policy_path)
+            if arg == "-":
+                frows = lint_cases(Path("<stdin>"), policy_path=policy_path, text=sys.stdin.read())
+            else:
+                frows = lint_cases(Path(arg), policy_path=policy_path)
             if baseline_write:
                 snapshot.extend({"file": arg, **f} for f in frows)
             if baseline_keys is not None:
@@ -489,7 +491,7 @@ def main(argv: list[str] | None = None) -> int:
             ]
             results.append(
                 {
-                    "path": str(fpath),
+                    "path": "<stdin>" if arg == "-" else arg,
                     "findings": fshown,
                     "errors": ferr,
                     "warnings": fwarn,
@@ -540,6 +542,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1 if any_err or (strict and any_find) else 0
     path = Path(argv[0]) if argv else DEFAULT_CASES
+    stdin_text = None
+    if argv and argv[0] == "-":
+        if watch_seconds > 0 or do_fix:
+            sys.stderr.write("- (stdin) supports neither --fix nor --watch\n")
+            return 2
+        stdin_text = sys.stdin.read()
     if watch_seconds > 0:
         import time as _time
 
@@ -623,7 +631,7 @@ def main(argv: list[str] | None = None) -> int:
         verb = "would fix" if dry_run else "fixed"
         for rule in sorted(set(applied)):
             sys.stderr.write("%s %s x%d\n" % (verb, rule, applied.count(rule)))
-    findings = lint_cases(path, policy_path=policy_path)
+    findings = lint_cases(path, policy_path=policy_path, text=stdin_text)
     if baseline_write and not _write_baseline(
         baseline_write, [{"file": str(path), **f} for f in findings]
     ):
@@ -647,7 +655,7 @@ def main(argv: list[str] | None = None) -> int:
     n_warn = sum(1 for f in findings if f["severity"] == "warn")
     n_info = sum(1 for f in findings if f["severity"] == "info")
     payload = {
-        "path": str(path),
+        "path": "<stdin>" if stdin_text is not None else str(path),
         "findings": shown,
         "errors": n_err,
         "warnings": n_warn,

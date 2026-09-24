@@ -1936,7 +1936,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--keep-text",
         default="",
-        help="Pin messages/tool calls whose text or input matches this regex (never dropped).",
+        help="Pin messages/tool calls whose text or input matches this regex (never dropped; '-' reads it from stdin).",
     )
     parser.add_argument(
         "--history",       
@@ -2095,6 +2095,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     args.goal = _watch.text_arg(args.goal)
+    args.keep_text = _watch.text_arg(args.keep_text)
     if args.schema:
         if args.json:
             sys.stdout.write(json.dumps(COMPACT_SCHEMA_ROWS, indent=2) + "\n")

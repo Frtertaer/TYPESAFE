@@ -93,14 +93,41 @@ def empty() -> dict[str, Any]:
     return data
 
 
+_STDIN_TRACE: dict | None = None
+_STDIN_READ = False
+
+
+def _stdin_raw() -> dict | None:
+    """Parse the '--file -' trace JSON from stdin once (cached)."""
+    global _STDIN_TRACE, _STDIN_READ
+    if not _STDIN_READ:
+        _STDIN_READ = True
+        try:
+            raw = json.loads(sys.stdin.read())
+        except ValueError:
+            raw = None
+        _STDIN_TRACE = raw if isinstance(raw, dict) else None
+    return _STDIN_TRACE
+
+
+def _exists(path: Path) -> bool:
+    """A '-' path always 'exists' — its stdin content may still be invalid."""
+    return str(path) == "-" or path.is_file()
+
+
 def load(path: Path | None = None) -> dict[str, Any]:
     path = path or default_path()
-    if not path.is_file():
+    if str(path) == "-":
+        raw = _stdin_raw()
+        if raw is None:
+            return empty()
+    elif not path.is_file():
         return empty()
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return empty()
+    else:
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return empty()
     if not isinstance(raw, dict):
         return empty()
     data = empty()
@@ -136,6 +163,9 @@ def _atomic_write(path: Path, text: str) -> None:
 
 def save(data: dict[str, Any], path: Path | None = None) -> Path:
     path = path or default_path()
+    if str(path) == "-":
+        sys.stderr.write("--file - (stdin) is read-only\n")
+        raise SystemExit(1)
     _atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     return path
 
@@ -259,7 +289,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 def cmd_show(args: argparse.Namespace) -> int:
     path = Path(args.file) if args.file else default_path()
     data = load(path)
-    exists = path.is_file()
+    exists = _exists(path)
     if getattr(args, "jq", ""):
         fields = [f.strip() for f in args.jq.split(",") if f.strip()]
         values: dict[str, Any] = {}
@@ -291,7 +321,7 @@ def cmd_show(args: argparse.Namespace) -> int:
             sys.stdout.write("%s\n" % value)
         return 0
     age_seconds = None
-    if exists:
+    if exists and str(path) != "-":
         try:
             age_seconds = max(0.0, round(time.time() - path.stat().st_mtime, 3))
         except OSError:
@@ -732,6 +762,8 @@ def cmd_prune(args: argparse.Namespace) -> int:
     """Delete the trace file when its mtime is older than --older-than seconds."""
     path = Path(args.file) if args.file else default_path()
     jq = getattr(args, "jq", "")
+    if str(path) == "-":
+        return emit({"path": "-", "removed": False, "reason": "stdin is read-only"}, jq)
     if not path.is_file():
         return emit({"path": str(path), "removed": False, "reason": "missing"}, jq)
     try:
@@ -806,7 +838,7 @@ def cmd_env(args: argparse.Namespace) -> int:
         fill_timeout = 90.0
     report = {
         "file": str(path),
-        "exists": path.is_file(),
+        "exists": _exists(path),
         "fill_timeout_seconds": fill_timeout,
         "plan_set": bool(os.environ.get("JEV_TRACE_PLAN", "").strip()),
         "policy": policy if policy else "default",
@@ -1011,31 +1043,41 @@ def cmd_verify(args: argparse.Namespace) -> int:
     """
     path = Path(args.file) if args.file else default_path()
     payload: dict = {"path": str(path), "ok": True, "notes": 0, "checked": 0, "skipped": 0, "bad": []}
-    if not path.is_file():
-        payload["ok"] = False
-        payload["missing"] = True
+    if str(path) == "-":
+        raw = _stdin_raw()
+        missing = False
+    elif not path.is_file():
+        raw = None
+        missing = True
     else:
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             raw = None
-        if not isinstance(raw, dict):
-            payload["ok"] = False
-            payload["error"] = "unreadable"
-        else:
-            notes = raw.get("notes")
-            notes = notes if isinstance(notes, list) else []
-            payload["notes"] = len(notes)
-            for i, note in enumerate(notes, 1):
-                if not isinstance(note, dict) or not note.get("sha"):
-                    payload["skipped"] += 1
-                    continue
-                computed = hashlib.sha256(str(note.get("text") or "").encode("utf-8")).hexdigest()[:12]
-                if computed != note["sha"]:
-                    payload["bad"].append({"index": i, "stored": note["sha"], "computed": computed})
-                else:
-                    payload["checked"] += 1
-            if payload["bad"] and getattr(args, "fix", False):
+        missing = False
+    if missing:
+        payload["ok"] = False
+        payload["missing"] = True
+    elif not isinstance(raw, dict):
+        payload["ok"] = False
+        payload["error"] = "unreadable"
+    else:
+        notes = raw.get("notes")
+        notes = notes if isinstance(notes, list) else []
+        payload["notes"] = len(notes)
+        for i, note in enumerate(notes, 1):
+            if not isinstance(note, dict) or not note.get("sha"):
+                payload["skipped"] += 1
+                continue
+            computed = hashlib.sha256(str(note.get("text") or "").encode("utf-8")).hexdigest()[:12]
+            if computed != note["sha"]:
+                payload["bad"].append({"index": i, "stored": note["sha"], "computed": computed})
+            else:
+                payload["checked"] += 1
+        if payload["bad"] and getattr(args, "fix", False):
+            if str(path) == "-":
+                payload["error"] = "--fix needs a writable file"
+            else:
                 for row in payload["bad"]:
                     notes[row["index"] - 1]["sha"] = row["computed"]
                 try:
@@ -1045,7 +1087,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
                     payload["bad"] = []
                 except OSError as exc:
                     payload["error"] = "fix failed: %s" % exc
-            payload["ok"] = not payload["bad"] and "error" not in payload
+        payload["ok"] = not payload["bad"] and "error" not in payload
     if getattr(args, "verdict", ""):
         _watch.write_verdict(
             args.verdict,
@@ -1451,6 +1493,9 @@ def cmd_notes(args: argparse.Namespace) -> int:
 
 def _diff_side(path: Path) -> tuple[dict, bool]:
     """Raw trace doc + exists flag; missing/corrupt/non-dict reads as empty()."""
+    if str(path) == "-":
+        raw = _stdin_raw()
+        return (raw if raw is not None else empty()), raw is not None
     if not path.is_file():
         return empty(), False
     try:
@@ -1568,7 +1613,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
             cur = load(path)
             tick = {
                 "ts": int(_time.time()),
-                "exists": path.is_file(),
+                "exists": _exists(path),
                 "attempt_count": int(cur.get("attempt_count") or 0),
                 "history": len(cur.get("history") or []),
                 "inspected": len(cur.get("inspected") or []),
@@ -1601,7 +1646,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
     history_list = data.get("history") or []
     notes_list = data.get("notes") or []
     out: dict[str, Any] = {
-        "exists": path.is_file(),
+        "exists": _exists(path),
         "attempt_count": int(data.get("attempt_count") or 0),
         "history": len(history_list),
         "inspected": len(data.get("inspected") or []),
@@ -1612,7 +1657,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
         "has_error": bool(data.get("last_error")),
         "has_unknown": bool(data.get("unknown")),
     }
-    if path.is_file():
+    if str(path) != "-" and path.is_file():
         try:
             out["age_seconds"] = int(time.time() - path.stat().st_mtime)
         except OSError:
@@ -1781,7 +1826,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Hold plan/step in a file because Jev and a new session forget."
     )
-    parser.add_argument("--file", help="Trace JSON path (default JEV_TRACE or .jev-trace.json)")
+    parser.add_argument("--file", help="Trace JSON path (default JEV_TRACE or .jev-trace.json; '-' reads the trace JSON from stdin — read-only, no --watch)")
     sub = parser.add_subparsers(dest="command", required=True)
     init = sub.add_parser("init", help="Create a trace from the human plan")
     init.add_argument("--plan", default=None, help="Plan text (default JEV_TRACE_PLAN env)")
@@ -1998,6 +2043,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     parser = build_parser()
     args = parser.parse_args(argv)
+    if getattr(args, "file", "") == "-" and getattr(args, "watch", 0):
+        sys.stderr.write("--file - (stdin) supports no --watch (cannot re-read)")
+        return 2
     return int(args.func(args))
 
 

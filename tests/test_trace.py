@@ -3447,5 +3447,81 @@ class VerifyFixTests(unittest.TestCase):
             self.assertEqual(data["notes"][1]["sha"], "deadbeefdead")
 
 
+class StdinFileTests(unittest.TestCase):
+    TRACE = json.dumps(
+        {
+            "plan": "p",
+            "current_step": "s1",
+            "attempt_count": 3,
+            "history": [{"pick": "a", "ts": 1.0, "iso": "x"}],
+            "notes": [],
+            "inspected": [],
+        }
+    )
+
+    def _feed(self, argv, stdin_text=TRACE):
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        tr._STDIN_READ = False
+        tr._STDIN_TRACE = None
+        buf, err = io.StringIO(), io.StringIO()
+        with patch("sys.stdin", io.StringIO(stdin_text)):
+            with redirect_stdout(buf), redirect_stderr(err):
+                try:
+                    rc = tr.main(argv)
+                except SystemExit as exc:
+                    rc = int(exc.code or 0) if isinstance(exc.code, int) else 1
+        return rc, buf.getvalue(), err.getvalue()
+
+    def test_show_reads_stdin(self) -> None:
+        rc, out, _err = self._feed(["--file", "-", "show", "--jq", "attempt_count"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out), 3)
+
+    def test_stats_exists_true(self) -> None:
+        rc, out, _err = self._feed(["--file", "-", "stats"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(json.loads(out)["exists"])
+
+    def test_bad_stdin_loads_empty(self) -> None:
+        rc, out, _err = self._feed(["--file", "-", "show", "--jq", "attempt_count"], "{bad")
+        self.assertEqual(json.loads(out), 0)
+        self.assertEqual(rc, 0)
+
+    def test_write_commands_rejected(self) -> None:
+        for cmd in (["set", "--step", "x"], ["bump"], ["record", "--pick", "p"], ["init", "--plan", "x"]):
+            rc, _o, err = self._feed(["--file", "-", *cmd])
+            self.assertNotEqual(rc, 0, cmd)
+            self.assertIn("read-only", err)
+
+    def test_prune_rejected(self) -> None:
+        rc, out, _err = self._feed(["--file", "-", "prune", "--older-than", "0"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["reason"], "stdin is read-only")
+
+    def test_watch_rejected(self) -> None:
+        rc, _o, err = self._feed(["--file", "-", "state", "--watch", "1"])
+        self.assertEqual(rc, 2)
+        self.assertIn("stdin", err)
+
+    def test_verify_stdin(self) -> None:
+        trace = json.loads(self.TRACE)
+        import hashlib
+
+        trace["notes"] = [{"text": "hi", "sha": hashlib.sha256(b"hi").hexdigest()[:12]}]
+        rc, out, _err = self._feed(["--file", "-", "verify"], json.dumps(trace))
+        self.assertEqual(rc, 0)
+        self.assertIn("notes=1 checked=1", out)
+
+    def test_diff_stdin_side(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            other = Path(tmp) / "t.json"
+            other.write_text(self.TRACE, encoding="utf-8")
+            rc, out, _err = self._feed(["--file", "-", "diff", "-", str(other), "--jq", "changed"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(out), {})
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

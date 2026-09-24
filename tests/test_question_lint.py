@@ -1371,5 +1371,87 @@ class BaselineTests(unittest.TestCase):
             self.assertGreater(data["suppressed"], 0)
 
 
+class DiffTests(unittest.TestCase):
+    REQ_A = {
+        "state": {"task": "t"},
+        "questions": {
+            "q": {"type": "choice", "instructions": "pick", "options": [{"id": "a"}]}
+        },
+    }
+    REQ_B = {
+        "state": {"task": "t2"},
+        "questions": {
+            "q": {"type": "noul", "instructions": "pick2"},
+            "q2": {"type": "choice"},
+        },
+    }
+
+    def _files(self, tmp):
+        a = Path(tmp) / "a.json"
+        b = Path(tmp) / "b.json"
+        a.write_text(json.dumps(self.REQ_A), encoding="utf-8")
+        b.write_text(json.dumps(self.REQ_B), encoding="utf-8")
+        return a, b
+
+    def test_diff_identical(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            a, _b = self._files(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = question_lint.main([str(a), "--diff", str(a)])
+            self.assertEqual(rc, 0)
+            self.assertIn("0 difference(s)", buf.getvalue())
+
+    def test_diff_per_question(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = self._files(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = question_lint.main([str(b), "--diff", str(a)])
+            out = buf.getvalue()
+            self.assertEqual(rc, 0)
+            self.assertIn("~ state:", out)
+            self.assertIn("~ questions.q.type:", out)
+            self.assertIn("~ questions.q.instructions:", out)
+            self.assertIn("+ questions.q2", out)
+            self.assertIn("5 difference(s)", out)
+
+    def test_diff_missing_file_rc2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            a, _b = self._files(tmp)
+            err = io.StringIO()
+            with redirect_stderr(err), redirect_stdout(io.StringIO()):
+                rc = question_lint.main([str(a), "--diff", str(Path(tmp) / "no.json")])
+            self.assertEqual(rc, 2)
+            self.assertIn("cannot read --diff", err.getvalue())
+
+    def test_diff_multi_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = self._files(tmp)
+            err = io.StringIO()
+            with redirect_stderr(err), redirect_stdout(io.StringIO()):
+                rc = question_lint.main([str(a), str(b), "--diff", str(a)])
+            self.assertEqual(rc, 2)
+            self.assertIn("--diff", err.getvalue())
+
+    def test_diff_stdin_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            a, _b = self._files(tmp)
+            err = io.StringIO()
+            with redirect_stderr(err), redirect_stdout(io.StringIO()):
+                from unittest.mock import patch
+
+                with patch("sys.stdin", io.StringIO(json.dumps(self.REQ_A))):
+                    rc = question_lint.main(["-", "--diff", str(a)])
+            self.assertEqual(rc, 2)
+            self.assertIn("stdin", err.getvalue())
+
+    def test_diff_request_unit(self) -> None:
+        lines = question_lint.diff_request(self.REQ_A, self.REQ_B)
+        self.assertTrue(any(line.startswith("~ questions.q.type") for line in lines))
+        self.assertTrue(any(line.startswith("+ questions.q2") for line in lines))
+        self.assertTrue(any(line.startswith("~ state") for line in lines))
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

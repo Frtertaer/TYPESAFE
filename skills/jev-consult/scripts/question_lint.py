@@ -376,6 +376,56 @@ def apply_fixes(request: dict) -> list[str]:
     return applied
 
 
+def diff_request(a: dict, b: dict) -> list[str]:
+    """Diff two request docs: shallow top-level keys plus per-question fields."""
+    lines: list[str] = []
+    if not isinstance(a, dict):
+        a = {}
+    if not isinstance(b, dict):
+        b = {}
+    aa = {k: v for k, v in a.items() if k != "questions"}
+    bb = {k: v for k, v in b.items() if k != "questions"}
+    for key in sorted(set(aa) | set(bb)):
+        if key not in bb:
+            lines.append("- %s = %s" % (key, json.dumps(aa[key], sort_keys=True)[:120]))
+        elif key not in aa:
+            lines.append("+ %s = %s" % (key, json.dumps(bb[key], sort_keys=True)[:120]))
+        elif aa[key] != bb[key]:
+            lines.append(
+                "~ %s: %s -> %s"
+                % (
+                    key,
+                    json.dumps(aa[key], sort_keys=True)[:60],
+                    json.dumps(bb[key], sort_keys=True)[:60],
+                )
+            )
+    qa = a.get("questions")
+    qb = b.get("questions")
+    if isinstance(qa, dict) or isinstance(qb, dict):
+        qa = qa if isinstance(qa, dict) else {}
+        qb = qb if isinstance(qb, dict) else {}
+        for qid in sorted(set(qa) | set(qb)):
+            if qid not in qb:
+                lines.append("- questions.%s" % qid)
+            elif qid not in qa:
+                lines.append("+ questions.%s" % qid)
+            elif qa[qid] != qb[qid]:
+                xa = qa[qid] if isinstance(qa[qid], dict) else {}
+                xb = qb[qid] if isinstance(qb[qid], dict) else {}
+                for field in sorted(set(xa) | set(xb)):
+                    if xa.get(field) != xb.get(field):
+                        lines.append(
+                            "~ questions.%s.%s: %s -> %s"
+                            % (
+                                qid,
+                                field,
+                                json.dumps(xa.get(field), sort_keys=True)[:60],
+                                json.dumps(xb.get(field), sort_keys=True)[:60],
+                            )
+                        )
+    return lines
+
+
 def _atomic_write(path, text):
     tmp = path.with_name(path.name + ".tmp")
     try:
@@ -417,7 +467,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.). `-` reads the request JSON from stdin (single file or mixed with paths in multi mode; --fix/--watch need a real path).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S      preset severity floor (error|warn|info; JEV_QLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.). `-` reads the request JSON from stdin (single file or mixed with paths in multi mode; --fix/--watch need a real path).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S      preset severity floor (error|warn|info; JEV_QLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this request against another file (per-question +/- and ~ lines)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -473,6 +523,14 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         argv = argv[:idx] + argv[idx + 2 :]
     out_path = ""
+    diff_path = None
+    if "--diff" in argv:
+        idx = argv.index("--diff")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--diff needs a request file to compare against\n")
+            return 2
+        diff_path = argv[idx + 1]
+        argv = argv[:idx] + argv[idx + 2 :]
     if "--explain" in argv:
         idx = argv.index("--explain")
         if idx + 1 >= len(argv):
@@ -645,8 +703,8 @@ def main(argv: list[str] | None = None) -> int:
     if baseline_path:
         baseline_keys = _watch.load_baseline(baseline_path, BASELINE_FIELDS)
     if len(argv) > 1:
-        if watch_seconds > 0 or do_fix:
-            sys.stderr.write("multiple paths support neither --watch nor --fix\n")
+        if watch_seconds > 0 or do_fix or diff_path is not None:
+            sys.stderr.write("multiple paths support neither --watch, --fix nor --diff\n")
             return 2
         results = []
         n_suppressed = 0
@@ -729,8 +787,8 @@ def main(argv: list[str] | None = None) -> int:
         any_find = any(r["total"] for r in results)
         return 1 if any_err or (strict and any_find) else 0
     if argv[0] == "-":
-        if do_fix or watch_seconds > 0:
-            sys.stderr.write("- (stdin) supports neither --fix nor --watch\n")
+        if do_fix or watch_seconds > 0 or diff_path is not None:
+            sys.stderr.write("- (stdin) supports neither --fix, --watch nor --diff\n")
             return 2
         text = sys.stdin.read()
         try:
@@ -752,6 +810,21 @@ def main(argv: list[str] | None = None) -> int:
     if not isinstance(request, dict):
         sys.stderr.write("request JSON must be an object\n")
         return 2
+    if diff_path is not None:
+        try:
+            other = json.loads(Path(diff_path).read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as exc:
+            sys.stderr.write("cannot read --diff %s (%s)\n" % (diff_path, exc))
+            return 2
+        if not isinstance(other, dict):
+            sys.stderr.write("--diff file must contain a JSON object\n")
+            return 2
+        lines = diff_request(other, request)
+        sys.stdout.write("diff %s -> %s\n" % (diff_path, argv[0]))
+        for line in lines:
+            sys.stdout.write(line + "\n")
+        sys.stdout.write("%d difference(s)\n" % len(lines))
+        return 0
     if watch_seconds > 0:
         import time as _time
 

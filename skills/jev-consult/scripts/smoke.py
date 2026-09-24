@@ -7012,7 +7012,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--only",
         default=os.environ.get("JEV_SMOKE_ONLY", ""),
-        help="Comma-separated step names to run (default: all; JEV_SMOKE_ONLY presets).",
+        help="Comma-separated step names to run (default: all; JEV_SMOKE_ONLY presets; '-' reads the list from stdin).",
     )
     parser.add_argument(
         "--fail-fast",
@@ -7150,7 +7150,7 @@ def main(argv: list[str] | None = None) -> int:
             repeat = 1
     if repeat < 1:
         repeat = 1
-    wanted = {s.strip() for s in args.only.split(",") if s.strip()}
+    wanted = {s.strip() for s in _watch.text_arg(args.only).split(",") if s.strip()}
     unknown = wanted - names
     if unknown:
         sys.stderr.write(

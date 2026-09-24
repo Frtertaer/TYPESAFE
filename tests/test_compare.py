@@ -921,6 +921,12 @@ class StdinCasesTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 2, extra)
             self.assertIn("stdin", proc.stderr)
 
+    def test_only_dash_reads_id_list_from_stdin(self) -> None:
+        proc = self.run_cli("--json", "--only", "-", stdin="stuck\n")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual([r["id"] for r in payload["rows"]], ["stuck"])
+
 
 class DiffStdinTests(unittest.TestCase):
     """`--diff -` reads the baseline JSON from stdin."""

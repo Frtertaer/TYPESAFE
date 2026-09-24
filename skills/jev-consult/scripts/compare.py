@@ -393,7 +393,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--only",
         default=os.environ.get("JEV_COMPARE_ONLY", ""),
-        help="Comma-separated case ids to run (default: all; JEV_COMPARE_ONLY presets).",
+        help="Comma-separated case ids to run (default: all; JEV_COMPARE_ONLY presets; '-' reads the list from stdin).",
     )
     parser.add_argument(
         "--strict",
@@ -526,7 +526,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         return 0 if ok else 1
-    only = {s.strip() for s in args.only.split(",") if s.strip()} or None
+    only = {s.strip() for s in _watch.text_arg(args.only).split(",") if s.strip()} or None
     if args.cases == "-" and (args.watch or args.diff):
         sys.stderr.write("--cases - (stdin) supports neither --watch nor --diff\n")
         return 2

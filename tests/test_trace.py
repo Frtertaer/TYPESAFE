@@ -455,6 +455,23 @@ class TraceTests(unittest.TestCase):
                 {"idf": 2, "": 1, "explicit": 1},
             )
 
+    def test_history_kind_dash_reads_stdin(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            data = tr.empty()
+            data = tr.record(data, pick="a", kind="idf")
+            data = tr.record(data, pick="b", kind="explicit")
+            tr.save(data, path)
+            buf = io.StringIO()
+            with patch.object(sys, "stdin", io.StringIO("idf\n")):
+                with redirect_stdout(buf):
+                    rc = tr.main(["--file", str(path), "history", "--kind", "-", "--count"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "1")
+
     def _write_history(self, path, stamps):
         data = tr.empty()
         for i, ts in enumerate(stamps):
@@ -1741,6 +1758,21 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(len(lines), 2)
             self.assertIn("p1", lines[1])
             self.assertNotIn("p0", lines[1])
+
+    def test_export_kinds_dash_reads_stdin(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            self._write_history(path, [1000.0, 2000.0])
+            buf = io.StringIO()
+            with patch.object(sys, "stdin", io.StringIO("explicit\n")):
+                with patch.object(sys, "stdout", buf):
+                    rc = tr.main(["--file", str(path), "export", "--kinds", "-"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            kinds = {h.get("kind") for h in payload["history"]}
+            self.assertEqual(kinds, {"explicit"})
 
     def test_export_since_before_bounds_history_and_notes(self) -> None:
         import io

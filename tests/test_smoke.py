@@ -97,6 +97,18 @@ class SmokeTests(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertEqual({s["name"] for s in out["steps"]}, {"policy", "trace"})
 
+    def test_only_dash_reads_step_list_from_stdin(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "-"],
+            input="policy\n",
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertEqual({s["name"] for s in out["steps"]}, {"policy"})
+
     def test_jobs_runs_subset_in_step_order(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(SMOKE), "--only", "trace,policy,decisions",

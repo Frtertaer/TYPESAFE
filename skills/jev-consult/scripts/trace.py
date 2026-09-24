@@ -524,7 +524,9 @@ def cmd_history(args: argparse.Namespace) -> int:
                 or needle in str(h.get("kind") or "").lower()
             ]
         want_kinds = {
-            k.strip() for k in (getattr(args, "kind", "") or "").split(",") if k.strip()
+            k.strip()
+            for k in _watch.text_arg(getattr(args, "kind", "") or "").split(",")
+            if k.strip()
         }
         if want_kinds:
             items = [h for h in items if str(h.get("kind") or "") in want_kinds]
@@ -959,7 +961,7 @@ def cmd_export(args: argparse.Namespace) -> int:
             items = data.get(key)
             if isinstance(items, list):
                 data[key] = [item for item in items if _in_window(item)]
-    kinds_raw = getattr(args, "kinds", "") or ""
+    kinds_raw = _watch.text_arg(getattr(args, "kinds", "") or "")
     if kinds_raw.strip():
         wanted = {k.strip() for k in kinds_raw.split(",") if k.strip()}
         hist = data.get("history")
@@ -1951,7 +1953,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--reverse", action="store_true", help="List picks newest-first")
     hist_cmd.add_argument("--field", default="", help="Print only this field per pick (a.b digs into nested objects)")
     hist_cmd.add_argument("--kinds", action="store_true", help="Print distinct history kinds with counts, sorted desc (empty kind shown as '-')")
-    hist_cmd.add_argument("--kind", default="", help="Only picks with exactly this kind (comma list for several)")
+    hist_cmd.add_argument("--kind", default="", help="Only picks with exactly this kind (comma list for several; '-' reads the list from stdin)")
     hist_cmd.add_argument("--uniq", action="store_true", help="Dedupe picks by pick+kind (first occurrence wins; applied before --limit)")
     hist_cmd.add_argument("--count", action="store_true", help="Print just the filtered pick count (--json emits {count})")
     hist_cmd.add_argument("--rate", action="store_true", help="Print pick-rate stats over the filtered history: per-day UTC buckets plus picks_per_day")
@@ -2004,7 +2006,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export_cmd.add_argument("--since", default=None, help="Only history/notes with ts >= epoch seconds or ISO8601")
     export_cmd.add_argument("--before", default=None, help="Only history/notes with ts <= epoch seconds or ISO8601")
-    export_cmd.add_argument("--kinds", default="", help="Comma list of pick kinds to keep in exported history")
+    export_cmd.add_argument("--kinds", default="", help="Comma list of pick kinds to keep in exported history ('-' reads the list from stdin)")
     export_cmd.add_argument("--md", action="store_true", help="Emit a markdown document (history + notes tables) instead of the JSON bundle")
     export_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the export payload (rc 2 on unknown key)")
     export_cmd.set_defaults(func=cmd_export)

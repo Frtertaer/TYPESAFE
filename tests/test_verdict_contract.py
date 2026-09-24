@@ -69,6 +69,44 @@ class VerdictContractTests(unittest.TestCase):
                     offenders.append("%s: %s without %s" % (f.name, flag, helper))
         self.assertEqual(offenders, [])
 
+    def test_scanner_write_verdict_matches_shared_contract(self) -> None:
+        # skill_scanner carries a standalone write_verdict (no _watch import
+        # possible). Its guarantees must stay the shared ones: int-ts
+        # injection, atomic file write, and '-' streaming the indent=2
+        # payload to the given stream.
+        import importlib.util
+        import io
+        import json
+        import sys
+        import tempfile
+
+        def _load(name):
+            spec = importlib.util.spec_from_file_location(
+                "vcon_" + name.replace(".", "_"), SCRIPTS / name
+            )
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = mod
+            spec.loader.exec_module(mod)
+            return mod
+
+        watch = _load("_watch.py")
+        scanner = _load("skill_scanner.py")
+        payload = {"verdict": "REJECT-PENDING-REVIEW", "CRITICAL": 2}
+        with tempfile.TemporaryDirectory() as tmp:
+            for label, writer in (("watch", watch.write_verdict),
+                                  ("scanner", scanner.write_verdict)):
+                with self.subTest(impl=label):
+                    out = Path(tmp) / ("%s.json" % label)
+                    self.assertTrue(writer(str(out), dict(payload)))
+                    data = json.loads(out.read_text(encoding="utf-8"))
+                    self.assertEqual(data["verdict"], payload["verdict"])
+                    self.assertIsInstance(data["ts"], int)
+                    buf = io.StringIO()
+                    self.assertTrue(writer("-", dict(payload), stream=buf))
+                    streamed = json.loads(buf.getvalue())
+                    self.assertEqual(streamed["verdict"], payload["verdict"])
+                    self.assertIn("ts", streamed)
+
     def test_write_verdict_injects_ts(self) -> None:
         import importlib.util
         import sys

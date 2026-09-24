@@ -130,11 +130,15 @@ class JqParityTests(unittest.TestCase):
             ("flat.key", "v", True), ("a.b.c", 9, True), ("x.y.z", 7, True),
             ("a.b.nope", None, False),
         ]
-        for script in ("jev.py", "smoke.py", "trace.py", "trigger_eval.py"):
+        for script in ("jev.py", "smoke.py", "trace.py", "trigger_eval.py",
+                       "skill_scanner.py"):
             mod = _load(script)
+            # jq_lookup is the pack shim; skill_scanner's standalone mirror
+            # is named _dig — same (value, found) contract either way.
+            dig = getattr(mod, "jq_lookup", None) or getattr(mod, "_dig")
             with self.subTest(script=script):
                 for path, want, found in cases:
-                    self.assertEqual(mod.jq_lookup(payload, path), (want, found), path)
+                    self.assertEqual(dig(payload, path), (want, found), path)
                     self.assertEqual(watch.dig(payload, path), (want, found), path)
 
     def test_no_inline_dotted_dig_loops(self) -> None:

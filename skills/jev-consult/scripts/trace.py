@@ -754,6 +754,10 @@ def cmd_history(args: argparse.Namespace) -> int:
     if getattr(args, "json", False):
         sys.stdout.write(json.dumps(history, ensure_ascii=False, indent=2) + "\n")
         return 0
+    if getattr(args, "jsonl", False):
+        for entry in history:
+            sys.stdout.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        return 0
     for entry in history:
         kind = str(entry.get("kind") or "")
         line = str(entry.get("pick") or "")
@@ -2040,6 +2044,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.set_defaults(func=cmd_notes)
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")
+    hist_cmd.add_argument("--jsonl", action="store_true", help="Emit each pick as one JSON line (for piping)")
     hist_cmd.add_argument("--limit", type=int, help="Show only the last N picks")
     hist_cmd.add_argument("--first", type=int, default=None, help="Show only the earliest N picks (applied before --limit/--reverse)")
     hist_cmd.add_argument("--reverse", action="store_true", help="List picks newest-first")

@@ -3199,6 +3199,25 @@ class CountFlagTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(json.loads(buf.getvalue()), {"count": 2})
 
+    def test_history_jsonl_emits_one_row_per_pick(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._trace(tmp)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--jsonl"])
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+            self.assertEqual(len(rows), 3)
+            self.assertEqual([r["pick"] for r in rows], ["a", "b", "a"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--jsonl", "--uniq"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(buf.getvalue().strip().splitlines()), 2)
+
     def test_notes_count(self) -> None:
         import io
         from contextlib import redirect_stdout

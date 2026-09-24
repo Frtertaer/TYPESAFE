@@ -522,6 +522,20 @@ class CliTests(unittest.TestCase):
                 self.assertIn("severity", row)
             self.assertNotIn("findings", proc.stdout)
 
+    def test_jsonl_keys_projects_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_skill(tmp, "bad_dir", GOOD.format(name="Other"))
+            proc = self._run(str(bad), "--jsonl", "--keys", "rule,path")
+            self.assertNotEqual(proc.returncode, 2)
+            rows = [
+                json.loads(l) for l in proc.stdout.splitlines() if l.strip()
+            ]
+            self.assertTrue(rows)
+            for row in rows:
+                self.assertEqual(set(row), {"rule", "path"})
+            proc = self._run(str(bad), "--jsonl", "--keys", " ,")
+            self.assertEqual(proc.returncode, 2)
+
     def test_baseline_suppresses_known_findings(self):
         """--baseline PATH suppresses recorded findings; new ones still fire."""
         with tempfile.TemporaryDirectory() as tmp:

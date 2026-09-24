@@ -1150,6 +1150,18 @@ class ApplyFixesTests(unittest.TestCase):
         self.assertEqual(payload["self_test"], "ok")
         self.assertIn("J010", payload["rules"])
 
+    def test_init_prints_lint_clean_request(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = question_lint.main(["--init"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(
+            sorted(q["type"] for q in payload["questions"].values()),
+            ["choice", "noul", "score"],
+        )
+        self.assertEqual(question_lint.lint_request(payload), [])
+
     def test_rules_lists_every_rule_sorted(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

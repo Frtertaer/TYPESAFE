@@ -40,6 +40,38 @@ REQUEST_SCHEMA_ROWS = {
     "question.criteria": {"required": False, "type": "object{option: label} for choice, {true,false} for noul, list[label] for score (missing fires J009)"},
 }
 
+# --init prints this minimal lint-clean request: one question per type as a
+# hand-authoring starting point. (jev.py scaffold instead builds a request
+# from policy.json templates.)
+INIT_REQUEST = {
+    "state": {"task": "short description of what is being decided"},
+    "irreversible": False,
+    "questions": {
+        "pick": {
+            "type": "choice",
+            "instructions": "Which approach should the next step take?",
+            "criteria": {
+                "safe": "the smallest change that satisfies the ask",
+                "thorough": "a wider change covering adjacent cases",
+                "none": "none of these",
+            },
+        },
+        "blocked": {
+            "type": "noul",
+            "instructions": "Does the task need a secret the session lacks?",
+            "criteria": {
+                "true": "a required credential is missing; stop and ask",
+                "false": "everything needed is present; proceed",
+            },
+        },
+        "risk": {
+            "type": "score",
+            "instructions": "Rate the blast radius of the chosen approach.",
+            "criteria": ["trivial", "moderate", "severe"],
+        },
+    },
+}
+
 NEGATION = re.compile(r"\b(not|never|no longer|isn't|aren't|doesn't|don't|didn't|won't|cannot|can't|without|except|unless|neither|nor)\b", re.I)
 ARITHMETIC = re.compile(r"\b(how many|count of|number of|at least \d+|at most \d+|more than \d+|fewer than \d+|less than \d+|sum of|total of|average|percent(age)?)\b", re.I)
 DATETIME = re.compile(r"\b(within the (last|past|next)|older than|newer than|earlier than|later than|expired?|overdue|past due|(before|after|since|until) \d|\d+\s*(minutes?|hours?|days?|weeks?|months?|years?))\b", re.I)
@@ -467,7 +499,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.). `-` reads the request JSON from stdin (single file or mixed with paths in multi mode; --fix/--watch need a real path).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_QLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this request against another file (per-question +/- and ~ lines; "-" reads it from stdin)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.). `-` reads the request JSON from stdin (single file or mixed with paths in multi mode; --fix/--watch need a real path).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_QLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this request against another file (per-question +/- and ~ lines; "-" reads it from stdin)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --init            print a minimal lint-clean request.json (one question per type) and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -602,18 +634,8 @@ def main(argv: list[str] | None = None) -> int:
                 "self-test: %s rules=%s\n" % ("ok" if ok else "FAIL", ",".join(found))
             )
         return 0 if ok else 1
-    if "--rules" in argv:
-        if "--json" in argv:
-            sys.stdout.write(
-                json.dumps(
-                    [{"rule": r, "description": RULES[r]} for r in sorted(RULES)],
-                    indent=2,
-                )
-                + "\n"
-            )
-        else:
-            for r in sorted(RULES):
-                sys.stdout.write("%s: %s\n" % (r, RULES[r]))
+    if "--init" in argv:
+        sys.stdout.write(json.dumps(INIT_REQUEST, indent=2) + "\n")
         return 0
     if "--out" in argv:
         idx = argv.index("--out")

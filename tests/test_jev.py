@@ -359,6 +359,38 @@ class SecretTests(unittest.TestCase):
         self.assertNotIn("SECRETEXAMPLEVALUE", leaked)
         self.assertIn("[REDACTED]", leaked)
 
+    def test_redact_catch_all_secret_shapes(self) -> None:
+        for raw in (
+            "TYPESAFE_API_KEY=TYPESAFESECRET123",
+            "sk-TYPESAFESECRET123",
+            "apikey_TYPESAFESECRET123",
+            "bearer TYPESAFESECRET123",
+        ):
+            with self.subTest(raw=raw):
+                self.assertNotIn("TYPESAFESECRET123", jev.redact(raw))
+
+    def test_redact_leaves_ordinary_text(self) -> None:
+        text = "HTTP 500: internal error, try again"
+        self.assertEqual(jev.redact(text), text)
+
+    def test_http_error_body_is_redacted(self) -> None:
+        # an upstream error echoing the api key must not leak it via SystemExit
+        key = "apikey_LEAKCHECK1234567890"
+        err = urllib.error.HTTPError(
+            "https://api.typesafe.ai/v1/systemone",
+            500,
+            "err",
+            None,
+            io.BytesIO(("upstream said key=" + key).encode("utf-8")),
+        )
+        opener = _FakeOpener([err])
+        with self.assertRaises(SystemExit) as ctx:
+            with patch.dict(os.environ, {"TYPESAFE_API_KEY": key}), patch.object(
+                jev, "load_api_key", return_value=key
+            ), patch("urllib.request.build_opener", return_value=opener):
+                jev.post_systemone({"task": "t"}, {"q": {"type": "noul", "instructions": "?"}}, {}, retries=0)
+        self.assertNotIn("LEAKCHECK1234567890", str(ctx.exception))
+
     def test_load_api_key_message_has_no_value(self) -> None:
         old = os.environ.pop("TYPESAFE_API_KEY", None)
         old_hermes = os.environ.pop("HERMES_HOME", None)

@@ -2517,6 +2517,31 @@ class DiffTests(unittest.TestCase):
             )
             self.assertEqual(payload["removed"], {})
 
+    def test_diff_jsonl_emits_one_row_per_divergence(self) -> None:
+        from io import StringIO
+
+        with tempfile.TemporaryDirectory() as tmp:
+            a = self._write(tmp, "a.json", {"plan": "p1", "notes": [{"ts": 1, "text": "n1"}], "gone": 5})
+            b = self._write(tmp, "b.json", {"plan": "p2", "notes": [{"ts": 1, "text": "n1"}, {"ts": 2, "text": "n2"}], "extra_b": 1})
+            buf = StringIO()
+            with patch("sys.stdout", buf):
+                rc = tr.main(["diff", str(a), str(b), "--jsonl"])
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+            types = {(r["type"], r["key"]) for r in rows}
+            self.assertEqual(
+                types,
+                {
+                    ("changed", "plan"),
+                    ("added", "notes"),
+                    ("only_a", "gone"),
+                    ("only_b", "extra_b"),
+                },
+            )
+            changed = next(r for r in rows if r["type"] == "changed")
+            self.assertEqual(changed["a"], "p1")
+            self.assertEqual(changed["b"], "p2")
+
     def test_diff_identical_and_missing(self) -> None:
         from io import StringIO
 

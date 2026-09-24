@@ -1656,7 +1656,21 @@ def cmd_diff(args: argparse.Namespace) -> int:
     rc = emit_jq(payload, getattr(args, "jq", ""))
     if rc is not None:
         return rc
-    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    if getattr(args, "jsonl", False):
+        rows: list[str] = []
+        for key in sorted(payload["changed"]):
+            row = payload["changed"][key]
+            rows.append(json.dumps({"type": "changed", "key": key, "a": row["a"], "b": row["b"]}, ensure_ascii=False))
+        for kind in ("added", "removed"):
+            for key in sorted(payload[kind]):
+                rows.append(json.dumps({"type": kind, "key": key, "items": payload[kind][key]}, ensure_ascii=False))
+        for key in payload["only_a"]:
+            rows.append(json.dumps({"type": "only_a", "key": key}, ensure_ascii=False))
+        for key in payload["only_b"]:
+            rows.append(json.dumps({"type": "only_b", "key": key}, ensure_ascii=False))
+        text = "".join(r + "\n" for r in rows)
+    else:
+        text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     out_path = getattr(args, "out", "") or ""
     if out_path:
         try:
@@ -2094,6 +2108,7 @@ def build_parser() -> argparse.ArgumentParser:
     diff_cmd.add_argument("a", help="First trace JSON path")
     diff_cmd.add_argument("b", help="Second trace JSON path")
     diff_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the diff payload (rc 2 on unknown key)")
+    diff_cmd.add_argument("--jsonl", action="store_true", help="Emit one JSON row per divergence: {type: changed|added|removed|only_a|only_b, key, ...}")
     diff_cmd.add_argument("--out", default="", help="Write the diff JSON to PATH instead of stdout")
     diff_cmd.set_defaults(func=cmd_diff)
     sug.set_defaults(func=cmd_suggest)

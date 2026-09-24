@@ -3750,6 +3750,25 @@ class WrongTypedFieldTests(unittest.TestCase):
             self.assertEqual(seen["cwd"], str(Path(tmp)))
             self.assertEqual(json.loads(buf.getvalue()), {})
 
+    def test_simulate_dash_reads_prompt_from_stdin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.getcwd()
+            os.chdir(tmp)
+            seen = {}
+            def spy(payload, **_kw):
+                seen.update(payload)
+                return {}
+            try:
+                buf = io.StringIO()
+                with patch.object(HOOK, "handle", spy):
+                    with patch("sys.stdin", io.StringIO("stdin prompt text\n")):
+                        with patch("sys.stdout", buf):
+                            rc = HOOK.main(["--simulate", "-"])
+            finally:
+                os.chdir(old)
+            self.assertEqual(rc, 0)
+            self.assertEqual(seen["prompt"], "stdin prompt text")
+
     def test_simulate_missing_text_runs_empty_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             old = os.getcwd()

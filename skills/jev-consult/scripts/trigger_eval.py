@@ -273,6 +273,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Print rows as CSV: id,should_trigger,lexical,score,ok.",
     )
     parser.add_argument(
+        "--keys",
+        metavar="a,b",
+        default="",
+        help="With --jsonl/--csv: keep only these keys/columns per row (rc 2 on an empty list; rc 2 on unknown key).",
+    )
+    parser.add_argument(
         "--covers",
         action="store_true",
         help="Print per-tag coverage counts and ids of cases with no covers field.",
@@ -1135,36 +1141,37 @@ def main(argv: list[str] | None = None) -> int:
             for row in _rows():
                 sys.stdout.write("%s: %s\n" % (row["id"], row["prompt"]))
         return 0 if result["ok"] else 1
+    row_keys = ["id", "should_trigger", "lexical", "score", "ok"]
+    if getattr(args, "keys", ""):
+        row_keys = [k.strip() for k in args.keys.split(",") if k.strip()]
+        if not row_keys:
+            sys.stderr.write("--keys needs at least one key\n")
+            return 2
+        bad = [k for k in row_keys if k not in ("id", "should_trigger", "lexical", "score", "ok")]
+        if bad:
+            sys.stderr.write("unknown --keys: %s\n" % ",".join(bad))
+            return 2
     if getattr(args, "jsonl", False):
         for row in _rows():
             sys.stdout.write(
                 json.dumps(
-                    {
-                        "id": row["id"],
-                        "should_trigger": row["should_trigger"],
-                        "lexical": row["lexical"],
-                        "score": row["score"],
-                        "ok": row["ok"],
-                    },
+                    {k: row[k] for k in row_keys},
                     ensure_ascii=False,
                 )
                 + "\n"
             )
         return 0 if result["ok"] else 1
     if args.csv:
-        sys.stdout.write("id,should_trigger,lexical,score,ok\n")
+        sys.stdout.write(",".join(row_keys) + "\n")
         for row in _rows():
-            score = "" if row["score"] is None else "%.3f" % row["score"]
-            sys.stdout.write(
-                "%s,%s,%s,%s,%s\n"
-                % (
-                    row["id"],
-                    row["should_trigger"],
-                    row["lexical"],
-                    score,
-                    row["ok"],
-                )
-            )
+            cells = {
+                "id": row["id"],
+                "should_trigger": row["should_trigger"],
+                "lexical": row["lexical"],
+                "score": "" if row["score"] is None else "%.3f" % row["score"],
+                "ok": row["ok"],
+            }
+            sys.stdout.write(",".join(str(cells[k]) for k in row_keys) + "\n")
         return 0 if result["ok"] else 1
     if args.json:
         if args.summary:

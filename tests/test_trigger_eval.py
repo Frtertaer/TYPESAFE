@@ -554,6 +554,34 @@ class TriggerEvalTests(unittest.TestCase):
         hit = [r for r in rows if r["id"] == "pos-approach"][0]
         self.assertTrue(hit["should_trigger"])
 
+    def test_keys_projects_jsonl_rows(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--jsonl", "--keys", "id,ok"])
+        self.assertEqual(rc, 0)
+        rows = [json.loads(line) for line in buf.getvalue().splitlines()]
+        self.assertGreater(len(rows), 2)
+        for row in rows:
+            self.assertEqual(set(row), {"id", "ok"})
+
+    def test_keys_projects_csv_columns(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--csv", "--keys", "score,id"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(lines[0], "score,id")
+        self.assertTrue(lines[1].endswith(",pos-approach"))
+
+    def test_keys_rejects_empty_and_unknown(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--jsonl", "--keys", ","])
+        self.assertEqual(rc, 2)
+        with redirect_stdout(buf):
+            rc = te.main(["--csv", "--keys", "id,nope"])
+        self.assertEqual(rc, 2)
+
     def test_covers_reports_tag_counts_and_uncovered(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

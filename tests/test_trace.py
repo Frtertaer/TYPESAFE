@@ -685,6 +685,25 @@ class TraceTests(unittest.TestCase):
             notes = json.loads(buf.getvalue())
             self.assertEqual([n["text"] for n in notes], ["new", "old"])
 
+    def test_notes_jsonl_emits_one_row_per_note(self) -> None:
+        import time
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            now = time.time()
+            tr.save(
+                {"notes": [{"ts": now - 10, "text": "old"}, {"ts": now, "text": "new"}]},
+                path,
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--jsonl"])
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+            self.assertEqual([r["text"] for r in rows], ["old", "new"])
+
     def test_history_reverse_lists_newest_first(self) -> None:
         import time
         from io import StringIO

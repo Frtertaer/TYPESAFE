@@ -1552,6 +1552,12 @@ def cmd_notes(args: argparse.Namespace) -> int:
             )
     elif getattr(args, "json", False):
         out_text = json.dumps(notes, ensure_ascii=False, indent=2) + "\n"
+    elif getattr(args, "jsonl", False):
+        out_text = "".join(
+            json.dumps(n, ensure_ascii=False) + "\n"
+            for n in notes
+            if isinstance(n, dict)
+        )
     else:
         lines = []
         for note in notes:
@@ -2013,6 +2019,7 @@ def build_parser() -> argparse.ArgumentParser:
     stats_cmd.set_defaults(func=cmd_stats)
     notes_cmd = sub.add_parser("notes", help="List recorded notes (iso + text)")
     notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")
+    notes_cmd.add_argument("--jsonl", action="store_true", help="Emit each note as one JSON line (for piping)")
     notes_cmd.add_argument("--limit", type=int, help="Show only the last N notes")
     notes_cmd.add_argument("--first", type=int, default=None, help="Show only the earliest N notes (applied before --limit/--reverse)")
     notes_cmd.add_argument("--prune", type=int, help="Rewrite the trace keeping only the last N notes")

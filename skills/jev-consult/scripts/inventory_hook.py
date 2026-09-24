@@ -1024,9 +1024,11 @@ def main(argv: list[str] | None = None) -> int:
         parts = {
             "jev_status": LAST_DECISION.get("jev_status"),
             "winner": (LAST_DECISION.get("winner") or {}).get("name"),
+            "question": LAST_DECISION.get("question"),
             "dedupe": LAST_DECISION.get("dedupe"),
             "shortlist": len(LAST_DECISION.get("shortlist") or []),
             "latency_ms": LAST_DECISION.get("latency_ms"),
+            "over_budget": LAST_DECISION.get("over_budget"),
             "sidecar_age_s": LAST_DECISION.get("sidecar_age_s"),
             "score_avg": LAST_DECISION.get("shortlist_score_avg"),
         }

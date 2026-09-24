@@ -1930,6 +1930,38 @@ class MainLoopTests(unittest.TestCase):
             self.assertIn("jev_status=idf", text)
             self.assertIn("winner=jwt-auth", text)
 
+    def test_debug_line_carries_every_documented_field(self) -> None:
+        """SKILL.md documents the JEV_HOOK_DEBUG line as echoing
+        jev_status, winner, question, dedupe, shortlist, latency_ms,
+        over_budget, sidecar_age_s, score_avg — every one must appear."""
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        decision = {
+            "jev_status": "winner",
+            "winner": {"name": "jwt-auth"},
+            "question": "pick",
+            "dedupe": False,
+            "shortlist": ["a"],
+            "latency_ms": 5,
+            "over_budget": False,
+            "sidecar_age_s": 3,
+            "shortlist_score_avg": 2.5,
+        }
+        err_buf, out_buf = io.StringIO(), io.StringIO()
+        with patch.object(HOOK, "handle", lambda _p: {}), patch.object(
+            HOOK, "LAST_DECISION", decision
+        ), patch.dict(os.environ, {"JEV_HOOK_DEBUG": "1"}), patch.object(
+            sys, "stdin", io.StringIO('{"prompt": "x"}')
+        ), redirect_stdout(out_buf), redirect_stderr(err_buf):
+            HOOK.main([])
+        line = err_buf.getvalue()
+        for field in (
+            "jev_status", "winner", "question", "dedupe", "shortlist",
+            "latency_ms", "over_budget", "sidecar_age_s", "score_avg",
+        ):
+            self.assertIn("%s=" % field, line, "debug line missing %s" % field)
+
     def run_main_verbose(self, stdin_text: str, extra_argv=None) -> tuple:
         import io
         from contextlib import redirect_stderr, redirect_stdout
@@ -2029,6 +2061,11 @@ class HandleBranchTests(unittest.TestCase):
                 self.assertEqual(HOOK.extract_cwd({}), Path(tmp))
             with patch.dict(os.environ, {"JEV_HOOK_CWD": tmp}):
                 self.assertEqual(HOOK.extract_cwd({"cwd": "/no/such/dir"}), Path(tmp))
+            with tempfile.TemporaryDirectory() as other:
+                with patch.dict(os.environ, {"JEV_HOOK_CWD": other}):
+                    self.assertEqual(
+                        HOOK.extract_cwd({"cwd": tmp}), Path(tmp)
+                    )  # a valid payload cwd wins over JEV_HOOK_CWD
             with patch.dict(os.environ, {"JEV_HOOK_CWD": "/no/such/dir"}):
                 self.assertIsNone(HOOK.extract_cwd({}))
         with patch.dict(os.environ, {"JEV_HOOK_EVENT": "post_llm"}):

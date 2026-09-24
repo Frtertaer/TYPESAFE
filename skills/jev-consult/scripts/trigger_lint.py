@@ -27,6 +27,48 @@ ID_RE = re.compile(r"^(pos|neg)-[a-z0-9][a-z0-9-]*$")
 SEVERITIES = ("error", "warn", "info")
 
 
+def diff_cases(a: dict, b: dict) -> list[str]:
+    """+/-/~ lines: top-level keys except 'cases', then per-case fields by id."""
+    lines: list[str] = []
+    for key in sorted((set(a) | set(b)) - {"cases"}):
+        if key not in a:
+            lines.append("+ %s = %s" % (key, json.dumps(b[key])[:120]))
+        elif key not in b:
+            lines.append("- %s = %s" % (key, json.dumps(a[key])[:120]))
+        elif a[key] != b[key]:
+            lines.append(
+                "~ %s: %s -> %s"
+                % (key, json.dumps(a[key])[:60], json.dumps(b[key])[:60])
+            )
+    ca = {
+        c.get("id"): c for c in (a.get("cases") or []) if isinstance(c, dict)
+    }
+    cb = {
+        c.get("id"): c for c in (b.get("cases") or []) if isinstance(c, dict)
+    }
+    for cid in sorted(set(cb) - set(ca), key=str):
+        lines.append("+ cases.%s" % cid)
+    for cid in sorted(set(ca) - set(cb), key=str):
+        lines.append("- cases.%s" % cid)
+    for cid in sorted(set(ca) & set(cb), key=str):
+        ra, rb = ca[cid], cb[cid]
+        for fk in sorted(set(ra) | set(rb)):
+            if fk not in ra:
+                lines.append(
+                    "+ cases.%s.%s = %s" % (cid, fk, json.dumps(rb[fk])[:60])
+                )
+            elif fk not in rb:
+                lines.append(
+                    "- cases.%s.%s = %s" % (cid, fk, json.dumps(ra[fk])[:60])
+                )
+            elif ra[fk] != rb[fk]:
+                lines.append(
+                    "~ cases.%s.%s: %s -> %s"
+                    % (cid, fk, json.dumps(ra[fk])[:60], json.dumps(rb[fk])[:60])
+                )
+    return lines
+
+
 def _must_ask_kinds(policy_path: Path = DEFAULT_POLICY) -> set[str] | None:
     try:
         data = json.loads(policy_path.read_text(encoding="utf-8-sig"))
@@ -223,7 +265,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch).\nLint a trigger-cases fixture file for schema sanity.\nFlags:\n  --policy PATH     lint cases against a specific policy.json\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the cases-file key contract (--json emits the object)\n  --severity S      preset severity floor (error|warn|info; JEV_TLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad cases file; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args or unreadable file.\n'
+USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch/--diff).\nLint a trigger-cases fixture file for schema sanity.\nFlags:\n  --policy PATH     lint cases against a specific policy.json\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the cases-file key contract (--json emits the object)\n  --severity S      preset severity floor (error|warn|info; JEV_TLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this cases file against another (+/-/~ on cases.<id>.<field>; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad cases file; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args or unreadable file.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -334,6 +376,14 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("--out needs a PATH value\n")
             return 2
         out_path = argv[idx + 1].strip()
+        argv = argv[:idx] + argv[idx + 2 :]
+    diff_path = None
+    if "--diff" in argv:
+        idx = argv.index("--diff")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--diff needs a PATH value\n")
+            return 2
+        diff_path = argv[idx + 1]
         argv = argv[:idx] + argv[idx + 2 :]
     env_policy = os.environ.get("JEV_POLICY", "").strip()
     policy_path = Path(env_policy) if env_policy else DEFAULT_POLICY
@@ -463,8 +513,10 @@ def main(argv: list[str] | None = None) -> int:
     if baseline_path:
         baseline_keys = _watch.load_baseline(baseline_path, BASELINE_FIELDS)
     if len(argv) > 1:
-        if watch_seconds > 0 or do_fix:
-            sys.stderr.write("multiple paths support neither --watch nor --fix\n")
+        if watch_seconds > 0 or do_fix or diff_path is not None:
+            sys.stderr.write(
+                "multiple paths support neither --watch, --fix nor --diff\n"
+            )
             return 2
         results = []
         n_suppressed = 0
@@ -544,10 +596,30 @@ def main(argv: list[str] | None = None) -> int:
     path = Path(argv[0]) if argv else DEFAULT_CASES
     stdin_text = None
     if argv and argv[0] == "-":
-        if watch_seconds > 0 or do_fix:
-            sys.stderr.write("- (stdin) supports neither --fix nor --watch\n")
+        if watch_seconds > 0 or do_fix or diff_path is not None:
+            sys.stderr.write("- (stdin) supports neither --fix, --watch nor --diff\n")
             return 2
         stdin_text = sys.stdin.read()
+    if diff_path is not None:
+        try:
+            other = json.loads(
+                sys.stdin.read()
+                if diff_path == "-"
+                else Path(diff_path).read_text(encoding="utf-8-sig")
+            )
+            cur = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as exc:
+            sys.stderr.write("cannot read --diff input (%s)\n" % exc)
+            return 2
+        if not isinstance(other, dict) or not isinstance(cur, dict):
+            sys.stderr.write("--diff needs JSON objects on both sides\n")
+            return 2
+        lines = diff_cases(other, cur)
+        sys.stdout.write("diff %s -> %s\n" % (diff_path, path))
+        for line in lines:
+            sys.stdout.write(line + "\n")
+        sys.stdout.write("%d difference(s)\n" % len(lines))
+        return 0
     if watch_seconds > 0:
         import time as _time
 

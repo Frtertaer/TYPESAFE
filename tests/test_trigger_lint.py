@@ -672,5 +672,86 @@ class StdinDashTests(unittest.TestCase):
             self.assertIn(rc, (0, 1))
 
 
+
+class DiffFlagTests(unittest.TestCase):
+    """`--diff PATH` diffs two trigger-cases docs; '-' = stdin side."""
+
+    A = {"cases": [{"id": "pos-a", "prompt": "ask jev now",
+                    "should_trigger": True}]}
+    B = {"cases": [{"id": "pos-a", "prompt": "ask jev now!",
+                    "should_trigger": True},
+                   {"id": "pos-b", "prompt": "brand new case",
+                    "should_trigger": True}]}
+
+    def _files(self, tmp: str):
+        a = Path(tmp) / "a.json"
+        b = Path(tmp) / "b.json"
+        a.write_text(json.dumps(self.A), encoding="utf-8")
+        b.write_text(json.dumps(self.B), encoding="utf-8")
+        return a, b
+
+    def _run(self, argv, stdin_text=""):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.stdin", io.StringIO(stdin_text)):
+            with redirect_stdout(out), redirect_stderr(err):
+                rc = trigger_lint.main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_diff_identical_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, _b = self._files(tmp)
+            rc, out, _ = self._run([str(a), "--diff", str(a)])
+        self.assertEqual(rc, 0)
+        self.assertIn("0 difference(s)", out)
+
+    def test_diff_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = self._files(tmp)
+            rc, out, _ = self._run([str(b), "--diff", str(a)])
+        self.assertEqual(rc, 0)
+        self.assertIn("+ cases.pos-b", out)
+        self.assertIn("~ cases.pos-a.prompt:", out)
+        self.assertIn("2 difference(s)", out)
+
+    def test_diff_dash_side_stdin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _a, b = self._files(tmp)
+            rc, out, _ = self._run(
+                [str(b), "--diff", "-"], stdin_text=json.dumps(self.A)
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn("diff - ->", out)
+        self.assertIn("+ cases.pos-b", out)
+
+    def test_diff_stdin_main_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, _b = self._files(tmp)
+            rc, _o, err = self._run(
+                ["-", "--diff", str(a)], stdin_text=json.dumps(self.A)
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("--diff", err)
+
+    def test_diff_multi_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = self._files(tmp)
+            rc, _o, err = self._run([str(a), str(b), "--diff", str(a)])
+        self.assertEqual(rc, 2)
+        self.assertIn("--diff", err)
+
+    def test_diff_unreadable_rc2(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, _b = self._files(tmp)
+            rc, _o, err = self._run(
+                [str(a), "--diff", str(Path(tmp) / "no.json")]
+            )
+        self.assertEqual(rc, 2)
+        self.assertIn("cannot read --diff", err)
+
+    def test_diff_cases_unit(self):
+        lines = trigger_lint.diff_cases(self.A, self.B)
+        self.assertIn("+ cases.pos-b", lines)
+        self.assertTrue(any(l.startswith("~ cases.pos-a.prompt") for l in lines))
+
 if __name__ == "__main__":
     unittest.main()

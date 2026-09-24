@@ -30,3 +30,10 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      - id: smoke-quick
+        name: smoke.py self_test step (offline)
+        entry: python skills/jev-consult/scripts/smoke.py
+        args: [--only, self_test, --quiet]
+        language: system
+        pass_filenames: false
+        always_run: true

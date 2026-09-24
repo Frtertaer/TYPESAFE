@@ -228,6 +228,21 @@ def text_arg(value: str) -> str:
     return value
 
 
+def md_table(rows: list, cols: list, out=None) -> None:
+    """Print dict ROWS as a Markdown table headed by COLS (cell keys match
+    column names); '|' and newlines inside a cell are escaped/flattened."""
+    stream = out if out is not None else sys.stdout
+    stream.write("| " + " | ".join(cols) + " |\n")
+    stream.write("|" + "|".join(" --- " for _ in cols) + "|\n")
+    for r in rows:
+        cells = [str(r.get(c) or "") for c in cols]
+        stream.write(
+            "| "
+            + " | ".join(c.replace("|", "\\|").replace("\n", " ") for c in cells)
+            + " |\n"
+        )
+
+
 def load_baseline(path: str, fields=("path", "rule", "message")) -> set:
     """Load a baseline findings file written by a lint's --baseline-write/--out.
     Accepts {"findings": [...]} or a bare list; '-' reads the baseline JSON

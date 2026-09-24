@@ -80,6 +80,40 @@ class ExplainContractTests(unittest.TestCase):
                 )
         self.assertEqual(problems, [])
 
+    def test_md_flag_renders_findings_table(self) -> None:
+        cases = {
+            "policy_lint.py": ('-', '{"version": 1}'),
+            "question_lint.py": (
+                '-',
+                '{"questions": {"q": {"type": "noul", "instructions": '
+                '"Is it done and does it pass?", "criteria": {"true": "y", "false": "n"}}}}',
+            ),
+            "skill_lint.py": ('-', '# no frontmatter\n'),
+            "trigger_lint.py": (
+                '-',
+                '{"cases": [{"id": "dup", "should_trigger": true}, {"id": "dup"}]}',
+            ),
+        }
+        problems = []
+        for script, (arg, stdin) in sorted(cases.items()):
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPTS / script), arg, "--md"],
+                input=stdin,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if proc.returncode not in (0, 1):
+                problems.append(
+                    "%s: rc=%d err=%r" % (script, proc.returncode, proc.stderr[:80])
+                )
+                continue
+            if not proc.stdout.startswith("| severity |") or "| " + LINTS[script] not in proc.stdout:
+                problems.append(
+                    "%s: out=%r" % (script, proc.stdout[:80])
+                )
+        self.assertEqual(problems, [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

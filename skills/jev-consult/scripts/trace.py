@@ -524,7 +524,8 @@ def cmd_history(args: argparse.Namespace) -> int:
     history = data.get("history")
     history = [h for h in history if isinstance(h, dict)] if isinstance(history, list) else []
     older = getattr(args, "prune_older_than", None)
-    if older is not None and str(path) == "-":
+    dry = getattr(args, "dry_run", False)
+    if older is not None and str(path) == "-" and not dry:
         sys.stderr.write("--prune-older-than cannot rewrite a stdin trace\n")
         return 2
     if older is not None:
@@ -537,15 +538,21 @@ def cmd_history(args: argparse.Namespace) -> int:
             or float(h["ts"]) >= cutoff
         ]
         data["history"] = kept
-        try:
-            save(data, path)
+        if dry:
             sys.stderr.write(
-                "history pruned to %d (dropped %d older than %ss)\n"
+                "would prune history to %d (dropped %d older than %ss)\n"
                 % (len(kept), len(history) - len(kept), older)
             )
-        except OSError as exc:
-            sys.stderr.write("prune failed: %s\n" % exc)
-            return 1
+        else:
+            try:
+                save(data, path)
+                sys.stderr.write(
+                    "history pruned to %d (dropped %d older than %ss)\n"
+                    % (len(kept), len(history) - len(kept), older)
+                )
+            except OSError as exc:
+                sys.stderr.write("prune failed: %s\n" % exc)
+                return 1
         history = kept
     def _filtered(items: list) -> list | None:
         needle = (
@@ -1288,15 +1295,28 @@ def cmd_notes(args: argparse.Namespace) -> int:
     data = load(path)
     notes = data.get("notes")
     notes = notes if isinstance(notes, list) else []
+    dry = getattr(args, "dry_run", False)
+    mutating = (
+        getattr(args, "prune", None) is not None
+        or getattr(args, "prune_older_than", None) is not None
+        or getattr(args, "edit", None)
+        or getattr(args, "drop", "") or ""
+    )
+    if mutating and str(path) == "-" and not dry:
+        sys.stderr.write("notes mutations cannot rewrite a stdin trace\n")
+        return 2
     prune = getattr(args, "prune", None)
     if isinstance(prune, int) and prune >= 0:
         data["notes"] = notes[-prune:] if prune else []
-        try:
-            save(data, path)
-            sys.stderr.write("notes pruned to %d\n" % len(data["notes"]))
-        except OSError as exc:
-            sys.stderr.write("prune failed: %s\n" % exc)
-            return 1
+        if dry:
+            sys.stderr.write("would prune notes to %d\n" % len(data["notes"]))
+        else:
+            try:
+                save(data, path)
+                sys.stderr.write("notes pruned to %d\n" % len(data["notes"]))
+            except OSError as exc:
+                sys.stderr.write("prune failed: %s\n" % exc)
+                return 1
         notes = data["notes"]
     older = getattr(args, "prune_older_than", None)
     if older is not None:
@@ -1310,15 +1330,21 @@ def cmd_notes(args: argparse.Namespace) -> int:
             or float(n["ts"]) >= cutoff
         ]
         data["notes"] = kept
-        try:
-            save(data, path)
+        if dry:
             sys.stderr.write(
-                "notes pruned to %d (dropped %d older than %ss)\n"
+                "would prune notes to %d (dropped %d older than %ss)\n"
                 % (len(kept), len(notes) - len(kept), older)
             )
-        except OSError as exc:
-            sys.stderr.write("prune failed: %s\n" % exc)
-            return 1
+        else:
+            try:
+                save(data, path)
+                sys.stderr.write(
+                    "notes pruned to %d (dropped %d older than %ss)\n"
+                    % (len(kept), len(notes) - len(kept), older)
+                )
+            except OSError as exc:
+                sys.stderr.write("prune failed: %s\n" % exc)
+                return 1
         notes = kept
     edit = getattr(args, "edit", None)
     if edit:
@@ -1352,16 +1378,23 @@ def cmd_notes(args: argparse.Namespace) -> int:
         for i in range(lo, hi + 1):
             notes[i - 1]["text"] = edit[1]
             notes[i - 1]["sha"] = new_sha
-        try:
-            save(data, path)
+        if dry:
             sys.stderr.write(
-                "note %d updated\n" % lo
+                "would update note %d\n" % lo
                 if lo == hi
-                else "notes %d-%d updated\n" % (lo, hi)
+                else "would update notes %d-%d\n" % (lo, hi)
             )
-        except OSError as exc:
-            sys.stderr.write("edit failed: %s\n" % exc)
-            return 1
+        else:
+            try:
+                save(data, path)
+                sys.stderr.write(
+                    "note %d updated\n" % lo
+                    if lo == hi
+                    else "notes %d-%d updated\n" % (lo, hi)
+                )
+            except OSError as exc:
+                sys.stderr.write("edit failed: %s\n" % exc)
+                return 1
         notes = data["notes"]
     drop = getattr(args, "drop", "") or ""
     if drop:
@@ -1389,16 +1422,23 @@ def cmd_notes(args: argparse.Namespace) -> int:
             return 2
         del notes[lo - 1 : hi]
         data["notes"] = notes
-        try:
-            save(data, path)
+        if dry:
             sys.stderr.write(
-                "note %d dropped\n" % lo
+                "would drop note %d\n" % lo
                 if lo == hi
-                else "notes %d-%d dropped\n" % (lo, hi)
+                else "would drop notes %d-%d\n" % (lo, hi)
             )
-        except OSError as exc:
-            sys.stderr.write("drop failed: %s\n" % exc)
-            return 1
+        else:
+            try:
+                save(data, path)
+                sys.stderr.write(
+                    "note %d dropped\n" % lo
+                    if lo == hi
+                    else "notes %d-%d dropped\n" % (lo, hi)
+                )
+            except OSError as exc:
+                sys.stderr.write("drop failed: %s\n" % exc)
+                return 1
     context = getattr(args, "context", None)
     if context is not None:
         try:
@@ -2259,6 +2299,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         help="Rewrite the trace dropping notes whose ts is older than S seconds ago (notes with no readable ts are kept)",
     )
+    notes_cmd.add_argument("--dry-run", action="store_true", help="With --prune/--prune-older-than/--edit/--drop: preview the rewrite without saving (works on --file -)")
     notes_cmd.add_argument("--edit", nargs=2, metavar=("I", "TEXT"), help="Rewrite note I (1-based, into the unfiltered list) — or every note in range I-J — with TEXT; keeps ts/iso/harness, recomputes sha; rc 2 out of range")
     notes_cmd.add_argument("--drop", metavar="I", default="", help="Delete note I (1-based, into the unfiltered list) or range I-J; rc 2 out of range")
     notes_cmd.add_argument("--context", metavar="I", default=None, help="Print the notes surrounding index I (1-based, into the unfiltered list; other filters ignored)")
@@ -2307,8 +2348,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--prune-older-than",
         metavar="S",
         type=float,
-        help="Rewrite the trace dropping picks whose ts is older than S seconds ago (picks with no readable ts are kept; rc 2 on --file -)",
+        help="Rewrite the trace dropping picks whose ts is older than S seconds ago (picks with no readable ts are kept; rc 2 on --file - unless --dry-run)",
     )
+    hist_cmd.add_argument("--dry-run", action="store_true", help="With --prune-older-than: preview the rewrite without saving (works on --file -)")
     hist_cmd.add_argument("--gap", metavar="S", type=float, default=0.0, help="List consecutive-pick gaps wider than S seconds ({index,gap_s,prev_pick,pick} rows; --json emits {gaps})")
     hist_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,picks} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     hist_cmd.add_argument("--jq", metavar="KEY", default="", help="With --watch: print just the named tick field(s) per pass, comma list")

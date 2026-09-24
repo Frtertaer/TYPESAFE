@@ -1447,6 +1447,96 @@ class TraceTests(unittest.TestCase):
                     )
             self.assertEqual(rc, 2)
 
+    def test_cli_notes_dry_run_never_writes(self) -> None:
+        import io
+        import time
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            for text in ("a", "b", "c"):
+                tr.main(["--file", str(path), "record", "--pick", "x", "--note", text])
+            before = path.read_bytes()
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = tr.main(["--file", str(path), "notes", "--prune", "1", "--dry-run"])
+            self.assertEqual(rc, 0)
+            self.assertIn("would prune", err.getvalue())
+            self.assertEqual(path.read_bytes(), before)
+
+            with redirect_stdout(io.StringIO()), redirect_stderr(err := io.StringIO()):
+                rc = tr.main(["--file", str(path), "notes", "--drop", "1-2", "--dry-run"])
+            self.assertEqual(rc, 0)
+            self.assertIn("would drop notes 1-2", err.getvalue())
+            self.assertEqual(path.read_bytes(), before)
+
+            with redirect_stdout(io.StringIO()), redirect_stderr(err := io.StringIO()):
+                rc = tr.main(["--file", str(path), "notes", "--edit", "1", "z", "--dry-run"])
+            self.assertEqual(rc, 0)
+            self.assertIn("would update note 1", err.getvalue())
+            self.assertEqual(path.read_bytes(), before)
+
+            with redirect_stdout(io.StringIO()), redirect_stderr(err := io.StringIO()):
+                rc = tr.main(["--file", str(path), "notes", "--prune-older-than", "60", "--dry-run"])
+            self.assertEqual(rc, 0)
+            self.assertIn("would prune", err.getvalue())
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_cli_notes_mutation_on_stdin_needs_dry_run(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        payload = json.dumps({"plan": "P", "current_step": "s", "notes": [{"ts": 1, "text": "a", "sha": "x"}]})
+        try:
+            with patch.object(sys, "stdin", io.StringIO(payload)):
+                with patch.object(sys, "stderr", io.StringIO()) as err:
+                    rc = tr.main(["--file", "-", "notes", "--drop", "1"])
+            self.assertEqual(rc, 2)
+            self.assertIn("stdin", err.getvalue())
+            tr._STDIN_READ = False
+            tr._STDIN_TRACE = None
+            with patch.object(sys, "stdin", io.StringIO(payload)):
+                with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err2:
+                    rc = tr.main(["--file", "-", "notes", "--drop", "1", "--dry-run"])
+            self.assertEqual(rc, 0)
+            self.assertIn("would drop", err2.getvalue())
+        finally:
+            tr._STDIN_READ = False
+            tr._STDIN_TRACE = None
+
+    def test_cli_history_prune_dry_run_never_writes(self) -> None:
+        import io
+        import time
+        from contextlib import redirect_stderr, redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            tr.main(["--file", str(path), "init", "--plan", "P"])
+            tr.main(["--file", str(path), "record", "--pick", "old"])
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["history"][0]["ts"] = time.time() - 99999
+            path.write_text(json.dumps(data), encoding="utf-8")
+            before = path.read_bytes()
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = tr.main(["--file", str(path), "history", "--prune-older-than", "60", "--dry-run"])
+            self.assertEqual(rc, 0)
+            self.assertIn("would prune", err.getvalue())
+            self.assertEqual(path.read_bytes(), before)
+            # stdin previews allowed under --dry-run
+            try:
+                tr._STDIN_READ = False
+                tr._STDIN_TRACE = None
+                with patch.object(sys, "stdin", io.StringIO(before.decode("utf-8"))):
+                    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err2:
+                        rc = tr.main(["--file", "-", "history", "--prune-older-than", "60", "--dry-run"])
+                self.assertEqual(rc, 0)
+                self.assertIn("would prune", err2.getvalue())
+            finally:
+                tr._STDIN_READ = False
+                tr._STDIN_TRACE = None
+
     def test_cli_notes_edit_rewrites_text_and_sha(self) -> None:
         import hashlib as _hl
 

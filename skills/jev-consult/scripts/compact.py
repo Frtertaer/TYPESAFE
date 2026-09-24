@@ -1997,6 +1997,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Verify 'full output saved: PATH' references in FILE exist (rc 1 on missing).",
     )
     parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="With --verify-spill: also fail (rc 1) when FILE has no spill references at all.",
+    )
+    parser.add_argument(
         "--orphan-spill",
         metavar="FILE",
         default="",
@@ -2271,6 +2276,9 @@ def main(argv: list[str] | None = None) -> int:
             except OSError as exc:
                 sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
         return 0
+    if getattr(args, "strict", False) and not args.verify_spill:
+        sys.stderr.write("--strict requires --verify-spill\n")
+        return 2
     if args.verify_spill:
         try:
             text = Path(args.verify_spill).read_text(encoding="utf-8")
@@ -2279,13 +2287,15 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         refs = SPILL_REF.findall(text)
         missing = [ref for ref in refs if not Path(ref).is_file()]
+        ok = not missing and not (args.strict and not refs)
         if args.json:
             sys.stdout.write(
                 json.dumps(
                     {
                         "refs": refs,
                         "missing": missing,
-                        "ok": not missing,
+                        "ok": ok,
+                        "strict": bool(args.strict),
                     },
                     indent=2,
                 )
@@ -2296,8 +2306,15 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write(
                     "%s %s\n" % ("ok" if Path(ref).is_file() else "missing", ref)
                 )
-            sys.stdout.write("%d refs, %d missing\n" % (len(refs), len(missing)))
-        return 1 if missing else 0
+            sys.stdout.write(
+                "%d refs, %d missing%s\n"
+                % (
+                    len(refs),
+                    len(missing),
+                    " (strict: no refs)" if args.strict and not refs else "",
+                )
+            )
+        return 0 if ok else 1
     if args.orphan_spill:
         try:
             text = Path(args.orphan_spill).read_text(encoding="utf-8")

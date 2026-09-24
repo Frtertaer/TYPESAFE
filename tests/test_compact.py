@@ -2091,6 +2091,29 @@ class ListSpillTests(unittest.TestCase):
                 rc = C.main(["--verify-spill", str(Path(tmp) / "nope.txt")])
             self.assertEqual(rc, 2)
 
+    def test_cli_verify_spill_strict_fails_on_zero_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "out.txt"
+            doc.write_text("no spill references here", encoding="utf-8")
+            with patch("sys.stdout", io.StringIO()):
+                rc = C.main(["--verify-spill", str(doc), "--strict"])
+            self.assertEqual(rc, 1)
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--verify-spill", str(doc), "--strict"])
+            self.assertIn("0 refs, 0 missing (strict: no refs)", buf.getvalue())
+            existing = Path(tmp) / "a.txt"
+            existing.write_text("x", encoding="utf-8")
+            doc.write_text("full output saved: %s\n" % existing, encoding="utf-8")
+            with patch("sys.stdout", io.StringIO()):
+                rc = C.main(["--verify-spill", str(doc), "--strict"])
+            self.assertEqual(rc, 0)
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = C.main(["--strict"])
+            self.assertEqual(rc, 2)
+            self.assertIn("--strict requires --verify-spill", err.getvalue())
+
     def test_cli_verify_spill_matches_emitted_marker(self) -> None:
         # abridge_live emits "full output saved: PATH …]" — the ref ends
         # at the space-ellipsis, not at ']' glued to the path

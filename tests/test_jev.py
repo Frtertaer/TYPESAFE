@@ -628,6 +628,28 @@ class ScaffoldTests(unittest.TestCase):
             self.assertIn("lint J012", err.getvalue())
             self.assertTrue(out.is_file())
 
+    def test_every_template_scaffolds_lint_clean(self) -> None:
+        # e2e contract: every policy template's scaffolded request passes
+        # question_lint with zero error findings — scaffolded requests are
+        # always ask-able.
+        policy = jev.load_policy("")
+        ql = jev.question_lint
+        self.assertIsNotNone(ql)
+        templates = policy.get("templates") or {}
+        self.assertGreater(len(templates), 5)
+        for name in sorted(templates):
+            tmpl = templates[name]
+            extra = {}
+            if tmpl.get("type") == "choice":
+                extra = {name: {"opt_x": "option x", "opt_y": "option y"}}
+            with self.subTest(template=name):
+                request = jev.scaffold_request(
+                    policy, [name], {"task": "demo task"}, extra
+                )
+                findings = ql.lint_request(request, hatch={"none", "other"})
+                errors = [f for f in findings if f.get("severity") == "error"]
+                self.assertEqual(errors, [])
+
     def test_guard_no_decision_action(self) -> None:
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         skill = (ROOT / "skills" / "jev-consult" / "SKILL.md").read_text(encoding="utf-8")

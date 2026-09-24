@@ -2011,6 +2011,27 @@ class HookRetriesEnvTests(unittest.TestCase):
         self.assertEqual(rows[0]["id"], "skill_jwt_auth")
         self.assertEqual(rows[0]["name"], "jwt-auth")
 
+    def test_cli_md_emits_table(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = inv.main(
+                [
+                    "--harness", "hermes",
+                    "--hermes-home", str(FIXTURE),
+                    "--task", "jwt",
+                    "--md", "--scores",
+                ]
+            )
+        self.assertEqual(code, 0)
+        lines = buf.getvalue().strip().splitlines()
+        self.assertEqual(lines[0], "| id | kind | name | score |")
+        self.assertTrue(lines[1].startswith("| ---"))
+        self.assertIn("skill_jwt_auth", lines[2])
+        self.assertEqual(len(lines), 3)
+
     def test_cli_kinds_prints_per_kind_counts(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

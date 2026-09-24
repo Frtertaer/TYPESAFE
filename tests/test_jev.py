@@ -192,6 +192,29 @@ class DecideTests(unittest.TestCase):
         decision = jev.decide(answers, policy, irreversible=True)
         self.assertEqual(decision["action"], "escalate")
 
+    def test_decide_empty_answers_proceeds(self) -> None:
+        decision = jev.decide({}, self.policy)
+        self.assertEqual(decision["action"], "proceed")
+        self.assertEqual(decision["picks"], {})
+        self.assertEqual(decision["notes"], [])
+
+    def test_decide_unknown_answer_type_escalates(self) -> None:
+        decision = jev.decide({"q": {"type": "ranking", "x": 1}}, self.policy)
+        self.assertEqual(decision["action"], "escalate")
+        self.assertTrue(any("unknown answer type" in n for n in decision["notes"]))
+        # an unknown type doesn't pollute picks
+        self.assertNotIn("q", decision["picks"])
+
+    def test_decide_missing_type_key_escalates(self) -> None:
+        decision = jev.decide({"q": {"choice": "x", "confidence": 0.9}}, self.policy)
+        self.assertEqual(decision["action"], "escalate")
+        self.assertTrue(any("unknown answer type" in n for n in decision["notes"]))
+
+    def test_decide_non_dict_answer_escalates(self) -> None:
+        decision = jev.decide({"q": "just-a-string"}, self.policy)
+        self.assertEqual(decision["action"], "escalate")
+        self.assertTrue(any("malformed answer" in n for n in decision["notes"]))
+
     def test_v3_tight_gap_used_not_nested_015(self) -> None:
         answers = {
             "where": {

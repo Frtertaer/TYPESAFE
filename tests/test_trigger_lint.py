@@ -777,5 +777,22 @@ class DiffFlagTests(unittest.TestCase):
         self.assertIn("+ cases.pos-b", lines)
         self.assertTrue(any(l.startswith("~ cases.pos-a.prompt") for l in lines))
 
+    def test_init_prints_lint_clean_cases(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = trigger_lint.main(["--init"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        cases = payload["cases"]
+        self.assertTrue(any(c["should_trigger"] is True for c in cases))
+        self.assertTrue(any(c["should_trigger"] is False for c in cases))
+        self.assertEqual(trigger_lint.lint_cases(Path("<init>"), text=json.dumps(payload)), [])
+        covered = {
+            k for c in cases for k in c.get("covers") or [] if c.get("should_trigger")
+        }
+        must_ask = trigger_lint._must_ask_kinds()
+        if must_ask:
+            self.assertEqual(must_ask, covered)
+
 if __name__ == "__main__":
     unittest.main()

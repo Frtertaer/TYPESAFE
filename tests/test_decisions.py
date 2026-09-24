@@ -182,7 +182,9 @@ class SummarizeTest(unittest.TestCase):
         self.assertIn("hi", line)
 
 
-def run_cli(*argv: str, env: dict | None = None) -> subprocess.CompletedProcess:
+def run_cli(
+    *argv: str, env: dict | None = None, stdin_text: str | None = None
+) -> subprocess.CompletedProcess:
     full_env = dict(os.environ)
     if env:
         full_env.update(env)
@@ -191,6 +193,7 @@ def run_cli(*argv: str, env: dict | None = None) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         env=full_env,
+        input=stdin_text,
     )
 
 
@@ -260,6 +263,29 @@ class CliTest(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("1", proc.stdout)
+
+    def test_grep_dash_reads_substr_from_stdin(self):
+        """--grep - reads the filter substring from stdin."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "prompt_head": "fix tests", "winner": "alpha"},
+                    {"ts": 2, "prompt_head": "fix tests", "winner": "beta"},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--grep", "-", "--count",
+                stdin_text="alpha\n",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("1", proc.stdout)
+            proc = self.run_cli(
+                "--file", str(path), "--count", stdin_text="",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("2", proc.stdout)
 
     def test_grep_filters_across_string_fields(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -880,7 +880,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--field", default=os.environ.get("JEV_DECISIONS_FIELD", ""), help="Generic filter: KEY=VALUE equality on any entry field (a.b digs into nested objects)")
     parser.add_argument("--prompt", default=os.environ.get("JEV_DECISIONS_PROMPT", ""), help="Only entries whose prompt_head/prompt_tail contain this substring (case-insensitive)")
     parser.add_argument("--reason", default=os.environ.get("JEV_DECISIONS_REASON", ""), help="Only entries whose reason field contains this substring (case-insensitive)")
-    parser.add_argument("--grep", default=os.environ.get("JEV_DECISIONS_GREP", ""), help="Only entries where any string field contains this substring (case-insensitive, one nesting level deep)")
+    parser.add_argument("--grep", default=os.environ.get("JEV_DECISIONS_GREP", ""), help="Only entries where any string field contains this substring (case-insensitive, one nesting level deep); '-' reads SUBSTR from stdin")
     env_min_need = os.environ.get("JEV_DECISIONS_MIN_NEED", "").strip()
     try:
         env_min_need = float(env_min_need) if env_min_need else None
@@ -1200,6 +1200,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--self-test", action="store_true", help="Parse a synthetic 3-entry log + 1 bad line; exit 1 when the counts do not match")
     parser.add_argument("--verify", action="store_true", help="Chain check the raw log: unparseable lines, missing ts/jev_status, missing required schema keys on full routing/fill entries, ts regressions; rc 1 on any problem (--jq KEY digs the report, rc 2 on unknown; --out PATH writes the report JSON)")
     args = parser.parse_args(argv)
+    args.grep = _watch.text_arg(args.grep)
     if getattr(args, "schema", False):
         if args.json:
             sys.stdout.write(json.dumps(ENTRY_SCHEMA_ROWS, indent=2) + "\n")

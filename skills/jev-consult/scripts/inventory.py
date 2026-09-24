@@ -1309,7 +1309,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         env_limit = 12
     parser.add_argument("--limit", type=int, default=max(1, env_limit))
-    parser.add_argument("--include", default="", help="Comma names to force onto the shortlist.")
+    parser.add_argument("--include", default="", help="Comma names to force onto the shortlist ('-' reads the list from stdin).")
     parser.add_argument("--write-ask", help="Write a Jev ask JSON with load_tools + installed_enough.")
     parser.add_argument("--sidecar", help="Write %s-style JSON of the shortlist names." % SIDECAR_NAME)
     parser.add_argument(
@@ -1396,7 +1396,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--grep",
         default="",
-        help="Keep only items whose name or description contains SUBSTR (case-insensitive).",
+        help="Keep only items whose name or description contains SUBSTR (case-insensitive; '-' reads SUBSTR from stdin).",
     )
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
@@ -1436,6 +1436,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     args.task = _watch.text_arg(args.task)
+    args.grep = _watch.text_arg(args.grep)
+    args.include = _watch.text_arg(args.include)
     if (args.baseline or args.baseline_write) and not args.dupes:
         sys.stderr.write("--baseline/--baseline-write only apply with --dupes\n")
         return 2

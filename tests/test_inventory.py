@@ -1074,6 +1074,52 @@ class InventoryTests(unittest.TestCase):
         names = [item["name"] for item in payload["shortlist"]]
         self.assertEqual(names, ["jwt-auth"])
 
+    def test_cli_grep_dash_reads_stdin(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        buf = StringIO()
+        with patch.object(sys, "stdin", StringIO("jwt\n")):
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(FIXTURE),
+                        "--grep",
+                        "-",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        names = [item["name"] for item in json.loads(buf.getvalue())["shortlist"]]
+        self.assertEqual(names, ["jwt-auth"])
+
+    def test_cli_include_dash_reads_stdin(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        buf = StringIO()
+        with patch.object(sys, "stdin", StringIO("jwt-auth\n")):
+            with redirect_stdout(buf):
+                code = inv.main(
+                    [
+                        "--harness",
+                        "hermes",
+                        "--hermes-home",
+                        str(FIXTURE),
+                        "--include",
+                        "-",
+                        "--task",
+                        "unrelated",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        names = [item["name"] for item in json.loads(buf.getvalue())["shortlist"]]
+        self.assertIn("jwt-auth", names)
+
     def test_cli_paths_prints_item_paths(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

@@ -513,7 +513,8 @@ def cmd_history(args: argparse.Namespace) -> int:
     history = [h for h in history if isinstance(h, dict)] if isinstance(history, list) else []
     def _filtered(items: list) -> list | None:
         needle = (
-            getattr(args, "grep", "") or os.environ.get("JEV_TRACE_HISTORY_GREP", "")
+            _watch.text_arg(getattr(args, "grep", ""))
+            or os.environ.get("JEV_TRACE_HISTORY_GREP", "")
         ).strip().lower()
         if needle:
             items = [
@@ -1254,7 +1255,7 @@ def cmd_notes(args: argparse.Namespace) -> int:
         want_harness = getattr(args, "harness", "") or ""
         if want_harness:
             items = [n for n in items if isinstance(n, dict) and n.get("harness") == want_harness]
-        needle = (getattr(args, "grep", "") or os.environ.get("JEV_TRACE_GREP", "")).strip().lower()
+        needle = (_watch.text_arg(getattr(args, "grep", "")) or os.environ.get("JEV_TRACE_GREP", "")).strip().lower()
         if needle:
             items = [n for n in items if isinstance(n, dict) and needle in str(n.get("text") or "").lower()]
         if getattr(args, "uniq", False):
@@ -1927,7 +1928,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd.add_argument("--out", default="", help="Write the notes output to PATH instead of stdout")
     notes_cmd.add_argument("--field", default="", help="Print only this field per note (a.b digs into nested objects)")
     notes_cmd.add_argument("--reverse", action="store_true", help="List notes newest-first")
-    notes_cmd.add_argument("--grep", default="", help="Only notes whose text contains SUBSTR (case-insensitive; default JEV_TRACE_GREP)")
+    notes_cmd.add_argument("--grep", default="", help="Only notes whose text contains SUBSTR (case-insensitive; default JEV_TRACE_GREP; '-' reads SUBSTR from stdin)")
     notes_cmd.add_argument("--uniq", action="store_true", help="Dedupe notes by sha/text (first occurrence wins)")
     notes_cmd.add_argument("--by-harness", action="store_true", help="Print distinct note harnesses with counts, sorted desc (empty harness shown as '-')")
     notes_cmd.add_argument("--shas", action="store_true", help="Print just the sha of each filtered note, one per line (--json emits {shas})")
@@ -1955,7 +1956,7 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd.add_argument("--count", action="store_true", help="Print just the filtered pick count (--json emits {count})")
     hist_cmd.add_argument("--rate", action="store_true", help="Print pick-rate stats over the filtered history: per-day UTC buckets plus picks_per_day")
     hist_cmd.add_argument("--since", default=None, help="Only picks with ts >= epoch seconds or ISO8601")
-    hist_cmd.add_argument("--grep", default="", help="Only picks whose pick/kind contains SUBSTR (case-insensitive; default JEV_TRACE_HISTORY_GREP)")
+    hist_cmd.add_argument("--grep", default="", help="Only picks whose pick/kind contains SUBSTR (case-insensitive; default JEV_TRACE_HISTORY_GREP; '-' reads SUBSTR from stdin)")
     hist_cmd.add_argument("--before", default=None, help="Only picks with ts <= epoch seconds or ISO8601")
     hist_cmd.add_argument("--gap", metavar="S", type=float, default=0.0, help="List consecutive-pick gaps wider than S seconds ({index,gap_s,prev_pick,pick} rows; --json emits {gaps})")
     hist_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,picks} count tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")

@@ -410,6 +410,25 @@ class TraceTests(unittest.TestCase):
             self.assertIn("scaffold", buf.getvalue())
             self.assertNotIn("jwt-auth", buf.getvalue())
 
+    def test_history_grep_dash_reads_stdin(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            data = tr.empty()
+            data = tr.record(data, pick="scaffold", kind="approach")
+            data = tr.record(data, pick="jwt-auth", kind="skill")
+            tr.save(data, path)
+            buf = StringIO()
+            with patch.object(sys, "stdin", StringIO("jwt\n")):
+                with redirect_stdout(buf):
+                    code = tr.main(["--file", str(path), "history", "--grep", "-"])
+            self.assertEqual(code, 0)
+            out = buf.getvalue()
+            self.assertIn("jwt-auth", out)
+            self.assertNotIn("scaffold", out)
+
     def test_history_kinds_lists_distinct_with_counts(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout
@@ -594,6 +613,24 @@ class TraceTests(unittest.TestCase):
                     tr.main(["--file", str(path), "notes"])
             self.assertNotIn("jwt tokens", buf.getvalue())
             self.assertIn("unrelated", buf.getvalue())
+
+    def test_notes_grep_dash_reads_stdin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            from io import StringIO
+            from contextlib import redirect_stdout
+
+            with redirect_stdout(StringIO()):
+                tr.main(["--file", str(path), "record", "--pick", "a", "--note", "jwt tokens"])
+                tr.main(["--file", str(path), "record", "--pick", "b", "--note", "unrelated"])
+            buf = StringIO()
+            with patch.object(sys, "stdin", StringIO("JWT\n")):
+                with redirect_stdout(buf):
+                    code = tr.main(["--file", str(path), "notes", "--grep", "-"])
+            self.assertEqual(code, 0)
+            out = buf.getvalue()
+            self.assertIn("jwt tokens", out)
+            self.assertNotIn("unrelated", out)
 
     def test_notes_uniq_dedupes_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

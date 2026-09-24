@@ -1261,7 +1261,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--csv",
         action="store_true",
-        help="Print filtered entries as CSV",
+        help="Print filtered entries as CSV; also emits CSV tables on the report views (--daily/--hourly/--winners/--statuses/--outcomes/--fills/--harnesses/--dedupes/--fields/--daily-status/--gap/--streaks/--silent-since/--chains/--fill-gaps)",
     )
     parser.add_argument(
         "--md",
@@ -1857,6 +1857,18 @@ def main(argv: list[str] | None = None) -> int:
                 ],
                 ["from", "to", "seconds"],
             )
+        elif getattr(args, "csv", False):
+            _watch.csv_table(
+                [
+                    {
+                        "from": _iso_full(g["from_ts"]) or "?",
+                        "to": _iso_full(g["to_ts"]) or "?",
+                        "seconds": g["seconds"],
+                    }
+                    for g in gaps
+                ],
+                ["from", "to", "seconds"],
+            )
         else:
             sys.stdout.write(format_gaps(gaps) + "\n")
         return 0
@@ -1872,6 +1884,14 @@ def main(argv: list[str] | None = None) -> int:
                     "current_streak", "best_status", "best_streak",
                 ],
             )
+        elif getattr(args, "csv", False):
+            _watch.csv_table(
+                rows,
+                [
+                    "harness", "entries", "current_status",
+                    "current_streak", "best_status", "best_streak",
+                ],
+            )
         else:
             sys.stdout.write(format_streaks(rows) + "\n")
         return 0
@@ -1881,6 +1901,18 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(json.dumps({"silent": rows}, indent=2) + "\n")
         elif getattr(args, "md", False):
             _watch.md_table(
+                [
+                    {
+                        "harness": r["harness"],
+                        "last": _iso_full(r["last_ts"]) or "?",
+                        "age_s": r["age_s"],
+                    }
+                    for r in rows
+                ],
+                ["harness", "last", "age_s"],
+            )
+        elif getattr(args, "csv", False):
+            _watch.csv_table(
                 [
                     {
                         "harness": r["harness"],
@@ -1915,6 +1947,20 @@ def main(argv: list[str] | None = None) -> int:
                 ],
                 ["prompt_head", "count", "first", "last", "statuses"],
             )
+        elif getattr(args, "csv", False):
+            _watch.csv_table(
+                [
+                    {
+                        "prompt_head": r["prompt_head"],
+                        "count": r["count"],
+                        "first": _iso_full(r["first_ts"]) or "?",
+                        "last": _iso_full(r["last_ts"]) or "?",
+                        "statuses": ",".join(r["statuses"]),
+                    }
+                    for r in rows
+                ],
+                ["prompt_head", "count", "first", "last", "statuses"],
+            )
         else:
             sys.stdout.write(format_chains(rows) + "\n")
         return 1 if rows else 0
@@ -1924,6 +1970,26 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(json.dumps({"fill_gaps": rows}, indent=2) + "\n")
         elif getattr(args, "md", False):
             _watch.md_table(
+                [
+                    {
+                        "harness": r["harness"],
+                        "misses": r["misses"],
+                        "filled": r["filled"],
+                        "open": r["open"],
+                        "fill_rate": (
+                            "-" if r.get("fill_rate") is None
+                            else "%.3f" % r["fill_rate"]
+                        ),
+                        "age_s": "-" if r.get("age_s") is None else r["age_s"],
+                        "examples": "; ".join(r["examples"]),
+                    }
+                    for r in rows
+                ],
+                ["harness", "misses", "filled", "open",
+                 "fill_rate", "age_s", "examples"],
+            )
+        elif getattr(args, "csv", False):
+            _watch.csv_table(
                 [
                     {
                         "harness": r["harness"],
@@ -2335,6 +2401,11 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write("| day | status | n |\n| --- | --- | --- |\n")
                 for day, status, n in rows:
                     sys.stdout.write("| %s | %s | %d |\n" % (day, status, n))
+            elif getattr(args, "csv", False):
+                _watch.csv_table(
+                    [{"day": day, "status": status, "n": n} for day, status, n in rows],
+                    ["day", "status", "n"],
+                )
             else:
                 for day, status, n in rows:
                     sys.stdout.write("%s %s %d\n" % (day, status, n))
@@ -2395,6 +2466,12 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write("| %s | n |\n| --- | --- |\n" % key_col)
             for value, n in rows:
                 sys.stdout.write("| %s | %d |\n" % (value, n))
+        elif getattr(args, "csv", False):
+            key_col = "day" if args.daily else "hour" if args.hourly else "value"
+            _watch.csv_table(
+                [{key_col: value, "n": n} for value, n in rows],
+                [key_col, "n"],
+            )
         else:
             for value, n in rows:
                 sys.stdout.write("%s %d\n" % (value, n))

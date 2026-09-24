@@ -3458,6 +3458,59 @@ class PruneTest(unittest.TestCase):
             self.assertIn("| 2026-01-01 | ok | 1 |", lines)
             self.assertIn("| 2026-01-01 | none | 1 |", lines)
 
+    def test_report_views_csv_tables(self):
+        import csv as _csv
+        import io as _io
+
+        def csv_rows(proc):
+            return list(_csv.reader(_io.StringIO(proc.stdout)))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1_700_000_000, "jev_status": "ok", "harness": "codex"},
+                    {"ts": 1_700_000_100, "jev_status": "none", "harness": "codex"},
+                    {"ts": 1_700_000_200, "jev_status": "ok", "harness": "grok"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--daily", "--csv")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(csv_rows(proc)[0], ["day", "n"])
+            proc = self.run_cli("--file", str(path), "--daily-status", "--csv")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(csv_rows(proc)[0], ["day", "status", "n"])
+            proc = self.run_cli("--file", str(path), "--statuses", "--csv")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(csv_rows(proc)[0], ["value", "n"])
+            proc = self.run_cli("--file", str(path), "--streaks", "--csv")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(
+                csv_rows(proc)[0],
+                [
+                    "harness", "entries", "current_status",
+                    "current_streak", "best_status", "best_streak",
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--fill-gaps", "--csv")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(
+                csv_rows(proc)[0],
+                [
+                    "harness", "misses", "filled", "open",
+                    "fill_rate", "age_s", "examples",
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--gap", "60", "--csv")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(csv_rows(proc)[0], ["from", "to", "seconds"])
+            proc = self.run_cli(
+                "--file", str(path), "--silent-since", "1", "--csv"
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertEqual(csv_rows(proc)[0], ["harness", "last", "age_s"])
+
     def test_missing_accepts_comma_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

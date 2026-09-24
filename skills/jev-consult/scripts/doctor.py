@@ -27,6 +27,7 @@ if str(_SCRIPTS) not in sys.path:
 
 import _watch  # noqa: E402
 from inventory import _policy_float_key  # noqa: E402
+from policy_lint import lint_policy  # noqa: E402
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
@@ -49,6 +50,7 @@ CHECK_NAMES = (
     "jev-tools.json",
     "api_key",
     "policy",
+    "policy_lint",
     "decisions_log",
     "progress_ledger",
 )
@@ -77,6 +79,7 @@ HINTS = {
     "hooks": "create .claude/settings.json with a hooks block or run python scripts/install.py --agents claude-code",
     "api_key": "set TYPESAFE_API_KEY in the environment or a .env file",
     "policy": "restore skills/jev-consult/policy.json",
+    "policy_lint": "fix the flagged keys in skills/jev-consult/policy.json (python skills/jev-consult/scripts/policy_lint.py)",
     "hooks_json": "fix or delete the malformed hooks file; it blocks hook registration",
 }
 
@@ -258,6 +261,23 @@ def check_common(home: Path, hermes: Path) -> list[dict]:
         policy_ok = bool(data.get("question_soft_max"))
         detail = "ok" if policy_ok else "no question_soft_max"
     out.append(_check("*", "policy", policy_ok, detail))
+    if isinstance(data, dict):
+        try:
+            findings = lint_policy(data)
+        except Exception:
+            findings = []
+        errors = sum(1 for f in findings if f.get("severity") == "error")
+        warns = sum(1 for f in findings if f.get("severity") == "warn")
+        first = next(
+            (f for f in findings if f.get("severity") == "error"), None
+        )
+        lint_detail = "errors=%d warnings=%d" % (errors, warns)
+        if first is not None:
+            lint_detail += " (%s: %s)" % (
+                first.get("path") or first.get("rule") or "?",
+                first.get("message") or "?",
+            )
+        out.append(_check("*", "policy_lint", errors == 0, lint_detail))
     raw_log = os.environ.get("JEV_CONSULT_LOG") or ""
     if raw_log.strip() == "0":
         out.append(_check("*", "decisions_log", True, "disabled (JEV_CONSULT_LOG=0)"))

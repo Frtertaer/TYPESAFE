@@ -378,6 +378,29 @@ class DoctorTests(unittest.TestCase):
         rc, out, _ = run_main(["--agents", "hermes", "--home", "x", "--hermes-home", "y"])
         self.assertTrue(check_of(out, "policy")["ok"])
 
+    def test_policy_lint_check_emitted_and_ok(self) -> None:
+        rc, out, _ = run_main(["--agents", "hermes", "--home", "x", "--hermes-home", "y"])
+        lint = check_of(out, "policy_lint")
+        self.assertTrue(lint["ok"], lint)
+
+    def test_policy_lint_check_fails_on_error_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad-policy.json"
+            policy = json.loads(
+                (DOC.SCRIPT_DIR.parent / "policy.json").read_text(encoding="utf-8")
+            )
+            policy["question_soft_max"] = 99
+            policy["question_hard_max"] = 4
+            bad.write_text(json.dumps(policy), encoding="utf-8")
+            rc, out, _ = run_main(
+                ["--agents", "hermes", "--home", "x", "--hermes-home", "y"],
+                env_extra={"JEV_POLICY": str(bad)},
+            )
+            lint = check_of(out, "policy_lint")
+            self.assertFalse(lint["ok"])
+            self.assertIn("errors=", lint["detail"])
+            self.assertEqual(lint["hint"], DOC.HINTS["policy_lint"])
+
     def test_only_filters_checks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rc, out, _ = run_main(

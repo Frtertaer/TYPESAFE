@@ -78,10 +78,25 @@ ENTRY_SCHEMA_ROWS = {
 }
 
 
-def load_entries(path: Path) -> tuple[list[dict], int]:
+_STDIN_TEXT: str | None = None
+
+
+def _log_text(path: Path) -> str | None:
+    """Read the log; the '-' path reads stdin once and caches it."""
+    global _STDIN_TEXT
+    if str(path) == "-":
+        if _STDIN_TEXT is None:
+            _STDIN_TEXT = sys.stdin.read()
+        return _STDIN_TEXT
     try:
-        text = path.read_text(encoding="utf-8-sig")
+        return path.read_text(encoding="utf-8-sig")
     except OSError:
+        return None
+
+
+def load_entries(path: Path) -> tuple[list[dict], int]:
+    text = _log_text(path)
+    if text is None:
         return [], 0
     return _parse_jsonl(text)
 
@@ -89,10 +104,10 @@ def load_entries(path: Path) -> tuple[list[dict], int]:
 def load_bad_lines(path: Path) -> list[tuple[int, str]]:
     """Return [(lineno, raw)] for lines that failed to parse as JSON objects."""
     bad_rows: list[tuple[int, str]] = []
-    try:
-        lines = path.read_text(encoding="utf-8-sig").splitlines()
-    except OSError:
+    text = _log_text(path)
+    if text is None:
         return bad_rows
+    lines = text.splitlines()
     for lineno, line in enumerate(lines, 1):
         stripped = line.strip()
         if not stripped:
@@ -112,11 +127,11 @@ def verify_log(path: Path) -> dict:
     jev_status present. Returns {ok, entries, bad_lines, problems}."""
     problems: list[dict] = []
     entries: list[dict] = []
-    try:
-        lines = path.read_text(encoding="utf-8-sig").splitlines()
-    except OSError:
+    text = _log_text(path)
+    if text is None:
         return {"ok": False, "entries": 0, "bad_lines": 0,
                 "problems": [{"line": 0, "issue": "unreadable"}]}
+    lines = text.splitlines()
     bad = 0
     prev_ts: float | None = None
     for lineno, line in enumerate(lines, 1):
@@ -812,7 +827,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Stats over ~/.cache/jev-consult/decisions.jsonl."
     )
-    parser.add_argument("--file", help="Override decisions.jsonl path")
+    parser.add_argument("--file", help="Override decisions.jsonl path ('-' reads the JSONL log from stdin)")
     try:
         env_tail = int(os.environ.get("JEV_DECISIONS_TAIL", "") or 0)
     except ValueError:
@@ -1280,7 +1295,12 @@ def main(argv: list[str] | None = None) -> int:
     if path is None:
         sys.stderr.write("decisions log disabled (JEV_CONSULT_LOG=0)\n")
         return 2
-    if not path.is_file():
+    if str(path) == "-" and (
+        args.prune or getattr(args, "drop_bad", False) or args.watch
+    ):
+        sys.stderr.write("--file - (stdin) supports neither --prune, --drop-bad nor --watch\n")
+        return 2
+    if str(path) != "-" and not path.is_file():
         sys.stderr.write("no decisions log at %s\n" % path)
         return 1
     if getattr(args, "verify", False):

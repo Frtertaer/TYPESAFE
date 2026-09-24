@@ -3652,5 +3652,53 @@ class ReasonFilterTest(unittest.TestCase):
             self.assertEqual(proc.stdout.strip(), "1")
 
 
+class StdinFileTests(unittest.TestCase):
+    def _feed(self, *argv: str, stdin: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(SCRIPTS / "decisions.py"), *argv],
+            capture_output=True,
+            text=True,
+            input=stdin,
+        )
+
+    LOG = (
+        '{"ts": 1700000000.0, "jev_status": "ok"}\n'
+        '{"ts": 1700000001.0, "jev_status": "none"}\n'
+        "not json\n"
+    )
+
+    def test_file_dash_count(self) -> None:
+        proc = self._feed("--file", "-", "--count", stdin=self.LOG)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "2")
+
+    def test_file_dash_verify(self) -> None:
+        proc = self._feed("--file", "-", "--verify", "--json", stdin=self.LOG)
+        self.assertEqual(proc.returncode, 1)
+        report = json.loads(proc.stdout)
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["bad_lines"], 1)
+        self.assertEqual(report["entries"], 2)
+
+    def test_file_dash_clean_log_verifies(self) -> None:
+        proc = self._feed(
+            "--file", "-", "--verify", "--json",
+            stdin='{"ts": 1.0, "jev_status": "ok"}\n',
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(json.loads(proc.stdout)["ok"])
+
+    def test_file_dash_tail(self) -> None:
+        proc = self._feed("--file", "-", "--tail", "1", stdin=self.LOG)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("1700000001", proc.stdout)
+
+    def test_file_dash_rejects_write_modes(self) -> None:
+        for extra in (["--prune", "--days", "1"], ["--drop-bad"], ["--watch", "1"]):
+            proc = self._feed("--file", "-", *extra, stdin=self.LOG)
+            self.assertEqual(proc.returncode, 2, extra)
+            self.assertIn("stdin", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

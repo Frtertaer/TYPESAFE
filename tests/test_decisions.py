@@ -3134,6 +3134,19 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 2)
             self.assertIn("--verbose requires --verify", proc.stderr)
 
+    def test_verify_top_caps_problem_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            path.write_text("\n".join("not json" for _ in range(8)) + "\n", encoding="utf-8")
+            proc = self.run_cli("--file", str(path), "--verify", "--top", "3")
+            self.assertEqual(proc.returncode, 1)
+            self.assertEqual(proc.stdout.count("unparseable"), 3)
+            self.assertIn("and 5 more", proc.stdout)
+            proc = self.run_cli(
+                "--file", str(path), "--verify", "--top", "3", "--verbose"
+            )
+            self.assertEqual(proc.stdout.count("unparseable"), 8)
+
     def test_verify_jq_digs_report(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

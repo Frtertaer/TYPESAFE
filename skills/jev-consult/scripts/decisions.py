@@ -935,7 +935,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         env_top = 0
     parser.add_argument(
-        "--top", type=int, default=max(0, env_top), help="Cap count-list output (--statuses et al.) to N rows"
+        "--top", type=int, default=max(0, env_top), help="Cap count-list output (--statuses et al.) and --verify problem rows to N rows"
     )
     try:
         env_days = float(os.environ.get("JEV_DECISIONS_DAYS", "") or 0)
@@ -1536,10 +1536,11 @@ def main(argv: list[str] | None = None) -> int:
                     len(report["problems"]),
                 )
             )
+            cap = max(1, getattr(args, "top", 0) or 20)
             shown = (
                 report["problems"]
                 if getattr(args, "verbose", False)
-                else report["problems"][:20]
+                else report["problems"][:cap]
             )
             for row in shown:
                 sys.stdout.write("  line %d: %s\n" % (row["line"], row["issue"]))

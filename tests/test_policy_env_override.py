@@ -22,6 +22,9 @@ SCRIPTS_DIR = ROOT / "skills" / "jev-consult" / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import inventory  # noqa: E402
+import peer_fill  # noqa: E402
+import catalog_fill  # noqa: E402
+import apply_fill  # noqa: E402
 
 POLICY_JSON = ROOT / "skills" / "jev-consult" / "policy.json"
 
@@ -219,6 +222,58 @@ class DoctorPolicyEnvTests(unittest.TestCase):
             payload2 = json.loads(proc2.stdout)
             checks2 = {c["check"]: c for c in payload2["checks"]}
             self.assertTrue(checks2["policy"]["ok"], proc2.stdout)
+
+
+class ThresholdPolicyEnvTests(unittest.TestCase):
+    """Every script knob is policy-backed: JEV_POLICY path feeds it, env wins
+    where an override exists."""
+
+    def test_fill_timeout_honors_policy_and_env_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = _custom_policy(tmp, fill_timeout_seconds=33)
+            with patch.dict(os.environ, {"JEV_POLICY": str(custom)}):
+                env = dict(os.environ)
+                env.pop("JEV_FILL_TIMEOUT", None)
+                with patch.dict(os.environ, env, clear=True):
+                    self.assertEqual(peer_fill.fill_timeout_seconds(), 33.0)
+                with patch.dict(
+                    os.environ, {"JEV_FILL_TIMEOUT": "12"}, clear=False
+                ):
+                    self.assertEqual(peer_fill.fill_timeout_seconds(), 12.0)
+
+    def test_scan_cache_seconds_honors_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = _custom_policy(tmp, scan_cache_seconds=7)
+            with patch.dict(os.environ, {"JEV_POLICY": str(custom)}):
+                self.assertEqual(inventory.scan_cache_seconds(), 7.0)
+            self.assertNotEqual(inventory.scan_cache_seconds(), 7.0)
+
+    def test_catalog_search_limit_honors_policy_in_both_fills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = _custom_policy(tmp, catalog_search_limit=3)
+            with patch.dict(os.environ, {"JEV_POLICY": str(custom)}):
+                self.assertEqual(catalog_fill.catalog_search_limit(), 3)
+                self.assertEqual(apply_fill.catalog_search_limit(), 3)
+            self.assertEqual(catalog_fill.catalog_search_limit(), 8)
+            self.assertEqual(apply_fill.catalog_search_limit(), 8)
+
+    def test_catalog_cache_max_queries_honors_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = _custom_policy(tmp, catalog_cache_max_queries=5)
+            with patch.dict(os.environ, {"JEV_POLICY": str(custom)}):
+                self.assertEqual(catalog_fill.cache_max_queries(), 5)
+            self.assertEqual(catalog_fill.cache_max_queries(), 50)
+
+    def test_shipped_policy_defines_all_threshold_keys(self) -> None:
+        policy = json.loads(POLICY_JSON.read_text(encoding="utf-8"))
+        for key in (
+            "fill_timeout_seconds",
+            "scan_cache_seconds",
+            "catalog_search_limit",
+            "catalog_cache_max_queries",
+            "hermes_install_timeout_seconds",
+        ):
+            self.assertIn(key, policy, key)
 
 
 if __name__ == "__main__":

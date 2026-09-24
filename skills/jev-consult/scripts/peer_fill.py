@@ -45,6 +45,7 @@ from inventory import (  # noqa: E402
     user_home,
     write_miss,
     write_sidecar,
+    _policy_float_key,
 )
 
 SKIP_NAMES = {"jev-consult"}
@@ -148,14 +149,15 @@ def write_peer_ask(path: Path, task: str, dest: str, picked: list[dict]) -> None
 
 
 def fill_timeout_seconds() -> float:
-    """JEV_FILL_TIMEOUT env overrides the default 90s Jev ask timeout."""
+    """JEV_FILL_TIMEOUT env overrides the policy timeout
+    (fill_timeout_seconds in policy.json, 90 default)."""
     try:
         env = float(os.environ.get("JEV_FILL_TIMEOUT", "") or 0)
         if env > 0:
             return env
     except ValueError:
         pass
-    return 90.0
+    return _policy_float_key("fill_timeout_seconds", 90.0)
 
 
 def env_report() -> dict:

@@ -280,5 +280,9 @@
   },
   "spill_max_files": 200,
   "spill_max_bytes": 268435456,
-  "hermes_install_timeout_seconds": 180
+  "hermes_install_timeout_seconds": 180,
+  "fill_timeout_seconds": 90,
+  "scan_cache_seconds": 45,
+  "catalog_search_limit": 8,
+  "catalog_cache_max_queries": 50
 }

@@ -83,7 +83,7 @@ HOOK_LIMIT_KEY = "hook_limit"
 SIDECAR_NAME = ".jev-tools.json"
 MISS_NAME = ".jev-tools-miss.json"
 HARNESSES = ("hermes", "claude-code", "codex", "grok")
-CACHE_TTL = 45.0
+CACHE_TTL = 45.0  # shipped default; policy.json scan_cache_seconds wins
 SIDECAR_TTL_KEY = "sidecar_ttl_seconds"
 DEFAULT_SIDECAR_TTL_SECONDS = 14400.0
 _SCAN_CACHE: dict[str, tuple[float, list[dict]]] = {}
@@ -688,7 +688,7 @@ def scan_cached(harness: str, home: Path | None = None, hermes: Path | None = No
     key = "%s|%s|%s" % (harness, home, hermes)
     now = time.monotonic()
     hit = _SCAN_CACHE.get(key)
-    if hit and now - hit[0] < CACHE_TTL:
+    if hit and now - hit[0] < scan_cache_seconds():
         return hit[1]
     items = scan(harness, home=home, hermes=hermes)
     _SCAN_CACHE[key] = (now, items)
@@ -955,6 +955,12 @@ def _policy_float_key(key: str, default: float) -> float:
         return max(0.0, float(_policy_dict().get(key, default)))
     except (TypeError, ValueError):
         return default
+
+
+def scan_cache_seconds() -> float:
+    """In-process scan() cache TTL. Threshold lives in policy.json
+    (scan_cache_seconds, 45 default)."""
+    return _policy_float_key("scan_cache_seconds", CACHE_TTL)
 
 
 def sidecar_ttl_seconds() -> float:
@@ -1503,6 +1509,7 @@ def main(argv: list[str] | None = None) -> int:
             "limit": args.limit,
             "log": "disabled" if log_env == "0" else (log_env or "default"),
             "policy": os.environ.get("JEV_POLICY", "").strip() or "default",
+            "scan_cache_seconds": scan_cache_seconds(),
             "watch_max": _watch.cap("JEV_INV_WATCH_MAX", None),
             "watch_secs": watch_secs,
             "watch_quiet": _watch.quiet("JEV_INV_WATCH_QUIET", False),

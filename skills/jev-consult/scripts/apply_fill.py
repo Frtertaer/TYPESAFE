@@ -49,7 +49,13 @@ from inventory import (  # noqa: E402
 from peer_fill import read_miss, run_jev, fill_timeout_seconds  # noqa: E402
 
 ASK_NAME = ".jev-apply-fill.request.json"
-SEARCH_LIMIT = 8
+SEARCH_LIMIT = 8  # shipped default; policy.json catalog_search_limit wins
+
+
+def catalog_search_limit() -> int:
+    """Hermes search row cap. Threshold lives in policy.json
+    (catalog_search_limit, 8 default)."""
+    return int(_policy_float_key("catalog_search_limit", float(SEARCH_LIMIT)))
 
 
 def hermes_install_timeout() -> int:
@@ -68,6 +74,7 @@ def env_report() -> dict:
     return {
         "fill_timeout_seconds": fill_timeout_seconds(),
         "hermes_install_timeout_seconds": hermes_install_timeout(),
+        "catalog_search_limit": catalog_search_limit(),
         "watch_max": _watch.cap("JEV_APPLY_WATCH_MAX", None),
         "watch_secs": watch_secs,
         "watch_quiet": _watch.quiet("JEV_APPLY_WATCH_QUIET", False),
@@ -208,7 +215,7 @@ def parse_mcp_catalog(raw: str, query: set[str]) -> list[dict]:
         if query and not (query & words) and name.lower() not in query:
             continue
         hits.append(as_item("mcp", name, desc))
-        if len(hits) >= SEARCH_LIMIT:
+        if len(hits) >= catalog_search_limit():
             break
     return drop_blocked(hits)
 
@@ -226,7 +233,7 @@ def search_hits(task: str) -> list[dict] | None:
         return None
     plugins = parse_plugin_search(plugin_out) if plugin_code == 0 else []
     mcps = parse_mcp_catalog(mcp_out, query) if mcp_code == 0 else []
-    return plugins[:SEARCH_LIMIT] + mcps[:SEARCH_LIMIT]
+    return plugins[:catalog_search_limit()] + mcps[:catalog_search_limit()]
 
 
 def inspect_ok(kind: str, name: str) -> bool:
@@ -350,7 +357,7 @@ def fill(
         if hits is None:
             emit("no_hermes")
             return 0
-        ranked = shortlist(hits, task, SEARCH_LIMIT, []) if hits else []
+        ranked = shortlist(hits, task, catalog_search_limit(), []) if hits else []
         if not ranked:
             emit("no_apply")
             return 0
@@ -727,7 +734,7 @@ def main() -> int:
         try:
             hits = search_hits(task)
             if args.list:
-                items = shortlist(hits, task, SEARCH_LIMIT, []) if hits else []
+                items = shortlist(hits, task, catalog_search_limit(), []) if hits else []
                 if args.json:
                     rows = [
                         {

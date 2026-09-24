@@ -51,9 +51,9 @@ from peer_fill import (  # noqa: E402
 )
 
 ASK_NAME = ".jev-catalog-fill.request.json"
-SEARCH_LIMIT = 8
+SEARCH_LIMIT = 8  # shipped default; policy.json catalog_search_limit wins
 DEFAULT_CATALOG_CACHE_SECONDS = 900.0
-CACHE_MAX_QUERIES = 50
+CACHE_MAX_QUERIES = 50  # shipped default; policy.json catalog_cache_max_queries wins
 BLOCK_RE = re.compile(
     r"(exploit|attack|hack|malware|phishing|privesc|ransom|payload|\bcve\b|weapon)",
     re.I,
@@ -137,6 +137,18 @@ def catalog_cache_seconds() -> float:
     return _policy_float_key("catalog_cache_seconds", DEFAULT_CATALOG_CACHE_SECONDS)
 
 
+def catalog_search_limit() -> int:
+    """Hermes search row cap. Threshold lives in policy.json
+    (catalog_search_limit, 8 default)."""
+    return int(_policy_float_key("catalog_search_limit", float(SEARCH_LIMIT)))
+
+
+def cache_max_queries() -> int:
+    """Catalog query cache row cap. Threshold lives in policy.json
+    (catalog_cache_max_queries, 50 default)."""
+    return int(_policy_float_key("catalog_cache_max_queries", float(CACHE_MAX_QUERIES)))
+
+
 def hermes_install_timeout() -> int:
     """Seconds budget for the hermes install call. Threshold lives in
     policy.json (hermes_install_timeout_seconds, 180 default)."""
@@ -153,6 +165,8 @@ def env_report() -> dict:
     return {
         "fill_timeout_seconds": fill_timeout_seconds(),
         "catalog_cache_seconds": catalog_cache_seconds(),
+        "catalog_search_limit": catalog_search_limit(),
+        "catalog_cache_max_queries": cache_max_queries(),
         "hermes_install_timeout_seconds": hermes_install_timeout(),
         "watch_max": _watch.cap("JEV_CATALOG_WATCH_MAX", None),
         "watch_secs": watch_secs,
@@ -220,7 +234,7 @@ def write_catalog_cache(query: str, hits: list[dict], path: Path | None = None) 
     if not isinstance(raw, dict):
         raw = {}
     raw[query] = {"written_at": int(time.time()), "hits": hits}
-    while len(raw) > CACHE_MAX_QUERIES:
+    while len(raw) > cache_max_queries():
         oldest = min(
             raw,
             key=lambda k: (
@@ -277,7 +291,7 @@ def search_hits(task: str, cache: bool = True) -> list[dict] | None:
         if cached is not None:
             return drop_blocked(cached)
     code, out = run_hermes(
-        ["skills", "search", query, "--json", "--limit", str(SEARCH_LIMIT)]
+        ["skills", "search", query, "--json", "--limit", str(catalog_search_limit())]
     )
     if code == 127:
         return None
@@ -429,7 +443,7 @@ def fill(
         if hits is None:
             emit("no_hermes")
             return 0
-        ranked = shortlist(hits, task, SEARCH_LIMIT, []) if hits else []
+        ranked = shortlist(hits, task, catalog_search_limit(), []) if hits else []
         if not ranked:
             emit("no_catalog")
             return 0

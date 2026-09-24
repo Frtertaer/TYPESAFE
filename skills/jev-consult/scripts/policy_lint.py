@@ -63,16 +63,25 @@ REQUIRED_KEYS = (
 # probability-like fields: finite numbers inside [0, 1]
 PROB_FIELDS = ("confidence_floor", "noul_yes", "noul_no", "noul_unsure", "strong_pick", "tight_gap")
 ESCALATE_PROB_FIELDS = ("confidence_below", "noul_near", "choice_gap_below")
-POSITIVE_INT_FIELDS = ("version", "question_soft_max", "question_hard_max", "choice_option_hard_max")
+POSITIVE_INT_FIELDS = (
+    "version",
+    "question_soft_max",
+    "question_hard_max",
+    "choice_option_hard_max",
+    "catalog_search_limit",
+    "catalog_cache_max_queries",
+)
 NONNEG_NUM_FIELDS = (
     "catalog_cache_seconds",
     "dedupe_ttl_seconds",
+    "fill_timeout_seconds",
     "hermes_install_timeout_seconds",
     "hook_budget_seconds",
     "hook_jev_retries",
     "hook_jev_timeout_seconds",
     "hook_max_prompt_chars",
     "hook_payload_max_bytes",
+    "scan_cache_seconds",
     "sidecar_ttl_seconds",
     "smoke_perf_budget_seconds",
     "spill_max_bytes",
@@ -82,10 +91,13 @@ NONEMPTY_STR_FIELDS = ("model", "endpoint", "default", "role", "coder_role")
 ESCALATE_BOOL_FIELDS = ("irreversible",)
 KNOWN_ESCALATE_KEYS = ESCALATE_PROB_FIELDS + ESCALATE_BOOL_FIELDS
 KNOWN_TOP_KEYS = REQUIRED_KEYS + (
+    "catalog_cache_max_queries",
     "catalog_cache_seconds",
+    "catalog_search_limit",
     "catalogs",
     "choice",
     "dedupe_ttl_seconds",
+    "fill_timeout_seconds",
     "hallucination",
     "hermes_install_timeout_seconds",
     "hook_budget_seconds",
@@ -94,6 +106,7 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "hook_max_prompt_chars",
     "hook_payload_max_bytes",
     "progress",
+    "scan_cache_seconds",
     "smoke_perf_budget_seconds",
     "spill_max_bytes",
     "spill_max_files",
@@ -121,6 +134,10 @@ INIT_POLICY = {
     "tight_gap": 0.08,
     "sidecar_ttl_seconds": 14400,
     "hermes_install_timeout_seconds": 180,
+    "fill_timeout_seconds": 90,
+    "scan_cache_seconds": 45,
+    "catalog_search_limit": 8,
+    "catalog_cache_max_queries": 50,
     "must_ask": ["approach"],
     "never_ask": [
         "tool_checkable_fact",

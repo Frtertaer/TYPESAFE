@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "skills" / "jev-consult" / "scripts" / "skill_scanner.py"
@@ -228,6 +229,47 @@ class SelfScanTests(unittest.TestCase):
         findings = scanner.scan_skill(skill_dir)
         warn = [f.check for f in findings if f.severity == "WARN"]
         self.assertLessEqual(len(warn), 3, "new WARN findings appeared: %s" % warn)
+
+
+class SelfTestFlagTests(unittest.TestCase):
+    def test_self_test_exits_zero_with_ok_marker(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = scanner.main(["--self-test"])
+        self.assertEqual(rc, 0)
+        self.assertIn("self-test: ok", buf.getvalue())
+
+    def test_self_test_needs_no_path(self) -> None:
+        # --self-test must run before the required-path check.
+        buf, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(err):
+            rc = scanner.main(["--self-test"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(err.getvalue(), "")
+
+    def test_self_test_rc1_when_no_critical(self) -> None:
+        err = io.StringIO()
+        with patch.object(scanner, "scan_skill", return_value=[]), redirect_stderr(err):
+            rc = scanner.main(["--self-test"])
+        self.assertEqual(rc, 1)
+        self.assertIn("self-test: fail", err.getvalue())
+
+    def test_self_test_fixture_avoids_suppress_marker(self) -> None:
+        # The synthetic lure must not carry the suppress marker or the scan
+        # would skip it and the probe would always fail.
+        real = scanner.scan_skill
+        captured = {}
+
+        def spy(d):
+            captured["text"] = (Path(d) / "SKILL.md").read_text(encoding="utf-8")
+            return real(d)
+
+        with patch.object(scanner, "scan_skill", side_effect=spy):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = scanner.main(["--self-test"])
+        self.assertEqual(rc, 0)
+        self.assertNotIn("skillscan" + ":allow", captured["text"])
 
 
 if __name__ == "__main__":

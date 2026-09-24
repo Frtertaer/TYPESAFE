@@ -32,6 +32,7 @@ SELF_TESTS = {
     "progress.py": (["self-test"], '"self_test"'),
     "question_lint.py": (["--self-test"], "self-test: ok"),
     "skill_lint.py": (["--self-test"], "self-test: ok"),
+    "skill_scanner.py": (["--self-test"], "self-test: ok"),
     "smoke.py": (["--self-test"], "self-test: ok"),
     "trace.py": (["self-test"], '"self_test"'),
     "trigger_eval.py": (["--self-test"], "self-test: ok"),

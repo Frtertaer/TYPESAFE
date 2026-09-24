@@ -34,14 +34,15 @@ SELF_TEST = {
     "progress.py": ["self-test"],
     "question_lint.py": ["--self-test"],
     "skill_lint.py": ["--self-test"],
+    "skill_scanner.py": ["--self-test"],
     "smoke.py": ["--self-test"],
     "trace.py": ["self-test"],
     "trigger_eval.py": ["--self-test"],
     "trigger_lint.py": ["--self-test"],
 }
 
-# Vendored scanner is argparse-only; progress_core is a library module.
-NON_SELF_TEST = {"skill_scanner.py", "progress_core.py"}
+# progress_core is a library module without a CLI surface.
+NON_SELF_TEST = {"progress_core.py"}
 
 
 class SelfTestSweepTests(unittest.TestCase):

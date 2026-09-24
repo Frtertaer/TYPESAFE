@@ -143,6 +143,9 @@ class AtomicWriteGuardTest(unittest.TestCase):
             "trigger_lint.py": [
                 'with open(p, "w", encoding="utf-8") as fh:',
             ],
+            "skill_scanner.py": [
+                'with open(skill / "SKILL.md", "w", encoding="utf-8") as fh:',
+            ],
         }
         seen: dict[str, set[str]] = {}
         offenders = []

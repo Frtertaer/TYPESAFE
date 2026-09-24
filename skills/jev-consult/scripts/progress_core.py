@@ -81,7 +81,8 @@ def _decode(text: str):
 
 def read_json(path: Path):
     try:
-        return _decode(path.read_text(encoding="utf-8-sig"))
+        text = sys.stdin.read() if str(path) == "-" else path.read_text(encoding="utf-8-sig")
+        return _decode(text)
     except (OSError, UnicodeError) as exc:
         raise ProgressError("INPUT_UNREADABLE", "Cannot read JSON input") from exc
 

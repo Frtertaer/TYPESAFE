@@ -28,7 +28,7 @@ def build_parser():
     parser.add_argument("--policy", help="Policy file used only when initializing a new stage")
     commands = parser.add_subparsers(dest="command", required=True)
     initialize = commands.add_parser("init", help="Freeze an agreed plan and policy; run its trusted baseline checks")
-    initialize.add_argument("plan", help="Reviewed stage plan JSON; commands in this file will execute")
+    initialize.add_argument("plan", help="Reviewed stage plan JSON ('-' reads it from stdin); commands in this file will execute")
     for name in ("status", "history"):
         command = commands.add_parser(name)
         command.add_argument("stage")
@@ -85,7 +85,7 @@ def build_parser():
     )
     env_p.add_argument("--out", metavar="PATH", default="", help="Also write the env report JSON to PATH (fail-open)")
     lint_p = commands.add_parser("lint", help="Dry-validate a plan against a policy with the same checks as init; writes nothing")
-    lint_p.add_argument("plan", help="Stage-plan JSON file")
+    lint_p.add_argument("plan", help="Stage-plan JSON file ('-' reads it from stdin)")
     for name in commands.choices:
         sub = commands.choices[name]
         sub.add_argument(

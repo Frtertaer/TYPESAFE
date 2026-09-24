@@ -1008,6 +1008,14 @@ class ProgressPolicyTests(unittest.TestCase):
                 with self.assertRaises(progress.ProgressError):
                     progress.read_json(path)
 
+    def test_read_json_stdin(self):
+        with patch("sys.stdin", StringIO('{"a": 1}')):
+            self.assertEqual(progress.read_json(Path("-")), {"a": 1})
+        with patch("sys.stdin", StringIO("{bad")):
+            with self.assertRaises(progress.ProgressError) as ctx:
+                progress.read_json(Path("-"))
+        self.assertEqual(ctx.exception.code, "INVALID_JSON")
+
 
 class GitEvidenceTests(unittest.TestCase):
     def setUp(self):
@@ -1345,6 +1353,43 @@ class ReportWatchTests(unittest.TestCase):
     def test_report_watch_jq_prints_named_field(self):
         _rc, out, _err = self._run(_watch_args(max_ticks=1, jq="chars"))
         self.assertGreater(json.loads(out.strip()), 0)
+
+
+
+class StdinPlanTests(unittest.TestCase):
+    """`progress.py lint -` / `init -` read the plan JSON from stdin."""
+
+    PLAN = (SCRIPTS.parent / "examples" / "progress-plan.json").read_text(encoding="utf-8")
+
+    def _lint(self, stdin_text: str):
+        out = StringIO()
+        with patch("sys.stdin", StringIO(stdin_text)):
+            from contextlib import redirect_stdout
+            with redirect_stdout(out):
+                rc = progress_cli.main(["lint", "-"])
+        return rc, out.getvalue()
+
+    def test_lint_stdin_plan_ok(self):
+        rc, out = self._lint(self.PLAN)
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["lint"], "ok")
+        self.assertEqual(payload["stage"], "reliability")
+
+    def test_lint_stdin_bad_json(self):
+        rc, out = self._lint("{bad")
+        self.assertEqual(rc, 1)
+        self.assertEqual(json.loads(out)["code"], "INVALID_JSON")
+
+    def test_init_stdin_bad_json_errors(self):
+        out = StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("sys.stdin", StringIO("{bad")):
+                from contextlib import redirect_stdout
+                with redirect_stdout(out):
+                    rc = progress_cli.main(["--repo", tmp, "init", "-"])
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(json.loads(out.getvalue())["error"]["code"], "INVALID_JSON")
 
 
 if __name__ == "__main__":

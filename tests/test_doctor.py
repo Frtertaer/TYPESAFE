@@ -962,6 +962,54 @@ class DoctorSchemaTests(unittest.TestCase):
                 )
             self.assertEqual(rc, 2)
 
+    def test_csv_emits_check_rows(self) -> None:
+        import csv as _csv
+        import io as _io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(
+                [
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--csv",
+                ],
+                cwd=tmp,
+            )
+        self.assertIn(rc, (0, 1))
+        rows = list(_csv.reader(_io.StringIO(text)))
+        self.assertEqual(rows[0], ["check", "agent", "ok", "hint"])
+        self.assertGreater(len(rows), 1)
+
+    def test_csv_keys_drives_columns(self) -> None:
+        import csv as _csv
+        import io as _io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(
+                [
+                    "--home", tmp,
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--csv", "--keys", "check,ok",
+                ],
+                cwd=tmp,
+            )
+        self.assertIn(rc, (0, 1))
+        rows = list(_csv.reader(_io.StringIO(text)))
+        self.assertEqual(rows[0], ["check", "ok"])
+        self.assertGreater(len(rows), 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with patch.object(sys, "stderr", buf):
+                rc, _, _ = run_main(
+                    [
+                        "--home", tmp,
+                        "--hermes-home", str(Path(tmp) / "h"),
+                        "--csv", "--keys", " ,",
+                    ],
+                    cwd=tmp,
+                )
+            self.assertEqual(rc, 2)
+
 
 class DoctorBaselineTests(unittest.TestCase):
     def _empty_home(self, tmp: str) -> Path:

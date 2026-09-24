@@ -11,6 +11,8 @@ check, not a crash.
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 import os
 import re
@@ -353,7 +355,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown report (verdict line + per-check table with hints) to PATH")
     parser.add_argument("--md", action="store_true", help="Print the same markdown report to stdout instead of the JSON payload")
     parser.add_argument("--jsonl", action="store_true", help="Print each check as one JSON line instead of the {ok,checks} payload (for piping)")
-    parser.add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these check keys in each row (rc 2 on an empty list)")
+    parser.add_argument("--csv", action="store_true", help="Print the checks as CSV rows (check,agent,ok,hint; --keys a,b overrides the columns) instead of the JSON payload")
+    parser.add_argument("--keys", metavar="a,b", default="", help="With --jsonl/--csv: keep only these check keys in each row / as the columns (rc 2 on an empty list)")
     parser.add_argument("--baseline", metavar="PATH", default="", help="Mark checks recorded as failing in PATH (written by --baseline-write) as suppressed: they still print but do not fail the run, watch ticks, or verdict; '-' reads the baseline JSON from stdin")
     parser.add_argument("--baseline-write", metavar="PATH", default="", help="Snapshot the currently failing checks to PATH for later --baseline runs")
     parser.add_argument("--self-test", action="store_true", help="Run every check against a synthetic empty HOME; exit 1 when no check fails")
@@ -685,12 +688,39 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "md", False):
         sys.stdout.write("\n".join(_report_lines()) + "\n")
         return 0 if ok else 1
+    key_sel = getattr(args, "keys", "") or ""
+    keys = [k.strip() for k in key_sel.split(",") if k.strip()]
+    if (getattr(args, "jsonl", False) or getattr(args, "csv", False)) and key_sel and not keys:
+        sys.stderr.write("--keys names no fields\n")
+        return 2
+    if getattr(args, "csv", False):
+        buf = io.StringIO()
+        writer = csv.writer(buf, lineterminator="\n")
+        if keys:
+            writer.writerow(keys)
+            for c in shown:
+                writer.writerow(
+                    [
+                        json.dumps(c.get(k), sort_keys=True)
+                        if isinstance(c.get(k), (dict, list))
+                        else str(c.get(k) if c.get(k) is not None else "")
+                        for k in keys
+                    ]
+                )
+        else:
+            writer.writerow(["check", "agent", "ok", "hint"])
+            for c in shown:
+                writer.writerow(
+                    [
+                        c.get("check") or "",
+                        c.get("agent") or "",
+                        "suppressed" if c.get("suppressed") else ("yes" if c.get("ok") else "no"),
+                        c.get("hint") or "",
+                    ]
+                )
+        sys.stdout.write(buf.getvalue())
+        return 0 if ok else 1
     if getattr(args, "jsonl", False):
-        key_sel = getattr(args, "keys", "") or ""
-        keys = [k.strip() for k in key_sel.split(",") if k.strip()]
-        if key_sel and not keys:
-            sys.stderr.write("--keys names no fields\n")
-            return 2
         for c in shown:
             row = (
                 {k: c.get(k) for k in keys}

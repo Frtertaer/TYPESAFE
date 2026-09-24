@@ -335,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Comma-separated check names to run (e.g. skills,hooks_json); default: all.",
     )
     parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH (with --watch: append each tick line)")
-    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON ({verdict, ticks, checks, failed, agents}) to PATH when finished (with --watch, refreshed every tick; ticks counts passes).")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim verdict JSON ({verdict, ticks, checks, failed, agents}) to PATH when finished (with --watch, refreshed every tick; ticks counts passes). '-' prints it to stdout.")
     parser.add_argument(
         "--watch",
         type=float,

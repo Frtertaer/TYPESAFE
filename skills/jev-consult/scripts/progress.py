@@ -54,7 +54,7 @@ def build_parser():
             sub.add_argument("--out", metavar="PATH", default="",
                              help="With --watch: append each tick line to PATH (fail-open); without --watch: write the result JSON to PATH instead of stdout")
         sub.add_argument("--verdict", metavar="PATH", default="",
-                         help="Write a slim verdict JSON to PATH (with --watch: refreshed every tick)")
+                         help="Write a slim verdict JSON to PATH (with --watch: refreshed every tick) '-' prints it to stdout.")
     replay = commands.add_parser("evidence", help="Rebuild the exact Jev input recorded for an assessment or review event")
     replay.add_argument("stage")
     replay.add_argument("sequence", type=int, help="Event sequence number from history")
@@ -95,7 +95,7 @@ def build_parser():
         if name in ("init", "evidence", "assess", "invalidate", "restore", "review", "self-test"):
             sub.add_argument(
                 "--verdict", metavar="PATH", default="",
-                help="Write a slim {verdict: ok|error, command} JSON to PATH after the run (action/points/stage_id when the result has them)",
+                help="Write a slim {verdict: ok|error, command} JSON to PATH after the run (action/points/stage_id when the result has them) '-' prints it to stdout.",
             )
     return parser
 

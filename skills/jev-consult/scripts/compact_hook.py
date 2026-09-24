@@ -138,7 +138,7 @@ def env_report() -> dict:
     }
 
 
-USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose|--debug] [--file PATH] [--simulate TEXT [--event NAME]] [--dry-run] [--verdict PATH] [--env [--jq KEY] [--out PATH]] [--self-test]\n\nReads one PostToolUse JSON event from stdin (or --file). When the tool result\nis longer than the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n--debug prints a one-line JSON record {verdict, reason, in_chars,\nout_chars} to stderr every run.\n--dry-run resolves the same abridge decision but spills the omitted text\nunder <spill_dir>/dry/ instead of the live spill dir.\n--simulate TEXT runs a synthetic PostToolUse event with TEXT as the tool\nresult — a quick probe of the live-fat decision without crafting JSON;\n--event NAME overrides the synthetic event name (default PostToolUse).\n--self-test runs handle() on synthetic payloads and exits 1 on failure.\n--verdict PATH writes a slim {verdict: compacted|skip, reason} JSON after the\nhook run (fail-open on a bad path).\n--env prints the resolved hook config JSON ({live_fat, live_head, live_tail,\nspill_dir, spill_disabled, spill_max_files, spill_max_bytes, policy};\n--jq KEY prints one value; --out PATH also writes it, fail-open).\n'
+USAGE = 'Usage: python compact_hook.py [--help|--version|--verbose|--debug] [--file PATH] [--simulate TEXT [--event NAME]] [--dry-run] [--verdict PATH] [--env [--jq KEY] [--out PATH]] [--self-test]\n\nReads one PostToolUse JSON event from stdin (or --file). When the tool result\nis longer than the live-fat threshold and is not an error, emits\nhookSpecificOutput.updatedToolOutput with the abridged text; otherwise prints\n{} and exits 0. Never exits non-zero — fail open.\n--verbose prints the skip reason to stderr when the payload is {}.\n--debug prints a one-line JSON record {verdict, reason, in_chars,\nout_chars} to stderr every run.\n--dry-run resolves the same abridge decision but spills the omitted text\nunder <spill_dir>/dry/ instead of the live spill dir.\n--simulate TEXT runs a synthetic PostToolUse event with TEXT as the tool\nresult — a quick probe of the live-fat decision without crafting JSON;\n--event NAME overrides the synthetic event name (default PostToolUse).\n--self-test runs handle() on synthetic payloads and exits 1 on failure.\n--verdict PATH writes a slim {verdict: compacted|skip, reason} JSON after the\nhook run (fail-open on a bad path; "-" prints it to stderr instead of a file).\n--env prints the resolved hook config JSON ({live_fat, live_head, live_tail,\nspill_dir, spill_disabled, spill_max_files, spill_max_bytes, policy};\n--jq KEY prints one value; --out PATH also writes it, fail-open).\n'
 
 
 def _flag_value(argv: list, flag: str) -> str:
@@ -154,7 +154,7 @@ def _emit(payload: dict, verdict_path: str, verdict: dict, debug: bool = False) 
     """Print the hook payload and refresh the --verdict file."""
     sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
     if verdict_path:
-        _watch.write_verdict(verdict_path, verdict)
+        _watch.write_verdict(verdict_path, verdict, stream=sys.stderr)
     if debug:
         record = dict(verdict)
         record["in_chars"] = LAST_LENS.get("in")

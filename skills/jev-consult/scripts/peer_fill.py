@@ -386,7 +386,7 @@ def main() -> int:
         "--verdict",
         default="",
         metavar="PATH",
-        help="Write a slim {verdict: pending|clean, ticks, miss, miss_task, ask} JSON to PATH — refreshed every tick with --watch; without it, a one-shot {ticks: 1} payload.",
+        help="Write a slim {verdict: pending|clean, ticks, miss, miss_task, ask} JSON to PATH — refreshed every tick with --watch; without it, a one-shot {ticks: 1} payload. '-' prints it to stdout.",
     )
     parser.add_argument(
         "--self-test",

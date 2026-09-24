@@ -7064,7 +7064,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
-    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, steps, failed} JSON to PATH when finished (in --watch mode, the final pass state).")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, steps, failed} JSON to PATH when finished (in --watch mode, the final pass state). '-' prints it to stdout.")
     parser.add_argument("--junit", metavar="PATH", default="", help="Write a JUnit XML <testsuite> for the step results to PATH (in --watch mode, the final pass).")
     parser.add_argument("--tag", metavar="T", default="", help="Label this run: lands in the verdict payload as tag and in the junit testsuite name")
     parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")

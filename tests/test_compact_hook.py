@@ -296,6 +296,18 @@ class HookE2ETests(unittest.TestCase):
             self.assertEqual(verdict["verdict"], "skip")
             self.assertEqual(verdict["reason"], "invalid JSON")
 
+    def test_verdict_dash_streams_to_stderr_not_stdout(self) -> None:
+        """--verdict - keeps stdout to the single hook payload and prints the
+        slim verdict on stderr instead."""
+        proc = self._run_full(
+            "",
+            argv=["--simulate", "tiny", "--verdict", "-"],
+        )
+        self.assertEqual(json.loads(proc.stdout.strip()), {})
+        verdict = json.loads(proc.stderr.strip())
+        self.assertEqual(verdict["verdict"], "skip")
+        self.assertIn("ts", verdict)
+
     def test_verdict_bad_path_still_emits(self) -> None:
         proc = self._run_full(
             "",

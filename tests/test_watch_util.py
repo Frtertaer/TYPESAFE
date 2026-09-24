@@ -207,6 +207,50 @@ class TextArgTests(unittest.TestCase):
             self.assertEqual(_watch.text_arg("-"), "")
 
 
+class VerdictDashTests(unittest.TestCase):
+    """write_verdict('-') streams the payload instead of writing a file."""
+
+    def test_dash_prints_to_stdout_by_default(self) -> None:
+        import io
+        import tempfile
+        from contextlib import redirect_stdout
+        from pathlib import Path
+
+        buf = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            import os
+
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(buf):
+                    ok = _watch.write_verdict("-", {"verdict": "pass"})
+            finally:
+                os.chdir(cwd)
+            self.assertTrue(ok)
+            data = json.loads(buf.getvalue())
+            self.assertEqual(data["verdict"], "pass")
+            self.assertIn("ts", data)
+            self.assertEqual(os.listdir(tmp), [])
+
+    def test_dash_streams_to_given_stream(self) -> None:
+        import io
+
+        buf = io.StringIO()
+        ok = _watch.write_verdict("-", {"verdict": "x"}, stream=buf)
+        self.assertTrue(ok)
+        self.assertEqual(json.loads(buf.getvalue())["verdict"], "x")
+
+    def test_dash_keeps_caller_ts(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _watch.write_verdict("-", {"verdict": "pass", "ts": 42})
+        self.assertEqual(json.loads(buf.getvalue())["ts"], 42)
+
+
 class BaselineStdinTests(unittest.TestCase):
     """load_baseline('-') reads the suppress-list JSON from stdin."""
 

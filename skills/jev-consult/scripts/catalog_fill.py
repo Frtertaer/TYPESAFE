@@ -580,7 +580,7 @@ def main() -> int:
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that finds catalog hits")
     parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s/cache_age_s ignored)")
-    parser.add_argument("--verdict", default="", metavar="PATH", help="Write a slim {verdict: hits|none, ticks, hits, cached} JSON — refreshed every tick with --watch; in --list/--show mode a one-shot {ticks: 1} payload.")
+    parser.add_argument("--verdict", default="", metavar="PATH", help="Write a slim {verdict: hits|none, ticks, hits, cached} JSON — refreshed every tick with --watch; in --list/--show mode a one-shot {ticks: 1} payload. '-' prints it to stdout.")
     parser.add_argument(
         "--out",
         default="",

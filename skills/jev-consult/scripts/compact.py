@@ -1959,7 +1959,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick that fell back to the original transcript")
     parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
-    parser.add_argument("--verdict", default="", metavar="PATH", help="Write a slim {verdict: ok|fallback, ticks, reduction, fallback} JSON to PATH — refreshed every --watch tick; without --watch a one-shot probe after the run.")
+    parser.add_argument("--verdict", default="", metavar="PATH", help="Write a slim {verdict: ok|fallback, ticks, reduction, fallback} JSON to PATH — refreshed every --watch tick; without --watch a one-shot probe after the run. '-' prints it to stdout.")
     parser.add_argument(
         "--prune-spill",
         type=float,

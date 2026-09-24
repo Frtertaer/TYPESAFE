@@ -1210,7 +1210,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--verdict",
         metavar="PATH",
         default="",
-        help="Write a slim {verdict: proceed|escalate, action, picks, warnings} JSON to PATH after the ask (atomic via .tmp+rename).",
+        help="Write a slim {verdict: proceed|escalate, action, picks, warnings} JSON to PATH after the ask (atomic via .tmp+rename). '-' prints it to stdout.",
     )
     ask.add_argument(
         "--jq",
@@ -1237,7 +1237,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--verdict",
         metavar="PATH",
         default="",
-        help="Write a slim {verdict: proceed|escalate, action} JSON to PATH (atomic via .tmp+rename).",
+        help="Write a slim {verdict: proceed|escalate, action} JSON to PATH (atomic via .tmp+rename). '-' prints it to stdout.",
     )
     decide_cmd.add_argument("file", help="JSON file or - for stdin")
     decide_cmd.add_argument(
@@ -1297,7 +1297,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--verdict",
         metavar="PATH",
         default="",
-        help="Write a slim {ok, model, noul, ms} JSON to PATH (atomic via .tmp+rename).",
+        help="Write a slim {ok, model, noul, ms} JSON to PATH (atomic via .tmp+rename). '-' prints it to stdout.",
     )
     ping.add_argument(
         "--jq",

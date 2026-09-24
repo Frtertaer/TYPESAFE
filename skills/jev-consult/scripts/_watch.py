@@ -166,14 +166,19 @@ def maybe_version(argv: list, out=None) -> bool:
     return True
 
 
-def write_verdict(path: str, payload: dict) -> bool:
+def write_verdict(path: str, payload: dict, stream=None) -> bool:
     """Write a slim verdict JSON to path; False (with stderr note) on failure.
 
     A ``ts`` epoch field is injected when the caller did not set one. Writes a
     sibling ``<name>.tmp`` file first and ``os.replace``s it over the target
-    so readers never see a half-written payload."""
+    so readers never see a half-written payload. ``-`` streams the payload
+    instead of writing a file — to stdout by default; hooks pass
+    ``stream=sys.stderr`` so the hook payload on stdout stays untouched."""
     if "ts" not in payload:
         payload = dict(payload, ts=int(time.time()))
+    if str(path) == "-":
+        (stream or sys.stdout).write(json.dumps(payload, indent=2) + "\n")
+        return True
     target = Path(path)
     tmp = target.with_name(target.name + ".tmp")
     try:

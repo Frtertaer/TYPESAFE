@@ -443,7 +443,7 @@ def main(argv: list[str] | None = None) -> int:
         "--verdict",
         metavar="PATH",
         default="",
-        help="Write a slim verdict JSON ({verdict, verdict_label, ok, failed_gates, coverage, hits, total, worst_positive, best_negative, margin}) to PATH (with --watch, refreshed every tick).",
+        help="Write a slim verdict JSON ({verdict, verdict_label, ok, failed_gates, coverage, hits, total, worst_positive, best_negative, margin}) to PATH (with --watch, refreshed every tick). '-' prints it to stdout.",
     )
     parser.add_argument(
         "--baseline",

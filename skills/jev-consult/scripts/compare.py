@@ -387,7 +387,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--md", action="store_true", help="Print rows as a Markdown table")
     parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH")
     parser.add_argument("--report", metavar="PATH", default="", help="Write a markdown compare report (verdict + per-case table) to PATH; with --json writes the report object instead")
-    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, cases, failures} JSON to PATH (in --watch mode refreshed every tick)")
+    parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, cases, failures} JSON to PATH (in --watch mode refreshed every tick) '-' prints it to stdout.")
     parser.add_argument("--cases", default=os.environ.get("JEV_COMPARE_CASES", "") or None, help="Path to compare-cases.json ('-' reads cases JSON from stdin; needs a file for --watch/--diff)")
     parser.add_argument("--schema", action="store_true", help="Print the compare-cases.json key contract and exit (--json emits the object)")
     parser.add_argument(

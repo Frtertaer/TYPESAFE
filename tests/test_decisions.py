@@ -1428,6 +1428,28 @@ class CliTest(unittest.TestCase):
             proc = self.run_cli("--file", str(path), "--jsonl", "--keys", " , ")
             self.assertEqual(proc.returncode, 2)
 
+    def test_keys_sets_csv_and_md_columns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [{"harness": "a", "ts": 1, "winner": {"name": "w1"}}],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--csv", "--keys", "harness,winner"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = proc.stdout.strip().splitlines()
+            self.assertEqual(lines[0], "harness,winner")
+            self.assertEqual(len(lines), 2)
+            self.assertIn("a,", lines[1])
+            self.assertIn('"name"', lines[1])
+            proc = self.run_cli(
+                "--file", str(path), "--md", "--keys", "harness"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("| harness |", proc.stdout)
+
     def test_until_filters_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

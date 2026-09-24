@@ -1277,7 +1277,7 @@ def main(argv: list[str] | None = None) -> int:
         "--keys",
         metavar="a,b",
         default="",
-        help="Keep only these entry keys in emitted rows (--jsonl/--out/--nth/--sample; rc 2 when empty)",
+        help="Keep only these entry keys in emitted rows (--jsonl/--out/--nth/--sample; --csv/--md tables use them as columns; rc 2 when empty)",
     )
     parser.add_argument(
         "--last",
@@ -2408,11 +2408,11 @@ def main(argv: list[str] | None = None) -> int:
             emit_entries, min(sample_n, len(emit_entries))
         )
     key_sel = getattr(args, "keys", "") or ""
-    if key_sel:
-        proj = [k.strip() for k in key_sel.split(",") if k.strip()]
-        if not proj:
-            sys.stderr.write("--keys names no fields\n")
-            return 2
+    proj = [k.strip() for k in key_sel.split(",") if k.strip()]
+    if key_sel and not proj:
+        sys.stderr.write("--keys names no fields\n")
+        return 2
+    if proj:
         emit_entries = [
             {k: item.get(k) for k in proj} if isinstance(item, dict) else item
             for item in emit_entries
@@ -2442,6 +2442,19 @@ def main(argv: list[str] | None = None) -> int:
         return value.replace("|", "\\|").replace("\n", " ")
 
     def _rows():
+        if proj:
+            rows = []
+            for item in emit_entries:
+                row = []
+                for k in proj:
+                    value = item.get(k) if isinstance(item, dict) else ""
+                    row.append(
+                        json.dumps(value, sort_keys=True)
+                        if isinstance(value, (dict, list))
+                        else str(value if value is not None else "")
+                    )
+                rows.append(row)
+            return proj, rows
         rows = []
         for item in emit_entries:
             winner = item.get("winner")

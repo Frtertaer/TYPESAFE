@@ -6931,6 +6931,7 @@ SCHEMA_SCRIPTS = {
     "progress.py": ("--schema",),
     "question_lint.py": ("--schema",),
     "skill_lint.py": ("--schema",),
+    "smoke.py": ("--schema",),
     "trace.py": ("schema",),
     "trigger_eval.py": ("--schema",),
     "trigger_lint.py": ("--schema",),
@@ -6999,6 +7000,18 @@ def step_coverage(tmp: Path) -> dict:
     return _step("coverage", rc == 0, detail)
 
 
+SMOKE_SCHEMA_ROWS = {
+    "ok": {"required": True, "type": "boolean, true when every step passed or was suppressed"},
+    "steps": {"required": True, "type": "list[step]"},
+    "step.name": {"required": True, "type": "string, step name"},
+    "step.ok": {"required": True, "type": "boolean"},
+    "step.detail": {"required": True, "type": "string, one-line evidence"},
+    "step.suppressed": {"required": False, "type": "boolean, true when --baseline marked the failure known"},
+    "suppressed": {"required": True, "type": "int, count of suppressed failures"},
+    "tag": {"required": False, "type": "string, --tag label when given"},
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     _watch.fix_stdio()
     if _watch.maybe_version(sys.argv[1:] if argv is None else argv):
@@ -7028,6 +7041,11 @@ def main(argv: list[str] | None = None) -> int:
         "--json",
         action="store_true",
         help="With --list/--coverage, emit JSON instead of text.",
+    )
+    parser.add_argument(
+        "--schema",
+        action="store_true",
+        help="Print the results payload key contract ({ok, steps, suppressed, tag}) and exit (--json emits the object).",
     )
     parser.add_argument(
         "--timeout",
@@ -7106,6 +7124,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     names = {name for name, _ in STEPS}
+    if args.schema:
+        rows = {key: dict(row) for key, row in SMOKE_SCHEMA_ROWS.items()}
+        if args.json:
+            sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+        else:
+            for key in rows:
+                sys.stdout.write(
+                    "%s: %s (%s)\n"
+                    % (key, rows[key]["type"], "required" if rows[key]["required"] else "optional")
+                )
+        return 0
     if args.list:
         if getattr(args, "json", False):
             sys.stdout.write(json.dumps(sorted(names)) + "\n")

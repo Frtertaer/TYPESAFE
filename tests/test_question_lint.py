@@ -1446,6 +1446,33 @@ class DiffTests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("stdin", err.getvalue())
 
+    def test_diff_dash_reads_second_from_stdin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = self._files(tmp)
+            buf = io.StringIO()
+            from unittest.mock import patch
+
+            with patch("sys.stdin", io.StringIO(json.dumps(self.REQ_A))):
+                with redirect_stdout(buf):
+                    rc = question_lint.main([str(b), "--diff", "-"])
+            out = buf.getvalue()
+            self.assertEqual(rc, 0)
+            self.assertIn("diff - ->", out)
+            self.assertIn("~ state:", out)
+            self.assertIn("5 difference(s)", out)
+
+    def test_diff_dash_bad_json_rc2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            a, _b = self._files(tmp)
+            err = io.StringIO()
+            from unittest.mock import patch
+
+            with patch("sys.stdin", io.StringIO("{bad")):
+                with redirect_stderr(err), redirect_stdout(io.StringIO()):
+                    rc = question_lint.main([str(a), "--diff", "-"])
+            self.assertEqual(rc, 2)
+            self.assertIn("cannot read --diff", err.getvalue())
+
     def test_diff_request_unit(self) -> None:
         lines = question_lint.diff_request(self.REQ_A, self.REQ_B)
         self.assertTrue(any(line.startswith("~ questions.q.type") for line in lines))

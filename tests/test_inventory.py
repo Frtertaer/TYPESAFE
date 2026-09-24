@@ -1645,6 +1645,84 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(Path(jwt["path"]).name, "jwt-auth")
         self.assertTrue((Path(jwt["path"]) / "SKILL.md").is_file())
 
+    def test_unused_lists_items_never_referenced(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        items = [
+            {"kind": "skill", "name": "a", "id": "skill_a"},
+            {"kind": "skill", "name": "b", "id": "skill_b"},
+            {"kind": "skill", "name": "c", "id": "skill_c"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            log.write_text(
+                json.dumps(
+                    {
+                        "shortlist": ["skill_a"],
+                        "winner": {"kind": "skill", "name": "b"},
+                    }
+                )
+                + "\nnot json\n",
+                encoding="utf-8",
+            )
+            buf = StringIO()
+            env = {"JEV_CONSULT_LOG": str(log)}
+            with patch.dict(os.environ, env):
+                with patch.object(inv, "scan", return_value=list(items)):
+                    with redirect_stdout(buf):
+                        code = inv.main(
+                            [
+                                "--harness", "hermes",
+                                "--hermes-home", str(FIXTURE),
+                                "--unused",
+                            ]
+                        )
+            self.assertEqual(code, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertTrue(payload["unused"])
+            self.assertEqual(payload["referenced"], 2)
+            self.assertEqual(
+                [i["id"] for i in payload["shortlist"]], ["skill_c"]
+            )
+
+            buf = StringIO()
+            with patch.dict(os.environ, env):
+                with patch.object(inv, "scan", return_value=list(items)):
+                    with redirect_stdout(buf):
+                        code = inv.main(
+                            [
+                                "--harness", "hermes",
+                                "--hermes-home", str(FIXTURE),
+                                "--unused", "--names",
+                            ]
+                        )
+            self.assertEqual(code, 0)
+            self.assertEqual(buf.getvalue().strip(), "skill_c")
+
+    def test_unused_missing_log_everything_unused(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        items = [{"kind": "skill", "name": "a", "id": "skill_a"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = StringIO()
+            env = {"JEV_CONSULT_LOG": str(Path(tmp) / "none.jsonl")}
+            with patch.dict(os.environ, env):
+                with patch.object(inv, "scan", return_value=list(items)):
+                    with redirect_stdout(buf):
+                        code = inv.main(
+                            [
+                                "--harness", "hermes",
+                                "--hermes-home", str(FIXTURE),
+                                "--unused", "--count",
+                            ]
+                        )
+            self.assertEqual(code, 0)
+            self.assertEqual(buf.getvalue().strip(), "1/1")
+
 
 class ScoresFlagTests(unittest.TestCase):
     def test_scores_adds_score_field(self) -> None:

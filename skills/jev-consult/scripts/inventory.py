@@ -762,6 +762,40 @@ def decisions_log_path() -> Path | None:
     return Path.home() / ".cache" / "jev-consult" / "decisions.jsonl"
 
 
+def referenced_names(log_path: Path | None) -> set[str]:
+    """Lowercased item ids/names the decisions log has ever mentioned:
+    shortlist ids plus winner names. Missing or unreadable log -> empty set."""
+    if log_path is None or not log_path.is_file():
+        return set()
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return set()
+    seen: set[str] = set()
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            item = json.loads(stripped)
+        except ValueError:
+            continue
+        if not isinstance(item, dict):
+            continue
+        winner = item.get("winner")
+        if isinstance(winner, dict):
+            name = str(winner.get("name") or "").strip().lower()
+            if name:
+                seen.add(name)
+        shortlist = item.get("shortlist")
+        if isinstance(shortlist, list):
+            for sid in shortlist:
+                sid = str(sid).strip().lower()
+                if sid:
+                    seen.add(sid)
+    return seen
+
+
 def _file_lock(fd: int) -> None:
     """Best-effort exclusive lock so concurrent appends never interleave.
 
@@ -1365,6 +1399,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--count", action="store_true", help="Print only PICKED/SCANNED counts instead of the payload.")
     parser.add_argument("--kinds", action="store_true", help="Print per-kind counts (kind N per line) and exit.")
     parser.add_argument("--explain-item", metavar="NAME", default="", help="Print the IDF score decomposition for the installed item NAME vs --task (per-term name/description/df/weight) as JSON; rc 2 when NAME is not installed.")
+    parser.add_argument("--unused", action="store_true", help="Replace the shortlist with installed items never referenced by the decisions log (not a winner, never shortlisted; honors JEV_CONSULT_LOG, composes with --names/--count/--jsonl/--md/--csv)")
     parser.add_argument(
         "--watch",
         metavar="SECONDS",
@@ -1757,6 +1792,17 @@ def main(argv: list[str] | None = None) -> int:
         "shortlist": picked,
         "catalogs": [{"name": name, "url": url} for name, url in catalogs()],
     }
+    if getattr(args, "unused", False):
+        ref = referenced_names(decisions_log_path())
+        unused = [
+            item
+            for item in items
+            if str(item.get("id") or "").lower() not in ref
+            and str(item.get("name") or "").lower() not in ref
+        ]
+        payload["shortlist"] = unused
+        payload["unused"] = True
+        payload["referenced"] = len(items) - len(unused)
     if args.diff:
         try:
             old = json.loads(

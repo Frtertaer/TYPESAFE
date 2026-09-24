@@ -657,6 +657,20 @@ class BaselineTests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertIn("not found", err.getvalue())
 
+    def test_jsonl_emits_one_finding_per_line(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_cases(tmp, [{"id": "pos-x", "should_trigger": True}])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main([str(bad), "--jsonl"])
+            self.assertEqual(rc, 1)
+            rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+            self.assertTrue(rows)
+            for row in rows:
+                self.assertEqual(row["file"], str(bad))
+                self.assertIn("rule", row)
+                self.assertIn("severity", row)
+
 
 class StdinDashTests(unittest.TestCase):
     def _feed(self, argv, stdin_text):

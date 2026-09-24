@@ -619,7 +619,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python policy_lint.py [POLICY.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch/--diff).\nStatic checks for policy.json (required keys, ranges, ordering, template).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --diff PATH       diff this policy against another JSON file (+/-/~ lines; "-" reads it from stdin)\n  --show            print the effective policy JSON and exit\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_PLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the known policy.json key/type table (--json emits an object)\n  --usage           flag known keys no pack script reads (P015, info; scans scripts dir)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad policy dict; exit 1 when no findings\n  --init            print a minimal lint-clean policy.json skeleton and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python policy_lint.py [POLICY.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch/--diff).\nStatic checks for policy.json (required keys, ranges, ordering, template).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --diff PATH       diff this policy against another JSON file (+/-/~ lines; "-" reads it from stdin)\n  --show            print the effective policy JSON and exit\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_PLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the known policy.json key/type table (--json emits an object)\n  --usage           flag known keys no pack script reads (P015, info; scans scripts dir)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --jsonl           findings as one JSON object per line (adds file)\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad policy dict; exit 1 when no findings\n  --init            print a minimal lint-clean policy.json skeleton and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -635,6 +635,7 @@ def main(argv: list[str] | None = None) -> int:
     quiet = "--quiet" in argv
     as_json = "--json" in argv
     as_md = "--md" in argv
+    as_jsonl = "--jsonl" in argv
     fail_fast = "--fail-fast" in argv
     do_fix = "--fix" in argv
     dry_run = "--dry-run" in argv
@@ -833,7 +834,7 @@ def main(argv: list[str] | None = None) -> int:
         a
         for a in argv
         if a
-        not in {"--strict", "--show", "--quiet", "--json", "--md", "--fail-fast", "--fix", "--dry-run", "--usage"}
+        not in {"--strict", "--show", "--quiet", "--json", "--md", "--jsonl", "--fail-fast", "--fix", "--dry-run", "--usage"}
     ]
     baseline_keys: set | None = None
     if "--env" in argv:
@@ -922,6 +923,12 @@ def main(argv: list[str] | None = None) -> int:
             )
         if as_json:
             sys.stdout.write(json.dumps(results, indent=2) + "\n")
+        elif as_jsonl:
+            for res in results:
+                for f in res["findings"]:
+                    sys.stdout.write(
+                        json.dumps({"file": res["path"], **f}, ensure_ascii=False) + "\n"
+                    )
         elif as_md:
             md_rows = [
                 {**f, "path": res["path"]}
@@ -1158,12 +1165,18 @@ def main(argv: list[str] | None = None) -> int:
             if quiet and finding["severity"] != "error":
                 continue
             shown.append(finding)
-        if as_md:
+        if as_jsonl:
+            file_label = "<stdin>" if argv and argv[0] == "-" else str(path)
+            for finding in shown:
+                sys.stdout.write(
+                    json.dumps({"file": file_label, **finding}, ensure_ascii=False) + "\n"
+                )
+        elif as_md:
             _watch.md_table(shown, ["severity", "rule", "path", "message"])
         else:
             for finding in shown:
                 sys.stdout.write(format_finding(finding) + "\n")
-    if not quiet and not as_json and not as_md:
+    if not quiet and not as_json and not as_md and not as_jsonl:
         sys.stdout.write("policy_lint: %d error(s), %d warning(s), %d info\n" % (errors, warns, infos))
     return rc
 

@@ -500,7 +500,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.). `-` reads the request JSON from stdin (single file or mixed with paths in multi mode; --fix/--watch need a real path).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: report what would change without writing\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_QLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this request against another file (per-question +/- and ~ lines; "-" reads it from stdin)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --init            print a minimal lint-clean request.json (one question per type) and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.). `-` reads the request JSON from stdin (single file or mixed with paths in multi mode; --fix/--watch need a real path).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: report what would change without writing\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_QLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --jsonl           findings as one JSON object per line (adds file)\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this request against another file (per-question +/- and ~ lines; "-" reads it from stdin)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --init            print a minimal lint-clean request.json (one question per type) and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -514,6 +514,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     as_json = "--json" in argv
     as_md = "--md" in argv
+    as_jsonl = "--jsonl" in argv
     do_fix = "--fix" in argv
     dry_run = "--dry-run" in argv
     strict = "--strict" in argv
@@ -717,7 +718,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = [
         a
         for a in argv
-        if a not in ("--json", "--md", "--fix", "--dry-run", "--strict", "--quiet", "--fail-fast")
+        if a not in ("--json", "--md", "--jsonl", "--fix", "--dry-run", "--strict", "--quiet", "--fail-fast")
     ]
     if "--env" in argv:
         try:
@@ -831,6 +832,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if as_json:
             sys.stdout.write(json.dumps(results, indent=2) + "\n")
+        elif as_jsonl:
+            for res in results:
+                for f in res["findings"]:
+                    sys.stdout.write(
+                        json.dumps({"file": res["path"], **f}, ensure_ascii=False) + "\n"
+                    )
         elif as_md:
             md_rows = [
                 {**f, "path": res["path"]}
@@ -1025,6 +1032,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if as_json:
         sys.stdout.write(json.dumps({"findings": shown}, indent=2) + "\n")
+    elif as_jsonl:
+        file_label = "<stdin>" if argv[0] == "-" else argv[0]
+        for f in shown:
+            if quiet and f["severity"] != "error":
+                continue
+            sys.stdout.write(
+                json.dumps({"file": file_label, **f}, ensure_ascii=False) + "\n"
+            )
     elif as_md:
         _watch.md_table(
             [f for f in shown if not quiet or f["severity"] == "error"],

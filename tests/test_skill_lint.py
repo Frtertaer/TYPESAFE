@@ -507,6 +507,21 @@ class CliTests(unittest.TestCase):
     def test_no_args_rc2(self):
         self.assertEqual(self._run().returncode, 2)
 
+    def test_jsonl_emits_one_finding_per_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_skill(tmp, "bad_dir", GOOD.format(name="Other"))
+            proc = self._run(str(bad), "--jsonl")
+            self.assertNotEqual(proc.returncode, 2)
+            rows = [
+                json.loads(l) for l in proc.stdout.splitlines() if l.strip()
+            ]
+            self.assertTrue(rows)
+            for row in rows:
+                self.assertEqual(row["path"], str(bad))
+                self.assertIn("rule", row)
+                self.assertIn("severity", row)
+            self.assertNotIn("findings", proc.stdout)
+
     def test_baseline_suppresses_known_findings(self):
         """--baseline PATH suppresses recorded findings; new ones still fire."""
         with tempfile.TemporaryDirectory() as tmp:

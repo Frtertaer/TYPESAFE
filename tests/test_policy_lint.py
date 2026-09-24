@@ -1170,5 +1170,42 @@ class StdinDashTests(unittest.TestCase):
         self.assertEqual(policy_lint.lint_policy(payload), [])
 
 
+class JsonlEmitTests(unittest.TestCase):
+    def _run(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(LINT_PATH), *args],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_jsonl_emits_one_finding_per_line(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            policy = base_policy()
+            policy["noul_yes"] = 1.7
+            bad = Path(tmp) / "policy.json"
+            bad.write_text(json.dumps(policy), encoding="utf-8")
+            proc = self._run(str(bad), "--jsonl")
+            self.assertEqual(proc.returncode, 1)
+            rows = [
+                json.loads(l) for l in proc.stdout.splitlines() if l.strip()
+            ]
+            self.assertTrue(rows)
+            for row in rows:
+                self.assertEqual(row["file"], str(bad))
+                self.assertIn("rule", row)
+                self.assertIn("severity", row)
+            # multi-file: file key tracks the source path per row
+            good = Path(tmp) / "good.json"
+            good.write_text(json.dumps(base_policy()), encoding="utf-8")
+            proc = self._run(str(good), str(bad), "--jsonl")
+            self.assertEqual(proc.returncode, 1)
+            rows = [
+                json.loads(l) for l in proc.stdout.splitlines() if l.strip()
+            ]
+            self.assertTrue(rows)
+            self.assertTrue({r["file"] for r in rows} <= {str(good), str(bad)})
+            self.assertTrue(any(r["file"] == str(bad) for r in rows))
+
+
 if __name__ == "__main__":
     unittest.main()

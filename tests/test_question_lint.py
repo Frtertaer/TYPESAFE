@@ -747,6 +747,23 @@ class StandaloneCliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertIn("lint: 1 finding(s)", proc.stdout)
 
+    def test_jsonl_emits_one_finding_per_line(self) -> None:
+        request = {
+            "state": "1" * 100000,
+            "questions": {"q": noul("Should the coder proceed with the plan?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            proc = self._run(str(path), "--jsonl")
+        self.assertEqual(proc.returncode, 1)
+        rows = [json.loads(l) for l in proc.stdout.splitlines() if l.strip()]
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertEqual(row["file"], str(path))
+            self.assertIn("rule", row)
+            self.assertIn("severity", row)
+
     def test_error_request_rc1(self) -> None:
         request = {
             "state": "1" * 100000,

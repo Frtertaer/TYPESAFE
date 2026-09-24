@@ -433,6 +433,14 @@ def _entry_ts(item: dict) -> float | None:
     return None
 
 
+def _entry_key(item: dict) -> str:
+    return str(
+        item.get("sha")
+        or item.get("ts")
+        or json.dumps(item, sort_keys=True, default=str)
+    )
+
+
 def is_miss_entry(item: dict) -> bool:
     if str(item.get("jev_status") or "") not in MISS_STATUSES:
         return False
@@ -1191,6 +1199,13 @@ def main(argv: list[str] | None = None) -> int:
         default=0.0,
         help="Re-read the log every S seconds and print a {\"ts\",\"count\"} JSON tick",
     )
+    parser.add_argument(
+        "--follow",
+        metavar="S",
+        type=float,
+        default=0.0,
+        help="Like --watch S, but prints each newly appended entry as a JSONL line (--jq digs fields) instead of count ticks",
+    )
     parser.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides the JEV_*_WATCH_MAX env)")
     parser.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
@@ -1297,9 +1312,12 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("decisions log disabled (JEV_CONSULT_LOG=0)\n")
         return 2
     if str(path) == "-" and (
-        args.prune or getattr(args, "drop_bad", False) or args.watch
+        args.prune
+        or getattr(args, "drop_bad", False)
+        or args.watch
+        or getattr(args, "follow", 0.0)
     ):
-        sys.stderr.write("--file - (stdin) supports neither --prune, --drop-bad nor --watch\n")
+        sys.stderr.write("--file - (stdin) supports neither --prune, --drop-bad, --watch nor --follow\n")
         return 2
     if str(path) != "-" and not path.is_file():
         sys.stderr.write("no decisions log at %s\n" % path)
@@ -1695,7 +1713,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
         return 0
-    if getattr(args, "watch", 0) > 0:
+    if getattr(args, "watch", 0) > 0 or getattr(args, "follow", 0) > 0:
+        following = getattr(args, "watch", 0) <= 0
+        watch_s = args.follow if following else args.watch
         max_ticks = _watch.cap("JEV_DECISIONS_WATCH_MAX", args.max_ticks)
         ticks = 0
         dead = _watch.deadline("JEV_DECISIONS_WATCH_SECS", getattr(args, "watch_max", 0.0))
@@ -1725,9 +1745,7 @@ def main(argv: list[str] | None = None) -> int:
 
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or time.time() < dead):
             cur_keys = {
-                str(e.get("sha") or e.get("ts") or json.dumps(e, sort_keys=True, default=str))
-                for e in entries
-                if isinstance(e, dict)
+                _entry_key(e) for e in entries if isinstance(e, dict)
             }
             newest_ts = max(
                 (
@@ -1755,7 +1773,26 @@ def main(argv: list[str] | None = None) -> int:
                     tick["delta_pct"] = None
             total_added += int(tick.get("added", 0))
             total_removed += int(tick.get("removed", 0))
-            if args.jq:
+            if following:
+                if prev_keys is not None:
+                    new_keys = cur_keys - prev_keys
+                    for item in entries:
+                        if not isinstance(item, dict):
+                            continue
+                        if _entry_key(item) not in new_keys:
+                            continue
+                        if args.jq:
+                            for field in [
+                                f.strip() for f in args.jq.split(",") if f.strip()
+                            ]:
+                                sys.stdout.write(
+                                    json.dumps(_dig(item, field)) + "\n"
+                                )
+                        else:
+                            sys.stdout.write(
+                                json.dumps(item, sort_keys=True) + "\n"
+                            )
+            elif args.jq:
                 for field in [f.strip() for f in args.jq.split(",") if f.strip()]:
                     sys.stdout.write(json.dumps(_dig(tick, field)) + "\n")
             else:
@@ -1783,7 +1820,7 @@ def main(argv: list[str] | None = None) -> int:
             if getattr(args, "unchanged_max", 0) and unchanged >= args.unchanged_max:
                 sys.stderr.write("watch: %d consecutive identical ticks\n" % unchanged)
                 break
-            time.sleep(args.watch)
+            time.sleep(watch_s)
             try:
                 fresh, _bad = load_entries(path)
                 entries = _filtered(fresh)

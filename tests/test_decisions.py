@@ -2131,6 +2131,91 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(len(ticks), 2)
             self.assertTrue(all(t["count"] == 2 for t in ticks))
 
+    def test_follow_prints_newly_appended_entries(self):
+        import os as _os
+        import subprocess as _sp
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1, "prompt_head": "old"}])
+            env = dict(_os.environ, JEV_DECISIONS_WATCH_MAX="8")
+            proc = _sp.Popen(
+                [
+                    sys.executable,
+                    str(ROOT / "skills/jev-consult/scripts/decisions.py"),
+                    "--file", str(path), "--follow", "0.05",
+                ],
+                stdout=_sp.PIPE,
+                stderr=_sp.PIPE,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            _time.sleep(0.15)
+            write_log(path, [{"ts": 1, "prompt_head": "old"}, {"ts": 2, "prompt_head": "new"}])
+            out, err = proc.communicate(timeout=20)
+            self.assertEqual(proc.returncode, 0, err)
+            rows = [
+                json.loads(l)
+                for l in out.splitlines()
+                if l.startswith("{")
+            ]
+            self.assertEqual([r.get("prompt_head") for r in rows], ["new"])
+
+    def test_follow_jq_digs_each_new_entry(self):
+        import os as _os
+        import subprocess as _sp
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1, "winner": {"name": "a"}}])
+            env = dict(_os.environ, JEV_DECISIONS_WATCH_MAX="8")
+            proc = _sp.Popen(
+                [
+                    sys.executable,
+                    str(ROOT / "skills/jev-consult/scripts/decisions.py"),
+                    "--file", str(path), "--follow", "0.05",
+                    "--jq", "winner.name",
+                ],
+                stdout=_sp.PIPE,
+                stderr=_sp.PIPE,
+                text=True,
+                cwd=str(ROOT),
+                env=env,
+            )
+            _time.sleep(0.15)
+            write_log(
+                path,
+                [
+                    {"ts": 1, "winner": {"name": "a"}},
+                    {"ts": 2, "winner": {"name": "b"}},
+                ],
+            )
+            out, err = proc.communicate(timeout=20)
+            self.assertEqual(proc.returncode, 0, err)
+            self.assertEqual(
+                [json.loads(l) for l in out.splitlines() if l.strip()], ["b"]
+            )
+
+    def test_follow_rejects_stdin_file(self):
+        import subprocess as _sp
+
+        proc = _sp.run(
+            [
+                sys.executable,
+                str(ROOT / "skills/jev-consult/scripts/decisions.py"),
+                "--file", "-", "--follow", "0.05",
+            ],
+            input="",
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("--follow", proc.stderr)
+
     def test_report_writes_markdown_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

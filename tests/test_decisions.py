@@ -1251,6 +1251,31 @@ class CliTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0)
             self.assertEqual(proc.stdout.strip(), "")
 
+    def test_questions_sorted_desc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"question": "load_tools"},
+                    {"question": "explicit"},
+                    {"question": "load_tools"},
+                    {"jev_status": "idf"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--questions")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(
+                proc.stdout.strip().splitlines(),
+                ["load_tools 2", "explicit 1", "unknown 1"],
+            )
+            proc = self.run_cli("--file", str(path), "--questions", "--json")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(
+                json.loads(proc.stdout)["counts"],
+                {"load_tools": 2, "explicit": 1, "unknown": 1},
+            )
+
     def test_outcome_filter(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

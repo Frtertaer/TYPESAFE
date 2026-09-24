@@ -1081,6 +1081,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print unique fill kind values with counts, sorted desc",
     )
     parser.add_argument(
+        "--questions",
+        action="store_true",
+        help="Print unique question kind values with counts, sorted desc",
+    )
+    parser.add_argument(
         "--fields",
         action="store_true",
         help="Print all field names seen in entries with counts, sorted desc",
@@ -2376,6 +2381,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.winners
         or args.outcomes
         or args.fills
+        or args.questions
         or args.fields
         or args.dedupes
         or args.daily
@@ -2456,6 +2462,8 @@ def main(argv: list[str] | None = None) -> int:
                 field = "outcome"
             elif args.fills:
                 field = "fill"
+            elif args.questions:
+                field = "question"
             elif args.harnesses:
                 field = "harness"
             else:

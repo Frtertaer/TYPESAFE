@@ -3700,5 +3700,37 @@ class StdinFileTests(unittest.TestCase):
             self.assertIn("stdin", proc.stderr)
 
 
+class VerifyVerdictTests(unittest.TestCase):
+    def test_verify_verdict_written_on_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            log.write_text(
+                '{"ts": 1.0, "jev_status": "ok"}\nnot json\n',
+                encoding="utf-8",
+            )
+            verdict = Path(tmp) / "v.json"
+            proc = run_cli(
+                "--file", str(log), "--verify", "--verdict", str(verdict),
+            )
+            self.assertEqual(proc.returncode, 1)
+            data = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(data["verdict"], "fail")
+            self.assertEqual(data["bad_lines"], 1)
+            self.assertIn("ts", data)
+
+    def test_verify_verdict_written_on_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            log.write_text('{"ts": 1.0, "jev_status": "ok"}\n', encoding="utf-8")
+            verdict = Path(tmp) / "v.json"
+            proc = run_cli(
+                "--file", str(log), "--verify", "--verdict", str(verdict),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(verdict.read_text(encoding="utf-8"))
+            self.assertEqual(data["verdict"], "ok")
+            self.assertEqual(data["entries"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

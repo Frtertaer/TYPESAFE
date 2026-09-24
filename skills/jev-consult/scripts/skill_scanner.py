@@ -301,8 +301,16 @@ def parse_frontmatter(text):
     return fm
 
 
-def discover_skills(root):
+def _csv_arg(value):
+    """Parse a comma-separated flag value; '-' reads the list from stdin once."""
+    if value == "-":
+        value = sys.stdin.read()
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def discover_skills(root, skip=None):
     """Return a list of skill directories (dirs containing SKILL.md)."""
+    skip = SKIP_DIRS if skip is None else skip
     root = Path(root)
     if root.is_file() and root.name == "SKILL.md":
         return [root.parent]
@@ -311,16 +319,17 @@ def discover_skills(root):
     found = []
     if root.is_dir():
         for dirpath, dirs, files in os.walk(root):
-            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
+            dirs[:] = sorted(d for d in dirs if d not in skip)
             if "SKILL.md" in files:
                 found.append(Path(dirpath))
                 dirs[:] = []  # don't descend into nested skills
     return found
 
 
-def iter_scan_files(skill_dir, include_fixtures=False):
+def iter_scan_files(skill_dir, include_fixtures=False, skip=None):
+    skip = SKIP_DIRS if skip is None else skip
     for dirpath, dirs, files in os.walk(skill_dir):
-        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
+        dirs[:] = sorted(d for d in dirs if d not in skip)
         if not include_fixtures:
             # A skill's own evals/fixtures/ may hold deliberately malicious test
             # payloads; scanning them as part of the skill produces false alarms.
@@ -347,7 +356,7 @@ def network_declared(fm):
     return any(w in compat for w in NETWORK_DECLARE_WORDS), any(w in blob for w in NETWORK_DECLARE_WORDS)
 
 
-def scan_skill(skill_dir, include_fixtures=False):
+def scan_skill(skill_dir, include_fixtures=False, skip=None):
     skill_dir = Path(skill_dir).resolve()
     skill_name = skill_dir.name
     findings = []
@@ -405,7 +414,7 @@ def scan_skill(skill_dir, include_fixtures=False):
                 "Prose instructs running a command/script to 'initialize/activate/enable' — install-time execution lure pattern.", line)
 
     # --- Per-file pattern scans (Checks 1, 3, 4, 5, 7) ----------------------
-    for path in iter_scan_files(skill_dir, include_fixtures=include_fixtures):
+    for path in iter_scan_files(skill_dir, include_fixtures=include_fixtures, skip=skip):
         content = read_text(path)
         if content is None:
             continue
@@ -543,6 +552,13 @@ def main(argv=None):
     ap.add_argument("--baseline-write", metavar="PATH", default="",
                     help="Snapshot the current findings to PATH for later "
                          "--baseline runs (output/rc unchanged).")
+    ap.add_argument("--severity", metavar="LIST", default="",
+                    help="Only report these severities (comma list; '-' reads stdin).")
+    ap.add_argument("--only", metavar="LIST", default="",
+                    help="Only report these check ids (comma list; '-' reads stdin).")
+    ap.add_argument("--exclude-dir", metavar="LIST", default="",
+                    help="Skip these directory names in addition to the built-ins "
+                         "(comma list; '-' reads stdin).")
     ap.add_argument("--jq", metavar="KEY", default="",
                     help="Print just this dotted-path field of the report payload "
                          "(e.g. verdict or summary.CRITICAL); unknown key exits 2.")
@@ -594,7 +610,25 @@ def main(argv=None):
               "Fix: pass the skill directory itself (the one containing SKILL.md), "
               "e.g. python3 skill_scanner.py PATH/skills/some-skill" % root, file=sys.stderr)  # skillscan:allow
         return 2
-    skills = discover_skills(root)
+    sev_want = None
+    if args.severity:
+        sev_want = set(_csv_arg(args.severity))
+        bad = sev_want - set(SEV_RANK)
+        if bad:
+            print("unknown severity %r (severities: %s)" % (
+                sorted(bad)[0], ", ".join(SEV_RANK)), file=sys.stderr)
+            return 2
+    only = set()
+    if args.only:
+        only = set(_csv_arg(args.only))
+        bad = only - set(CHECKS)
+        if bad:
+            print("unknown check %r (checks: %s)" % (
+                sorted(bad)[0], ", ".join(sorted(CHECKS))), file=sys.stderr)
+            return 2
+    skip = SKIP_DIRS | set(_csv_arg(args.exclude_dir)) if args.exclude_dir else SKIP_DIRS
+
+    skills = discover_skills(root, skip=skip)
     if not skills:
         print("error: no SKILL.md found under %s\n"
               "Fix: agent skills are directories with a SKILL.md at their root. "
@@ -604,7 +638,12 @@ def main(argv=None):
 
     all_findings = []
     for sd in sorted(skills):
-        all_findings.extend(scan_skill(sd, include_fixtures=args.include_fixtures))
+        all_findings.extend(scan_skill(
+            sd, include_fixtures=args.include_fixtures, skip=skip))
+    if sev_want is not None:
+        all_findings = [f for f in all_findings if f.severity in sev_want]
+    if only:
+        all_findings = [f for f in all_findings if f.check in only]
 
     if args.baseline_write:
         try:

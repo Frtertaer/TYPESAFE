@@ -2028,7 +2028,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--jsonl",
         action="store_true",
-        help="Emit each per-call decision as one JSON line (for piping; -o writes the lines to the file)",
+        help="Emit each per-call decision as one JSON line (for piping; -o writes the lines to the file); with --diff emits one {type: changed|only_a|only_b, ...} row per differing call",
     )
     parser.add_argument(
         "--json",
@@ -2251,6 +2251,19 @@ def main(argv: list[str] | None = None) -> int:
         text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
         if getattr(args, "json", False):
             sys.stdout.write(text)
+        elif getattr(args, "jsonl", False):
+            for row in payload["changed"]:
+                sys.stdout.write(
+                    json.dumps({"type": "changed", **row}, ensure_ascii=False) + "\n"
+                )
+            for ident in payload["only_a"]:
+                sys.stdout.write(
+                    json.dumps({"type": "only_a", "id": ident}, ensure_ascii=False) + "\n"
+                )
+            for ident in payload["only_b"]:
+                sys.stdout.write(
+                    json.dumps({"type": "only_b", "id": ident}, ensure_ascii=False) + "\n"
+                )
         else:
             sys.stdout.write(
                 "diff: same=%d changed=%d only_a=%d only_b=%d\n"

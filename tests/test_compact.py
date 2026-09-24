@@ -1412,6 +1412,42 @@ class CompactCliTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 2)
             self.assertIn(b"bad --jq key", proc.stderr)
 
+    def test_diff_jsonl_emits_rows_per_divergence(self) -> None:
+        import subprocess
+
+        script = Path(__file__).resolve().parents[1] / "skills" / "jev-consult" / "scripts" / "compact.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            a = Path(tmp) / "a.json"
+            b = Path(tmp) / "b.json"
+            a.write_text(json.dumps({"decisions": [
+                {"id": "t1", "tool": "read", "action": "keep"},
+                {"id": "t2", "tool": "edit", "action": "drop_call"},
+                {"id": "t3", "tool": "bash", "action": "keep"},
+            ]}), encoding="utf-8")
+            b.write_text(json.dumps({"decisions": [
+                {"id": "t1", "tool": "read", "action": "keep"},
+                {"id": "t2", "tool": "edit", "action": "keep"},
+                {"id": "t4", "tool": "grep", "action": "drop_result"},
+            ]}), encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(script), "--diff", str(a), str(b), "--jsonl"],
+                capture_output=True, timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr[:200])
+            rows = [
+                json.loads(l)
+                for l in proc.stdout.decode("utf-8").splitlines()
+                if l.strip()
+            ]
+            self.assertEqual(
+                rows,
+                [
+                    {"type": "changed", "id": "t2", "tool": "edit", "a": "drop_call", "b": "keep"},
+                    {"type": "only_a", "id": "t3"},
+                    {"type": "only_b", "id": "t4"},
+                ],
+            )
+
     def test_min_reduction_fallback_restores(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "t.json"

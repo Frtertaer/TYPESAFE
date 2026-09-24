@@ -2173,6 +2173,33 @@ class PruneTest(unittest.TestCase):
             proc = self.run_cli("--file", str(path), "--last", "--status", "nope")
             self.assertEqual(proc.stdout.strip(), "")
 
+    def test_last_oldest_honor_keys_projection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1, "harness": "claude", "jev_status": "ok"},
+                    {"ts": 2, "harness": "codex", "jev_status": "none"},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--last", "--keys", "ts,harness"
+            )
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(json.loads(proc.stdout), {"ts": 2, "harness": "codex"})
+            proc = self.run_cli(
+                "--file", str(path), "--oldest", "--keys", "ts"
+            )
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(json.loads(proc.stdout), {"ts": 1})
+            # --last stays the newest *matching* entry even under --reverse
+            proc = self.run_cli(
+                "--file", str(path), "--last", "--reverse", "--keys", "harness"
+            )
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(json.loads(proc.stdout), {"harness": "codex"})
+
     def test_jq_multi_fields_prints_columns(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

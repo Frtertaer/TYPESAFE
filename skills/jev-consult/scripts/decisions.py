@@ -2419,11 +2419,17 @@ def main(argv: list[str] | None = None) -> int:
         ]
     if getattr(args, "last", False):
         if emit_entries:
-            sys.stdout.write(json.dumps(entries[-1], indent=2, sort_keys=True) + "\n")
+            item = entries[-1]
+            if proj and isinstance(item, dict):
+                item = {k: item.get(k) for k in proj}
+            sys.stdout.write(json.dumps(item, indent=2, sort_keys=True) + "\n")
         return 0
     if getattr(args, "oldest", False):
         if emit_entries:
-            sys.stdout.write(json.dumps(entries[0], indent=2, sort_keys=True) + "\n")
+            item = entries[0]
+            if proj and isinstance(item, dict):
+                item = {k: item.get(k) for k in proj}
+            sys.stdout.write(json.dumps(item, indent=2, sort_keys=True) + "\n")
         return 0
     if getattr(args, "nth", 0):
         if args.nth < 1 or args.nth > len(emit_entries):

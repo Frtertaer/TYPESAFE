@@ -279,7 +279,9 @@ class TriggerEvalTests(unittest.TestCase):
         with redirect_stdout(buf):
             with patch.object(sys, "stderr", err):
                 rc = te.main(["--json", "--jq", "cases.0"])
-        self.assertEqual(rc, 2)
+        # numeric parts index lists (pack-wide _watch.dig contract)
+        self.assertEqual(rc, 0)
+        self.assertTrue(json.loads(buf.getvalue()))
 
     def test_self_test_passes_and_json(self) -> None:
         buf = io.StringIO()

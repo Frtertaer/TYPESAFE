@@ -145,13 +145,7 @@ def evaluate(
 
 def jq_lookup(obj, path: str):
     """Dotted-path lookup; (value, True) or (None, False) when any part misses."""
-    cur = obj
-    for part in path.split("."):
-        if isinstance(cur, dict) and part in cur:
-            cur = cur[part]
-        else:
-            return None, False
-    return cur, True
+    return _watch.dig(obj, path)
 
 
 def _atomic_write(path, text):

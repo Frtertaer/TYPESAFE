@@ -911,13 +911,7 @@ def cmd_undo(args: argparse.Namespace) -> int:
 
 def jq_lookup(obj, path: str):
     """Dotted-path dict traversal: returns (value, True) or (None, False)."""
-    node = obj
-    for part in path.split("."):
-        if isinstance(node, dict) and part in node:
-            node = node[part]
-        else:
-            return None, False
-    return node, True
+    return _watch.dig(obj, path)
 
 
 def emit_jq(payload: dict, jq: str) -> int | None:

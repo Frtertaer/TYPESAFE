@@ -569,6 +569,8 @@ def write_out(path: str, payload: dict[str, Any]) -> bool:
 
 def jq_lookup(obj, path: str):
     """Dotted-path lookup; (value, True) or (None, False) when any part misses."""
+    if _watch is not None:
+        return _watch.dig(obj, path)
     cur = obj
     for part in path.split("."):
         if isinstance(cur, dict) and part in cur:

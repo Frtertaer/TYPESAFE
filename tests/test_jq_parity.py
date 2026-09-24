@@ -99,6 +99,33 @@ class JqParityTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0)
             self.assertTrue(proc.stdout.strip().isdigit())
 
+    def test_jq_lookup_implementations_agree_on_lists(self) -> None:
+        # jev/smoke/trace/trigger_eval keep a jq_lookup shim; it must behave
+        # exactly like _watch.dig — numeric parts index lists, misses are
+        # (None, False).
+        import importlib.util
+        import sys as _sys
+
+        def _load(name):
+            spec = importlib.util.spec_from_file_location(
+                "jqmod_" + name.replace(".", "_"), SCRIPTS_DIR / name
+            )
+            mod = importlib.util.module_from_spec(spec)
+            _sys.modules[spec.name] = mod
+            spec.loader.exec_module(mod)
+            return mod
+
+        watch = _load("_watch.py")
+        payload = {"rows": [{"a": 1}, {"a": 2}], "top": {"n": 5}}
+        cases = [("rows.0.a", 1, True), ("rows.1.a", 2, True), ("top.n", 5, True),
+                 ("rows.9.a", None, False), ("rows.a", None, False), ("nope", None, False)]
+        for script in ("jev.py", "smoke.py", "trace.py", "trigger_eval.py"):
+            mod = _load(script)
+            with self.subTest(script=script):
+                for path, want, found in cases:
+                    self.assertEqual(mod.jq_lookup(payload, path), (want, found), path)
+                    self.assertEqual(watch.dig(payload, path), (want, found), path)
+
 
 if __name__ == "__main__":
     unittest.main()

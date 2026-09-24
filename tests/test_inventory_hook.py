@@ -2102,6 +2102,52 @@ class HandleBranchTests(unittest.TestCase):
         self.assertIsNone(HOOK.extract_cwd({"cwd": "/no/such/dir-xyz"}))
         self.assertIsNone(HOOK.extract_cwd({}))
 
+    def test_extract_prompt_key_precedence(self) -> None:
+        # first matching top-level spelling wins, history is fallback
+        self.assertEqual(
+            HOOK.extract_prompt({"prompt": "p", "user_message": "u"}), "p"
+        )
+        self.assertEqual(
+            HOOK.extract_prompt({"user_message": "u", "userMessage": "m"}), "u"
+        )
+        self.assertEqual(
+            HOOK.extract_prompt(
+                {
+                    "userMessage": "m",
+                    "conversation_history": [{"role": "user", "content": "h"}],
+                }
+            ),
+            "m",
+        )
+        # a non-user-typed role on the last history item falls back to env
+        with patch.dict(os.environ, {"JEV_HOOK_PROMPT": "env"}):
+            self.assertEqual(
+                HOOK.extract_prompt(
+                    {"conversation_history": [{"role": "system", "content": "s"}]}
+                ),
+                "env",
+            )
+
+    def test_payload_ts_variants(self) -> None:
+        self.assertEqual(HOOK.payload_ts({"timestamp": 1700000000}), 1700000000.0)
+        self.assertEqual(HOOK.payload_ts({"ts": 1700000000}), 1700000000.0)
+        self.assertEqual(HOOK.payload_ts({"time": 1700000000}), 1700000000.0)
+        self.assertEqual(HOOK.payload_ts({"created_at": 1700000000}), 1700000000.0)
+        # milliseconds are normalized to seconds
+        self.assertAlmostEqual(
+            HOOK.payload_ts({"ts": 1700000000123}), 1700000000.123, places=3
+        )
+        # ISO strings parse
+        ts = HOOK.payload_ts({"created_at": "2023-11-14T22:13:20Z"})
+        self.assertAlmostEqual(ts, 1700000000.0, delta=1.0)
+        # bools and junk rejected, first valid spelling wins
+        self.assertIsNone(HOOK.payload_ts({"ts": True}))
+        self.assertIsNone(HOOK.payload_ts({"ts": "not-a-date"}))
+        self.assertIsNone(HOOK.payload_ts({}))
+        self.assertEqual(
+            HOOK.payload_ts({"timestamp": "bad", "ts": 42}), 42.0
+        )
+
     def test_redact_prompt_wiring(self) -> None:
         class FakeJev:
             @staticmethod

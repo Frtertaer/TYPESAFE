@@ -24,6 +24,7 @@ suppress self-matches.
 """
 
 import argparse
+import csv
 import json
 import os
 import re
@@ -578,6 +579,33 @@ def _payload_for(root, skills, findings, suppressed, counts):
     }
 
 
+def _print_md(root, skills, all_findings, suppressed, counts):
+    """Markdown findings table + summary (pack --md convention)."""
+    print("# agent-skill security scan — %d skill(s) under %s\n" % (
+        len(skills), root))
+    print("| severity | check | location | message | suppressed |")
+    print("| --- | --- | --- | --- | --- |")
+    for f in all_findings:
+        loc = "%s:%s" % (f.file, f.line) if f.line else f.file
+        msg = f.message.replace("|", "\\|")
+        print("| %s | %s | %s | %s | %s |" % (
+            f.severity, f.check, loc, msg,
+            "yes" if f.suppressed else "no"))
+    print()
+    print("Summary: %d CRITICAL, %d WARN, %d INFO" % (
+        counts["CRITICAL"], counts["WARN"], counts["INFO"]) + (
+            " (%d suppressed)" % suppressed if suppressed else ""))
+
+
+def _print_csv(all_findings):
+    """CSV finding rows (severity,check,file,line,message,suppressed)."""
+    out = csv.writer(sys.stdout)
+    out.writerow(["severity", "check", "file", "line", "message", "suppressed"])
+    for f in all_findings:
+        out.writerow([f.severity, f.check, f.file, f.line or "",
+                      f.message, "yes" if f.suppressed else ""])
+
+
 def _print_report(root, skills, all_findings, suppressed, counts):
     print("agent-skill security scan v%s — %d skill(s) under %s\n" % (
         VERSION, len(skills), root))
@@ -648,6 +676,10 @@ def main(argv=None):
     ap.add_argument("--exclude-dir", metavar="LIST", default="",
                     help="Skip these directory names in addition to the built-ins "
                          "(comma list; '-' reads stdin).")
+    ap.add_argument("--md", action="store_true",
+                    help="Emit findings as a markdown table instead of the text report.")
+    ap.add_argument("--csv", action="store_true",
+                    help="Emit findings as CSV rows instead of the text report.")
     ap.add_argument("--fail-on", metavar="SEV", default="",
                     help="Exit 1 on findings at this severity or above "
                          "(CRITICAL, WARN, INFO; default CRITICAL).")
@@ -836,6 +868,10 @@ def main(argv=None):
                   if isinstance(val, (dict, list)) else val)
         elif args.json:
             print(json.dumps(payload, indent=2))
+        elif args.md:
+            _print_md(root, skills, all_findings, suppressed, counts)
+        elif args.csv:
+            _print_csv(all_findings)
         else:
             _print_report(root, skills, all_findings, suppressed, counts)
         break

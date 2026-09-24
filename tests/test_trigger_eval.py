@@ -540,6 +540,20 @@ class TriggerEvalTests(unittest.TestCase):
         row = [l for l in lines if l.startswith("pos-approach,")][0]
         self.assertEqual(row.split(",")[1], "True")
 
+    def test_jsonl_emits_one_row_per_case(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = te.main(["--jsonl"])
+        self.assertEqual(rc, 0)
+        rows = [json.loads(line) for line in buf.getvalue().splitlines()]
+        self.assertGreater(len(rows), 2)
+        for row in rows:
+            self.assertEqual(
+                set(row), {"id", "should_trigger", "lexical", "score", "ok"}
+            )
+        hit = [r for r in rows if r["id"] == "pos-approach"][0]
+        self.assertTrue(hit["should_trigger"])
+
     def test_covers_reports_tag_counts_and_uncovered(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

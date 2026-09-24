@@ -263,6 +263,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the trigger-cases file key contract and exit (--json emits the object).",
     )
     parser.add_argument(
+        "--jsonl",
+        action="store_true",
+        help="Emit one {id,should_trigger,lexical,score,ok} JSON row per case (for piping).",
+    )
+    parser.add_argument(
         "--csv",
         action="store_true",
         help="Print rows as CSV: id,should_trigger,lexical,score,ok.",
@@ -1129,6 +1134,22 @@ def main(argv: list[str] | None = None) -> int:
         else:
             for row in _rows():
                 sys.stdout.write("%s: %s\n" % (row["id"], row["prompt"]))
+        return 0 if result["ok"] else 1
+    if getattr(args, "jsonl", False):
+        for row in _rows():
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "id": row["id"],
+                        "should_trigger": row["should_trigger"],
+                        "lexical": row["lexical"],
+                        "score": row["score"],
+                        "ok": row["ok"],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
         return 0 if result["ok"] else 1
     if args.csv:
         sys.stdout.write("id,should_trigger,lexical,score,ok\n")

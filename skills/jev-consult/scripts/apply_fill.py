@@ -528,7 +528,7 @@ def main() -> int:
                     with redirect_stdout(buf):
                         fill(
                             "self-test task",
-                            "claude",
+                            "claude-code",
                             tmp_path,
                             None,
                             True,

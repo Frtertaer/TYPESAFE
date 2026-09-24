@@ -206,6 +206,15 @@ class LintSkillTests(unittest.TestCase):
             with contextlib.redirect_stdout(buf):
                 rc = skill_lint.main([str(bad), "--severity", "bogus"])
             self.assertEqual(rc, 2)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = skill_lint.main(
+                    [str(warn_path), str(bad), "--severity", "warn,error"]
+                )
+            out = buf.getvalue()
+            self.assertEqual(rc, 1)
+            self.assertIn("S004", out)
+            self.assertIn("S001", out)
 
     def test_severity_env_default(self):
         with tempfile.TemporaryDirectory() as tmp:

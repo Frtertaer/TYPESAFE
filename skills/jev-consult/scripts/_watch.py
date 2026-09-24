@@ -199,6 +199,18 @@ def baseline_key(row: dict, fields) -> tuple:
     return tuple(str(row.get(f)) for f in fields)
 
 
+SEVERITY_LEVELS = ("error", "warn", "info")
+
+
+def severity_arg(raw: str) -> set[str] | None:
+    """Parse a --severity value: a comma list of error|warn|info. Returns the
+    picked set, or None when any entry is unknown."""
+    picked = {s.strip() for s in raw.strip().lower().split(",") if s.strip()}
+    if not picked or not picked <= set(SEVERITY_LEVELS):
+        return None
+    return picked
+
+
 def text_arg(value: str) -> str:
     """'-' reads the argument text from stdin (trailing newline stripped);
     any other value passes through unchanged. stdin is single-use — a

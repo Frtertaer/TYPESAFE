@@ -467,7 +467,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.). `-` reads the request JSON from stdin (single file or mixed with paths in multi mode; --fix/--watch need a real path).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S      preset severity floor (error|warn|info; JEV_QLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this request against another file (per-question +/- and ~ lines; "-" reads it from stdin)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.). `-` reads the request JSON from stdin (single file or mixed with paths in multi mode; --fix/--watch need a real path).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_QLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this request against another file (per-question +/- and ~ lines; "-" reads it from stdin)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -495,21 +495,23 @@ def main(argv: list[str] | None = None) -> int:
                 )
         return 0
     fail_fast = "--fail-fast" in argv
-    severity = ""
+    severity: set[str] = set()
     if "--severity" in argv:
         idx = argv.index("--severity")
         if idx + 1 >= len(argv):
             sys.stderr.write("--severity needs a value (error|warn|info)\n")
             return 2
-        severity = argv[idx + 1].strip().lower()
-        if severity not in SEVERITIES:
-            sys.stderr.write("bad --severity %r (want error|warn|info)\n" % severity)
+        picked = _watch.severity_arg(argv[idx + 1])
+        if picked is None:
+            sys.stderr.write("bad --severity %r (want comma list of error|warn|info)\n" % argv[idx + 1])
             return 2
+        severity = picked
         argv = argv[:idx] + argv[idx + 2 :]
     else:
         env_sev = os.environ.get("JEV_QLINT_SEVERITY", "").strip().lower()
-        if env_sev and env_sev in SEVERITIES:
-            severity = env_sev
+        picked = _watch.severity_arg(env_sev)
+        if picked:
+            severity = picked
     unchanged_max = 0
     if "--unchanged-max" in argv:
         idx = argv.index("--unchanged-max")
@@ -666,7 +668,7 @@ def main(argv: list[str] | None = None) -> int:
             env_watch_secs = 0.0
         report = {
             "files": [a for a in argv if not a.startswith("--")],
-            "severity": severity,
+            "severity": ",".join(sorted(severity)),
             "strict": strict,
             "quiet": quiet,
             "watch_max": _watch.cap("JEV_QLINT_WATCH_MAX", None),
@@ -740,7 +742,7 @@ def main(argv: list[str] | None = None) -> int:
             fshown = [
                 f
                 for f in ffind
-                if (not severity or f["severity"] == severity)
+                if (not severity or f["severity"] in severity)
                 and (not quiet or f["severity"] == "error")
             ]
             results.append(
@@ -920,7 +922,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write(
                 "baseline: suppressed %d known finding(s)\n" % n_suppressed
             )
-    shown = [f for f in findings if not severity or f["severity"] == severity]
+    shown = [f for f in findings if not severity or f["severity"] in severity]
     if out_path:
         try:
             _atomic_write(

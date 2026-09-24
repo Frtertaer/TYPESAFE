@@ -351,7 +351,7 @@ def _atomic_write(path, text):
         raise
 
 
-USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S      preset severity floor (error|warn|info; JEV_SLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  -                 read SKILL.md content from stdin (no --fix/--watch/--diff)\n  --diff PATH       diff this SKILL.md against another (frontmatter/cited_scripts/body_lines/body_sha1; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_SLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  -                 read SKILL.md content from stdin (no --fix/--watch/--diff)\n  --diff PATH       diff this SKILL.md against another (frontmatter/cited_scripts/body_lines/body_sha1; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -367,21 +367,23 @@ def main(argv: list[str] | None = None) -> int:
     strict = "--strict" in argv
     quiet = "--quiet" in argv
     fail_fast = "--fail-fast" in argv
-    severity = ""
+    severity: set[str] = set()
     if "--severity" in argv:
         idx = argv.index("--severity")
         if idx + 1 >= len(argv):
             sys.stderr.write("--severity needs a value (error|warn|info)\n")
             return 2
-        severity = argv[idx + 1].strip().lower()
-        if severity not in ("error", "warn", "info"):
-            sys.stderr.write("bad --severity %r (want error|warn|info)\n" % severity)
+        picked = _watch.severity_arg(argv[idx + 1])
+        if picked is None:
+            sys.stderr.write("bad --severity %r (want comma list of error|warn|info)\n" % argv[idx + 1])
             return 2
+        severity = picked
         argv = argv[:idx] + argv[idx + 2 :]
     else:
         env_sev = os.environ.get("JEV_SLINT_SEVERITY", "").strip().lower()
-        if env_sev in ("error", "warn", "info"):
-            severity = env_sev
+        picked = _watch.severity_arg(env_sev)
+        if picked:
+            severity = picked
     unchanged_max = 0
     if "--unchanged-max" in argv:
         idx = argv.index("--unchanged-max")
@@ -559,7 +561,7 @@ def main(argv: list[str] | None = None) -> int:
             env_watch_secs = 0.0
         report = {
             "files": [a for a in argv if not a.startswith("--")],
-            "severity": severity,
+            "severity": ",".join(sorted(severity)),
             "strict": strict,
             "quiet": quiet,
             "watch_max": _watch.cap("JEV_SLINT_WATCH_MAX", None),
@@ -731,7 +733,7 @@ def main(argv: list[str] | None = None) -> int:
             kept = [r for r in all_rows if _baseline_key(r) not in baseline_keys]
             suppressed = len(all_rows) - len(kept)
             all_rows = kept
-        rows = [r for r in all_rows if not severity or r["severity"] == severity]
+        rows = [r for r in all_rows if not severity or r["severity"] in severity]
         payload = {"findings": rows}
         if suppressed:
             sys.stderr.write(
@@ -791,7 +793,7 @@ def main(argv: list[str] | None = None) -> int:
                 n_warn += 1
             if f["severity"] == "error" or (strict and f["severity"] == "warn"):
                 rc = 1
-            if severity and f["severity"] != severity:
+            if severity and f["severity"] not in severity:
                 continue
             if quiet and f["severity"] != "error":
                 continue

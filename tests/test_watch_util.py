@@ -294,5 +294,18 @@ class BaselineStdinTests(unittest.TestCase):
         self.assertIn("unreadable", err.getvalue())
 
 
+class SeverityArgTests(unittest.TestCase):
+    def test_single_and_list(self) -> None:
+        self.assertEqual(_watch.severity_arg("warn"), {"warn"})
+        self.assertEqual(_watch.severity_arg("warn,error"), {"warn", "error"})
+        self.assertEqual(_watch.severity_arg("WARN, info "), {"warn", "info"})
+
+    def test_bad_values(self) -> None:
+        self.assertIsNone(_watch.severity_arg(""))
+        self.assertIsNone(_watch.severity_arg("bogus"))
+        self.assertIsNone(_watch.severity_arg("warn,bogus"))
+        self.assertIsNone(_watch.severity_arg(","))
+
+
 if __name__ == "__main__":
     unittest.main()

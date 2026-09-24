@@ -358,6 +358,19 @@ class LintCliTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(proc.returncode, 2)
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--severity", "warn,error"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("J001", proc.stdout)
+            self.assertIn("J002", proc.stdout)
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--severity", "warn,bogus"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 2)
 
     def test_out_writes_findings_json(self) -> None:
         request = {

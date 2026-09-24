@@ -205,6 +205,15 @@ class CliTests(unittest.TestCase):
             with redirect_stdout(buf):
                 trigger_lint.main([str(path), "--severity", "warn"])
             self.assertIn("T009", buf.getvalue())
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main([str(path), "--severity", "warn,error"])
+            self.assertEqual(rc, 0)
+            self.assertIn("T009", buf.getvalue())
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main([str(path), "--severity", "warn,bogus"])
+            self.assertEqual(rc, 2)
 
     def test_out_writes_findings_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

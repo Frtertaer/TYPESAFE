@@ -576,7 +576,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python policy_lint.py [POLICY.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch/--diff).\nStatic checks for policy.json (required keys, ranges, ordering, template).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --diff PATH       diff this policy against another JSON file (+/-/~ lines; "-" reads it from stdin)\n  --show            print the effective policy JSON and exit\n  --severity S      preset severity floor (error|warn|info; JEV_PLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the known policy.json key/type table (--json emits an object)\n  --usage           flag known keys no pack script reads (P015, info; scans scripts dir)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad policy dict; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python policy_lint.py [POLICY.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch/--diff).\nStatic checks for policy.json (required keys, ranges, ordering, template).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --diff PATH       diff this policy against another JSON file (+/-/~ lines; "-" reads it from stdin)\n  --show            print the effective policy JSON and exit\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_PLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the known policy.json key/type table (--json emits an object)\n  --usage           flag known keys no pack script reads (P015, info; scans scripts dir)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad policy dict; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -594,21 +594,23 @@ def main(argv: list[str] | None = None) -> int:
     fail_fast = "--fail-fast" in argv
     do_fix = "--fix" in argv
     dry_run = "--dry-run" in argv
-    severity = ""
+    severity: set[str] = set()
     if "--severity" in argv:
         i = argv.index("--severity")
         if i + 1 >= len(argv):
             sys.stderr.write("--severity needs a value (error|warn|info)\n")
             return 2
-        severity = argv[i + 1].strip().lower()
-        if severity not in ("error", "warn", "info"):
-            sys.stderr.write("bad --severity %r (want error|warn|info)\n" % severity)
+        picked = _watch.severity_arg(argv[i + 1])
+        if picked is None:
+            sys.stderr.write("bad --severity %r (want comma list of error|warn|info)\n" % argv[i + 1])
             return 2
+        severity = picked
         del argv[i : i + 2]
     else:
         env_sev = os.environ.get("JEV_PLINT_SEVERITY", "").strip().lower()
-        if env_sev in ("error", "warn", "info"):
-            severity = env_sev
+        picked = _watch.severity_arg(env_sev)
+        if picked:
+            severity = picked
     unchanged_max = 0
     if "--unchanged-max" in argv:
         i = argv.index("--unchanged-max")
@@ -776,7 +778,7 @@ def main(argv: list[str] | None = None) -> int:
         report = {
             "files": files,
             "policy": files[0] if files else str(DEFAULT_POLICY),
-            "severity": severity,
+            "severity": ",".join(sorted(severity)),
             "strict": strict,
             "quiet": quiet,
             "watch_max": _watch.cap("JEV_PLINT_WATCH_MAX", None),
@@ -838,7 +840,7 @@ def main(argv: list[str] | None = None) -> int:
             fshown = [
                 f
                 for f in ffind
-                if (not severity or f["severity"] == severity)
+                if (not severity or f["severity"] in severity)
                 and (not quiet or f["severity"] == "error")
             ]
             results.append(
@@ -1019,7 +1021,7 @@ def main(argv: list[str] | None = None) -> int:
     shown_rows = [
         f
         for f in findings
-        if (not severity or f["severity"] == severity)
+        if (not severity or f["severity"] in severity)
         and (not quiet or f["severity"] == "error")
     ]
     errors = sum(1 for f in findings if f["severity"] == "error")
@@ -1073,7 +1075,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         for finding in findings:
-            if severity and finding["severity"] != severity:
+            if severity and finding["severity"] not in severity:
                 continue
             if quiet and finding["severity"] != "error":
                 continue

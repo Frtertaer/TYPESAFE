@@ -400,6 +400,25 @@ class PolicyLintTests(unittest.TestCase):
                 rc = policy_lint.main([str(p), "--severity", "bogus"])
             self.assertEqual(rc, 2)
 
+    def test_severity_comma_list(self) -> None:
+        policy = base_policy()
+        policy["escalate_if"]["confidene_below"] = 0.4
+        policy["noul_yes"] = 1.7
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "policy.json"
+            p.write_text(json.dumps(policy), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = policy_lint.main([str(p), "--severity", "warn,error"])
+            self.assertEqual(rc, 1)
+            head = buf.getvalue().split("policy_lint:")[0]
+            self.assertIn("P010", head)
+            self.assertIn("P002", head)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = policy_lint.main([str(p), "--severity", "warn,bogus"])
+            self.assertEqual(rc, 2)
+
     def test_severity_env_default(self) -> None:
         import os
         from unittest import mock

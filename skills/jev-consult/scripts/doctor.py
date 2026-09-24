@@ -351,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--schema", action="store_true", help="Print the {ok,checks} payload key contract and check-name catalog (--json emits the object) and exit")
     parser.add_argument("--json", action="store_true", help="With --schema: emit the contract object instead of text rows (the normal payload is already JSON)")
     parser.add_argument("--report", metavar="PATH", default="", help="Also write a markdown report (verdict line + per-check table with hints) to PATH")
+    parser.add_argument("--jsonl", action="store_true", help="Print each check as one JSON line instead of the {ok,checks} payload (for piping)")
     parser.add_argument("--baseline", metavar="PATH", default="", help="Mark checks recorded as failing in PATH (written by --baseline-write) as suppressed: they still print but do not fail the run, watch ticks, or verdict; '-' reads the baseline JSON from stdin")
     parser.add_argument("--baseline-write", metavar="PATH", default="", help="Snapshot the currently failing checks to PATH for later --baseline runs")
     parser.add_argument("--self-test", action="store_true", help="Run every check against a synthetic empty HOME; exit 1 when no check fails")
@@ -676,6 +677,10 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (args.report, exc))
             return 1
         sys.stderr.write("wrote %s\n" % args.report)
+    if getattr(args, "jsonl", False):
+        for c in shown:
+            sys.stdout.write(json.dumps(c, ensure_ascii=False, sort_keys=True) + "\n")
+        return 0 if ok else 1
     sys.stdout.write(text)
     return 0 if ok else 1
 

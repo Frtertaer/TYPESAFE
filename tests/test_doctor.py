@@ -904,6 +904,20 @@ class DoctorSchemaTests(unittest.TestCase):
                     "undocumented check key %r" % key,
                 )
 
+    def test_jsonl_emits_one_row_per_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, _, text = run_main(
+                ["--home", tmp, "--hermes-home", str(Path(tmp) / "h"), "--jsonl"],
+                cwd=tmp,
+            )
+        self.assertIn(rc, (0, 1))
+        lines = [json.loads(l) for l in text.splitlines() if l.strip()]
+        self.assertGreater(len(lines), 0)
+        for row in lines:
+            self.assertIn(row["check"], DOC.CHECK_NAMES)
+            self.assertIsInstance(row["ok"], bool)
+        self.assertNotIn('"checks"', text)
+
 
 class DoctorBaselineTests(unittest.TestCase):
     def _empty_home(self, tmp: str) -> Path:

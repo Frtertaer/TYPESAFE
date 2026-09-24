@@ -3768,6 +3768,57 @@ class StreakTest(unittest.TestCase):
             self.assertEqual(rows[0]["entries"], 2)
 
 
+class ChainsTest(unittest.TestCase):
+    def _log(self, tmp: str) -> Path:
+        path = Path(tmp) / "decisions.jsonl"
+        write_log(
+            path,
+            [
+                {"ts": 1, "jev_status": "ok", "prompt_head": "which hook"},
+                {"ts": 2, "jev_status": "none", "prompt_head": "which hook"},
+                {"ts": 3, "jev_status": "ok", "prompt_head": "single ask"},
+                {"ts": 4, "jev_status": "error", "prompt_head": "which hook"},
+            ],
+        )
+        return path
+
+    def test_chains_flags_repeated_prompt_rc1(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli("--file", str(self._log(tmp)), "--chains")
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            self.assertIn("3x which hook", proc.stdout)
+            self.assertIn("error,none,ok", proc.stdout)
+            self.assertNotIn("single ask", proc.stdout)
+
+    def test_chains_none_rc0(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1, "prompt_head": "a"}, {"ts": 2, "prompt_head": "b"}])
+            proc = run_cli("--file", str(path), "--chains")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("no chains", proc.stdout)
+
+    def test_chains_json_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli("--file", str(self._log(tmp)), "--chains", "--json")
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            rows = json.loads(proc.stdout)["chains"]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["prompt_head"], "which hook")
+            self.assertEqual(rows[0]["count"], 3)
+            self.assertEqual(rows[0]["first_ts"], 1.0)
+            self.assertEqual(rows[0]["last_ts"], 4.0)
+            self.assertEqual(rows[0]["statuses"], ["error", "none", "ok"])
+
+    def test_chains_min_threshold(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli(
+                "--file", str(self._log(tmp)), "--chains", "--chain-min", "4"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("no chains", proc.stdout)
+
+
 class ReasonFilterTest(unittest.TestCase):
     def _log(self, tmp: str) -> Path:
         path = Path(tmp) / "decisions.jsonl"

@@ -684,6 +684,53 @@ def status_streaks(entries: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda r: (-r["best_streak"], r["harness"]))
 
 
+def prompt_chains(entries: list[dict], min_n: int = 2) -> list[dict]:
+    """prompt_head values consulted at least MIN_N times (loop detector)."""
+    grouped: dict[str, list[dict]] = {}
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        head = str(item.get("prompt_head") or "").strip()
+        if not head:
+            continue
+        grouped.setdefault(head, []).append(item)
+    rows: list[dict] = []
+    for head, items in grouped.items():
+        if len(items) < min_n:
+            continue
+        tss = [t for t in (_entry_ts(i) for i in items) if t is not None]
+        rows.append(
+            {
+                "prompt_head": head[:120],
+                "count": len(items),
+                "first_ts": min(tss) if tss else None,
+                "last_ts": max(tss) if tss else None,
+                "statuses": sorted(
+                    {str(i.get("jev_status") or "unknown") for i in items}
+                ),
+            }
+        )
+    return sorted(rows, key=lambda r: (-r["count"], r["prompt_head"]))
+
+
+def format_chains(rows: list[dict]) -> str:
+    if not rows:
+        return "no chains"
+    lines = []
+    for row in rows:
+        lines.append(
+            "%dx %s [%s] %s -> %s"
+            % (
+                row["count"],
+                row["prompt_head"],
+                ",".join(row["statuses"]),
+                _iso_full(row["first_ts"]) or "?",
+                _iso_full(row["last_ts"]) or "?",
+            )
+        )
+    return "\n".join(lines)
+
+
 def format_streaks(rows: list[dict]) -> str:
     if not rows:
         return "no entries"
@@ -1045,6 +1092,18 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=None,
         help="List harnesses whose newest filtered entry is older than S seconds ago (rc 1 when any; --json emits {silent: [...]})",
+    )
+    parser.add_argument(
+        "--chains",
+        action="store_true",
+        help="List prompt_head values consulted at least --chain-min times (rc 1 when any; --json emits {chains: [...]})",
+    )
+    parser.add_argument(
+        "--chain-min",
+        metavar="N",
+        type=int,
+        default=2,
+        help="Minimum repeats for a --chains row (default 2)",
     )
     parser.add_argument(
         "--count",
@@ -1685,6 +1744,13 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(json.dumps({"silent": rows}, indent=2) + "\n")
         else:
             sys.stdout.write(format_silent(rows, float(args.silent_since)) + "\n")
+        return 1 if rows else 0
+    if getattr(args, "chains", False):
+        rows = prompt_chains(entries, int(getattr(args, "chain_min", 2)))
+        if args.json:
+            sys.stdout.write(json.dumps({"chains": rows}, indent=2) + "\n")
+        else:
+            sys.stdout.write(format_chains(rows) + "\n")
         return 1 if rows else 0
     if getattr(args, "fill_gaps", False):
         rows = fill_gaps(entries)

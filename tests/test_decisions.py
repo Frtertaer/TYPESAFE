@@ -1412,6 +1412,22 @@ class CliTest(unittest.TestCase):
             self.assertEqual(len(lines), 1)
             self.assertEqual(json.loads(lines[0])["harness"], "a")
 
+    def test_keys_projects_emitted_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [{"harness": "a", "ts": 1, "extra": "x"}],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--jsonl", "--keys", "harness,ts"
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            row = json.loads(proc.stdout.strip())
+            self.assertEqual(row, {"harness": "a", "ts": 1})
+            proc = self.run_cli("--file", str(path), "--jsonl", "--keys", " , ")
+            self.assertEqual(proc.returncode, 2)
+
     def test_until_filters_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

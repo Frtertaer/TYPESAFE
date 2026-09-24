@@ -1274,6 +1274,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Print filtered entries as raw JSON lines (for piping); with --verify emits one {line, issue} row per problem",
     )
     parser.add_argument(
+        "--keys",
+        metavar="a,b",
+        default="",
+        help="Keep only these entry keys in emitted rows (--jsonl/--out/--nth/--sample; rc 2 when empty)",
+    )
+    parser.add_argument(
         "--last",
         action="store_true",
         default=os.environ.get("JEV_DECISIONS_LAST", "").strip().lower() in ("1", "true", "yes"),
@@ -2401,6 +2407,16 @@ def main(argv: list[str] | None = None) -> int:
         emit_entries = _random.sample(
             emit_entries, min(sample_n, len(emit_entries))
         )
+    key_sel = getattr(args, "keys", "") or ""
+    if key_sel:
+        proj = [k.strip() for k in key_sel.split(",") if k.strip()]
+        if not proj:
+            sys.stderr.write("--keys names no fields\n")
+            return 2
+        emit_entries = [
+            {k: item.get(k) for k in proj} if isinstance(item, dict) else item
+            for item in emit_entries
+        ]
     if getattr(args, "last", False):
         if emit_entries:
             sys.stdout.write(json.dumps(entries[-1], indent=2, sort_keys=True) + "\n")

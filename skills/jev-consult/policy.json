@@ -284,5 +284,7 @@
   "fill_timeout_seconds": 90,
   "scan_cache_seconds": 45,
   "catalog_search_limit": 8,
-  "catalog_cache_max_queries": 50
+  "catalog_cache_max_queries": 50,
+  "env_file_max_bytes": 65536,
+  "sidecar_task_max_chars": 500
 }

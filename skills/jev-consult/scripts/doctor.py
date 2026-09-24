@@ -26,6 +26,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import _watch  # noqa: E402
+from inventory import _policy_float_key  # noqa: E402
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
@@ -216,9 +217,15 @@ def check_codex(home: Path) -> list[dict]:
     return out
 
 
+def _env_file_max_bytes() -> int:
+    """Cap on .env file size scanned for key presence. Threshold lives in
+    policy.json (env_file_max_bytes, 65536 default)."""
+    return int(_policy_float_key("env_file_max_bytes", 65536.0))
+
+
 def _env_file_has_key(path: Path) -> bool:
     try:
-        if not path.is_file() or path.stat().st_size > 65536:
+        if not path.is_file() or path.stat().st_size > _env_file_max_bytes():
             return False
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -422,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
             "watch_secs": watch_secs,
             "watch_quiet": _watch.quiet("JEV_DOCTOR_WATCH_QUIET", False),
             "policy": os.environ.get("JEV_POLICY", "").strip() or "default",
+            "env_file_max_bytes": _env_file_max_bytes(),
         }
         if getattr(args, "jq", ""):
             node, found = _watch.dig(payload, args.jq)

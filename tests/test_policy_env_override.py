@@ -264,6 +264,33 @@ class ThresholdPolicyEnvTests(unittest.TestCase):
                 self.assertEqual(catalog_fill.cache_max_queries(), 5)
             self.assertEqual(catalog_fill.cache_max_queries(), 50)
 
+    def test_env_file_max_bytes_honors_policy(self) -> None:
+        import doctor
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = _custom_policy(tmp, env_file_max_bytes=64)
+            with patch.dict(os.environ, {"JEV_POLICY": str(custom)}):
+                self.assertEqual(doctor._env_file_max_bytes(), 64)
+            self.assertEqual(doctor._env_file_max_bytes(), 65536)
+
+    def test_sidecar_task_max_chars_honors_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = _custom_policy(tmp, sidecar_task_max_chars=10)
+            with patch.dict(os.environ, {"JEV_POLICY": str(custom)}):
+                self.assertEqual(inventory.sidecar_task_max_chars(), 10)
+            self.assertEqual(inventory.sidecar_task_max_chars(), 500)
+
+    def test_write_sidecar_truncates_task_to_policy_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            custom = _custom_policy(tmp, sidecar_task_max_chars=7)
+            with patch.dict(os.environ, {"JEV_POLICY": str(custom)}):
+                sidecar = Path(tmp) / ".jev-tools.json"
+                inventory.write_sidecar(
+                    sidecar, "claude-code", "x" * 20,
+                    [{"id": "k:n", "kind": "skill", "name": "n"}],
+                )
+                data = json.loads(sidecar.read_text(encoding="utf-8"))
+                self.assertEqual(data["task"], "x" * 7)
+
     def test_shipped_policy_defines_all_threshold_keys(self) -> None:
         policy = json.loads(POLICY_JSON.read_text(encoding="utf-8"))
         for key in (
@@ -272,6 +299,8 @@ class ThresholdPolicyEnvTests(unittest.TestCase):
             "catalog_search_limit",
             "catalog_cache_max_queries",
             "hermes_install_timeout_seconds",
+            "env_file_max_bytes",
+            "sidecar_task_max_chars",
         ):
             self.assertIn(key, policy, key)
 

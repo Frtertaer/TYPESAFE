@@ -70,6 +70,8 @@ POSITIVE_INT_FIELDS = (
     "choice_option_hard_max",
     "catalog_search_limit",
     "catalog_cache_max_queries",
+    "env_file_max_bytes",
+    "sidecar_task_max_chars",
 )
 NONNEG_NUM_FIELDS = (
     "catalog_cache_seconds",
@@ -97,6 +99,7 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "catalogs",
     "choice",
     "dedupe_ttl_seconds",
+    "env_file_max_bytes",
     "fill_timeout_seconds",
     "hallucination",
     "hermes_install_timeout_seconds",
@@ -107,6 +110,7 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "hook_payload_max_bytes",
     "progress",
     "scan_cache_seconds",
+    "sidecar_task_max_chars",
     "smoke_perf_budget_seconds",
     "spill_max_bytes",
     "spill_max_files",
@@ -138,6 +142,8 @@ INIT_POLICY = {
     "scan_cache_seconds": 45,
     "catalog_search_limit": 8,
     "catalog_cache_max_queries": 50,
+    "env_file_max_bytes": 65536,
+    "sidecar_task_max_chars": 500,
     "must_ask": ["approach"],
     "never_ask": [
         "tool_checkable_fact",

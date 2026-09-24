@@ -743,7 +743,7 @@ def atomic_write_text(path: Path, text: str) -> None:
 
 
 def write_miss(path: Path, harness: str, task: str, extra: dict | None = None) -> None:
-    task = (task or "")[:500]
+    task = (task or "")[:sidecar_task_max_chars()]
     prior = read_sidecar(path)
     if prior and sidecar_fresh(prior) and str(prior.get("task") or "") == task:
         return
@@ -876,7 +876,7 @@ def write_sidecar(
 ) -> None:
     payload = {
         "harness": harness,
-        "task": (task or "")[:500],
+        "task": (task or "")[:sidecar_task_max_chars()],
         "written_at": int(time.time()),
         "names": [{"kind": item["kind"], "name": item["name"]} for item in picked],
         "items": [
@@ -955,6 +955,12 @@ def _policy_float_key(key: str, default: float) -> float:
         return max(0.0, float(_policy_dict().get(key, default)))
     except (TypeError, ValueError):
         return default
+
+
+def sidecar_task_max_chars() -> int:
+    """Cap on the task text stored in sidecars. Threshold lives in
+    policy.json (sidecar_task_max_chars, 500 default)."""
+    return int(_policy_float_key("sidecar_task_max_chars", 500.0))
 
 
 def scan_cache_seconds() -> float:
@@ -1510,6 +1516,7 @@ def main(argv: list[str] | None = None) -> int:
             "log": "disabled" if log_env == "0" else (log_env or "default"),
             "policy": os.environ.get("JEV_POLICY", "").strip() or "default",
             "scan_cache_seconds": scan_cache_seconds(),
+            "sidecar_task_max_chars": sidecar_task_max_chars(),
             "watch_max": _watch.cap("JEV_INV_WATCH_MAX", None),
             "watch_secs": watch_secs,
             "watch_quiet": _watch.quiet("JEV_INV_WATCH_QUIET", False),

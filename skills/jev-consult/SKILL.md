@@ -232,6 +232,8 @@ Every threshold lives in `policy.json` (override with `JEV_POLICY=PATH`). The to
 | `scan_cache_seconds` | `45` | in-process `inventory.scan` cache TTL |
 | `catalog_search_limit` | `8` | `hermes ... search` row cap in `apply_fill.py`/`catalog_fill.py` |
 | `catalog_cache_max_queries` | `50` | `catalog_fill.py` query-cache row cap |
+| `env_file_max_bytes` | `65536` | `doctor.py` .env size cap when scanning for key presence |
+| `sidecar_task_max_chars` | `500` | task text cap stored in `.jev-tools*.json` sidecars |
 | `templates` | `{approach: {...}, ...}` | question templates for `jev.py scaffold`/`decide` |
 | `hallucination` | `{claim, ...}` | claim-text block used by the hallucination guard |
 | `progress` | `{rubric_version, points, ...}` | scoring rubric for `progress.py` review points |

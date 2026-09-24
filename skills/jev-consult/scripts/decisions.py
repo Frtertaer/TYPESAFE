@@ -73,7 +73,7 @@ ENTRY_SCHEMA_ROWS = {
     "stale_sidecar": {"required": True, "type": "bool, a stale sidecar was auto-pruned"},
     "sidecar_age_s": {"required": True, "type": "int|null, age of the pruned sidecar"},
     "note": {"required": False, "type": "string, extra note tag (written only when set)"},
-    "fill": {"required": False, "type": "string, fill writer (apply|catalog) — fill entries only"},
+    "fill": {"required": False, "type": "string, fill writer (apply|catalog|peer) — fill entries only"},
     "outcome": {"required": False, "type": "string, first word of the fill result — fill entries only"},
 }
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import unittest
@@ -109,6 +110,68 @@ class SchemaParityTests(unittest.TestCase):
                 self.assertIsNotNone(match, "%s lacks OUTCOMES" % name)
                 declared = set(re.findall(r'"([a-z_]+)"', match.group(1)))
                 self.assertEqual(emitted - declared, set(), name)
+
+    def test_fill_vocabulary_aligns_across_scripts(self) -> None:
+        """The three fill writers log fill=<name>, and decisions.py's
+        entry schema + --fill help list exactly those names."""
+        names = {"peer_fill.py": "peer", "apply_fill.py": "apply",
+                 "catalog_fill.py": "catalog"}
+        for script, kind in names.items():
+            src = (SCRIPTS_DIR / script).read_text(encoding="utf-8")
+            self.assertIn(
+                '"fill": "%s"' % kind,
+                src,
+                "%s must log fill=%s in its decisions entry" % (script, kind),
+            )
+        decisions = (SCRIPTS_DIR / "decisions.py").read_text(
+            encoding="utf-8"
+        )
+        schema_fill = re.search(
+            r'"fill":\s*\{[^}]*"type":\s*"([^"]+)"', decisions
+        )
+        self.assertIsNotNone(schema_fill)
+        for kind in names.values():
+            self.assertIn(kind, schema_fill.group(1))
+        fill_help = re.search(
+            r'add_argument\("--fill".{0,400}?help="([^"]+)"',
+            decisions,
+            re.S,
+        )
+        self.assertIsNotNone(fill_help)
+        for kind in names.values():
+            self.assertIn(kind, fill_help.group(1))
+
+    def test_fill_outcomes_declared_are_emitted(self) -> None:
+        """Every OUTCOMES member must be emitted somewhere — emit("x"),
+        sys.stdout.write("x"), or json.dumps({"outcome": "x"}). A declared
+        outcome with no emit site is dead vocabulary."""
+        for name in FILL_SCRIPTS:
+            with self.subTest(script=name):
+                source = (SCRIPTS_DIR / name).read_text(encoding="utf-8")
+                declared = set(
+                    re.findall(
+                        r'"([a-z_]+)"',
+                        re.search(r"OUTCOMES = \(([^)]+)\)", source).group(1),
+                    )
+                )
+                # strip the OUTCOMES block before counting emit sites;
+                # a token counts emitted when it appears word-boundaried
+                # in an emit(/stdout.write(/json.dumps( line (covers the
+                # emit("installed %s") format sites too)
+                body = re.sub(r"OUTCOMES = \([^)]+\)", "", source)
+                emit_lines = [
+                    line
+                    for line in body.splitlines()
+                    if re.search(r"emit\(|stdout\.write\(|json\.dumps\(", line)
+                ]
+                dead = sorted(
+                    o
+                    for o in declared - {"dry"}  # dry is a "dry "-prefix tag
+                    if not any(
+                        re.search(r"\b%s\b" % o, line) for line in emit_lines
+                    )
+                )
+                self.assertEqual(dead, [], name)
 
     def test_smoke_covers_every_schema_script(self) -> None:
         """smoke.py's SCHEMA_SCRIPTS map must list every contract script."""

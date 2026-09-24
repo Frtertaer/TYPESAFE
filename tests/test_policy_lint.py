@@ -1223,6 +1223,24 @@ class JsonlEmitTests(unittest.TestCase):
             proc = self._run(str(bad), "--jsonl", "--keys", " ,")
             self.assertEqual(proc.returncode, 2)
 
+    def test_csv_emits_finding_rows(self) -> None:
+        import csv as _csv
+        import io as _io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            policy = base_policy()
+            policy["noul_yes"] = 1.7
+            bad = Path(tmp) / "policy.json"
+            bad.write_text(json.dumps(policy), encoding="utf-8")
+            proc = self._run(str(bad), "--csv")
+            self.assertEqual(proc.returncode, 1)
+            rows = list(_csv.reader(_io.StringIO(proc.stdout)))
+            self.assertEqual(rows[0], ["severity", "rule", "path", "message"])
+            self.assertGreater(len(rows), 1)
+            proc = self._run(str(bad), "--csv", "--keys", "rule,severity")
+            rows = list(_csv.reader(_io.StringIO(proc.stdout)))
+            self.assertEqual(rows[0], ["rule", "severity"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -536,6 +536,23 @@ class CliTests(unittest.TestCase):
             proc = self._run(str(bad), "--jsonl", "--keys", " ,")
             self.assertEqual(proc.returncode, 2)
 
+    def test_csv_emits_finding_rows(self):
+        import csv as _csv
+        import io as _io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_skill(tmp, "bad_dir", GOOD.format(name="Other"))
+            proc = self._run(str(bad), "--csv")
+            self.assertNotEqual(proc.returncode, 2)
+            rows = list(_csv.reader(_io.StringIO(proc.stdout)))
+            self.assertEqual(rows[0], ["severity", "rule", "path", "message"])
+            self.assertGreater(len(rows), 1)
+            proc = self._run(str(bad), "--csv", "--keys", "rule,severity")
+            rows = list(_csv.reader(_io.StringIO(proc.stdout)))
+            self.assertEqual(rows[0], ["rule", "severity"])
+            proc = self._run(str(bad), "--csv", "--keys", " ,")
+            self.assertEqual(proc.returncode, 2)
+
     def test_baseline_suppresses_known_findings(self):
         """--baseline PATH suppresses recorded findings; new ones still fire."""
         with tempfile.TemporaryDirectory() as tmp:

@@ -426,7 +426,7 @@ def _atomic_write(path, text):
         raise
 
 
-USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: report what would change without writing\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_SLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --jsonl           findings as one JSON object per line (adds path)\n  --keys a,b        with --jsonl: keep only these keys in each row (rc 2 on empty)\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  -                 read SKILL.md content from stdin (no --fix/--watch/--diff)\n  --diff PATH       diff this SKILL.md against another (frontmatter/cited_scripts/body_lines/body_sha1; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --init            print a minimal SKILL.md skeleton (name it after its directory) and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: report what would change without writing\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_SLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --csv             findings as CSV rows (--keys picks the columns)\n  --jsonl           findings as one JSON object per line (adds path)\n  --keys a,b        with --jsonl/--csv: keep only these keys in each row / as the columns (rc 2 on empty)\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  -                 read SKILL.md content from stdin (no --fix/--watch/--diff)\n  --diff PATH       diff this SKILL.md against another (frontmatter/cited_scripts/body_lines/body_sha1; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --init            print a minimal SKILL.md skeleton (name it after its directory) and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -441,6 +441,7 @@ def main(argv: list[str] | None = None) -> int:
     dry_run = "--dry-run" in argv
     as_json = "--json" in argv
     as_md = "--md" in argv
+    as_csv = "--csv" in argv
     as_jsonl = "--jsonl" in argv
     strict = "--strict" in argv
     quiet = "--quiet" in argv
@@ -514,6 +515,12 @@ def main(argv: list[str] | None = None) -> int:
             _watch.md_table(
                 [{"rule": k, "description": v} for k, v in sorted(RULES.items())],
                 ["rule", "description"],
+            )
+        elif as_csv:
+            _watch.csv_table(
+                [{k: r.get(k) for k in keys} if keys else r
+                 for r in ({"rule": k, "description": v} for k, v in sorted(RULES.items()))],
+                keys or ["rule", "description"],
             )
         else:
             for _rule in sorted(RULES):
@@ -665,7 +672,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = [
         a
         for a in argv
-        if a not in ("--fix", "--dry-run", "--json", "--md", "--jsonl", "--strict", "--quiet", "--fail-fast")
+        if a not in ("--fix", "--dry-run", "--json", "--md", "--csv", "--jsonl", "--strict", "--quiet", "--fail-fast")
     ]
     if "--env" in argv:
         try:
@@ -926,12 +933,14 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             if quiet and f["severity"] != "error":
                 continue
-            if as_md:
+            if as_md or as_csv:
                 md_rows.append(row)
             else:
                 sys.stdout.write("%s %s %s: %s\n" % (f["severity"], f["rule"], path, f["message"]))
     if as_md:
         _watch.md_table(md_rows, ["severity", "rule", "path", "message"])
+    if as_csv:
+        _watch.csv_table(md_rows, keys or ["severity", "rule", "path", "message"])
     if n_suppressed:
         sys.stderr.write(
             "baseline: suppressed %d known finding(s)\n" % n_suppressed

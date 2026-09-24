@@ -8,6 +8,8 @@ emit() prints one tick JSON line to stdout and appends it to the optional
 """
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
 import sys
@@ -241,6 +243,25 @@ def md_table(rows: list, cols: list, out=None) -> None:
             + " | ".join(c.replace("|", "\\|").replace("\n", " ") for c in cells)
             + " |\n"
         )
+
+
+def csv_table(rows: list, cols: list, out=None) -> None:
+    """Print dict ROWS as CSV headed by COLS (cell keys match column names);
+    dict/list cells serialize as JSON."""
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(cols)
+    for r in rows:
+        writer.writerow(
+            [
+                json.dumps(r.get(c), sort_keys=True)
+                if isinstance(r.get(c), (dict, list))
+                else ("" if r.get(c) is None else str(r.get(c)))
+                for c in cols
+            ]
+        )
+    stream = out if out is not None else sys.stdout
+    stream.write(buf.getvalue())
 
 
 def load_baseline(path: str, fields=("path", "rule", "message")) -> set:

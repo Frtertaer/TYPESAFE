@@ -781,6 +781,26 @@ class StandaloneCliTests(unittest.TestCase):
             self.assertEqual(set(row), {"rule", "file"})
         self.assertEqual(bad.returncode, 2)
 
+    def test_csv_emits_finding_rows(self) -> None:
+        import csv as _csv
+        import io as _io
+
+        request = {
+            "state": "1" * 100000,
+            "questions": {"q": noul("Should the coder proceed with the plan?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            proc = self._run(str(path), "--csv")
+            self.assertEqual(proc.returncode, 1)
+            rows = list(_csv.reader(_io.StringIO(proc.stdout)))
+            self.assertEqual(rows[0], ["severity", "rule", "qid", "message", "fix"])
+            self.assertGreater(len(rows), 1)
+            proc = self._run(str(path), "--csv", "--keys", "rule,severity")
+            rows = list(_csv.reader(_io.StringIO(proc.stdout)))
+            self.assertEqual(rows[0], ["rule", "severity"])
+
     def test_error_request_rc1(self) -> None:
         request = {
             "state": "1" * 100000,

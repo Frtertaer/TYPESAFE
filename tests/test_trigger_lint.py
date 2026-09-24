@@ -688,6 +688,25 @@ class BaselineTests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("--keys names no fields", err.getvalue())
 
+    def test_csv_emits_finding_rows(self) -> None:
+        import csv as _csv
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_cases(tmp, [{"id": "pos-x", "should_trigger": True}])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main([str(bad), "--csv"])
+            self.assertEqual(rc, 1)
+            rows = list(_csv.reader(io.StringIO(buf.getvalue())))
+            self.assertEqual(rows[0], ["severity", "rule", "id", "message"])
+            self.assertGreater(len(rows), 1)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main([str(bad), "--csv", "--keys", "rule,severity"])
+            self.assertEqual(rc, 1)
+            rows = list(_csv.reader(io.StringIO(buf.getvalue())))
+            self.assertEqual(rows[0], ["rule", "severity"])
+
 
 class StdinDashTests(unittest.TestCase):
     def _feed(self, argv, stdin_text):

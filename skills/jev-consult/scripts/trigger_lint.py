@@ -265,7 +265,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch/--diff).\nLint a trigger-cases fixture file for schema sanity.\nFlags:\n  --policy PATH     lint cases against a specific policy.json\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the cases-file key contract (--json emits the object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_TLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --jsonl           findings as one JSON object per line (adds file)\n  --keys a,b        with --jsonl: keep only these keys in each row (rc 2 on empty)\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this cases file against another (+/-/~ on cases.<id>.<field>; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad cases file; exit 1 when no findings\n  --init            print a lint-clean cases skeleton (one positive per policy must_ask kind) and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args or unreadable file.\n'
+USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch/--diff).\nLint a trigger-cases fixture file for schema sanity.\nFlags:\n  --policy PATH     lint cases against a specific policy.json\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the cases-file key contract (--json emits the object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_TLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --csv             findings as CSV rows (--keys picks the columns)\n  --jsonl           findings as one JSON object per line (adds file)\n  --keys a,b        with --jsonl/--csv: keep only these keys in each row / as the columns (rc 2 on empty)\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this cases file against another (+/-/~ on cases.<id>.<field>; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad cases file; exit 1 when no findings\n  --init            print a lint-clean cases skeleton (one positive per policy must_ask kind) and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args or unreadable file.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -278,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     as_json = "--json" in argv
     as_md = "--md" in argv
+    as_csv = "--csv" in argv
     as_jsonl = "--jsonl" in argv
     quiet = "--quiet" in argv
     severity: set[str] = set()
@@ -353,6 +354,11 @@ def main(argv: list[str] | None = None) -> int:
             _watch.md_table(
                 [{"rule": k, "description": v} for k, v in sorted(RULES.items())],
                 ["rule", "description"],
+            )
+        elif as_csv:
+            _watch.csv_table(
+                [_project({"rule": k, "description": v}) for k, v in sorted(RULES.items())],
+                keys or ["rule", "description"],
             )
         else:
             for _rule in sorted(RULES):
@@ -530,7 +536,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = [
         a
         for a in argv
-        if a not in ("--json", "--md", "--jsonl", "--quiet", "--strict", "--fix", "--dry-run", "--fail-fast")
+        if a not in ("--json", "--md", "--csv", "--jsonl", "--quiet", "--strict", "--fix", "--dry-run", "--fail-fast")
     ]
     if "--env" in argv:
         try:
@@ -638,13 +644,19 @@ def main(argv: list[str] | None = None) -> int:
                     sys.stdout.write(
                         json.dumps(_project({"file": res["path"], **f}), ensure_ascii=False) + "\n"
                     )
-        elif as_md:
+        elif as_md or as_csv:
             md_rows = [
                 {**f, "path": res["path"]}
                 for res in results
                 for f in res["findings"]
             ]
-            _watch.md_table(md_rows, ["severity", "rule", "path", "id", "message"])
+            if as_md:
+                _watch.md_table(md_rows, ["severity", "rule", "path", "id", "message"])
+            else:
+                _watch.csv_table(
+                    [_project(r) for r in md_rows],
+                    keys or ["severity", "rule", "path", "id", "message"],
+                )
         else:
             for res in results:
                 sys.stdout.write("%s:\n" % res["path"])
@@ -855,6 +867,11 @@ def main(argv: list[str] | None = None) -> int:
             )
     elif as_md:
         _watch.md_table(shown, ["severity", "rule", "id", "message"])
+    elif as_csv:
+        _watch.csv_table(
+            [_project(f) for f in shown],
+            keys or ["severity", "rule", "id", "message"],
+        )
     else:
         for f in shown:
             sys.stdout.write(

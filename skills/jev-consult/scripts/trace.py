@@ -880,7 +880,7 @@ def cmd_undo(args: argparse.Namespace) -> int:
             {"path": str(path), "removed": [], "history": 0, "reason": "empty"},
             jq, jl,
         )
-    n = max(1, min(int(args.n), len(history)))
+    n = len(history) if getattr(args, "all", False) else max(1, min(int(args.n), len(history)))
     removed = history[len(history) - n :]
     if getattr(args, "dry_run", False):
         return emit(
@@ -2152,6 +2152,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="How many trailing history picks to drop (default 1, clamped to history length)",
+    )
+    undo_cmd.add_argument(
+        "--all",
+        action="store_true",
+        help="Drop every history pick (same as --n <history length>)",
     )
     undo_cmd.add_argument(
         "--dry-run",

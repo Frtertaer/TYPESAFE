@@ -1679,6 +1679,32 @@ class TraceTests(unittest.TestCase):
             data = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(len(data["history"]), 1)
 
+    def test_undo_all_drops_every_pick(self) -> None:
+        import io
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                tr.main(["--file", str(path), "init", "--plan", "P"])
+                for pick in ("a", "b"):
+                    tr.main(["--file", str(path), "record", "--pick", pick])
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "undo", "--all", "--dry-run"])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(len(out["would_remove"]), 2)
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "undo", "--all"])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(len(out["removed"]), 2)
+            self.assertEqual(out["history"], 0)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["history"], [])
+
     def test_state_missing_file_empty(self) -> None:
         import io
         from unittest.mock import patch

@@ -208,6 +208,24 @@ class ApplyFillTests(unittest.TestCase):
         self.assertEqual(rows[0]["name"], "beta")
         self.assertEqual(rows[0]["kind"], "mcp")
 
+    def test_list_jsonl_emits_one_row_per_item(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        hits = [FILL.as_item("mcp", "beta", "b mcp"), FILL.as_item("plugin", "alpha", "a plugin")]
+        with patch.object(FILL, "search_hits", return_value=hits):
+            with patch.object(
+                sys, "argv", ["apply_fill.py", "--task", "beta alpha", "--list", "--jsonl"]
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+        self.assertEqual(rc, 0)
+        rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertEqual(set(row), {"kind", "name", "id"})
+
     def test_show_prints_matching_record(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

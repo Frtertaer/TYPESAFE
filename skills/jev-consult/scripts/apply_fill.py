@@ -407,6 +407,11 @@ def main() -> int:
         help="Print one candidate's full JSON record by name/id and exit.",
     )
     parser.add_argument(
+        "--jsonl",
+        action="store_true",
+        help="With --list: emit one {kind, name, id} JSON row per line instead of the array.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit the outcome as a JSON object instead of a text line.",
@@ -716,6 +721,19 @@ def main() -> int:
                         for item in items
                     ]
                     sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+                elif getattr(args, "jsonl", False):
+                    for item in items:
+                        sys.stdout.write(
+                            json.dumps(
+                                {
+                                    "kind": item.get("kind") or "?",
+                                    "name": item.get("name") or "?",
+                                    "id": item.get("id") or "",
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
                 else:
                     for item in items:
                         sys.stdout.write(

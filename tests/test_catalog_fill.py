@@ -463,6 +463,35 @@ class CatalogFillTests(unittest.TestCase):
             )
             self.assertFalse((base / INV.SIDECAR_NAME).exists())
 
+    def test_list_jsonl_emits_one_row_per_hit(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hits = [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                sys,
+                "argv",
+                [
+                    "catalog_fill.py",
+                    "--task",
+                    "jwt",
+                    "--harness",
+                    "claude-code",
+                    "--cwd",
+                    str(base),
+                    "--list",
+                    "--jsonl",
+                ],
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+            self.assertEqual(
+                rows, [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            )
+
     def test_watch_fail_fast_breaks_on_first_hit(self) -> None:
         import io
 

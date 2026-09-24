@@ -89,7 +89,60 @@ def env_report(script: str, argv_prefix: list, argv_suffix: list, tmp: str) -> d
     return json.loads(proc.stdout)
 
 
+SENTINEL = "apikey_SENTINEL_9x_LEAK"
+
+
+def run_with_sentinel(script: str, argv_prefix: list, argv_suffix: list, tmp: str,
+                      extra_env: dict | None = None, stdin: str | None = None):
+    env = dict(os.environ)
+    env["JEV_CONSULT_LOG"] = "0"
+    env["TYPESAFE_API_KEY"] = SENTINEL
+    env.update(extra_env or {})
+    return subprocess.run(
+        [sys.executable, str(SCRIPTS / script)] + argv_prefix + argv_suffix,
+        capture_output=True, text=True, timeout=120, cwd=tmp, env=env,
+        input=stdin,
+    )
+
+
 class EnvShapeTests(unittest.TestCase):
+    def test_env_surfaces_never_print_api_key(self) -> None:
+        """The key's VALUE must not reach stdout/stderr on any env or
+        debug surface — presence flags only."""
+        surfaces = [(name + ".py", [], ["--env"]) for name in EXPECTED]
+        for name, (prefix, arg, _keys) in ENV_SUBCOMMAND.items():
+            surfaces.append((name + ".py", list(prefix), ["env"]))
+        with tempfile.TemporaryDirectory() as tmp:
+            for script, prefix, suffix in surfaces:
+                prefix = list(prefix)
+                for i, a in enumerate(prefix):
+                    if a == "repo":
+                        prefix[i] = tmp
+                    elif a.endswith(".json"):
+                        prefix[i] = str(Path(tmp) / a)
+                if script == "progress.py":
+                    prefix += ["--db", str(Path(tmp) / "p.db")]
+                with self.subTest(script=script):
+                    proc = run_with_sentinel(script, prefix, suffix, tmp)
+                    self.assertNotIn(SENTINEL, proc.stdout)
+                    self.assertNotIn(SENTINEL, proc.stderr)
+
+    def test_hook_debug_never_prints_api_key(self) -> None:
+        """JEV_HOOK_DEBUG stderr lines and --verbose output stay
+        secret-free too."""
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_with_sentinel(
+                "inventory_hook.py", [], ["--verbose"], tmp,
+                extra_env={
+                    "JEV_HOOK_DEBUG": "1",
+                    "JEV_HOOK_CWD": tmp,
+                    "JEV_HOOK_PROMPT": "hello",
+                },
+                stdin="{}",
+            )
+            self.assertNotIn(SENTINEL, proc.stdout)
+            self.assertNotIn(SENTINEL, proc.stderr)
+
     def test_flag_env_key_sets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             for name, keys in sorted(EXPECTED.items()):

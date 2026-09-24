@@ -180,7 +180,10 @@ def roots_for(harness: str, home: Path | None = None, hermes: Path | None = None
 
 
 def tokens(text: str) -> set[str]:
-    words = re.findall(r"[a-z0-9]{3,}", text.lower())
+    # [^\W_] = unicode word chars minus underscore: ASCII behaves exactly as
+    # [a-z0-9] did, and Cyrillic/accented/CJK text now yields real tokens
+    # instead of an empty query.
+    words = re.findall(r"[^\W_]{3,}", text.lower())
     return {word for word in words if word not in stop_words()}
 
 

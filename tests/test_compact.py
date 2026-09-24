@@ -3062,6 +3062,26 @@ class SpillCapTests(unittest.TestCase):
         files, size = C._opts_spill_caps({"spill_max_files": "junk"})
         self.assertEqual(files, C.SPILL_MAX_FILES)
 
+    def test_cli_spill_cap_flags_override_env_report(self) -> None:
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = C.main(
+                [
+                    "--env",
+                    "--spill-max-files",
+                    "5",
+                    "--spill-max-bytes",
+                    "123",
+                ]
+            )
+        self.assertEqual(rc, 0)
+        report = json.loads(buf.getvalue())
+        self.assertEqual(report["spill_max_files"], 5)
+        self.assertEqual(report["spill_max_bytes"], 123)
+
 
 class SchemaTests(unittest.TestCase):
     def test_schema_flag_text_and_json(self) -> None:

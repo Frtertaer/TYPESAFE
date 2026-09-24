@@ -1078,6 +1078,23 @@ class NormalizeTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             C.extract_messages("string")
 
+    def test_extract_messages_alternate_keys(self):
+        for key in ("transcript", "items", "history", "input"):
+            with self.subTest(key=key):
+                payload = {key: [{"role": "user", "text": "k"}]}
+                self.assertEqual(C.extract_messages(payload)[0]["text"], "k")
+                # dict value carrying messages is unwrapped too
+                payload2 = {key: {"messages": [{"role": "user", "text": "d"}]}}
+                self.assertEqual(C.extract_messages(payload2)[0]["text"], "d")
+
+    def test_extract_messages_body_dict_and_bad_json(self):
+        # request.body already parsed as a dict works
+        out = C.extract_messages({"request": {"body": {"messages": [{"role": "user", "text": "b"}]}}})
+        self.assertEqual(out[0]["text"], "b")
+        # unparseable body falls through to other keys
+        out2 = C.extract_messages({"request": {"body": "not json"}, "messages": [{"role": "user", "text": "m"}]})
+        self.assertEqual(out2[0]["text"], "m")
+
     def test_parse_transcript_json_and_jsonl(self):
         msgs = C.parse_transcript('[{"role": "user", "text": "a"}]')
         self.assertEqual(len(msgs), 1)

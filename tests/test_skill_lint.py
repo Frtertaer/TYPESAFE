@@ -1121,5 +1121,53 @@ class DiffFlagTests(unittest.TestCase):
             doc.write_text(buf.getvalue(), encoding="utf-8")
             self.assertEqual(skill_lint.lint_skill(doc), [])
 
+    def test_usage_flags_unknown_frontmatter_keys(self):
+        doc_text = (
+            "---\nname: my-skill\ndescription: A test skill.\n"
+            "license: MIT\nweird_key: x\n---\n\n# body\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(tmp, "my-skill", doc_text)
+            self.assertFalse(
+                any(f["rule"] == "S014" for f in skill_lint.lint_skill(path))
+            )
+            findings = skill_lint.lint_skill(path, usage=True)
+        s014 = [f for f in findings if f["rule"] == "S014"]
+        self.assertEqual(len(s014), 1)
+        self.assertEqual(s014[0]["severity"], "info")
+        self.assertIn("weird_key", s014[0]["message"])
+        # license is a recognized skill-metadata key — not flagged
+        self.assertNotIn("license", s014[0]["message"])
+
+    def test_usage_cli_json(self):
+        doc_text = "---\nname: my-skill\ndescription: A test skill.\nweird_key: x\n---\n\n# body\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(tmp, "my-skill", doc_text)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = skill_lint.main([str(path), "--usage", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertIn(
+            "weird_key",
+            "\n".join(f["message"] for f in payload["findings"]),
+        )
+
+    def test_frontmatter_extra_keys_join_summary_diff(self):
+        a = "---\nname: s\ndescription: a\nlicense: MIT\n---\nbody\n"
+        b = "---\nname: s\ndescription: a\nlicense: Apache\n---\nbody\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "s"
+            d.mkdir()
+            pa, pb = d / "a.md", d / "b.md"
+            pa.write_text(a, encoding="utf-8")
+            pb.write_text(b, encoding="utf-8")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = skill_lint.main([str(pa), "--diff", str(pb)])
+        self.assertEqual(rc, 0)
+        self.assertIn("frontmatter.license", buf.getvalue())
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

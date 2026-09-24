@@ -20,7 +20,9 @@ if str(_SCRIPTS) not in sys.path:
 
 import _watch  # noqa: E402
 
-_FM_KEY = re.compile(r"^(name|description):\s*(.*)$")
+# Flat frontmatter scalar lines only: `key: value` at column 0 (nested YAML
+# blocks are skipped — their indented lines cannot match).
+_FM_KEY = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$")
 
 
 _FM_END = re.compile(r"\n---[ \t]*(\r?\n|$)")
@@ -128,7 +130,19 @@ def diff_skill(a: dict, b: dict) -> list[str]:
     return lines
 
 
-def lint_skill(path: Path) -> list[dict]:
+# Keys a SKILL.md frontmatter may legitimately carry (Anthropic agent-skills
+# spec + the pack's own contract). --usage flags anything else as S014.
+KNOWN_FRONTMATTER_KEYS = {
+    "name",
+    "description",
+    "license",
+    "compatibility",
+    "metadata",
+    "allowed-tools",
+}
+
+
+def lint_skill(path: Path, usage: bool = False) -> list[dict]:
     findings = []
     if str(path) != "-" and not path.is_file():
         return [
@@ -147,6 +161,15 @@ def lint_skill(path: Path) -> list[dict]:
             {"rule": "S002", "severity": "error", "message": "no frontmatter block"}
         )
         return findings
+    if usage:
+        for key in sorted(set(meta) - KNOWN_FRONTMATTER_KEYS):
+            findings.append(
+                {
+                    "rule": "S014",
+                    "severity": "info",
+                    "message": "frontmatter key %r is outside the skill-metadata contract" % key,
+                }
+            )
     name = meta.get("name", "").strip()
     if not name:
         findings.append(
@@ -399,6 +422,7 @@ RULES = {
     "S011": "policy.json key is never mentioned in SKILL.md",
     "S012": "a mentioned scripts/*.py exposes a --flag that SKILL.md never documents",
     "S013": "SKILL.md documents a --flag that no scripts/*.py exposes",
+    "S014": "frontmatter key is outside the skill-metadata contract; harnesses ignore it",
 }
 
 
@@ -426,7 +450,7 @@ def _atomic_write(path, text):
         raise
 
 
-USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: report what would change without writing\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_SLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --csv             findings as CSV rows (--keys picks the columns)\n  --jsonl           findings as one JSON object per line (adds path)\n  --keys a,b        with --jsonl/--csv: keep only these keys in each row / as the columns (rc 2 on empty)\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  -                 read SKILL.md content from stdin (no --fix/--watch/--diff)\n  --diff PATH       diff this SKILL.md against another (frontmatter/cited_scripts/body_lines/body_sha1; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --init            print a minimal SKILL.md skeleton (name it after its directory) and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: report what would change without writing\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_SLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --usage           add info findings for frontmatter keys outside the contract\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --csv             findings as CSV rows (--keys picks the columns)\n  --jsonl           findings as one JSON object per line (adds path)\n  --keys a,b        with --jsonl/--csv: keep only these keys in each row / as the columns (rc 2 on empty)\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  -                 read SKILL.md content from stdin (no --fix/--watch/--diff)\n  --diff PATH       diff this SKILL.md against another (frontmatter/cited_scripts/body_lines/body_sha1; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --init            print a minimal SKILL.md skeleton (name it after its directory) and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -444,6 +468,7 @@ def main(argv: list[str] | None = None) -> int:
     as_csv = "--csv" in argv
     as_jsonl = "--jsonl" in argv
     strict = "--strict" in argv
+    usage = "--usage" in argv
     quiet = "--quiet" in argv
     fail_fast = "--fail-fast" in argv
     severity: set[str] = set()
@@ -672,7 +697,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = [
         a
         for a in argv
-        if a not in ("--fix", "--dry-run", "--json", "--md", "--csv", "--jsonl", "--strict", "--quiet", "--fail-fast")
+        if a not in ("--fix", "--dry-run", "--usage", "--json", "--md", "--csv", "--jsonl", "--strict", "--quiet", "--fail-fast")
     ]
     if "--env" in argv:
         try:
@@ -747,7 +772,7 @@ def main(argv: list[str] | None = None) -> int:
         snapshot = [
             {"path": str(p), **f}
             for p in paths
-            for f in _watch.only_filter(lint_skill(p), only)
+            for f in _watch.only_filter(lint_skill(p, usage=usage), only)
         ]
         try:
             _atomic_write(
@@ -796,7 +821,7 @@ def main(argv: list[str] | None = None) -> int:
             rows = [
                 {**f, "path": str(path)}
                 for path in paths
-                for f in _watch.only_filter(lint_skill(path), only)
+                for f in _watch.only_filter(lint_skill(path, usage=usage), only)
             ]
             pre_drop = len(rows)
             if baseline_keys is not None:
@@ -856,7 +881,7 @@ def main(argv: list[str] | None = None) -> int:
         all_rows = [
             {"path": str(path), **f}
             for path in paths
-            for f in _watch.only_filter(lint_skill(path), only)
+            for f in _watch.only_filter(lint_skill(path, usage=usage), only)
         ]
         suppressed = 0
         if baseline_keys is not None:
@@ -918,7 +943,7 @@ def main(argv: list[str] | None = None) -> int:
     n_suppressed = 0
     md_rows: list[dict] = []
     for path in paths:
-        for f in _watch.only_filter(lint_skill(path), only):
+        for f in _watch.only_filter(lint_skill(path, usage=usage), only):
             row = {"path": str(path), **f}
             if baseline_keys is not None and _baseline_key(row) in baseline_keys:
                 n_suppressed += 1
@@ -954,7 +979,7 @@ def main(argv: list[str] | None = None) -> int:
         all_f = [
             {"path": str(path), **f}
             for path in paths
-            for f in _watch.only_filter(lint_skill(path), only)
+            for f in _watch.only_filter(lint_skill(path, usage=usage), only)
         ]
         if baseline_keys is not None:
             all_f = [

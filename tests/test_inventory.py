@@ -2364,6 +2364,32 @@ class UnicodeRoundTripTests(unittest.TestCase):
                 payload["names"], [{"kind": "skill", "name": "ё-search"}]
             )
 
+    def test_append_decision_short_write_completes_line(self) -> None:
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            real_write = os.write
+
+            def short_write(fd, data):
+                return real_write(fd, data[: max(1, len(data) // 2)])
+
+            with patch.object(inv.os, "write", short_write):
+                inv.append_decision({"sha": "x", "ts": 1, "jev_status": "ok"}, path)
+            line = path.read_text(encoding="utf-8")
+            self.assertTrue(line.endswith("\n"))
+            self.assertEqual(json.loads(line)["sha"], "x")
+
+    def test_append_decision_zero_write_fails_open(self) -> None:
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            with patch.object(inv.os, "write", lambda fd, data: 0):
+                inv.append_decision({"sha": "x"}, path)  # must not raise
+            # the write failed after the empty file was created; no partial line
+            self.assertEqual(path.read_text(encoding="utf-8"), "")
+
     def test_append_decision_bad_dir_fails_open(self) -> None:
         path = Path("N:\no\such\dir") / "d.jsonl"
         inv.append_decision({"sha": "x"}, path)

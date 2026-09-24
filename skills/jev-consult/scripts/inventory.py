@@ -858,7 +858,15 @@ def append_decision(entry: dict, path: Path | None = None) -> None:
         try:
             _file_lock(fd)
             try:
-                os.write(fd, (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8"))
+                data = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+                # os.write may return short; loop so the line never truncates
+                # mid-entry (a partial line would corrupt the jsonl chain).
+                view = memoryview(data)
+                while view:
+                    n = os.write(fd, view)
+                    if n <= 0:
+                        raise OSError("short write")
+                    view = view[n:]
             finally:
                 _file_unlock(fd)
         finally:

@@ -63,7 +63,13 @@ MISSING_VALUE_RC2 = {
         "--baseline",
         "--baseline-write",
     ],
-    "skill_scanner.py": ["--top", "--task", "--explain"],
+    "skill_scanner.py": [
+        "--top",
+        "--task",
+        "--explain",
+        "--baseline",
+        "--baseline-write",
+    ],
     "smoke.py": ["--only", "--repeat", "--jobs", "--timeout", "--baseline", "--baseline-write"],
     "trace.py": ["--file"],
     "trigger_eval.py": [

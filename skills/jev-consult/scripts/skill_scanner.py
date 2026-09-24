@@ -155,11 +155,15 @@ class Finding:
         self.skill, self.check, self.severity = skill, check, severity
         self.file, self.line, self.message = file, line, message
         self.evidence = evidence.strip()[:160]
+        self.suppressed = False
 
     def as_dict(self):
-        return {"skill": self.skill, "check": self.check, "severity": self.severity,
-                "file": self.file, "line": self.line, "message": self.message,
-                "evidence": self.evidence}
+        row = {"skill": self.skill, "check": self.check, "severity": self.severity,
+               "file": self.file, "line": self.line, "message": self.message,
+               "evidence": self.evidence}
+        if self.suppressed:
+            row["suppressed"] = True
+        return row
 
 
 SCHEMA = {
@@ -167,10 +171,50 @@ SCHEMA = {
     "version": {"required": True, "type": "string"},
     "root": {"required": True, "type": "string, scanned path"},
     "skills_scanned": {"required": True, "type": "list of skill dir paths"},
-    "findings": {"required": True, "type": "list of {skill,check,severity,file,line,message,evidence}"},
-    "summary": {"required": True, "type": "{CRITICAL,WARN,INFO} counts"},
+    "findings": {"required": True, "type": "list of {skill,check,severity,file,line,message,evidence,suppressed?}"},
+    "summary": {"required": True, "type": "{CRITICAL,WARN,INFO,suppressed} counts"},
     "verdict": {"required": True, "type": "PASS|REVIEW-WARNINGS|REJECT-PENDING-REVIEW"},
 }
+
+
+def _atomic_write(path, text):
+    """Sibling-tmp write + rename (os.replace semantics) — enough atomicity for
+    the standalone scanner where _watch.atomic_replace may not be importable."""
+    target = Path(path)
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(target)
+
+
+BASELINE_FIELDS = ("check", "file", "line", "message")
+
+
+def _baseline_key(f):
+    return (f.check, f.file, f.line, f.message)
+
+
+def _load_baseline(path):
+    """Key set from a --baseline-write file ('-' reads it from stdin, one read).
+    Missing/corrupt warns and returns an empty set so every finding counts."""
+    try:
+        raw = json.loads(
+            sys.stdin.read()
+            if str(path) == "-"
+            else Path(path).read_text(encoding="utf-8")
+        )
+    except FileNotFoundError:
+        print("baseline %s not found; all findings count" % path, file=sys.stderr)
+        return set()
+    except (OSError, ValueError):
+        print("baseline %s unreadable; all findings count" % path, file=sys.stderr)
+        return set()
+    items = raw.get("findings") if isinstance(raw, dict) else raw
+    keys = set()
+    if isinstance(items, list):
+        for f in items:
+            if isinstance(f, dict):
+                keys.add(tuple(f.get(k) for k in BASELINE_FIELDS))
+    return keys
 
 
 def read_text(path):
@@ -435,6 +479,13 @@ def main(argv=None):
                          "(with --json emits a list).")
     ap.add_argument("--explain", metavar="CHECK", default="",
                     help="Print one check's meaning and exit (rc 2 on unknown).")
+    ap.add_argument("--baseline", metavar="PATH", default="",
+                    help="Suppress findings recorded in PATH (written by "
+                         "--baseline-write): they still print marked suppressed "
+                         "but do not count or fail the run. '-' reads stdin.")
+    ap.add_argument("--baseline-write", metavar="PATH", default="",
+                    help="Snapshot the current findings to PATH for later "
+                         "--baseline runs (output/rc unchanged).")
     args = ap.parse_args(argv)
 
     if args.self_test:
@@ -490,16 +541,43 @@ def main(argv=None):
     for sd in sorted(skills):
         all_findings.extend(scan_skill(sd, include_fixtures=args.include_fixtures))
 
+    if args.baseline_write:
+        try:
+            _atomic_write(
+                args.baseline_write,
+                json.dumps({"findings": [f.as_dict() for f in all_findings]}, indent=2) + "\n",
+            )
+            sys.stderr.write(
+                "wrote baseline %s (%d findings)\n"
+                % (args.baseline_write, len(all_findings))
+            )
+        except OSError as exc:
+            print("cannot write --baseline-write %s: %s" % (
+                args.baseline_write, exc), file=sys.stderr)
+            return 1
+
+    suppressed = 0
+    if args.baseline:
+        baseline_keys = _load_baseline(args.baseline)
+        for f in all_findings:
+            if _baseline_key(f) in baseline_keys:
+                f.suppressed = True
+                suppressed += 1
+        if suppressed:
+            print("baseline: suppressed %d known finding(s)" % suppressed,
+                  file=sys.stderr)
+
     counts = {"CRITICAL": 0, "WARN": 0, "INFO": 0}
     for f in all_findings:
-        counts[f.severity] += 1
+        if not f.suppressed:
+            counts[f.severity] += 1
 
     if args.json:
         print(json.dumps({
             "scanner": "skill_scanner", "version": VERSION,
             "root": str(root), "skills_scanned": [str(s) for s in sorted(skills)],
             "findings": [f.as_dict() for f in all_findings],
-            "summary": counts,
+            "summary": dict(counts, suppressed=suppressed),
             "verdict": "REJECT-PENDING-REVIEW" if counts["CRITICAL"] else
                        ("REVIEW-WARNINGS" if counts["WARN"] else "PASS"),
         }, indent=2))
@@ -516,12 +594,15 @@ def main(argv=None):
                 continue
             for f in fs:
                 loc = "%s:%s" % (f.file, f.line) if f.line else f.file
-                print("  [%s] %s %s\n      %s" % (f.severity, f.check, loc, f.message))
+                tag = " suppressed" if f.suppressed else ""
+                print("  [%s]%s %s %s\n      %s" % (
+                    f.severity, tag, f.check, loc, f.message))
                 if f.evidence:
                     print("      > %s" % f.evidence)
             print()
         print("Summary: %d CRITICAL, %d WARN, %d INFO" %
-              (counts["CRITICAL"], counts["WARN"], counts["INFO"]))
+              (counts["CRITICAL"], counts["WARN"], counts["INFO"]) + (
+                  " (%d suppressed)" % suppressed if suppressed else ""))
         if counts["CRITICAL"]:
             print("Verdict guidance: CRITICAL findings present — do not install/run this skill "
                   "until a human reviews every flagged line. See references/skill-supply-chain.md.")

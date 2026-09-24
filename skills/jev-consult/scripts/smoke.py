@@ -7069,6 +7069,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tag", metavar="T", default="", help="Label this run: lands in the verdict payload as tag and in the junit testsuite name")
     parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
     parser.add_argument("--jsonl", action="store_true", help="Emit one step-result JSON row per line instead of the wrapped payload (--out writes the rows; --jq still digs the wrapped payload)")
+    parser.add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these keys in each step row (rc 2 on an empty list)")
     parser.add_argument(
         "--repeat",
         metavar="N",
@@ -7427,7 +7428,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.tag:
         payload["tag"] = args.tag
     if getattr(args, "jsonl", False) and not args.jq:
-        text = "".join(json.dumps(s, ensure_ascii=False) + "\n" for s in steps)
+        key_sel = getattr(args, "keys", "") or ""
+        keys = [k.strip() for k in key_sel.split(",") if k.strip()]
+        if key_sel and not keys:
+            sys.stderr.write("--keys names no fields\n")
+            return 2
+        text = "".join(
+            json.dumps(
+                {k: s.get(k) for k in keys} if keys else s,
+                ensure_ascii=False,
+            )
+            + "\n"
+            for s in steps
+        )
     else:
         text = json.dumps(payload, indent=2) + "\n"
     if args.jq:

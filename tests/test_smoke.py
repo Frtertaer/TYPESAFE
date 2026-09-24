@@ -136,6 +136,26 @@ class SmokeTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["name"], "policy")
 
+    def test_jsonl_keys_projects_step_rows(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "policy", "--jsonl",
+             "--keys", "name,ok"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        rows = [json.loads(l) for l in proc.stdout.splitlines() if l.strip()]
+        self.assertEqual(rows, [{"name": "policy", "ok": True}])
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "policy", "--jsonl",
+             "--keys", " ,"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 2)
+
     def test_jobs_runs_subset_in_step_order(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(SMOKE), "--only", "trace,policy,decisions",

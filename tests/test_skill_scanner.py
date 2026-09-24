@@ -878,6 +878,28 @@ class JsonlFlagTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(out.strip(), "")
 
+    def test_jsonl_matches_csv_and_md_row_counts(self) -> None:
+        # Every row format must report the SAME findings — a divergence
+        # (e.g. jsonl printing suppressed rows) would break pipe parity.
+        import csv as _csv
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = make_skill(tmp, self.BAD)
+            rc, jsonl_out, _ = self._run([str(skill), "--jsonl"])
+            self.assertEqual(rc, 1)
+            jsonl_rows = [json.loads(l) for l in jsonl_out.splitlines()
+                          if l.strip()]
+            _, csv_out, _ = self._run([str(skill), "--csv"])
+            csv_rows = list(_csv.reader(io.StringIO(csv_out)))[1:]
+            _, md_out, _ = self._run([str(skill), "--md"])
+            md_rows = [l for l in md_out.splitlines()
+                       if l.startswith("| CRITICAL") or l.startswith("| WARN")
+                       or l.startswith("| INFO")]
+            self.assertEqual(len(jsonl_rows), len(csv_rows))
+            self.assertEqual(len(jsonl_rows), len(md_rows))
+            self.assertEqual(
+                {(r["severity"], r["check"], r["line"]) for r in jsonl_rows},
+                {(r[0], r[1], int(r[3])) for r in csv_rows})
+
     def test_jsonl_watch_tick_lines(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             skill = make_skill(tmp, self.BAD)

@@ -96,6 +96,53 @@ class WatchTickShapeTests(unittest.TestCase):
         )
         assert_ticks(self, proc)
 
+    def test_compare_watch_ticks_are_jsonl_with_ts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = Path(tmp) / "cases.json"
+            cases.write_text(
+                json.dumps(
+                    {"cases": [{"id": "c1", "expect": {"a": 0.9},
+                                "sides": {"a": "model-a"}}]}
+                ),
+                encoding="utf-8",
+            )
+            proc = run(
+                "compare.py",
+                ["--cases", str(cases), "--watch", "0.05",
+                 "--max-ticks", "2"],
+            )
+        assert_ticks(self, proc)
+
+    def test_compact_watch_ticks_are_jsonl_with_ts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "transcript.json"
+            transcript.write_text(
+                json.dumps(
+                    {"messages": [{"role": "user", "text": "hi"},
+                                  {"role": "assistant", "text": "ok"}]}
+                ),
+                encoding="utf-8",
+            )
+            proc = run(
+                "compact.py",
+                [str(transcript), "--history", "--watch", "0.05",
+                 "--max-ticks", "2"],
+            )
+        assert_ticks(self, proc)
+
+    def test_progress_status_watch_ticks_are_jsonl_with_ts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            db = Path(tmp) / "ledger.db"
+            proc = run(
+                "progress.py",
+                ["--repo", str(repo), "--db", str(db),
+                 "status", "impl", "--watch", "0.05",
+                 "--max-ticks", "2"],
+            )
+        assert_ticks(self, proc)
+
     def test_inventory_watch_emits_parseable_json_ticks(self) -> None:
         """inventory --watch prints the one-shot pretty payload first,
         then JSONL ticks — pin both halves."""

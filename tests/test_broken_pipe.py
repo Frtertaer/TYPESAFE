@@ -39,7 +39,7 @@ def run_closed_stdout(script: str, tmp: str) -> subprocess.CompletedProcess:
     return proc
 
 
-EXEMPT = {"_watch.py", "skill_scanner.py"}
+EXEMPT = {"_watch.py"}  # skill_scanner guards its _watch import for standalone use
 
 
 class BrokenPipeTests(unittest.TestCase):

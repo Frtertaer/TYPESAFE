@@ -422,4 +422,10 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        import _watch
+    except ImportError:
+        # standalone use outside the pack scripts dir
+        sys.exit(main())
+    else:
+        _watch.exit_safely(main())

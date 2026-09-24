@@ -764,6 +764,23 @@ class StandaloneCliTests(unittest.TestCase):
             self.assertIn("rule", row)
             self.assertIn("severity", row)
 
+    def test_jsonl_keys_projects_rows(self) -> None:
+        request = {
+            "state": "1" * 100000,
+            "questions": {"q": noul("Should the coder proceed with the plan?")},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            proc = self._run(str(path), "--jsonl", "--keys", "rule,file")
+            bad = self._run(str(path), "--jsonl", "--keys", " ,")
+        self.assertEqual(proc.returncode, 1)
+        rows = [json.loads(l) for l in proc.stdout.splitlines() if l.strip()]
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertEqual(set(row), {"rule", "file"})
+        self.assertEqual(bad.returncode, 2)
+
     def test_error_request_rc1(self) -> None:
         request = {
             "state": "1" * 100000,

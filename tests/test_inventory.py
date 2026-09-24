@@ -1560,6 +1560,35 @@ class InventoryTests(unittest.TestCase):
             self.assertFalse(stale.exists())
             self.assertIn("pruned 1 stale sidecars", buf.getvalue())
 
+    def test_prune_sidecars_survives_unreadable_subdir(self) -> None:
+        import time as time_mod
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stale = root / ".jev-tools.json"
+            stale.write_text(
+                json.dumps({"written_at": time_mod.time() - 999999}),
+                encoding="utf-8",
+            )
+            fresh = root / ".jev-tools-miss.json"
+            fresh.write_text(
+                json.dumps({"written_at": time_mod.time()}), encoding="utf-8"
+            )
+            real_walk = os.walk
+
+            def flaky_walk(top, *a, **kw):
+                for triple in real_walk(top, *a, **kw):
+                    yield triple
+                # simulate a per-branch error surfacing mid-iteration
+                kw.get("onerror", lambda e: None)(PermissionError("denied"))
+
+            with patch.object(inv.os, "walk", flaky_walk):
+                removed = inv.prune_stale_sidecars(root)
+            self.assertEqual(removed, [stale])
+            self.assertFalse(stale.exists())
+            self.assertTrue(fresh.exists())
+
     def test_picker_request_has_untrusted_rule(self) -> None:
         payload = inv.picker_request(
             "task", "hermes", [{"id": "x", "kind": "skill", "name": "jwt-auth"}]

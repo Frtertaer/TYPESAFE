@@ -1197,7 +1197,19 @@ def prune_stale_sidecars(
     if not base.is_dir():
         return []
     removed: list[Path] = []
-    for path in sorted(base.rglob(".jev-tools*.json")):
+    # os.walk with onerror swallowing: an unreadable subdirectory skips just
+    # that branch instead of aborting the whole prune (Path.rglob raises
+    # OSError mid-iteration).
+    candidates: list[Path] = []
+    for dirpath, _dirnames, filenames in os.walk(
+        base, onerror=lambda exc: None
+    ):
+        candidates.extend(
+            Path(dirpath) / name
+            for name in filenames
+            if name.startswith(".jev-tools") and name.endswith(".json")
+        )
+    for path in sorted(candidates):
         if not path.is_file():
             continue
         if sidecar_status(path, ttl_seconds, now) in ("stale", "invalid"):

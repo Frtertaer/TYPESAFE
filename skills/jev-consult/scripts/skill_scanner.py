@@ -30,6 +30,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 VERSION = "1.0.0"
@@ -215,6 +216,62 @@ def _load_baseline(path):
             if isinstance(f, dict):
                 keys.add(tuple(f.get(k) for k in BASELINE_FIELDS))
     return keys
+
+
+def write_verdict(path, payload, stream=None):
+    """Write a slim verdict JSON to path; False (with stderr note) on failure.
+
+    Standalone mirror of _watch.write_verdict (skill_scanner ships without
+    the pack): a ``ts`` epoch field is injected when the caller did not set
+    one, ``-`` streams the payload to stdout instead of writing a file, and
+    file writes go through _atomic_write — sibling tmp derived as
+    ``target.with_name(target.name + ".tmp")`` then renamed so readers never
+    see a half-written payload (os.replace semantics via ``Path.replace``).
+    """
+    if "ts" not in payload:
+        payload = dict(payload, ts=int(time.time()))
+    if str(path) == "-":
+        (stream or sys.stdout).write(json.dumps(payload, indent=2) + "\n")
+        return True
+    try:
+        _atomic_write(Path(path), json.dumps(payload, indent=2) + "\n")
+    except OSError as exc:
+        sys.stderr.write("cannot write --verdict %s: %s\n" % (path, exc))
+        return False
+    return True
+
+
+def _dig(payload, key):
+    """Dotted-path dig for --jq; (value, True) or (None, False).
+
+    Standalone mirror of _watch.dig: list nodes index by numeric parts, and
+    keys that themselves contain dots resolve as a longest literal match
+    before giving up."""
+    cur = payload
+    parts = key.split(".")
+    i = 0
+    while i < len(parts):
+        part = parts[i]
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+            i += 1
+        elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
+            cur = cur[int(part)]
+            i += 1
+        elif isinstance(cur, dict):
+            hit = False
+            for j in range(len(parts), i + 1, -1):
+                literal = ".".join(parts[i:j])
+                if literal in cur:
+                    cur = cur[literal]
+                    i = j
+                    hit = True
+                    break
+            if not hit:
+                return None, False
+        else:
+            return None, False
+    return cur, True
 
 
 def read_text(path):
@@ -486,6 +543,14 @@ def main(argv=None):
     ap.add_argument("--baseline-write", metavar="PATH", default="",
                     help="Snapshot the current findings to PATH for later "
                          "--baseline runs (output/rc unchanged).")
+    ap.add_argument("--jq", metavar="KEY", default="",
+                    help="Print just this dotted-path field of the report payload "
+                         "(e.g. verdict or summary.CRITICAL); unknown key exits 2.")
+    ap.add_argument("--out", metavar="PATH", default="",
+                    help="Also write the JSON report payload to PATH.")
+    ap.add_argument("--verdict", metavar="PATH", default="",
+                    help="Write a slim verdict JSON ({verdict, skills, suppressed, "
+                         "CRITICAL, WARN, INFO}) to PATH; '-' prints it to stdout.")
     args = ap.parse_args(argv)
 
     if args.self_test:
@@ -572,15 +637,37 @@ def main(argv=None):
         if not f.suppressed:
             counts[f.severity] += 1
 
-    if args.json:
-        print(json.dumps({
-            "scanner": "skill_scanner", "version": VERSION,
-            "root": str(root), "skills_scanned": [str(s) for s in sorted(skills)],
-            "findings": [f.as_dict() for f in all_findings],
-            "summary": dict(counts, suppressed=suppressed),
-            "verdict": "REJECT-PENDING-REVIEW" if counts["CRITICAL"] else
-                       ("REVIEW-WARNINGS" if counts["WARN"] else "PASS"),
-        }, indent=2))
+    payload = {
+        "scanner": "skill_scanner", "version": VERSION,
+        "root": str(root), "skills_scanned": [str(s) for s in sorted(skills)],
+        "findings": [f.as_dict() for f in all_findings],
+        "summary": dict(counts, suppressed=suppressed),
+        "verdict": "REJECT-PENDING-REVIEW" if counts["CRITICAL"] else
+                   ("REVIEW-WARNINGS" if counts["WARN"] else "PASS"),
+    }
+
+    if args.out:
+        try:
+            _atomic_write(args.out, json.dumps(payload, indent=2) + "\n")
+        except OSError as exc:
+            print("cannot write --out %s: %s" % (args.out, exc), file=sys.stderr)
+            return 1
+
+    if args.verdict:
+        slim = dict({"verdict": payload["verdict"], "skills": len(skills)},
+                    **payload["summary"])
+        if not write_verdict(args.verdict, slim):
+            return 1
+
+    if args.jq:
+        val, found = _dig(payload, args.jq)
+        if not found:
+            print("unknown key %r (payload keys: %s)" % (
+                args.jq, ", ".join(payload)), file=sys.stderr)
+            return 2
+        print(json.dumps(val, indent=2) if isinstance(val, (dict, list)) else val)
+    elif args.json:
+        print(json.dumps(payload, indent=2))
     else:
         print("agent-skill security scan v%s — %d skill(s) under %s\n" % (VERSION, len(skills), root))
         by_skill = {}

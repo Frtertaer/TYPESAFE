@@ -743,6 +743,44 @@ class PostSystemoneTests(unittest.TestCase):
                 jev.post_systemone({"task": "t"}, self.QUESTIONS, {}, retries=1)
         self.assertEqual(opener.calls, 1)
 
+    def test_400_no_retry(self) -> None:
+        # client errors other than redirects are not retryable
+        opener = _FakeOpener([_http_error(400)])
+        env = {"TYPESAFE_API_KEY": "dummy-test-key-not-a-real-secret"}
+        with self.assertRaises(SystemExit):
+            with patch.dict(os.environ, env), patch.object(
+                jev, "load_api_key", return_value=env["TYPESAFE_API_KEY"]
+            ), patch("urllib.request.build_opener", return_value=opener):
+                jev.post_systemone({"task": "t"}, self.QUESTIONS, {}, retries=3)
+        self.assertEqual(opener.calls, 1)
+
+    def test_404_no_retry(self) -> None:
+        opener = _FakeOpener([_http_error(404)])
+        env = {"TYPESAFE_API_KEY": "dummy-test-key-not-a-real-secret"}
+        with self.assertRaises(SystemExit):
+            with patch.dict(os.environ, env), patch.object(
+                jev, "load_api_key", return_value=env["TYPESAFE_API_KEY"]
+            ), patch("urllib.request.build_opener", return_value=opener):
+                jev.post_systemone({"task": "t"}, self.QUESTIONS, {}, retries=3)
+        self.assertEqual(opener.calls, 1)
+
+    def test_429_retries_then_succeeds(self) -> None:
+        result, opener = self._post([_http_error(429), self.GOOD], retries=1)
+        self.assertEqual(opener.calls, 2)
+        self.assertEqual(result["answers"], self.GOOD["answers"])
+
+    def test_429_exhausts_retries(self) -> None:
+        opener = _FakeOpener([_http_error(429)] * 4)
+        env = {"TYPESAFE_API_KEY": "dummy-test-key-not-a-real-secret"}
+        with self.assertRaises(SystemExit):
+            with patch.dict(os.environ, env), patch.object(
+                jev, "load_api_key", return_value=env["TYPESAFE_API_KEY"]
+            ), patch("urllib.request.build_opener", return_value=opener), patch.object(
+                jev.time, "sleep"
+            ):
+                jev.post_systemone({"task": "t"}, self.QUESTIONS, {}, retries=2)
+        self.assertEqual(opener.calls, 3)
+
     def test_network_error_is_clean_systemexit(self) -> None:
         opener = _FakeOpener(
             [urllib.error.URLError("name or service not known")]

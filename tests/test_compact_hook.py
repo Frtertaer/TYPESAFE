@@ -259,6 +259,11 @@ class HookE2ETests(unittest.TestCase):
         self.assertEqual(json.loads(proc.stdout.strip()), {})
         self.assertIn("below live-fat threshold", proc.stderr)
 
+    def test_simulate_dash_reads_tool_result_from_stdin(self) -> None:
+        fat = "z" * 40000
+        proc = self._run_full(fat + "\n", argv=["--simulate", "-"])
+        self.assertIn("hookSpecificOutput", proc.stdout)
+
     def test_empty_and_bad_stdin(self) -> None:
         self.assertEqual(json.loads(self._run("")), {})
         self.assertEqual(json.loads(self._run("[1,2]")), {})

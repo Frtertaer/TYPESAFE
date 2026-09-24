@@ -76,6 +76,77 @@ class DeterminismTests(unittest.TestCase):
         self.assertEqual(a, b)
         self.assertTrue(a.strip())
 
+    def test_schema_outputs_byte_identical(self) -> None:
+        """--schema (or trace `schema`) must print byte-identical output
+        on repeat runs — the contract is pure metadata."""
+        flag = (
+            "apply_fill.py", "catalog_fill.py", "compact.py",
+            "compare.py", "decisions.py", "doctor.py", "inventory.py",
+            "inventory_hook.py", "jev.py", "peer_fill.py",
+            "policy_lint.py", "progress.py", "question_lint.py",
+            "skill_lint.py", "trigger_eval.py", "trigger_lint.py",
+        )
+        for name in sorted(flag):
+            with self.subTest(script=name):
+                a = run(name, ["--schema"])
+                b = run(name, ["--schema"])
+                self.assertEqual(a, b, name)
+                self.assertTrue(a.strip(), name)
+        with self.subTest(script="trace.py schema"):
+            a = run("trace.py", ["schema"])
+            b = run("trace.py", ["schema"])
+            self.assertEqual(a, b)
+            self.assertTrue(a.strip())
+
+    def test_env_reports_byte_identical(self) -> None:
+        """--env reports are pure config resolution — repeat runs must
+        be byte-identical."""
+        for name in ("compact.py", "compare.py", "doctor.py",
+                     "decisions.py", "inventory.py"):
+            with self.subTest(script=name):
+                a = run(name, ["--env"], cwd=str(HARNESS))
+                b = run(name, ["--env"], cwd=str(HARNESS))
+                self.assertEqual(a, b, name)
+                self.assertTrue(a.strip(), name)
+
+    def test_trace_listings_byte_identical(self) -> None:
+        """notes/history on a fixed trace file repeat byte-identically."""
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = Path(tmp) / ".jev-trace.json"
+            trace.write_text(
+                json.dumps(
+                    {
+                        "plan": "p",
+                        "current_step": "s",
+                        "attempt_count": 1,
+                        "last_error": "",
+                        "unknown": "",
+                        "inspected": [],
+                        "last_pick": "a",
+                        "history": [
+                            {"ts": 1000, "iso": "2026-01-01T00:00:00Z",
+                             "kind": "approach", "pick": "a"},
+                            {"ts": 2000, "iso": "2026-01-01T00:01:00Z",
+                             "pick": "b"},
+                        ],
+                        "notes": [
+                            {"ts": 1000, "iso": "2026-01-01T00:00:00Z",
+                             "text": "n1", "sha": "s1"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            for sub in (["notes", "--json"], ["history", "--json"],
+                        ["notes"], ["history"]):
+                with self.subTest(args=sub):
+                    a = run("trace.py",
+                            ["--file", str(trace)] + sub)
+                    b = run("trace.py",
+                            ["--file", str(trace)] + sub)
+                    self.assertEqual(a, b)
+                    self.assertTrue(a.strip())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -32,6 +32,7 @@ def build_parser():
     for name in ("status", "history"):
         command = commands.add_parser(name)
         command.add_argument("stage")
+    commands.choices["history"].add_argument("--jsonl", action="store_true", help="Emit each event as one JSON line instead of the wrapped object")
     report = commands.add_parser("report", help="Print a markdown summary of a stage (plan, credits, events); --out writes it to a file")
     report.add_argument("--json", action="store_true", help="Emit a structured {stage, goal, action, points, awarded_items, blocked_items, events, ...} object instead of markdown (--out then writes the JSON)")
     report.add_argument("stage")
@@ -621,6 +622,21 @@ def main(argv=None):
                 verdict_doc[key] = result[key]
         if not _watch.write_verdict(args.verdict, verdict_doc):
             return 1
+    if args.command == "history" and getattr(args, "jsonl", False) and not getattr(args, "jq", ""):
+        events = result.get("events") if isinstance(result, dict) else []
+        rows = [e for e in events if isinstance(e, dict)] if isinstance(events, list) else []
+        text = "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in rows)
+        out_path = getattr(args, "out", "") or ""
+        if out_path:
+            try:
+                atomic_write_text(Path(out_path), text)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (out_path, exc))
+                return 1
+            sys.stdout.write(json.dumps({"wrote": out_path, "bytes": len(text.encode("utf-8"))}) + "\n")
+            return 0
+        sys.stdout.write(text)
+        return 0
     if (
         args.command in ("status", "history")
         or (args.command == "report" and getattr(args, "json", False))

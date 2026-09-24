@@ -294,6 +294,26 @@ class OneshotOutTests(unittest.TestCase):
             saved = json.loads(target.read_text(encoding="utf-8"))
         self.assertEqual(saved, ledger.history.return_value)
 
+    def test_history_jsonl_emits_one_row_per_event(self) -> None:
+        ledger = self._ledger()
+        with patch.object(progress, "Ledger", return_value=ledger):
+            code, out = run_cli(["history", "s", "--jsonl"])
+        self.assertEqual(code, 0)
+        rows = [json.loads(l) for l in out.splitlines() if l.strip()]
+        self.assertEqual([r["kind"] for r in rows], ["init", "note"])
+
+    def test_history_jsonl_out_writes_rows(self) -> None:
+        ledger = self._ledger()
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "history.jsonl"
+            with patch.object(progress, "Ledger", return_value=ledger):
+                code, out = run_cli(["history", "s", "--jsonl", "--out", str(target)])
+            self.assertEqual(code, 0)
+            receipt = json.loads(out)
+            self.assertEqual(receipt["wrote"], str(target))
+            rows = [json.loads(l) for l in target.read_text(encoding="utf-8").splitlines() if l.strip()]
+        self.assertEqual(len(rows), 2)
+
     def test_out_receipt_jq_digs_wrapper(self) -> None:
         ledger = self._ledger()
         with tempfile.TemporaryDirectory() as tmp:

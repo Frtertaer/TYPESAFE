@@ -50,6 +50,50 @@ class SchemaParityTests(unittest.TestCase):
                     self.assertIsInstance(meta["required"], bool)
                     self.assertIsInstance(meta.get("type"), str)
 
+    def test_schema_text_rows_match_contract_and_agree_with_json(self) -> None:
+        """Bare --schema prints 'key: desc (required|optional|recommended)'
+        rows whose keys and required-ness agree with --json."""
+        import re
+
+        names = sorted(FLAG_SCHEMA) + sorted(SUBCOMMAND_SCHEMA)
+        row_re = re.compile(
+            r"^(?P<key>.+?): .+ \((?P<marker>required|optional|recommended)\)$"
+        )
+        for name in names:
+            with self.subTest(script=name):
+                text_proc = self._run(name)
+                self.assertEqual(
+                    text_proc.returncode,
+                    0,
+                    "%s schema rc=%d" % (name, text_proc.returncode),
+                )
+                text_lines = [
+                    line.strip()
+                    for line in text_proc.stdout.splitlines()
+                    if line.strip()
+                ]
+                self.assertTrue(text_lines, "%s empty schema text" % name)
+                text_required: dict[str, bool] = {}
+                for line in text_lines:
+                    match = row_re.match(line)
+                    self.assertIsNotNone(
+                        match, "%s bad schema row: %r" % (name, line)
+                    )
+                    key, marker = match.group("key"), match.group("marker")
+                    self.assertNotIn(
+                        key, text_required, "%s dup key %s" % (name, key)
+                    )
+                    text_required[key] = marker == "required"
+                json_proc = self._run(name, "--json")
+                json_rows = json.loads(json_proc.stdout)
+                self.assertEqual(
+                    set(text_required), set(json_rows), name
+                )
+                for key, meta in json_rows.items():
+                    self.assertEqual(
+                        text_required[key], meta["required"], "%s %s" % (name, key)
+                    )
+
     def test_fill_outcomes_cover_emit_literals(self) -> None:
         """Every emit(\"word ...\") literal must appear in OUTCOMES."""
         import re

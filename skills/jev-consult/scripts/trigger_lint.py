@@ -265,7 +265,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch/--diff).\nLint a trigger-cases fixture file for schema sanity.\nFlags:\n  --policy PATH     lint cases against a specific policy.json\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the cases-file key contract (--json emits the object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_TLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this cases file against another (+/-/~ on cases.<id>.<field>; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad cases file; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args or unreadable file.\n'
+USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch/--diff).\nLint a trigger-cases fixture file for schema sanity.\nFlags:\n  --policy PATH     lint cases against a specific policy.json\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the cases-file key contract (--json emits the object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_TLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this cases file against another (+/-/~ on cases.<id>.<field>; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad cases file; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args or unreadable file.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -322,6 +322,25 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("bad --unchanged-max %r\n" % argv[idx + 1])
             return 2
         argv = argv[:idx] + argv[idx + 2 :]
+    if "--rules" in argv:
+        argv = [a for a in argv if a != "--rules"]
+        if as_json:
+            sys.stdout.write(
+                json.dumps(
+                    [{"rule": k, "description": v} for k, v in sorted(RULES.items())],
+                    indent=2,
+                )
+                + "\n"
+            )
+        elif as_md:
+            _watch.md_table(
+                [{"rule": k, "description": v} for k, v in sorted(RULES.items())],
+                ["rule", "description"],
+            )
+        else:
+            for _rule in sorted(RULES):
+                sys.stdout.write("%s: %s\n" % (_rule, RULES[_rule]))
+        return 0
     if "--explain" in argv:
         idx = argv.index("--explain")
         if idx + 1 >= len(argv):

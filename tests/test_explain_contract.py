@@ -114,6 +114,42 @@ class ExplainContractTests(unittest.TestCase):
                 )
         self.assertEqual(problems, [])
 
+    def test_rules_lists_every_rule(self) -> None:
+        import json as _json
+
+        problems = []
+        for script, prefix in sorted(LINTS.items()):
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPTS / script), "--rules"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if proc.returncode != 0:
+                problems.append("%s: rc=%d" % (script, proc.returncode))
+                continue
+            lines = [
+                l for l in proc.stdout.splitlines() if l.startswith(prefix)
+            ]
+            if not lines or any(": " not in l for l in lines):
+                problems.append("%s: out=%r" % (script, proc.stdout[:80]))
+                continue
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPTS / script), "--rules", "--json"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            payload = _json.loads(proc.stdout)
+            if not isinstance(payload, list) or not all(
+                r.get("rule", "").startswith(prefix) and r.get("description")
+                for r in payload
+            ):
+                problems.append(
+                    "%s json: %r" % (script, proc.stdout[:80])
+                )
+        self.assertEqual(problems, [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

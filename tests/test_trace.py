@@ -1396,6 +1396,50 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(json.loads(buf.getvalue())["reason"], "missing")
 
+    def test_undo_drops_last_picks(self) -> None:
+        import io
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            with patch.object(sys, "stdout", io.StringIO()):
+                tr.main(["--file", str(path), "init", "--plan", "P"])
+                for pick in ("a", "b", "c"):
+                    tr.main(["--file", str(path), "record", "--pick", pick])
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "undo", "--n", "2"])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual([p["pick"] for p in out["removed"]], ["b", "c"])
+            self.assertEqual(out["history"], 1)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual([p["pick"] for p in data["history"]], ["a"])
+
+    def test_undo_dry_run_and_empty(self) -> None:
+        import io
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "undo"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue())["reason"], "empty")
+            with patch.object(sys, "stdout", io.StringIO()):
+                tr.main(["--file", str(path), "init", "--plan", "P"])
+                tr.main(["--file", str(path), "record", "--pick", "x"])
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "undo", "--dry-run"])
+            self.assertEqual(rc, 0)
+            out = json.loads(buf.getvalue())
+            self.assertEqual([p["pick"] for p in out["would_remove"]], ["x"])
+            self.assertTrue(out["dry_run"])
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(len(data["history"]), 1)
+
     def test_state_missing_file_empty(self) -> None:
         import io
         from unittest.mock import patch

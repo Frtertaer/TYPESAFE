@@ -791,6 +791,44 @@ def cmd_prune(args: argparse.Namespace) -> int:
     return emit({"path": str(path), "removed": True, "age_seconds": round(age, 3)}, jq)
 
 
+def cmd_undo(args: argparse.Namespace) -> int:
+    """Drop the last --n history picks (the inverse of record)."""
+    path = Path(args.file) if args.file else default_path()
+    jq = getattr(args, "jq", "")
+    if str(path) == "-":
+        return emit({"path": "-", "removed": [], "reason": "stdin is read-only"}, jq)
+    data = load(path)
+    history = list(data.get("history") or [])
+    if not history:
+        return emit(
+            {"path": str(path), "removed": [], "history": 0, "reason": "empty"},
+            jq,
+        )
+    n = max(1, min(int(args.n), len(history)))
+    removed = history[len(history) - n :]
+    if getattr(args, "dry_run", False):
+        return emit(
+            {
+                "path": str(path),
+                "removed": [],
+                "would_remove": removed,
+                "history": len(history),
+                "dry_run": True,
+            },
+            jq,
+        )
+    data["history"] = history[: len(history) - n]
+    save(data, path)
+    return emit(
+        {
+            "path": str(path),
+            "removed": removed,
+            "history": len(data["history"]),
+        },
+        jq,
+    )
+
+
 def jq_lookup(obj, path: str):
     """Dotted-path dict traversal: returns (value, True) or (None, False)."""
     node = obj
@@ -1886,6 +1924,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prune_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
     prune_cmd.set_defaults(func=cmd_prune)
+    undo_cmd = sub.add_parser(
+        "undo", help="Drop the last --n history picks (the inverse of record)"
+    )
+    undo_cmd.add_argument(
+        "--n",
+        type=int,
+        default=1,
+        help="How many trailing history picks to drop (default 1, clamped to history length)",
+    )
+    undo_cmd.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report the picks that would be dropped without writing",
+    )
+    undo_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
+    undo_cmd.set_defaults(func=cmd_undo)
     state_cmd = sub.add_parser(
         "state", help="Emit trace as a bare state dict (scaffold --state input)"
     )

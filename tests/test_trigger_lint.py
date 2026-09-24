@@ -671,6 +671,23 @@ class BaselineTests(unittest.TestCase):
                 self.assertIn("rule", row)
                 self.assertIn("severity", row)
 
+    def test_jsonl_keys_projects_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = write_cases(tmp, [{"id": "pos-x", "should_trigger": True}])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main([str(bad), "--jsonl", "--keys", "rule,file"])
+            self.assertEqual(rc, 1)
+            rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+            self.assertTrue(rows)
+            for row in rows:
+                self.assertEqual(set(row), {"rule", "file"})
+            err = io.StringIO()
+            with redirect_stderr(err):
+                rc = trigger_lint.main([str(bad), "--jsonl", "--keys", " ,"])
+            self.assertEqual(rc, 2)
+            self.assertIn("--keys names no fields", err.getvalue())
+
 
 class StdinDashTests(unittest.TestCase):
     def _feed(self, argv, stdin_text):

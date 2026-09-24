@@ -571,10 +571,30 @@ def jq_lookup(obj, path: str):
     """Dotted-path lookup; (value, True) or (None, False) when any part misses."""
     if _watch is not None:
         return _watch.dig(obj, path)
+    # Fallback copy of _watch.dig (lists index numerically; keys containing
+    # dots resolve as longest literal matches) for when _watch.py is absent.
     cur = obj
-    for part in path.split("."):
+    parts = path.split(".")
+    i = 0
+    while i < len(parts):
+        part = parts[i]
         if isinstance(cur, dict) and part in cur:
             cur = cur[part]
+            i += 1
+        elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
+            cur = cur[int(part)]
+            i += 1
+        elif isinstance(cur, dict):
+            hit = False
+            for j in range(len(parts), i + 1, -1):
+                literal = ".".join(parts[i:j])
+                if literal in cur:
+                    cur = cur[literal]
+                    i = j
+                    hit = True
+                    break
+            if not hit:
+                return None, False
         else:
             return None, False
     return cur, True

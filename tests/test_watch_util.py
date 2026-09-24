@@ -61,6 +61,33 @@ class DigTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(value, 0)
 
+    def test_dig_literal_key_with_dot(self) -> None:
+        value, ok = _watch.dig({"flat.key": "v"}, "flat.key")
+        self.assertTrue(ok)
+        self.assertEqual(value, "v")
+
+    def test_dig_literal_after_segment_descent(self) -> None:
+        # {"a.b": {"c": 9}}: "a.b" is one literal key, then "c" nests inside.
+        value, ok = _watch.dig({"a.b": {"c": 9}}, "a.b.c")
+        self.assertTrue(ok)
+        self.assertEqual(value, 9)
+        # literal at depth: {"x": {"y.z": 7}}
+        value, ok = _watch.dig({"x": {"y.z": 7}}, "x.y.z")
+        self.assertTrue(ok)
+        self.assertEqual(value, 7)
+
+    def test_dig_plain_segments_win_over_literal(self) -> None:
+        # both "a" (nested) and "a.b" (literal) exist — the path digs nested
+        # first; the literal is only a fallback when the dig stalls on a dict.
+        value, ok = _watch.dig({"a": {"b": 1}, "a.b": 2}, "a.b")
+        self.assertTrue(ok)
+        self.assertEqual(value, 1)
+
+    def test_dig_literal_miss_still_false(self) -> None:
+        value, ok = _watch.dig({"a.b": {"c": 9}}, "a.b.nope")
+        self.assertFalse(ok)
+        self.assertIsNone(value)
+
 
 class SameTickTests(unittest.TestCase):
     def test_identical_modulo_volatile(self) -> None:

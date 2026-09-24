@@ -124,13 +124,32 @@ def same_tick(prev: dict | None, tick: dict, ignore=("ts", "elapsed_s")) -> bool
 def dig(node, path: str):
     """Dotted-path lookup over dicts and lists; (value, True) or (None, False).
 
-    List nodes index by numeric parts (``0.errors`` digs the first row)."""
+    List nodes index by numeric parts (``0.errors`` digs the first row).
+    Keys that themselves contain dots resolve as a longest literal match:
+    ``"a.b.c"`` digs ``{"a.b": {"c": ...}}`` too — plain segments win, then
+    the longest remaining dotted literal is tried before giving up."""
     cur = node
-    for part in path.split("."):
+    parts = path.split(".")
+    i = 0
+    while i < len(parts):
+        part = parts[i]
         if isinstance(cur, dict) and part in cur:
             cur = cur[part]
+            i += 1
         elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
             cur = cur[int(part)]
+            i += 1
+        elif isinstance(cur, dict):
+            hit = False
+            for j in range(len(parts), i + 1, -1):
+                literal = ".".join(parts[i:j])
+                if literal in cur:
+                    cur = cur[literal]
+                    i = j
+                    hit = True
+                    break
+            if not hit:
+                return None, False
         else:
             return None, False
     return cur, True

@@ -116,9 +116,20 @@ class JqParityTests(unittest.TestCase):
             return mod
 
         watch = _load("_watch.py")
-        payload = {"rows": [{"a": 1}, {"a": 2}], "top": {"n": 5}}
-        cases = [("rows.0.a", 1, True), ("rows.1.a", 2, True), ("top.n", 5, True),
-                 ("rows.9.a", None, False), ("rows.a", None, False), ("nope", None, False)]
+        payload = {
+            "rows": [{"a": 1}, {"a": 2}],
+            "top": {"n": 5},
+            "a.b": {"c": 9},
+            "x": {"y.z": 7},
+            "flat.key": "v",
+        }
+        cases = [
+            ("rows.0.a", 1, True), ("rows.1.a", 2, True), ("top.n", 5, True),
+            ("rows.9.a", None, False), ("rows.a", None, False), ("nope", None, False),
+            # keys containing dots resolve as longest literal after segments
+            ("flat.key", "v", True), ("a.b.c", 9, True), ("x.y.z", 7, True),
+            ("a.b.nope", None, False),
+        ]
         for script in ("jev.py", "smoke.py", "trace.py", "trigger_eval.py"):
             mod = _load(script)
             with self.subTest(script=script):

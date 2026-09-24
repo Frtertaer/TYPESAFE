@@ -235,6 +235,8 @@ Every threshold lives in `policy.json` (override with `JEV_POLICY=PATH`). The to
 
 Residual flag spellings not spelled out in the prose above (test-pinned: every declared flag must appear here or in README.md):
 
+`--jq KEY` is the same dig everywhere: dotted parts descend dicts, numeric parts index lists, and a key that itself contains dots resolves as the longest literal match once the plain segments stall (e.g. `a.b.c` digs `{"a.b": {"c": ...}}`); a miss exits 2.
+
 | Script | Flags |
 | --- | --- |
 | `inventory.py` | `--all-names` (every scanned item name, no descriptions), `--catalogs` (marketplace URLs), `--check-miss FILE` (miss-file freshness like `--check-sidecar`), `--show-policy`, `--sidecar` (write `.jev-tools.json`-style name list), `--home`/`--hermes-home` (test overrides) |

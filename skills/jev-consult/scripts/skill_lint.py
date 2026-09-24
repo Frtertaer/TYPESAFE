@@ -351,7 +351,7 @@ def _atomic_write(path, text):
         raise
 
 
-USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_SLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  -                 read SKILL.md content from stdin (no --fix/--watch/--diff)\n  --diff PATH       diff this SKILL.md against another (frontmatter/cited_scripts/body_lines/body_sha1; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_SLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  -                 read SKILL.md content from stdin (no --fix/--watch/--diff)\n  --diff PATH       diff this SKILL.md against another (frontmatter/cited_scripts/body_lines/body_sha1; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -384,6 +384,20 @@ def main(argv: list[str] | None = None) -> int:
         picked = _watch.severity_arg(env_sev)
         if picked:
             severity = picked
+    only: set[str] = set()
+    if "--only" in argv:
+        idx = argv.index("--only")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--only needs a RULE[,RULE...] value\n")
+            return 2
+        only = {s.strip().upper() for s in argv[idx + 1].split(",") if s.strip()}
+        unknown = only - set(RULES)
+        if not only or unknown:
+            sys.stderr.write(
+                "bad --only %r (rules: %s)\n" % (argv[idx + 1], ", ".join(sorted(RULES)))
+            )
+            return 2
+        argv = argv[:idx] + argv[idx + 2 :]
     unchanged_max = 0
     if "--unchanged-max" in argv:
         idx = argv.index("--unchanged-max")
@@ -625,7 +639,9 @@ def main(argv: list[str] | None = None) -> int:
     baseline_keys: set | None = None
     if baseline_write:
         snapshot = [
-            {"path": str(p), **f} for p in paths for f in lint_skill(p)
+            {"path": str(p), **f}
+            for p in paths
+            for f in _watch.only_filter(lint_skill(p), only)
         ]
         try:
             _atomic_write(
@@ -674,7 +690,7 @@ def main(argv: list[str] | None = None) -> int:
             rows = [
                 {**f, "path": str(path)}
                 for path in paths
-                for f in lint_skill(path)
+                for f in _watch.only_filter(lint_skill(path), only)
             ]
             pre_drop = len(rows)
             if baseline_keys is not None:
@@ -726,7 +742,9 @@ def main(argv: list[str] | None = None) -> int:
         import json as _json
 
         all_rows = [
-            {"path": str(path), **f} for path in paths for f in lint_skill(path)
+            {"path": str(path), **f}
+            for path in paths
+            for f in _watch.only_filter(lint_skill(path), only)
         ]
         suppressed = 0
         if baseline_keys is not None:
@@ -782,7 +800,7 @@ def main(argv: list[str] | None = None) -> int:
     n_warn = 0
     n_suppressed = 0
     for path in paths:
-        for f in lint_skill(path):
+        for f in _watch.only_filter(lint_skill(path), only):
             row = {"path": str(path), **f}
             if baseline_keys is not None and _baseline_key(row) in baseline_keys:
                 n_suppressed += 1
@@ -811,7 +829,7 @@ def main(argv: list[str] | None = None) -> int:
         all_f = [
             {"path": str(path), **f}
             for path in paths
-            for f in lint_skill(path)
+            for f in _watch.only_filter(lint_skill(path), only)
         ]
         if baseline_keys is not None:
             all_f = [

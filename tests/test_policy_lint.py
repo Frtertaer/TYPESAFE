@@ -419,6 +419,24 @@ class PolicyLintTests(unittest.TestCase):
                 rc = policy_lint.main([str(p), "--severity", "warn,bogus"])
             self.assertEqual(rc, 2)
 
+    def test_only_filters_rules(self) -> None:
+        policy = base_policy()
+        policy["escalate_if"]["confidene_below"] = 0.4
+        policy["noul_yes"] = 1.7
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "policy.json"
+            p.write_text(json.dumps(policy), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = policy_lint.main([str(p), "--only", "P002"])
+            self.assertEqual(rc, 1)
+            self.assertIn("P002", buf.getvalue())
+            self.assertNotIn("P010", buf.getvalue())
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = policy_lint.main([str(p), "--only", "P999"])
+            self.assertEqual(rc, 2)
+
     def test_severity_env_default(self) -> None:
         import os
         from unittest import mock

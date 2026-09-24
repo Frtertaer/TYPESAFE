@@ -211,6 +211,14 @@ def severity_arg(raw: str) -> set[str] | None:
     return picked
 
 
+def only_filter(rows: list, only: set[str]) -> list:
+    """--only RULE[,RULE...]: keep findings whose 'rule' is in the set
+    (empty set keeps all)."""
+    if not only:
+        return list(rows)
+    return [r for r in rows if isinstance(r, dict) and r.get("rule") in only]
+
+
 def text_arg(value: str) -> str:
     """'-' reads the argument text from stdin (trailing newline stripped);
     any other value passes through unchanged. stdin is single-use — a

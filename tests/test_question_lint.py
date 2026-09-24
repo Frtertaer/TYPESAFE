@@ -372,6 +372,30 @@ class LintCliTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 2)
 
+    def test_only_filters_rules(self) -> None:
+        request = {
+            "state": {"task": "x"},
+            "questions": {
+                "a": noul("Should the coder not proceed?"),
+                "b": noul("Is it not true that the fix cannot ship?"),
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, request)
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--only", "J001"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("J001", proc.stdout)
+            self.assertNotIn("J002", proc.stdout)
+            proc = subprocess.run(
+                [sys.executable, str(QLINT), str(path), "--only", "J999"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 2)
+
     def test_out_writes_findings_json(self) -> None:
         request = {
             "state": {"task": "x"},

@@ -216,6 +216,20 @@ class LintSkillTests(unittest.TestCase):
             self.assertIn("S004", out)
             self.assertIn("S001", out)
 
+    def test_only_filters_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            warn_path = write_skill(tmp, "x", "---\nname: x\n---\n")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = skill_lint.main([str(warn_path), "--only", "S004"])
+            out = buf.getvalue()
+            self.assertIn("S004", out)
+            self.assertNotIn("S001", out)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = skill_lint.main([str(warn_path), "--only", "S999"])
+            self.assertEqual(rc, 2)
+
     def test_severity_env_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             warn_path = write_skill(tmp, "x", "---\nname: x\n---\n")

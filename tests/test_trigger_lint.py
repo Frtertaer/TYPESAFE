@@ -215,6 +215,21 @@ class CliTests(unittest.TestCase):
                 rc = trigger_lint.main([str(path), "--severity", "warn,bogus"])
             self.assertEqual(rc, 2)
 
+    def test_only_filters_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_cases(
+                tmp, [dict(GOOD_CASE), {"id": "pos-y", "prompt": "pick the approach now", "should_trigger": True}]
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main([str(path), "--only", "T009"])
+            self.assertEqual(rc, 0)
+            self.assertIn("T009", buf.getvalue())
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main([str(path), "--only", "T999"])
+            self.assertEqual(rc, 2)
+
     def test_out_writes_findings_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = write_cases(tmp, [{"id": "pos-x", "should_trigger": True}])

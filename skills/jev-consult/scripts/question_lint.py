@@ -467,7 +467,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.). `-` reads the request JSON from stdin (single file or mixed with paths in multi mode; --fix/--watch need a real path).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_QLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this request against another file (per-question +/- and ~ lines; "-" reads it from stdin)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.). `-` reads the request JSON from stdin (single file or mixed with paths in multi mode; --fix/--watch need a real path).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_QLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this request against another file (per-question +/- and ~ lines; "-" reads it from stdin)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -512,6 +512,20 @@ def main(argv: list[str] | None = None) -> int:
         picked = _watch.severity_arg(env_sev)
         if picked:
             severity = picked
+    only: set[str] = set()
+    if "--only" in argv:
+        idx = argv.index("--only")
+        if idx + 1 >= len(argv):
+            sys.stderr.write("--only needs a RULE[,RULE...] value\n")
+            return 2
+        only = {s.strip().upper() for s in argv[idx + 1].split(",") if s.strip()}
+        unknown = only - set(RULES)
+        if not only or unknown:
+            sys.stderr.write(
+                "bad --only %r (rules: %s)\n" % (argv[idx + 1], ", ".join(sorted(RULES)))
+            )
+            return 2
+        argv = argv[:idx] + argv[idx + 2 :]
     unchanged_max = 0
     if "--unchanged-max" in argv:
         idx = argv.index("--unchanged-max")
@@ -731,7 +745,7 @@ def main(argv: list[str] | None = None) -> int:
             if not isinstance(freq, dict):
                 sys.stderr.write("request JSON must be an object (%s)\n" % arg)
                 return 2
-            ffind = lint_request(freq)
+            ffind = _watch.only_filter(lint_request(freq), only)
             if baseline_write:
                 snapshot.extend({"file": arg, **f} for f in ffind)
             if baseline_keys is not None:
@@ -859,7 +873,7 @@ def main(argv: list[str] | None = None) -> int:
         prev_tick: dict | None = None
         unchanged = 0
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
-            current = lint_request(request)
+            current = _watch.only_filter(lint_request(request), only)
             pre_drop = len(current)
             if baseline_keys is not None:
                 current = _drop_baseline(current, baseline_keys)
@@ -908,7 +922,7 @@ def main(argv: list[str] | None = None) -> int:
             _atomic_write(Path(argv[0]), json.dumps(request, indent=2, ensure_ascii=False) + "\n")
             for rule in applied:
                 sys.stderr.write("fixed %s\n" % rule)
-    findings = lint_request(request)
+    findings = _watch.only_filter(lint_request(request), only)
     if baseline_write and not _write_baseline(
         baseline_write, [{"file": argv[0], **f} for f in findings]
     ):

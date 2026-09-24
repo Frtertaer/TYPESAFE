@@ -1271,7 +1271,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--jsonl",
         action="store_true",
-        help="Print filtered entries as raw JSON lines (for piping)",
+        help="Print filtered entries as raw JSON lines (for piping); with --verify emits one {line, issue} row per problem",
     )
     parser.add_argument(
         "--last",
@@ -1526,6 +1526,9 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
         if args.json:
             sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        elif getattr(args, "jsonl", False):
+            for row in report["problems"]:
+                sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
         else:
             sys.stdout.write(
                 "verify: %s entries=%d bad_lines=%d problems=%d\n"

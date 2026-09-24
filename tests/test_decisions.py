@@ -3147,6 +3147,19 @@ class PruneTest(unittest.TestCase):
             )
             self.assertEqual(proc.stdout.count("unparseable"), 8)
 
+    def test_verify_jsonl_emits_problem_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('{"ts": 1}\n')
+                fh.write("not json\n")
+            proc = self.run_cli("--file", str(path), "--verify", "--jsonl")
+            self.assertEqual(proc.returncode, 1)
+            rows = [json.loads(l) for l in proc.stdout.splitlines() if l.strip()]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0], {"line": 1, "issue": "missing jev_status"})
+            self.assertEqual(rows[1], {"line": 2, "issue": "unparseable"})
+
     def test_verify_jq_digs_report(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

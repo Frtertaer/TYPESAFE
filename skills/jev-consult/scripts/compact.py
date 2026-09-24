@@ -1895,7 +1895,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("file", nargs="?", help="Transcript JSON/JSONL (list, {messages}, OpenAI/Claude/Hermes). '-' = stdin.")
     parser.add_argument("-o", "--output", help="Write result JSON here instead of stdout.")
     parser.add_argument("--trace", help="Optional .jev-trace.json; matching file_path stays.")
-    parser.add_argument("--goal", default="")
+    parser.add_argument("--goal", default="", help="Goal text for the compaction brief ('-' reads it from stdin)")
     try:
         env_keep = float(os.environ.get("JEV_KEEP_THRESHOLD", "") or KEEP_THRESHOLD)
     except ValueError:
@@ -2094,6 +2094,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the result/spill/stats key contract and exit (--json emits the object).",
     )
     args = parser.parse_args(argv)
+    args.goal = _watch.text_arg(args.goal)
     if args.schema:
         if args.json:
             sys.stdout.write(json.dumps(COMPACT_SCHEMA_ROWS, indent=2) + "\n")

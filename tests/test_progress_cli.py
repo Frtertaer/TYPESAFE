@@ -110,6 +110,28 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(code, 0)
         ledger.assess.assert_called_once_with("s", "i", "done", retry_unavailable=True)
 
+    def test_summary_dash_reads_stdin(self) -> None:
+        ledger = self._ledger()
+        with patch.object(progress, "Ledger", return_value=ledger):
+            with patch.object(sys, "stdin", io.StringIO("piped summary\n")):
+                code, _out = run_cli(["assess", "s", "i", "--summary", "-"])
+        self.assertEqual(code, 0)
+        ledger.assess.assert_called_once_with(
+            "s", "i", "piped summary", retry_unavailable=False
+        )
+
+    def test_review_reason_dash_reads_stdin(self) -> None:
+        ledger = self._ledger()
+        with patch.object(progress, "Ledger", return_value=ledger):
+            with patch.object(sys, "stdin", io.StringIO("piped reason\n")):
+                code, _out = run_cli(
+                    ["review", "s", "--reason", "-", "--reviewer", "v"]
+                )
+        self.assertEqual(code, 0)
+        ledger.review.assert_called_once_with(
+            "s", "piped reason", "v", approve_finish=False
+        )
+
     def test_history_dispatch(self) -> None:
         ledger = self._ledger()
         with patch.object(progress, "Ledger", return_value=ledger):

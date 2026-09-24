@@ -61,21 +61,21 @@ def build_parser():
     assess = commands.add_parser("assess", help="Verify a committed outcome and request one Jev contribution grade")
     assess.add_argument("stage")
     assess.add_argument("item")
-    assess.add_argument("--summary", required=True)
+    assess.add_argument("--summary", required=True, help="Outcome summary ('-' reads it from stdin)")
     assess.add_argument("--retry-unavailable", action="store_true", help="Explicit retry of an unavailable request only; never rerate a received grade")
     invalidate = commands.add_parser("invalidate", help="Revoke existing credit and retain the audit trail")
     invalidate.add_argument("stage")
     invalidate.add_argument("item")
-    invalidate.add_argument("--reason", required=True)
+    invalidate.add_argument("--reason", required=True, help="Revocation reason ('-' reads it from stdin)")
     restore = commands.add_parser("restore", help="Reverify a reviewed restoration without awarding extra points")
     restore.add_argument("stage")
     restore.add_argument("item")
-    restore.add_argument("--reason", required=True)
-    restore.add_argument("--reviewer", required=True)
+    restore.add_argument("--reason", required=True, help="Reverify reason ('-' reads it from stdin)")
+    restore.add_argument("--reviewer", required=True, help="Reviewer name ('-' reads it from stdin)")
     review = commands.add_parser("review", help="Run fresh stage checks and ask Jev to continue, finish, or select a preauthorized pivot")
     review.add_argument("stage")
-    review.add_argument("--reason", required=True)
-    review.add_argument("--reviewer", required=True)
+    review.add_argument("--reason", required=True, help="Review reason ('-' reads it from stdin)")
+    review.add_argument("--reviewer", required=True, help="Reviewer name ('-' reads it from stdin)")
     review.add_argument("--approve-finish", action="store_true", help="Record explicit completion approval; checks and Jev must still permit finishing")
     commands.add_parser("self-test", help="Initialize a scratch ledger with a stub evidence collector and read it back")
     env_p = commands.add_parser(
@@ -464,6 +464,10 @@ def main(argv=None):
                 )
         return 0
     args = build_parser().parse_args(argv)
+    for attr in ("summary", "reason", "reviewer"):
+        val = getattr(args, attr, None)
+        if val is not None:
+            setattr(args, attr, _watch.text_arg(val))
     try:
         if args.command == "lint":
             policy_path = _policy_path(args.policy)

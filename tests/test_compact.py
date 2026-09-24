@@ -3030,5 +3030,27 @@ class IncludeDryTests(unittest.TestCase):
                 self.assertEqual(C._spill_dirs(None, include_dry=True), [None])
 
 
+class GoalStdinTests(unittest.TestCase):
+    def test_goal_dash_reads_stdin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps([{"role": "user", "content": "hi"}]), encoding="utf-8")
+            stdin = io.StringIO("goal from pipe\n")
+            buf = io.StringIO()
+            with patch.object(sys, "stdin", stdin), patch.object(sys, "stdout", buf):
+                rc = C.main([str(f), "--fake", "--history", "--goal", "-", "--min-reduction", "0"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(stdin.read(), "")
+
+    def test_goal_dash_empty_stdin_keeps_dash_free(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "t.json"
+            f.write_text(json.dumps([{"role": "user", "content": "hi"}]), encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdin", io.StringIO("")), patch.object(sys, "stdout", buf):
+                rc = C.main([str(f), "--fake", "--history", "--goal", "-", "--min-reduction", "0"])
+            self.assertEqual(rc, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

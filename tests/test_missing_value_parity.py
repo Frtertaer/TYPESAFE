@@ -64,8 +64,6 @@ MISSING_VALUE_RC2 = {
         "--baseline-write",
     ],
     "skill_scanner.py": [
-        "--top",
-        "--task",
         "--explain",
         "--baseline",
         "--baseline-write",

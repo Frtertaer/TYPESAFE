@@ -1875,6 +1875,37 @@ class PruneTest(unittest.TestCase):
             self.assertIn("--archive requires --prune", proc.stderr)
             self.assertEqual(len(path.read_text().splitlines()), 1)
 
+    def test_merge_appends_only_new_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            other = Path(tmp) / "other.jsonl"
+            write_log(path, [{"sha": "s1", "harness": "a"}, {"sha": "s2", "harness": "b"}])
+            write_log(other, [{"sha": "s2", "harness": "b"}, {"sha": "s3", "harness": "c"}])
+            proc = self.run_cli("--file", str(path), "--merge", str(other), "--count")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("merged 1 of 2", proc.stderr)
+            self.assertEqual(proc.stdout.strip(), "3")
+            shas = [
+                json.loads(l)["sha"]
+                for l in path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(shas, ["s1", "s2", "s3"])
+
+    def test_merge_counts_bad_lines_and_gates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            other = Path(tmp) / "other.jsonl"
+            write_log(path, [{"sha": "s1"}])
+            write_log(other, [{"sha": "s2"}, "not-json"])
+            proc = self.run_cli("--file", str(path), "--merge", str(other))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("1 bad line", proc.stderr)
+            missing = self.run_cli(
+                "--file", str(path), "--merge", str(Path(tmp) / "no.jsonl")
+            )
+            self.assertEqual(missing.returncode, 2)
+            self.assertIn("cannot read --merge", missing.stderr)
+
     def test_prune_entries_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

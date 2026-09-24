@@ -873,6 +873,32 @@ def prune_entries(path: Path, apply_filters, retries: int = 8, archive=None) -> 
     return None
 
 
+def merge_log(path: Path, other: Path) -> dict:
+    """Append OTHER's entries not already in PATH (identity = _entry_key).
+
+    Append-only: PATH is never rewritten, and a trailing partial line is
+    completed before the new rows land. Stats dict: added/skipped/total/
+    bad_lines (unparseable lines in OTHER).
+    """
+    cur_text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+    cur, _cur_bad = _parse_jsonl(cur_text)
+    incoming, inc_bad = _parse_jsonl(other.read_text(encoding="utf-8", errors="replace"))
+    seen = {_entry_key(item) for item in cur}
+    new = [item for item in incoming if _entry_key(item) not in seen]
+    if new:
+        with path.open("a", encoding="utf-8", newline="\n") as fh:
+            if cur_text and not cur_text.endswith("\n"):
+                fh.write("\n")
+            for item in new:
+                fh.write(json.dumps(item, sort_keys=True) + "\n")
+    return {
+        "added": len(new),
+        "skipped": len(incoming) - len(new),
+        "total": len(cur) + len(new),
+        "bad_lines": inc_bad,
+    }
+
+
 def _atomic_write(path, text):
     tmp = path.with_name(path.name + ".tmp")
     try:
@@ -1199,6 +1225,12 @@ def main(argv: list[str] | None = None) -> int:
         help="With --prune: append the dropped entries to PATH as JSONL before rewriting the log (lossless prune)",
     )
     parser.add_argument(
+        "--merge",
+        metavar="PATH",
+        default="",
+        help="Append entries from another decisions.jsonl that are not already in the log (identity = sha/ts/dump key), then continue into the normal report",
+    )
+    parser.add_argument(
         "--drop-bad",
         action="store_true",
         help="Rewrite the log dropping unparseable lines (keeps all well-formed entries)",
@@ -1398,6 +1430,29 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "archive", "") and not args.prune:
         sys.stderr.write("--archive requires --prune\n")
         return 2
+    if getattr(args, "merge", ""):
+        if str(path) == "-":
+            sys.stderr.write("--file - (stdin) does not support --merge\n")
+            return 2
+        other = Path(args.merge)
+        if not other.is_file():
+            sys.stderr.write("cannot read --merge file %s\n" % other)
+            return 2
+        try:
+            merged = merge_log(path, other)
+        except OSError as exc:
+            sys.stderr.write("merge failed: %s\n" % exc)
+            return 1
+        sys.stderr.write(
+            "merged %d of %d entries from %s (skipped %d dupes, %d bad line(s))\n"
+            % (
+                merged["added"],
+                merged["added"] + merged["skipped"],
+                other,
+                merged["skipped"],
+                merged["bad_lines"],
+            )
+        )
     if str(path) != "-" and not path.is_file():
         sys.stderr.write("no decisions log at %s\n" % path)
         return 1

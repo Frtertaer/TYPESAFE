@@ -138,6 +138,17 @@ class Finding:
                 "evidence": self.evidence}
 
 
+SCHEMA = {
+    "scanner": {"required": True, "type": "string, 'skill_scanner'"},
+    "version": {"required": True, "type": "string"},
+    "root": {"required": True, "type": "string, scanned path"},
+    "skills_scanned": {"required": True, "type": "list of skill dir paths"},
+    "findings": {"required": True, "type": "list of {skill,check,severity,file,line,message,evidence}"},
+    "summary": {"required": True, "type": "{CRITICAL,WARN,INFO} counts"},
+    "verdict": {"required": True, "type": "PASS|REVIEW-WARNINGS|REJECT-PENDING-REVIEW"},
+}
+
+
 def read_text(path):
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
@@ -350,14 +361,31 @@ def scan_skill(skill_dir, include_fixtures=False):
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Static security scanner for agent skills (OWASP AST01-AST10 aligned).")
-    ap.add_argument("path", help="A skill directory (containing SKILL.md), a SKILL.md file, "
+    ap.add_argument("path", nargs="?",
+                    help="A skill directory (containing SKILL.md), a SKILL.md file, "
                                  "or a parent directory holding many skills.")
     ap.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    ap.add_argument("--schema", action="store_true",
+                    help="Print the --json report key contract and exit "
+                         "(with --json emits the object).")
     ap.add_argument("--include-fixtures", action="store_true",
                     help="Also scan evals/fixtures/ inside each skill (skipped by "
                          "default because fixtures may be deliberately malicious "
                          "test payloads).")
     args = ap.parse_args(argv)
+
+    if args.schema:
+        if args.json:
+            print(json.dumps(SCHEMA, indent=2))
+        else:
+            for key, meta in SCHEMA.items():
+                print("%s: %s (%s)" % (
+                    key, meta["type"],
+                    "required" if meta["required"] else "optional"))
+        return 0
+
+    if args.path is None:
+        ap.error("the following arguments are required: path")
 
     root = Path(args.path).expanduser()
     if not root.exists():

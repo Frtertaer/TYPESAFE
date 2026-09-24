@@ -6932,6 +6932,7 @@ SCHEMA_SCRIPTS = {
     "progress.py": ("--schema",),
     "question_lint.py": ("--schema",),
     "skill_lint.py": ("--schema",),
+    "skill_scanner.py": ("--schema",),
     "smoke.py": ("--schema",),
     "trace.py": ("schema",),
     "trigger_eval.py": ("--schema",),

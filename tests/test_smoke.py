@@ -156,6 +156,39 @@ class SmokeTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 2)
 
+    def test_csv_and_md_emit_step_tables(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "policy", "--csv"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        lines = proc.stdout.strip().splitlines()
+        self.assertEqual(lines[0], "name,ok,detail,suppressed")
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[1].startswith("policy,True,"))
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "policy", "--md",
+             "--keys", "name,ok"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        lines = proc.stdout.strip().splitlines()
+        self.assertEqual(lines[0], "| name | ok |")
+        self.assertEqual(len(lines), 3)
+        self.assertIn("policy", lines[2])
+        proc = subprocess.run(
+            [sys.executable, str(SMOKE), "--only", "policy", "--csv",
+             "--keys", " ,"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 2)
+
     def test_jobs_runs_subset_in_step_order(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(SMOKE), "--only", "trace,policy,decisions",

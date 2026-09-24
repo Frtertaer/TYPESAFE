@@ -80,7 +80,7 @@ def _must_ask_kinds(policy_path: Path = DEFAULT_POLICY) -> set[str] | None:
     return {str(k) for k in kinds}
 
 
-def lint_cases(path: Path, policy_path: Path = DEFAULT_POLICY, text: str | None = None) -> list[dict]:
+def lint_cases(path: Path, policy_path: Path = DEFAULT_POLICY, text: str | None = None, usage: bool = False) -> list[dict]:
     findings: list[dict] = []
 
     def add(rule: str, severity: str, cid: str, message: str) -> None:
@@ -98,6 +98,24 @@ def lint_cases(path: Path, policy_path: Path = DEFAULT_POLICY, text: str | None 
     if not isinstance(cases, list):
         add("T002", "error", "-", "missing 'cases' list")
         return findings
+    if usage:
+        file_keys = {k.split(".", 1)[0] for k in SCHEMA_ROWS}
+        for key in sorted(set(data) - file_keys):
+            add("T012", "info", "-", "top-level key %r is outside the cases contract" % key)
+        case_keys = {
+            k.split(".", 1)[1] for k in SCHEMA_ROWS if k.startswith("case.")
+        }
+        for index, case in enumerate(cases):
+            if not isinstance(case, dict):
+                continue
+            cid = str(case.get("id") or "case[%d]" % index)
+            for key in sorted(set(case) - case_keys):
+                add(
+                    "T012",
+                    "info",
+                    cid,
+                    "case key %r is outside the cases contract" % key,
+                )
     seen: set[str] = set()
     must_ask = _must_ask_kinds(policy_path)
     n_pos = 0
@@ -211,6 +229,7 @@ RULES = {
     "T009": "positive case declares no covers kind",
     "T010": "no positive cases; the margin eval cannot pass",
     "T011": "a must_ask kind has no positive coverage case",
+    "T012": "file or case key is outside the cases contract; trigger_eval does not consume it",
 }
 
 SCHEMA_ROWS = {
@@ -265,7 +284,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch/--diff).\nLint a trigger-cases fixture file for schema sanity.\nFlags:\n  --policy PATH     lint cases against a specific policy.json\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the cases-file key contract (--json emits the object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_TLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --csv             findings as CSV rows (--keys picks the columns)\n  --jsonl           findings as one JSON object per line (adds file)\n  --keys a,b        with --jsonl/--csv: keep only these keys in each row / as the columns (rc 2 on empty)\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this cases file against another (+/-/~ on cases.<id>.<field>; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad cases file; exit 1 when no findings\n  --init            print a lint-clean cases skeleton (one positive per policy must_ask kind) and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args or unreadable file.\n'
+USAGE = 'Usage: python trigger_lint.py [CASES.json ...] [flags]  `-` reads the JSON from stdin (needs a real path for --fix/--watch/--diff).\nLint a trigger-cases fixture file for schema sanity.\nFlags:\n  --policy PATH     lint cases against a specific policy.json\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: print the diff, write nothing\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the cases-file key contract (--json emits the object)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_TLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --usage           add info findings for keys outside the cases contract\n  --env             print the resolved env config JSON (files, policy, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --csv             findings as CSV rows (--keys picks the columns)\n  --jsonl           findings as one JSON object per line (adds file)\n  --keys a,b        with --jsonl/--csv: keep only these keys in each row / as the columns (rc 2 on empty)\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this cases file against another (+/-/~ on cases.<id>.<field>; "-" reads the other side from stdin)\n  --self-test       lint a synthetic known-bad cases file; exit 1 when no findings\n  --init            print a lint-clean cases skeleton (one positive per policy must_ask kind) and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args or unreadable file.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -532,11 +551,12 @@ def main(argv: list[str] | None = None) -> int:
     strict = "--strict" in argv
     do_fix = "--fix" in argv
     dry_run = "--dry-run" in argv
+    usage = "--usage" in argv
     fail_fast = "--fail-fast" in argv
     argv = [
         a
         for a in argv
-        if a not in ("--json", "--md", "--csv", "--jsonl", "--quiet", "--strict", "--fix", "--dry-run", "--fail-fast")
+        if a not in ("--json", "--md", "--csv", "--jsonl", "--quiet", "--strict", "--fix", "--dry-run", "--usage", "--fail-fast")
     ]
     if "--env" in argv:
         try:
@@ -590,9 +610,9 @@ def main(argv: list[str] | None = None) -> int:
         snapshot = []
         for arg in argv:
             if arg == "-":
-                frows = lint_cases(Path("<stdin>"), policy_path=policy_path, text=sys.stdin.read())
+                frows = lint_cases(Path("<stdin>"), policy_path=policy_path, text=sys.stdin.read(), usage=usage)
             else:
-                frows = lint_cases(Path(arg), policy_path=policy_path)
+                frows = lint_cases(Path(arg), policy_path=policy_path, usage=usage)
             frows = _watch.only_filter(frows, only)
             if baseline_write:
                 snapshot.extend({"file": arg, **f} for f in frows)
@@ -735,7 +755,7 @@ def main(argv: list[str] | None = None) -> int:
         prev_tick: dict | None = None
         unchanged = 0
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
-            rows = _watch.only_filter(lint_cases(path, policy_path=policy_path), only)
+            rows = _watch.only_filter(lint_cases(path, policy_path=policy_path, usage=usage), only)
             pre_drop = len(rows)
             if baseline_keys is not None:
                 rows = _drop_baseline(rows, baseline_keys)
@@ -790,7 +810,7 @@ def main(argv: list[str] | None = None) -> int:
         verb = "would fix" if dry_run else "fixed"
         for rule in sorted(set(applied)):
             sys.stderr.write("%s %s x%d\n" % (verb, rule, applied.count(rule)))
-    findings = _watch.only_filter(lint_cases(path, policy_path=policy_path, text=stdin_text), only)
+    findings = _watch.only_filter(lint_cases(path, policy_path=policy_path, text=stdin_text, usage=usage), only)
     if baseline_write and not _write_baseline(
         baseline_write, [{"file": str(path), **f} for f in findings]
     ):

@@ -844,5 +844,46 @@ class DiffFlagTests(unittest.TestCase):
         if must_ask:
             self.assertEqual(must_ask, covered)
 
+    def test_usage_reports_dead_file_and_case_keys(self) -> None:
+        payload = {
+            "skill": "s",
+            "dead_top": 1,
+            "cases": [
+                {**GOOD_CASE, "dead_key": True},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            without_usage = trigger_lint.lint_cases(path)
+            self.assertFalse(any(f["rule"] == "T012" for f in without_usage))
+            findings = trigger_lint.lint_cases(path, usage=True)
+        t012 = [f for f in findings if f["rule"] == "T012"]
+        self.assertEqual({f["id"] for f in t012}, {"-", "pos-x"})
+        self.assertTrue(all(f["severity"] == "info" for f in t012))
+        messages = "\n".join(f["message"] for f in t012)
+        self.assertIn("dead_top", messages)
+        self.assertIn("dead_key", messages)
+
+    def test_usage_cli_json(self) -> None:
+        payload = {
+            "dead_top": 1,
+            "cases": [{**GOOD_CASE, "dead_key": True}],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = trigger_lint.main([str(path), "--usage", "--json"])
+        self.assertEqual(rc, 0)
+        out = json.loads(buf.getvalue())
+        self.assertIn(
+            "dead_key",
+            "\n".join(f["message"] for f in out["findings"]),
+        )
+        self.assertEqual(out["infos"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

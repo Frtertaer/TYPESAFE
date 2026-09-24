@@ -1843,6 +1843,32 @@ class TraceTests(unittest.TestCase):
             self.assertIn("p1", lines[1])
             self.assertNotIn("p0", lines[1])
 
+    def test_export_jsonl_emits_history_rows(self) -> None:
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            self._write_history(path, [1000.0, 2000.0])
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(["--file", str(path), "export", "--jsonl"])
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["pick"], "p0")
+            self.assertEqual(rows[1]["pick"], "p1")
+            self.assertEqual(rows[1]["kind"], "explicit")
+            # --kinds still filters the stream
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = tr.main(
+                    ["--file", str(path), "export", "--jsonl", "--kinds", "explicit"]
+                )
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["pick"], "p1")
+
     def test_export_kinds_dash_reads_stdin(self) -> None:
         import io
 

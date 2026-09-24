@@ -1051,6 +1051,12 @@ def cmd_export(args: argparse.Namespace) -> int:
                     ]
                 )
         out_text = buf.getvalue()
+    elif getattr(args, "jsonl", False):
+        out_text = "".join(
+            json.dumps(h, ensure_ascii=False) + "\n"
+            for h in data.get("history") or []
+            if isinstance(h, dict)
+        )
     elif getattr(args, "md", False):
         def _cell(v) -> str:
             return str(v or "").replace("|", "\\|").replace("\n", " ")
@@ -1090,7 +1096,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         sys.stderr.write(
             "wrote trace export%s to %s\n"
             % (
-                " (csv)" if getattr(args, "csv", False) else (" (md)" if getattr(args, "md", False) else ""),
+                " (csv)" if getattr(args, "csv", False) else (" (jsonl)" if getattr(args, "jsonl", False) else (" (md)" if getattr(args, "md", False) else "")),
                 out_path,
             )
         )
@@ -2155,6 +2161,7 @@ def build_parser() -> argparse.ArgumentParser:
     export_cmd.add_argument("--before", default=None, help="Only history/notes with ts <= epoch seconds or ISO8601")
     export_cmd.add_argument("--kinds", default="", help="Comma list of pick kinds to keep in exported history ('-' reads the list from stdin)")
     export_cmd.add_argument("--md", action="store_true", help="Emit a markdown document (history + notes tables) instead of the JSON bundle")
+    export_cmd.add_argument("--jsonl", action="store_true", help="Emit the (filtered) history list as one JSON row per line instead of the JSON bundle")
     export_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the export payload (rc 2 on unknown key)")
     export_cmd.set_defaults(func=cmd_export)
     verify_cmd = sub.add_parser(

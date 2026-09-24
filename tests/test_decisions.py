@@ -3096,6 +3096,49 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(counts[h1], 2)
             self.assertEqual(counts["unknown"], 1)
 
+    def test_daily_md_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {"ts": 1_700_000_000, "jev_status": "ok"},
+                    {"ts": 1_700_000_100, "jev_status": "ok"},
+                    {"jev_status": "ok"},
+                ],
+            )
+            proc = self.run_cli("--file", str(path), "--daily", "--md")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = proc.stdout.strip().splitlines()
+            self.assertEqual(lines[0], "| day | n |")
+            self.assertEqual(lines[1], "| --- | --- |")
+            self.assertIn("| 2023-11-14 | 2 |", lines)
+            self.assertIn("| unknown | 1 |", lines)
+
+    def test_hourly_md_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"ts": 1_700_000_000, "jev_status": "ok"}])
+            proc = self.run_cli("--file", str(path), "--hourly", "--md")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(proc.stdout.startswith("| hour | n |"))
+
+    def test_daily_status_md_table(self):
+        import datetime as _dt
+        day0 = _dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc).timestamp()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [
+                {"ts": day0, "jev_status": "ok"},
+                {"ts": day0 + 60, "jev_status": "none"},
+            ])
+            proc = self.run_cli("--file", str(path), "--daily-status", "--md")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = proc.stdout.strip().splitlines()
+            self.assertEqual(lines[0], "| day | status | n |")
+            self.assertIn("| 2026-01-01 | ok | 1 |", lines)
+            self.assertIn("| 2026-01-01 | none | 1 |", lines)
+
     def test_missing_accepts_comma_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

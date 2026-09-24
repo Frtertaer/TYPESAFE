@@ -1001,18 +1001,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--daily",
         action="store_true",
-        help="Print per-day entry counts (UTC YYYY-MM-DD), sorted desc",
+        help="Print per-day entry counts (UTC YYYY-MM-DD), sorted desc (--md renders a Markdown table)",
     )
     parser.add_argument(
         "--hourly",
         action="store_true",
-        help="Print per-hour-of-day entry counts (UTC 00-23), sorted desc",
+        help="Print per-hour-of-day entry counts (UTC 00-23), sorted desc (--md renders a Markdown table)",
     )
     parser.add_argument(
         "--daily-status",
         dest="daily_status",
         action="store_true",
-        help="Print a per-day x per-status matrix: rows 'YYYY-MM-DD STATUS N' sorted day-desc then count-desc (--json emits {daily_status: {day: {status: n}}})",
+        help="Print a per-day x per-status matrix: rows 'YYYY-MM-DD STATUS N' sorted day-desc then count-desc (--json emits {daily_status: {day: {status: n}}}; --md renders a Markdown table)",
     )
     parser.add_argument(
         "--evidence",
@@ -1990,6 +1990,10 @@ def main(argv: list[str] | None = None) -> int:
                 rows = rows[: args.top]
             if args.json:
                 sys.stdout.write(json.dumps({"daily_status": matrix}, indent=2) + "\n")
+            elif args.md:
+                sys.stdout.write("| day | status | n |\n| --- | --- | --- |\n")
+                for day, status, n in rows:
+                    sys.stdout.write("| %s | %s | %d |\n" % (day, status, n))
             else:
                 for day, status, n in rows:
                     sys.stdout.write("%s %s %d\n" % (day, status, n))
@@ -2045,6 +2049,11 @@ def main(argv: list[str] | None = None) -> int:
             rows = rows[: args.top]
         if args.json:
             sys.stdout.write(json.dumps({"counts": dict(rows)}, indent=2) + "\n")
+        elif args.md:
+            key_col = "day" if args.daily else "hour" if args.hourly else "value"
+            sys.stdout.write("| %s | n |\n| --- | --- |\n" % key_col)
+            for value, n in rows:
+                sys.stdout.write("| %s | %d |\n" % (value, n))
         else:
             for value, n in rows:
                 sys.stdout.write("%s %d\n" % (value, n))

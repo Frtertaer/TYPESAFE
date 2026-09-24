@@ -144,6 +144,66 @@ class LintSkillTests(unittest.TestCase):
             findings = skill_lint.lint_skill(path)
             self.assertNotIn("S010", {f["rule"] for f in findings})
 
+    def test_undocumented_flag_fires_s012(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(
+                tmp,
+                "x",
+                GOOD.format(name="x") + "\nRun `scripts/real.py` first.\n",
+            )
+            scripts = path.parent / "scripts"
+            scripts.mkdir()
+            (scripts / "real.py").write_text(
+                "import argparse\np = argparse.ArgumentParser()\np.add_argument('--verbose-foo')\n",
+                encoding="utf-8",
+            )
+            findings = skill_lint.lint_skill(path)
+            self.assertTrue(
+                any(
+                    f["rule"] == "S012" and "--verbose-foo" in f["message"]
+                    for f in findings
+                )
+            )
+
+    def test_documented_flag_no_s012(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(
+                tmp,
+                "x",
+                GOOD.format(name="x") + "\n`scripts/real.py` takes `--verbose-foo`.\n",
+            )
+            scripts = path.parent / "scripts"
+            scripts.mkdir()
+            (scripts / "real.py").write_text(
+                "import argparse\np = argparse.ArgumentParser()\np.add_argument('--verbose-foo')\n",
+                encoding="utf-8",
+            )
+            findings = skill_lint.lint_skill(path)
+            self.assertNotIn("S012", {f["rule"] for f in findings})
+
+    def test_s012_ignores_unmentioned_and_subprocess_args(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_skill(
+                tmp,
+                "x",
+                GOOD.format(name="x") + "\nRun `scripts/real.py`.\n",
+            )
+            scripts = path.parent / "scripts"
+            scripts.mkdir()
+            (scripts / "real.py").write_text(
+                "import argparse\np = argparse.ArgumentParser()\np.add_argument('--help-me')\n",
+                encoding="utf-8",
+            )
+            (scripts / "ghost.py").write_text(
+                "import argparse\np = argparse.ArgumentParser()\np.add_argument('--ghost-flag')\n",
+                encoding="utf-8",
+            )
+            findings = skill_lint.lint_skill(path)
+            s012 = [f["message"] for f in findings if f["rule"] == "S012"]
+            self.assertTrue(any("--help-me" in m for m in s012))
+            self.assertFalse(any("ghost-flag" in m for m in s012))
+            self.assertFalse(any(m.startswith("--no-") for m in s012))
+
     def test_no_scripts_dir_no_s010(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = write_skill(tmp, "x", GOOD.format(name="x"))

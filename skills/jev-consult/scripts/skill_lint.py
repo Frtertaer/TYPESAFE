@@ -249,6 +249,28 @@ def lint_skill(path: Path) -> list[dict]:
                     "message": "scripts/%s never mentioned in SKILL.md" % script,
                 }
             )
+        for script in sorted(p.name for p in scripts_dir.glob("*.py")):
+            if script.startswith("_") or script not in mentioned:
+                continue
+            try:
+                src = (scripts_dir / script).read_text(
+                    encoding="utf-8-sig", errors="replace"
+                )
+            except OSError:
+                continue
+            flags = set(re.findall(r"""add_argument\(\s*["'](--[a-z][a-z0-9-]+)""", src))
+            flags |= set(re.findall(r"""["'](--[a-z][a-z0-9-]+)["']\s+in\s+argv""", src))
+            flags |= set(re.findall(r"""argv\[\w*\]\s*==\s*["'](--[a-z][a-z0-9-]+)["']""", src))
+            for flag in sorted(flags):
+                if flag in ("--help", "--version", "--") or flag in text:
+                    continue
+                findings.append(
+                    {
+                        "rule": "S012",
+                        "severity": "info",
+                        "message": "scripts/%s exposes %s but SKILL.md never documents it" % (script, flag),
+                    }
+                )
     return findings
 
 
@@ -324,6 +346,7 @@ RULES = {
     "S009": "cited scripts/*.py file does not exist in the sibling scripts/ dir",
     "S010": "scripts/*.py file is never mentioned in SKILL.md (skips _* and [vendored] scripts)",
     "S011": "policy.json key is never mentioned in SKILL.md",
+    "S012": "a mentioned scripts/*.py exposes a --flag that SKILL.md never documents",
 }
 
 

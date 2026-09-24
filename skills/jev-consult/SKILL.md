@@ -277,5 +277,5 @@ python skills/jev-consult/scripts/progress.py assess reliability client --summar
 python skills/jev-consult/scripts/progress.py status reliability
 python skills/jev-consult/scripts/progress.py review reliability --reason "Acceptance evidence reviewed" --reviewer "review-reference"
 python skills/jev-consult/scripts/progress.py report reliability
-python skills/jev-consult/scripts/progress.py history reliability  # --jsonl emits one event row per line
+python skills/jev-consult/scripts/progress.py history reliability  # --jsonl emits one event row per line (--keys a,b keeps only those keys per row, rc 2 on an empty list)
 ```

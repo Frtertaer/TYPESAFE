@@ -33,6 +33,7 @@ def build_parser():
         command = commands.add_parser(name)
         command.add_argument("stage")
     commands.choices["history"].add_argument("--jsonl", action="store_true", help="Emit each event as one JSON line instead of the wrapped object")
+    commands.choices["history"].add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these keys in each event row (rc 2 on an empty list)")
     report = commands.add_parser("report", help="Print a markdown summary of a stage (plan, credits, events); --out writes it to a file")
     report.add_argument("--json", action="store_true", help="Emit a structured {stage, goal, action, points, awarded_items, blocked_items, events, ...} object instead of markdown (--out then writes the JSON)")
     report.add_argument("stage")
@@ -625,7 +626,18 @@ def main(argv=None):
     if args.command == "history" and getattr(args, "jsonl", False) and not getattr(args, "jq", ""):
         events = result.get("events") if isinstance(result, dict) else []
         rows = [e for e in events if isinstance(e, dict)] if isinstance(events, list) else []
-        text = "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in rows)
+        key_sel = getattr(args, "keys", "") or ""
+        keys = [k.strip() for k in key_sel.split(",") if k.strip()]
+        if key_sel and not keys:
+            sys.stderr.write("--keys names no fields\n")
+            return 2
+        text = "".join(
+            json.dumps(
+                {k: e.get(k) for k in keys} if keys else e, ensure_ascii=False
+            )
+            + "\n"
+            for e in rows
+        )
         out_path = getattr(args, "out", "") or ""
         if out_path:
             try:

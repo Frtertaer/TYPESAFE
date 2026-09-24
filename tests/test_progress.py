@@ -1356,6 +1356,46 @@ class ReportWatchTests(unittest.TestCase):
 
 
 
+class HistoryKeysTests(unittest.TestCase):
+    """`progress.py history --jsonl --keys a,b` projects event rows."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.db = self.root / "progress.sqlite3"
+        ledger = progress.Ledger(self.db, self.root, evidence=FakeEvidence())
+        ledger.initialize(plan(), policy())
+        ledger.assess(
+            "reliability", "item_0", "Verified outcome", asker=picker("material")
+        )
+
+    def _main(self, args):
+        out, err = StringIO(), StringIO()
+        with patch("sys.stdout", out), patch("sys.stderr", err):
+            rc = progress_cli.main(
+                ["--repo", str(self.root), "--db", str(self.db)] + args
+            )
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_history_jsonl_keys_projects_rows(self):
+        rc, out, _err = self._main(
+            ["history", "reliability", "--jsonl", "--keys", "kind,seq"]
+        )
+        self.assertEqual(rc, 0)
+        rows = [json.loads(l) for l in out.splitlines() if l.strip()]
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertEqual(set(row) - {"kind", "seq"}, set())
+
+    def test_history_jsonl_keys_empty_list_rc2(self):
+        rc, _out, err = self._main(
+            ["history", "reliability", "--jsonl", "--keys", " ,"]
+        )
+        self.assertEqual(rc, 2)
+        self.assertIn("--keys names no fields", err)
+
+
 class StdinPlanTests(unittest.TestCase):
     """`progress.py lint -` / `init -` read the plan JSON from stdin."""
 

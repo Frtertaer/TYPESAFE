@@ -22,6 +22,7 @@ python scripts/install.py                 # ставит скилл в 4 хар�
 # TYPESAFE_API_KEY=... в .env или env харнесса (значение не печатать)
 python skills/jev-consult/scripts/doctor.py        # rc 0 = установка ок
 python -m unittest discover -s tests      # прогон всей suite
+make test-jev                             # один test-файл по суффиксу (или python -m unittest tests.test_jev)
 ```
 
 ## Что в репозитории

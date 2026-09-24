@@ -6,6 +6,9 @@
 test:            ## full suite
 	python -m unittest discover -s tests
 
+test-%:          ## one test file by suffix: make test-jev runs tests.test_jev
+	python -m unittest tests.test_$*
+
 lint:            ## pack lints (policy + trigger cases + skill doc)
 	python skills/jev-consult/scripts/policy_lint.py skills/jev-consult/policy.json
 	python skills/jev-consult/scripts/trigger_lint.py tests/fixtures/jev-consult.trigger-cases.json

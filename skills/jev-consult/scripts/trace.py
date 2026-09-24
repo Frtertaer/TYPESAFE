@@ -598,6 +598,28 @@ def cmd_history(args: argparse.Namespace) -> int:
             sys.stdout.write(
                 json.dumps({"kinds": dict(rows)}, ensure_ascii=False, indent=2) + "\n"
             )
+        elif getattr(args, "jsonl", False):
+            keys = _key_projection(args)
+            if keys is None:
+                return 2
+            for kind, n in rows:
+                row = {"kind": kind or "-", "count": n}
+                if keys:
+                    row = {k: row.get(k) for k in keys}
+                sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
+        elif getattr(args, "csv", False):
+            keys = _key_projection(args)
+            if keys is None:
+                return 2
+            _watch.csv_table(
+                [{"kind": kind or "-", "count": n} for kind, n in rows],
+                keys or ["kind", "count"],
+            )
+        elif getattr(args, "md", False):
+            _watch.md_table(
+                [{"kind": kind or "-", "count": n} for kind, n in rows],
+                ["kind", "count"],
+            )
         else:
             for kind, n in rows:
                 sys.stdout.write("%s %d\n" % (kind or "-", n))
@@ -672,6 +694,24 @@ def cmd_history(args: argparse.Namespace) -> int:
         if getattr(args, "json", False):
             sys.stdout.write(
                 json.dumps({"gaps": gaps}, ensure_ascii=False, indent=2) + "\n"
+            )
+        elif getattr(args, "jsonl", False):
+            keys = _key_projection(args)
+            if keys is None:
+                return 2
+            for g in gaps:
+                row = {k: g.get(k) for k in keys} if keys else g
+                sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
+        elif getattr(args, "csv", False):
+            keys = _key_projection(args)
+            if keys is None:
+                return 2
+            _watch.csv_table(
+                gaps, keys or ["index", "prev_ts", "ts", "gap_s", "prev_pick", "pick"]
+            )
+        elif getattr(args, "md", False):
+            _watch.md_table(
+                gaps, ["index", "prev_ts", "ts", "gap_s", "prev_pick", "pick"]
             )
         else:
             for g in gaps:
@@ -776,6 +816,16 @@ def cmd_history(args: argparse.Namespace) -> int:
                 else entry
             )
             sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
+        return 0
+    if getattr(args, "csv", False) or getattr(args, "md", False):
+        keys = _key_projection(args)
+        if keys is None:
+            return 2
+        rows = [e for e in history if isinstance(e, dict)]
+        if getattr(args, "csv", False):
+            _watch.csv_table(rows, keys or ["ts", "iso", "kind", "pick"])
+        else:
+            _watch.md_table(rows, keys or ["ts", "iso", "kind", "pick"])
         return 0
     for entry in history:
         kind = str(entry.get("kind") or "")
@@ -1409,6 +1459,28 @@ def cmd_notes(args: argparse.Namespace) -> int:
             sys.stdout.write(
                 json.dumps({"by_harness": dict(rows)}, ensure_ascii=False, indent=2) + "\n"
             )
+        elif getattr(args, "jsonl", False):
+            keys = _key_projection(args)
+            if keys is None:
+                return 2
+            for harness, n in rows:
+                row = {"harness": harness or "-", "count": n}
+                if keys:
+                    row = {k: row.get(k) for k in keys}
+                sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
+        elif getattr(args, "csv", False):
+            keys = _key_projection(args)
+            if keys is None:
+                return 2
+            _watch.csv_table(
+                [{"harness": harness or "-", "count": n} for harness, n in rows],
+                keys or ["harness", "count"],
+            )
+        elif getattr(args, "md", False):
+            _watch.md_table(
+                [{"harness": harness or "-", "count": n} for harness, n in rows],
+                ["harness", "count"],
+            )
         else:
             for harness, n in rows:
                 sys.stdout.write("%s %d\n" % (harness or "-", n))
@@ -1492,6 +1564,24 @@ def cmd_notes(args: argparse.Namespace) -> int:
         if getattr(args, "json", False):
             sys.stdout.write(
                 json.dumps({"gaps": gaps}, ensure_ascii=False, indent=2) + "\n"
+            )
+        elif getattr(args, "jsonl", False):
+            keys = _key_projection(args)
+            if keys is None:
+                return 2
+            for g in gaps:
+                row = {k: g.get(k) for k in keys} if keys else g
+                sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
+        elif getattr(args, "csv", False):
+            keys = _key_projection(args)
+            if keys is None:
+                return 2
+            _watch.csv_table(
+                gaps, keys or ["index", "prev_ts", "ts", "gap_s", "prev_text", "text"]
+            )
+        elif getattr(args, "md", False):
+            _watch.md_table(
+                gaps, ["index", "prev_ts", "ts", "gap_s", "prev_text", "text"]
             )
         else:
             for g in gaps:
@@ -1590,6 +1680,18 @@ def cmd_notes(args: argparse.Namespace) -> int:
             for n in notes
             if isinstance(n, dict)
         )
+    elif getattr(args, "csv", False) or getattr(args, "md", False):
+        keys = _key_projection(args)
+        if keys is None:
+            return 2
+        cols = keys or ["ts", "iso", "harness", "sha", "text"]
+        rows = [n for n in notes if isinstance(n, dict)]
+        buf = io.StringIO()
+        if getattr(args, "csv", False):
+            _watch.csv_table(rows, cols, out=buf)
+        else:
+            _watch.md_table(rows, cols, out=buf)
+        out_text = buf.getvalue()
     else:
         lines = []
         for note in notes:
@@ -2075,7 +2177,9 @@ def build_parser() -> argparse.ArgumentParser:
     notes_cmd = sub.add_parser("notes", help="List recorded notes (iso + text)")
     notes_cmd.add_argument("--json", action="store_true", help="Emit notes as a JSON array")
     notes_cmd.add_argument("--jsonl", action="store_true", help="Emit each note as one JSON line (for piping)")
-    notes_cmd.add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these note keys in each row (rc 2 on an empty list)")
+    notes_cmd.add_argument("--keys", metavar="a,b", default="", help="With --jsonl/--csv: keep only these note keys in each row / pick the column order (rc 2 on an empty list)")
+    notes_cmd.add_argument("--csv", action="store_true", help="Emit notes (or --by-harness/--gap rows) as a CSV table; --keys picks the columns")
+    notes_cmd.add_argument("--md", action="store_true", help="Emit notes (or --by-harness/--gap rows) as a Markdown table")
     notes_cmd.add_argument("--limit", type=int, help="Show only the last N notes")
     notes_cmd.add_argument("--first", type=int, default=None, help="Show only the earliest N notes (applied before --limit/--reverse)")
     notes_cmd.add_argument("--prune", type=int, help="Rewrite the trace keeping only the last N notes")
@@ -2108,7 +2212,9 @@ def build_parser() -> argparse.ArgumentParser:
     hist_cmd = sub.add_parser("history", help="List recorded picks (--json for the array)")
     hist_cmd.add_argument("--json", action="store_true")
     hist_cmd.add_argument("--jsonl", action="store_true", help="Emit each pick as one JSON line (for piping)")
-    hist_cmd.add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these entry keys in each row (rc 2 on an empty list)")
+    hist_cmd.add_argument("--keys", metavar="a,b", default="", help="With --jsonl/--csv: keep only these entry keys in each row / pick the column order (rc 2 on an empty list)")
+    hist_cmd.add_argument("--csv", action="store_true", help="Emit picks (or --kinds/--gap rows) as a CSV table; --keys picks the columns")
+    hist_cmd.add_argument("--md", action="store_true", help="Emit picks (or --kinds/--gap rows) as a Markdown table")
     hist_cmd.add_argument("--limit", type=int, help="Show only the last N picks")
     hist_cmd.add_argument("--first", type=int, default=None, help="Show only the earliest N picks (applied before --limit/--reverse)")
     hist_cmd.add_argument("--reverse", action="store_true", help="List picks newest-first")

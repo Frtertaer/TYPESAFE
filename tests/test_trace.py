@@ -725,6 +725,147 @@ class TraceTests(unittest.TestCase):
             rc = tr.main(["--file", str(path), "notes", "--jsonl", "--keys", " ,"])
             self.assertEqual(rc, 2)
 
+    def test_notes_csv_and_md_emit_tables(self) -> None:
+        import time
+        import csv as _csv
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            now = time.time()
+            tr.save(
+                {"notes": [{"ts": now, "iso": "2026-01-01T00:00:00Z",
+                            "text": "n1", "sha": "s1", "harness": "h1"}]},
+                path,
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--csv"])
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(StringIO(buf.getvalue())))
+            self.assertEqual(rows[0], ["ts", "iso", "harness", "sha", "text"])
+            self.assertEqual(rows[1][4], "n1")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--csv", "--keys", "text"]
+                )
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(StringIO(buf.getvalue())))
+            self.assertEqual(rows, [["text"], ["n1"]])
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "notes", "--md"])
+            self.assertEqual(rc, 0)
+            self.assertIn("| ts | iso | harness | sha | text |", buf.getvalue())
+            self.assertIn("| n1 |", buf.getvalue())
+
+    def test_notes_views_emit_jsonl_csv_md(self) -> None:
+        import time
+        import csv as _csv
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            now = time.time()
+            tr.save(
+                {"notes": [
+                    {"ts": now, "text": "a", "harness": "h1"},
+                    {"ts": now + 500, "text": "b"},
+                ]},
+                path,
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--by-harness", "--csv"]
+                )
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(StringIO(buf.getvalue())))
+            self.assertEqual(rows[0], ["harness", "count"])
+            self.assertEqual(sorted(r[0] for r in rows[1:]), ["-", "h1"])
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--by-harness", "--jsonl"]
+                )
+            self.assertEqual(rc, 0)
+            got = [json.loads(l) for l in buf.getvalue().splitlines()]
+            self.assertEqual({r["harness"]: r["count"] for r in got},
+                             {"h1": 1, "-": 1})
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--gap", "100", "--csv"]
+                )
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(StringIO(buf.getvalue())))
+            self.assertEqual(rows[0],
+                             ["index", "prev_ts", "ts", "gap_s", "prev_text",
+                              "text"])
+            self.assertEqual(len(rows), 2)
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "notes", "--gap", "100", "--jsonl",
+                     "--keys", "gap_s"]
+                )
+            self.assertEqual(rc, 0)
+            got = [json.loads(l) for l in buf.getvalue().splitlines()]
+            self.assertEqual(len(got), 1)
+            self.assertIn("gap_s", got[0])
+
+    def test_history_csv_md_and_view_tables(self) -> None:
+        import time
+        import csv as _csv
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            now = time.time()
+            tr.save(
+                {"history": [
+                    {"ts": now, "iso": "x", "kind": "approach", "pick": "a"},
+                    {"ts": now + 500, "iso": "y", "kind": "other",
+                     "pick": "b"},
+                ]},
+                path,
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--csv"])
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(StringIO(buf.getvalue())))
+            self.assertEqual(rows[0], ["ts", "iso", "kind", "pick"])
+            self.assertEqual([r[3] for r in rows[1:]], ["a", "b"])
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "history", "--md"])
+            self.assertEqual(rc, 0)
+            self.assertIn("| ts | iso | kind | pick |", buf.getvalue())
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "history", "--kinds", "--csv"]
+                )
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(StringIO(buf.getvalue())))
+            self.assertEqual(rows[0], ["kind", "count"])
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "history", "--gap", "100", "--csv"]
+                )
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(StringIO(buf.getvalue())))
+            self.assertEqual(rows[0],
+                             ["index", "prev_ts", "ts", "gap_s", "prev_pick",
+                              "pick"])
+            self.assertEqual(len(rows), 2)
+
     def test_history_reverse_lists_newest_first(self) -> None:
         import time
         from io import StringIO

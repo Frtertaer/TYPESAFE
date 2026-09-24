@@ -54,6 +54,7 @@ CHECK_NAMES = (
     "policy_lint",
     "smoke_self_test",
     "decisions_log",
+    "decisions_verify",
     "progress_ledger",
 )
 
@@ -83,6 +84,7 @@ HINTS = {
     "policy": "restore skills/jev-consult/policy.json",
     "policy_lint": "fix the flagged keys in skills/jev-consult/policy.json (python skills/jev-consult/scripts/policy_lint.py)",
     "smoke_self_test": "run python skills/jev-consult/scripts/smoke.py --self-test and fix the failing synthetic step",
+    "decisions_verify": "run python skills/jev-consult/scripts/decisions.py --verify and fix the flagged log lines",
     "hooks_json": "fix or delete the malformed hooks file; it blocks hook registration",
 }
 
@@ -314,6 +316,23 @@ def check_common(home: Path, hermes: Path) -> list[dict]:
         except OSError:
             pass
     out.append(_check("*", "decisions_log", True, "%s (%d lines)" % (log, lines)))
+    if not log.is_file() or not lines:
+        out.append(_check("*", "decisions_verify", True, "absent"))
+    if log.is_file() and lines:
+        ok = False
+        detail = "verify crashed"
+        try:
+            import decisions as _decisions
+            from contextlib import redirect_stdout as _ro
+            buf = io.StringIO()
+            with _ro(buf):
+                src = _decisions.main(["--file", str(log), "--verify"])
+            first = buf.getvalue().strip().splitlines()
+            ok = src == 0
+            detail = first[0][:120] if first else "rc=%d" % src
+        except Exception as exc:
+            detail = "unrunnable: %s" % exc
+        out.append(_check("*", "decisions_verify", ok, detail))
     return out
 
 

@@ -409,6 +409,56 @@ class DoctorTests(unittest.TestCase):
         self.assertTrue(check["ok"], check)
         self.assertIn("self-test: ok", check["detail"])
 
+    def test_decisions_verify_absent_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc, out, _ = run_main(
+                ["--only", "decisions_verify", "--home", tmp,
+                 "--hermes-home", tmp],
+                env_extra={"JEV_CONSULT_LOG": ""},
+                cwd=tmp,
+            )
+        check = check_of(out, "decisions_verify")
+        self.assertTrue(check["ok"], check)
+        self.assertEqual(check["detail"], "absent")
+
+    def test_decisions_verify_fails_on_bad_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            logdir = home / ".cache" / "jev-consult"
+            logdir.mkdir(parents=True)
+            (logdir / "decisions.jsonl").write_text(
+                '{"ts": 1, "jev_status": "ok"}\nbad line\n',
+                encoding="utf-8",
+            )
+            rc, out, _ = run_main(
+                ["--only", "decisions_verify", "--home", str(home),
+                 "--hermes-home", str(home)],
+                env_extra={"JEV_CONSULT_LOG": ""},
+                cwd=tmp,
+            )
+            check = check_of(out, "decisions_verify")
+            self.assertFalse(check["ok"])
+            self.assertIn("bad_lines=1", check["detail"])
+            self.assertEqual(rc, 1)
+
+    def test_decisions_verify_ok_on_clean_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            logdir = home / ".cache" / "jev-consult"
+            logdir.mkdir(parents=True)
+            (logdir / "decisions.jsonl").write_text(
+                '{"ts": 1, "jev_status": "ok"}\n', encoding="utf-8",
+            )
+            rc, out, _ = run_main(
+                ["--only", "decisions_verify", "--home", str(home),
+                 "--hermes-home", str(home)],
+                env_extra={"JEV_CONSULT_LOG": ""},
+                cwd=tmp,
+            )
+            check = check_of(out, "decisions_verify")
+            self.assertTrue(check["ok"], check)
+            self.assertIn("verify: ok", check["detail"])
+
     def test_only_filters_checks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rc, out, _ = run_main(

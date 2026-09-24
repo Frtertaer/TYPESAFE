@@ -1231,6 +1231,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Append entries from another decisions.jsonl that are not already in the log (identity = sha/ts/dump key), then continue into the normal report",
     )
     parser.add_argument(
+        "--rotate",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Rewrite the log keeping only the last N entries (positional prune; honors --archive and --dry-run)",
+    )
+    parser.add_argument(
         "--drop-bad",
         action="store_true",
         help="Rewrite the log dropping unparseable lines (keeps all well-formed entries)",
@@ -1424,11 +1431,20 @@ def main(argv: list[str] | None = None) -> int:
         or getattr(args, "drop_bad", False)
         or args.watch
         or getattr(args, "follow", 0.0)
+        or getattr(args, "rotate", None) is not None
     ):
-        sys.stderr.write("--file - (stdin) supports neither --prune, --drop-bad, --watch nor --follow\n")
+        sys.stderr.write("--file - (stdin) supports neither --prune, --drop-bad, --rotate, --watch nor --follow\n")
         return 2
-    if getattr(args, "archive", "") and not args.prune:
-        sys.stderr.write("--archive requires --prune\n")
+    if getattr(args, "rotate", None) is not None and (
+        args.prune or getattr(args, "drop_bad", False)
+    ):
+        sys.stderr.write("--rotate conflicts with --prune/--drop-bad\n")
+        return 2
+    if args.rotate is not None and args.rotate < 1:
+        sys.stderr.write("--rotate needs N >= 1\n")
+        return 2
+    if getattr(args, "archive", "") and not args.prune and args.rotate is None:
+        sys.stderr.write("--archive requires --prune or --rotate\n")
         return 2
     if getattr(args, "merge", ""):
         if str(path) == "-":
@@ -2124,6 +2140,48 @@ def main(argv: list[str] | None = None) -> int:
                     else "",
                 )
             )
+    if args.rotate is not None:
+        n = args.rotate
+        if getattr(args, "dry_run", False):
+            total_all, total_bad_lines = load_entries(path)
+            kept_n = min(n, len(total_all))
+            if args.json:
+                args._rotate_dry_run = {
+                    "would_rotate": len(total_all) - kept_n,
+                    "total": len(total_all),
+                    "kept": kept_n,
+                    "bad_lines": total_bad_lines,
+                }
+            else:
+                sys.stderr.write(
+                    "dry-run: would rotate %d of %d entries (kept %d, dropped %d bad line(s))\n"
+                    % (len(total_all) - kept_n, len(total_all), kept_n, total_bad_lines)
+                )
+        else:
+            try:
+                result = prune_entries(
+                    path, lambda items: items[-n:], archive=args.archive or None
+                )
+            except OSError as exc:
+                sys.stderr.write("rotate failed: %s\n" % exc)
+                return 1
+            if result is None:
+                sys.stderr.write(
+                    "rotate failed: decisions log kept changing (appends in flight); retry shortly\n"
+                )
+                return 1
+            sys.stderr.write(
+                "rotated %d of %d entries (kept %d, dropped %d bad line(s)%s)\n"
+                % (
+                    result["dropped"],
+                    result["total"],
+                    result["kept"],
+                    result["bad"],
+                    ", archived %d to %s" % (result["archived"], args.archive)
+                    if args.archive
+                    else "",
+                )
+            )
     if args.errors:
         bad_rows = load_bad_lines(path)
         if args.json:
@@ -2417,6 +2475,8 @@ def main(argv: list[str] | None = None) -> int:
     stats["until"] = until
     if getattr(args, "_prune_dry_run", None):
         stats["prune_dry_run"] = args._prune_dry_run
+    if getattr(args, "_rotate_dry_run", None):
+        stats["rotate_dry_run"] = args._rotate_dry_run
     if getattr(args, "report", ""):
         rep = [
             "# decisions report",

@@ -1906,6 +1906,61 @@ class PruneTest(unittest.TestCase):
             self.assertEqual(missing.returncode, 2)
             self.assertIn("cannot read --merge", missing.stderr)
 
+    def test_rotate_keeps_last_n(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            archive = Path(tmp) / "archive.jsonl"
+            write_log(
+                path,
+                [
+                    {"sha": "s1", "harness": "a"},
+                    {"sha": "s2", "harness": "b"},
+                    {"sha": "s3", "harness": "c"},
+                ],
+            )
+            proc = self.run_cli(
+                "--file", str(path), "--rotate", "2", "--archive", str(archive)
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("rotated 1 of 3", proc.stderr)
+            self.assertIn("archived 1", proc.stderr)
+            shas = [
+                json.loads(l)["sha"]
+                for l in path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(shas, ["s2", "s3"])
+            dropped = [
+                json.loads(l)["sha"]
+                for l in archive.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(dropped, ["s1"])
+
+    def test_rotate_gates_and_dry_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(path, [{"sha": "s1"}, {"sha": "s2"}])
+            bad_n = self.run_cli("--file", str(path), "--rotate", "0")
+            self.assertEqual(bad_n.returncode, 2)
+            self.assertIn("--rotate needs N >= 1", bad_n.stderr)
+            conflict = self.run_cli(
+                "--file", str(path), "--rotate", "1", "--prune", "--sha", "s1"
+            )
+            self.assertEqual(conflict.returncode, 2)
+            self.assertIn("--rotate conflicts", conflict.stderr)
+            archive_gate = self.run_cli(
+                "--file", str(path), "--archive", str(Path(tmp) / "a.jsonl")
+            )
+            self.assertEqual(archive_gate.returncode, 2)
+            self.assertIn("--archive requires --prune or --rotate", archive_gate.stderr)
+            stdin_gate = self.run_cli("--file", "-", "--rotate", "1")
+            self.assertEqual(stdin_gate.returncode, 2)
+            dry = self.run_cli(
+                "--file", str(path), "--rotate", "1", "--dry-run"
+            )
+            self.assertEqual(dry.returncode, 0, dry.stderr)
+            self.assertIn("would rotate 1 of 2", dry.stderr)
+            self.assertEqual(len(path.read_text().splitlines()), 2)
+
     def test_prune_entries_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

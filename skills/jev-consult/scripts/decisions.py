@@ -1058,6 +1058,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Print unique harness values with counts, sorted desc",
     )
     parser.add_argument(
+        "--never-picked",
+        action="store_true",
+        help="List installed items never recorded as a winner in the filtered entries (scans every --harness value, or all four when unset)",
+    )
+    parser.add_argument(
+        "--home",
+        default="",
+        help="Override the harness home root (test override; --never-picked only)",
+    )
+    parser.add_argument(
+        "--hermes-home",
+        default="",
+        help="Override the Hermes root (test override; --never-picked only)",
+    )
+    parser.add_argument(
         "--winners",
         action="store_true",
         help="Print unique winner kind:name pairs with counts, sorted desc",
@@ -2466,6 +2481,59 @@ def main(argv: list[str] | None = None) -> int:
         else:
             for value, n in rows:
                 sys.stdout.write("%s %d\n" % (value, n))
+        return 0
+    if getattr(args, "never_picked", False):
+        picked = set()
+        for item in entries:
+            winner = item.get("winner")
+            if isinstance(winner, dict) and winner.get("name"):
+                picked.add(
+                    "%s:%s" % (winner.get("kind") or "?", winner["name"])
+                )
+        wanted = [h.strip() for h in (args.harness or "").split(",") if h.strip()]
+        harness_list = wanted or list(inventory.HARNESSES)
+        home = Path(args.home) if args.home else None
+        hermes = Path(args.hermes_home) if args.hermes_home else None
+        rows = []
+        for h in harness_list:
+            try:
+                scanned = inventory.scan(h, home=home, hermes=hermes)
+            except ValueError:
+                sys.stderr.write("--never-picked: unknown harness %r\n" % h)
+                return 2
+            for item in scanned:
+                key = "%s:%s" % (item.get("kind") or "?", item.get("name"))
+                if key not in picked:
+                    rows.append(
+                        {
+                            "harness": h,
+                            "kind": item.get("kind") or "?",
+                            "name": item.get("name") or "",
+                        }
+                    )
+        rows.sort(key=lambda r: (r["harness"], r["kind"], r["name"]))
+        if args.top > 0:
+            rows = rows[: args.top]
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {"harnesses": harness_list, "never_picked": rows, "count": len(rows)},
+                    indent=2,
+                )
+                + "\n"
+            )
+        elif getattr(args, "jsonl", False):
+            for row in rows:
+                sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
+        elif getattr(args, "csv", False):
+            _watch.csv_table(rows, ["harness", "kind", "name"])
+        elif args.md:
+            _watch.md_table(rows, ["harness", "kind", "name"])
+        else:
+            for row in rows:
+                sys.stdout.write(
+                    "%s %s:%s\n" % (row["harness"], row["kind"], row["name"])
+                )
         return 0
     emit_entries = entries[::-1] if getattr(args, "reverse", False) else entries
     sample_n = getattr(args, "sample", 0) or 0

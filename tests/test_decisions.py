@@ -1276,6 +1276,50 @@ class CliTest(unittest.TestCase):
                 {"load_tools": 2, "explicit": 1, "unknown": 1},
             )
 
+    def test_never_picked_joins_inventory_scan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            write_log(
+                path,
+                [
+                    {
+                        "harness": "hermes",
+                        "winner": {"kind": "skill", "name": "picked-one"},
+                    },
+                    {"harness": "hermes", "jev_status": "none"},
+                ],
+            )
+            hh = Path(tmp) / "hermes"
+            (hh / "skills" / "picked-one").mkdir(parents=True)
+            (hh / "skills" / "picked-one" / "SKILL.md").write_text(
+                "---\nname: picked-one\ndescription: x\n---\n", encoding="utf-8"
+            )
+            (hh / "skills" / "orphan-one").mkdir(parents=True)
+            (hh / "skills" / "orphan-one" / "SKILL.md").write_text(
+                "---\nname: orphan-one\ndescription: y\n---\n", encoding="utf-8"
+            )
+            base = [
+                "--file", str(path), "--never-picked",
+                "--harness", "hermes", "--hermes-home", str(hh),
+            ]
+            proc = self.run_cli(*base)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip(), "hermes skill:orphan-one")
+            proc = self.run_cli(*base, "--json")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["count"], 1)
+            self.assertEqual(payload["never_picked"][0]["name"], "orphan-one")
+            # --jq stays a per-entry extraction on decisions.py — it applies
+            # to entries, not this report view
+            proc = self.run_cli(*base, "--jq", "jev_status")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("none", proc.stdout)
+            proc = self.run_cli(
+                "--file", str(path), "--never-picked", "--harness", "bogus"
+            )
+            self.assertEqual(proc.returncode, 2)
+
     def test_outcome_filter(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "decisions.jsonl"

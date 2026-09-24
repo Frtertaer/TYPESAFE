@@ -36,6 +36,7 @@ REQUEST_SCHEMA_ROWS = {
     "state": {"required": False, "type": "object|string, session context sent to Jev (32k-token cap)"},
     "questions": {"required": True, "type": "object{qid: question}; qid is the answers key"},
     "irreversible": {"required": False, "type": "bool, marks irreversible actions"},
+    "model": {"required": False, "type": "string, overrides the policy model for this ask"},
     "question.type": {"required": True, "type": "choice|noul|score"},
     "question.instructions": {"required": True, "type": "string, the question text"},
     "question.criteria": {"required": False, "type": "object{option: label} for choice, {true,false} for noul, list[label] for score (missing fires J009)"},
@@ -116,6 +117,7 @@ RULES = {
     "J016": "choice has no 'none'/'other' escape; a forced pick returns a wrong answer",
     "J017": "two options carry identical descriptions; Jev has no basis to tell them apart",
     "J018": "option key collides with a hatch id modulo case; hatch matching is exact",
+    "J019": "request or question key is outside the schema contract; jev.py ask does not consume it",
     "J020": "state exceeds the 32k-token limit; trim or chunk it first",
     "J021": "state is over 8k tokens; irrelevant state distracts and drops accuracy",
 }
@@ -345,9 +347,39 @@ def lint_request(
     request: dict,
     max_options: int = 255,
     hatch: tuple[str, ...] = ("none", "other"),
+    usage: bool = False,
 ) -> list[dict]:
     findings: list[dict] = []
     questions = request.get("questions") if isinstance(request, dict) else None
+    if usage and isinstance(request, dict):
+        request_keys = {k.split(".", 1)[0] for k in REQUEST_SCHEMA_ROWS}
+        for key in sorted(set(request) - request_keys):
+            findings.append(
+                {
+                    "rule": "J019",
+                    "severity": "info",
+                    "qid": "*",
+                    "message": "top-level key %r is outside the request contract" % key,
+                    "fix": "Remove it or document a consumer; jev.py ask ignores it.",
+                }
+            )
+        question_keys = {
+            k.split(".", 1)[1] for k in REQUEST_SCHEMA_ROWS if k.startswith("question.")
+        }
+        if isinstance(questions, dict):
+            for qid, question in questions.items():
+                if not isinstance(question, dict):
+                    continue
+                for key in sorted(set(question) - question_keys):
+                    findings.append(
+                        {
+                            "rule": "J019",
+                            "severity": "info",
+                            "qid": str(qid),
+                            "message": "question key %r is outside the request contract" % key,
+                            "fix": "Remove it or document a consumer; jev.py ask ignores it.",
+                        }
+                    )
     if isinstance(questions, dict):
         for qid, question in questions.items():
             if isinstance(question, dict):
@@ -500,7 +532,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.). `-` reads the request JSON from stdin (single file or mixed with paths in multi mode; --fix/--watch need a real path).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: report what would change without writing\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_QLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --csv             findings as CSV rows (--keys picks the columns)\n  --jsonl           findings as one JSON object per line (adds file)\n  --keys a,b        with --jsonl/--csv: keep only these keys in each row / as the columns (rc 2 on empty)\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this request against another file (per-question +/- and ~ lines; "-" reads it from stdin)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --init            print a minimal lint-clean request.json (one question per type) and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.). `-` reads the request JSON from stdin (single file or mixed with paths in multi mode; --fix/--watch need a real path).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --dry-run         with --fix: report what would change without writing\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit ("-" reads it from stdin)\n  --rules           print every rule id + description (--json emits a list)\n  --severity S[,S...]  only these severities (error|warn|info comma list; JEV_QLINT_SEVERITY)\n  --only R[,R...]     lint only these rule ids (rc 2 on unknown id)\n  --usage           add info findings for keys outside the request contract\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH ("-" reads it from stdin)\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --md              findings as a Markdown table\n  --csv             findings as CSV rows (--keys picks the columns)\n  --jsonl           findings as one JSON object per line (adds file)\n  --keys a,b        with --jsonl/--csv: keep only these keys in each row / as the columns (rc 2 on empty)\n  --rules           list every rule id + description (with --json/--md)\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --diff PATH       diff this request against another file (per-question +/- and ~ lines; "-" reads it from stdin)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --init            print a minimal lint-clean request.json (one question per type) and exit\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON ("-" prints it to stdout)\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -518,6 +550,7 @@ def main(argv: list[str] | None = None) -> int:
     as_jsonl = "--jsonl" in argv
     do_fix = "--fix" in argv
     dry_run = "--dry-run" in argv
+    usage = "--usage" in argv
     strict = "--strict" in argv
     quiet = "--quiet" in argv
     if "--schema" in argv:
@@ -740,7 +773,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = [
         a
         for a in argv
-        if a not in ("--json", "--md", "--csv", "--jsonl", "--fix", "--dry-run", "--strict", "--quiet", "--fail-fast")
+        if a not in ("--json", "--md", "--csv", "--jsonl", "--fix", "--dry-run", "--usage", "--strict", "--quiet", "--fail-fast")
     ]
     if "--env" in argv:
         try:
@@ -812,7 +845,7 @@ def main(argv: list[str] | None = None) -> int:
             if not isinstance(freq, dict):
                 sys.stderr.write("request JSON must be an object (%s)\n" % arg)
                 return 2
-            ffind = _watch.only_filter(lint_request(freq), only)
+            ffind = _watch.only_filter(lint_request(freq, usage=usage), only)
             if baseline_write:
                 snapshot.extend({"file": arg, **f} for f in ffind)
             if baseline_keys is not None:
@@ -959,7 +992,7 @@ def main(argv: list[str] | None = None) -> int:
         prev_tick: dict | None = None
         unchanged = 0
         while (max_ticks <= 0 or ticks < max_ticks) and (not dead or _time.time() < dead):
-            current = _watch.only_filter(lint_request(request), only)
+            current = _watch.only_filter(lint_request(request, usage=usage), only)
             pre_drop = len(current)
             if baseline_keys is not None:
                 current = _drop_baseline(current, baseline_keys)
@@ -1009,7 +1042,7 @@ def main(argv: list[str] | None = None) -> int:
             _atomic_write(Path(argv[0]), json.dumps(request, indent=2, ensure_ascii=False) + "\n")
         for rule in applied:
             sys.stderr.write("%s %s\n" % ("would fix" if dry_run else "fixed", rule))
-    findings = _watch.only_filter(lint_request(request), only)
+    findings = _watch.only_filter(lint_request(request, usage=usage), only)
     if baseline_write and not _write_baseline(
         baseline_write, [{"file": argv[0], **f} for f in findings]
     ):

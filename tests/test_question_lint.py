@@ -1627,6 +1627,61 @@ class DiffTests(unittest.TestCase):
         self.assertTrue(any(line.startswith("+ questions.q2") for line in lines))
         self.assertTrue(any(line.startswith("~ state") for line in lines))
 
+    def test_usage_reports_dead_request_and_question_keys(self) -> None:
+        request = {
+            "state": "task",
+            "model": "jev-latest",
+            "dead_top": True,
+            "questions": {
+                "q": {
+                    "type": "choice",
+                    "instructions": "Pick an approach for the task.",
+                    "criteria": {"a": "A", "none": "none of these"},
+                    "dead_question_key": True,
+                }
+            },
+        }
+        without_usage = question_lint.lint_request(request)
+        self.assertNotIn(("J019", "info"), rules(without_usage))
+        findings = question_lint.lint_request(request, usage=True)
+        j019 = [f for f in findings if f["rule"] == "J019"]
+        self.assertEqual({f["qid"] for f in j019}, {"*", "q"})
+        self.assertTrue(all(f["severity"] == "info" for f in j019))
+        self.assertIn("dead_top", "\n".join(f["message"] for f in j019))
+        self.assertIn("dead_question_key", "\n".join(f["message"] for f in j019))
+
+    def test_usage_cli_json_and_schema_includes_model(self) -> None:
+        request = {
+            "state": "task",
+            "dead_top": True,
+            "questions": {
+                "q": {
+                    "type": "noul",
+                    "instructions": "Is the task safe to proceed?",
+                    "criteria": {"true": "safe", "false": "needs review"},
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "req.json"
+            path.write_text(json.dumps(request), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = question_lint.main([str(path), "--usage", "--json"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertIn(
+                "dead_top",
+                "\n".join(f["message"] for f in payload["findings"]),
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = question_lint.main(["--schema", "--json"])
+            self.assertEqual(rc, 0)
+            schema = json.loads(buf.getvalue())
+            self.assertIn("model", schema)
+            self.assertFalse(schema["model"]["required"])
+
 
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

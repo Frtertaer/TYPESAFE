@@ -55,9 +55,25 @@ def raw_frontmatter(text: str) -> dict[str, str] | None:
     return meta
 
 
+_STDIN_MD: str | None = None
+
+
+def _skill_text(path: Path) -> str | None:
+    """Read the SKILL.md text; the '-' path reads stdin once (cached)."""
+    global _STDIN_MD
+    if str(path) == "-":
+        if _STDIN_MD is None:
+            _STDIN_MD = sys.stdin.read()
+        return _STDIN_MD
+    try:
+        return path.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return None
+
+
 def lint_skill(path: Path) -> list[dict]:
     findings = []
-    if not path.is_file():
+    if str(path) != "-" and not path.is_file():
         return [
             {
                 "rule": "S001",
@@ -65,10 +81,9 @@ def lint_skill(path: Path) -> list[dict]:
                 "message": "file not found",
             }
         ]
-    try:
-        text = path.read_text(encoding="utf-8-sig", errors="replace")
-    except OSError as exc:
-        return [{"rule": "S001", "severity": "error", "message": "unreadable: %s" % exc}]
+    text = _skill_text(path)
+    if text is None:
+        return [{"rule": "S001", "severity": "error", "message": "unreadable"}]
     meta = raw_frontmatter(text)
     if meta is None:
         findings.append(
@@ -279,7 +294,7 @@ def _atomic_write(path, text):
         raise
 
 
-USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S      preset severity floor (error|warn|info; JEV_SLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python skill_lint.py SKILL.md [more.md ...] [flags]\nLint SKILL.md frontmatter sanity (name, description, length caps).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --schema          print the frontmatter key contract (--json emits an object)\n  --severity S      preset severity floor (error|warn|info; JEV_SLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  -                 read SKILL.md content from stdin (no --fix/--watch)\n  --self-test       lint a synthetic known-bad SKILL.md; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -510,15 +525,18 @@ def main(argv: list[str] | None = None) -> int:
             "usage: skill_lint.py SKILL.md [more.md ...] [--fix] [--strict]\n"
         )
         return 2
-    unknown = [a for a in argv if a.startswith("-")]
+    unknown = [a for a in argv if a.startswith("-") and a != "-"]
     if unknown:
         sys.stderr.write("unknown flag(s): %s\n" % ", ".join(unknown))
+        return 2
+    if "-" in argv and (do_fix or watch_seconds > 0):
+        sys.stderr.write("- (stdin) supports neither --fix nor --watch\n")
         return 2
     rc = 0
     paths: list[Path] = []
     for arg in argv:
         path = Path(arg)
-        if path.is_dir():
+        if arg != "-" and path.is_dir():
             paths.extend(sorted(path.rglob("SKILL.md")))
         else:
             paths.append(path)

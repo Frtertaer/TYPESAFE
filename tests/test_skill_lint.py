@@ -796,5 +796,75 @@ class RulesCatalogTest(unittest.TestCase):
         self.assertFalse(rows["description"]["required"])
 
 
+class StdinDashTests(unittest.TestCase):
+    """'-' path reads the SKILL.md text from stdin (cached)."""
+
+    def setUp(self) -> None:
+        self._prev = skill_lint._STDIN_MD
+        skill_lint._STDIN_MD = None
+
+    def tearDown(self) -> None:
+        skill_lint._STDIN_MD = self._prev
+
+    def _feed(self, argv: list, stdin_text: str):
+        buf = io.StringIO()
+        err = io.StringIO()
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            # '-' resolves sibling context (policy.json, scripts/) from cwd;
+            # an empty cwd keeps the fixture hermetic.
+            os.chdir(tmp)
+            try:
+                with mock.patch("sys.stdin", io.StringIO(stdin_text)):
+                    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
+                        rc = skill_lint.main(argv)
+            finally:
+                os.chdir(cwd)
+        return rc, buf.getvalue(), err.getvalue()
+
+    def test_stdin_clean_no_findings(self):
+        rc, out, _ = self._feed(["-", "--json"], GOOD.format(name="x"))
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["findings"], [])
+
+    def test_stdin_bad_skill_reports_dash_path(self):
+        rc, out, _ = self._feed(["-", "--json"], "no frontmatter\n")
+        self.assertEqual(rc, 1)
+        rows = json.loads(out)["findings"]
+        self.assertEqual(rows[0]["rule"], "S002")
+        self.assertEqual(rows[0]["path"], "-")
+
+    def test_stdin_rejects_fix_and_watch(self):
+        for argv in (["-", "--fix"], ["-", "--watch", "1"]):
+            rc, _out, err = self._feed(list(argv), GOOD.format(name="x"))
+            self.assertEqual(rc, 2, argv)
+            self.assertIn("stdin", err)
+
+    def test_stdin_text_cached_across_calls(self):
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with mock.patch("sys.stdin", io.StringIO(GOOD.format(name="x"))):
+                    first = skill_lint.lint_skill(Path("-"))
+                    second = skill_lint.lint_skill(Path("-"))
+            finally:
+                os.chdir(cwd)
+        self.assertEqual(first, [])
+        self.assertEqual(second, [])
+
+    def test_stdin_multi_mixed_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            good = write_skill(tmp, "ok-one", GOOD.format(name="ok-one"))
+            rc, out, _ = self._feed(
+                ["-", str(good), "--json"], "no frontmatter\n"
+            )
+            self.assertEqual(rc, 1)
+            rows = json.loads(out)["findings"]
+            self.assertIn("-", {r["path"] for r in rows})
+            # the clean skill contributes no rows; stdin findings carry "-"
+            self.assertFalse(any(r["severity"] == "error" and r["path"].endswith("SKILL.md") for r in rows))
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

@@ -2589,6 +2589,30 @@ class DiffTests(unittest.TestCase):
             self.assertEqual(changed["a"], "p1")
             self.assertEqual(changed["b"], "p2")
 
+    def test_diff_jsonl_keys_projects_rows(self) -> None:
+        from io import StringIO
+
+        with tempfile.TemporaryDirectory() as tmp:
+            a = self._write(tmp, "a.json", {"plan": "p1", "notes": []})
+            b = self._write(tmp, "b.json", {"plan": "p2", "notes": [{"ts": 1}]})
+            buf = StringIO()
+            with patch("sys.stdout", buf):
+                rc = tr.main(
+                    ["diff", str(a), str(b), "--jsonl", "--keys", "type,key"]
+                )
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+            self.assertTrue(rows)
+            for row in rows:
+                self.assertEqual(set(row), {"type", "key"})
+            buf = StringIO()
+            err = StringIO()
+            with patch("sys.stdout", buf), patch("sys.stderr", err):
+                rc = tr.main(
+                    ["diff", str(a), str(b), "--jsonl", "--keys", " ,"]
+                )
+            self.assertEqual(rc, 2)
+
     def test_diff_identical_and_missing(self) -> None:
         from io import StringIO
 

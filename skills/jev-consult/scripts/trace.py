@@ -1689,18 +1689,27 @@ def cmd_diff(args: argparse.Namespace) -> int:
     if rc is not None:
         return rc
     if getattr(args, "jsonl", False):
-        rows: list[str] = []
+        keys = _key_projection(args)
+        if keys is None:
+            return 2
+        rows: list[dict] = []
         for key in sorted(payload["changed"]):
             row = payload["changed"][key]
-            rows.append(json.dumps({"type": "changed", "key": key, "a": row["a"], "b": row["b"]}, ensure_ascii=False))
+            rows.append({"type": "changed", "key": key, "a": row["a"], "b": row["b"]})
         for kind in ("added", "removed"):
             for key in sorted(payload[kind]):
-                rows.append(json.dumps({"type": kind, "key": key, "items": payload[kind][key]}, ensure_ascii=False))
+                rows.append({"type": kind, "key": key, "items": payload[kind][key]})
         for key in payload["only_a"]:
-            rows.append(json.dumps({"type": "only_a", "key": key}, ensure_ascii=False))
+            rows.append({"type": "only_a", "key": key})
         for key in payload["only_b"]:
-            rows.append(json.dumps({"type": "only_b", "key": key}, ensure_ascii=False))
-        text = "".join(r + "\n" for r in rows)
+            rows.append({"type": "only_b", "key": key})
+        text = "".join(
+            json.dumps(
+                {k: r.get(k) for k in keys} if keys else r, ensure_ascii=False
+            )
+            + "\n"
+            for r in rows
+        )
     else:
         text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     out_path = getattr(args, "out", "") or ""
@@ -2143,6 +2152,7 @@ def build_parser() -> argparse.ArgumentParser:
     diff_cmd.add_argument("b", help="Second trace JSON path")
     diff_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the diff payload (rc 2 on unknown key)")
     diff_cmd.add_argument("--jsonl", action="store_true", help="Emit one JSON row per divergence: {type: changed|added|removed|only_a|only_b, key, ...}")
+    diff_cmd.add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these keys in each row (rc 2 on an empty list)")
     diff_cmd.add_argument("--out", default="", help="Write the diff JSON to PATH instead of stdout")
     diff_cmd.set_defaults(func=cmd_diff)
     sug.set_defaults(func=cmd_suggest)

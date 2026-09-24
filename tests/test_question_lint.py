@@ -450,6 +450,55 @@ class LintCliTests(unittest.TestCase):
         self.assertIn("lint: 0 error(s), 0 warning(s), 1 info", proc.stdout)
 
 
+class StdinDashTests(unittest.TestCase):
+    """`-` reads the request JSON from stdin, single or multi mode."""
+
+    def _feed(self, argv, stdin_text):
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+        from unittest.mock import patch
+
+        buf, err = io.StringIO(), io.StringIO()
+        with patch("sys.stdin", io.StringIO(stdin_text)):
+            with redirect_stdout(buf), redirect_stderr(err):
+                rc = question_lint.main(argv)
+        return rc, buf.getvalue(), err.getvalue()
+
+    GOOD = {"questions": {"q": noul("Ship the fix?")}}
+
+    def test_stdin_single_lints(self) -> None:
+        rc, out, _err = self._feed(["-", "--json"], json.dumps(self.GOOD))
+        self.assertEqual(rc, 0)
+        self.assertIsInstance(json.loads(out), (list, dict))
+
+    def test_stdin_bad_json_rc2(self) -> None:
+        rc, _out, err = self._feed(["-"], "{nope")
+        self.assertEqual(rc, 2)
+        self.assertIn("stdin", err)
+
+    def test_stdin_fix_watch_rejected(self) -> None:
+        rc, _o, err = self._feed(["-", "--fix"], json.dumps(self.GOOD))
+        self.assertEqual(rc, 2)
+        self.assertIn("stdin", err)
+
+    def test_stdin_in_multi_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            p1 = Path(tmp) / "a.json"
+            p1.write_text(json.dumps(self.GOOD), encoding="utf-8")
+            bad = {
+                "questions": {
+                    "q": noul("Is it not true that the fix cannot ship?")
+                }
+            }
+            rc, out, _err = self._feed(
+                [str(p1), "-", "--json"], json.dumps(bad)
+            )
+            self.assertEqual(rc, 1)
+            rows = json.loads(out)
+            self.assertEqual(rows[1]["path"], "<stdin>")
+            self.assertEqual(rows[1]["errors"], 1)
+
+
 class PolicyLintTests(unittest.TestCase):
     def test_policy_templates_lint_clean(self) -> None:
         policy = json.loads(

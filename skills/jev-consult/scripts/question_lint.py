@@ -417,7 +417,7 @@ def _write_baseline(path: str, rows: list) -> bool:
     return True
 
 
-USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S      preset severity floor (error|warn|info; JEV_QLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
+USAGE = 'Usage: python question_lint.py [QUESTIONS.json ...] [flags]\nLint Jev question wording (J010 compound-noul sharpening etc.). `-` reads the request JSON from stdin (single file or mixed with paths in multi mode; --fix/--watch need a real path).\nFlags:\n  --strict          exit 1 on warnings too\n  --fix             auto-apply safe fixes in place\n  --schema          print the request.json key contract (--json emits the object)\n  --explain RULE    print the description of one rule id and exit\n  --rules           print every rule id + description (--json emits a list)\n  --severity S      preset severity floor (error|warn|info; JEV_QLINT_SEVERITY)\n  --env             print the resolved env config JSON (files, severity, strict, quiet, watch_max, watch_secs, watch_quiet; --jq KEY one field, --out PATH writes it)\n  --quiet           print only errors/warnings count\n  --baseline PATH   suppress findings already recorded in PATH\n  --baseline-write PATH  write current findings to PATH for --baseline runs\n  --json            findings as JSON array\n  --jq KEY          one dotted-path field of the findings payload\n  --out PATH        append/write the payload to a file (fail-open)\n  --self-test       lint a synthetic compound-noul request; exit 1 when no findings\n  --help            print this usage and exit\n  --version         print the pack policy version and exit\n  --watch S         re-lint every S seconds emitting tick JSON\n  --watch-max S     stop the watch after S elapsed seconds\n  --max-ticks N     stop the watch after N ticks\n  --fail-fast       stop the watch on the first erroring tick\n  --unchanged-max N stop the watch after N consecutive identical ticks\n  --verdict PATH    write a slim {verdict: pass|fail, ...} JSON\nExit 0 clean/warn, 1 on any error, 2 on bad args.\n'
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -637,7 +637,7 @@ def main(argv: list[str] | None = None) -> int:
     if not argv:
         sys.stderr.write("usage: question_lint.py FILE... [--json] [--fix] [--strict]\n")
         return 2
-    unknown = [a for a in argv if a.startswith("-")]
+    unknown = [a for a in argv if a.startswith("-") and a != "-"]
     if unknown:
         sys.stderr.write("unknown flag(s): %s\n" % ", ".join(unknown))
         return 2
@@ -652,15 +652,22 @@ def main(argv: list[str] | None = None) -> int:
         n_suppressed = 0
         snapshot = []
         for arg in argv:
-            fpath = Path(arg)
-            try:
-                freq = json.loads(fpath.read_text(encoding="utf-8-sig"))
-            except OSError as exc:
-                sys.stderr.write("cannot read %s (%s)\n" % (arg, exc))
-                return 2
-            except ValueError as exc:
-                sys.stderr.write("cannot parse %s (%s)\n" % (arg, exc))
-                return 2
+            if arg == "-":
+                try:
+                    freq = json.loads(sys.stdin.read())
+                except ValueError as exc:
+                    sys.stderr.write("cannot parse stdin (%s)\n" % exc)
+                    return 2
+            else:
+                fpath = Path(arg)
+                try:
+                    freq = json.loads(fpath.read_text(encoding="utf-8-sig"))
+                except OSError as exc:
+                    sys.stderr.write("cannot read %s (%s)\n" % (arg, exc))
+                    return 2
+                except ValueError as exc:
+                    sys.stderr.write("cannot parse %s (%s)\n" % (arg, exc))
+                    return 2
             if not isinstance(freq, dict):
                 sys.stderr.write("request JSON must be an object (%s)\n" % arg)
                 return 2
@@ -679,7 +686,12 @@ def main(argv: list[str] | None = None) -> int:
                 and (not quiet or f["severity"] == "error")
             ]
             results.append(
-                {"path": arg, "findings": fshown, "errors": ferr, "total": len(ffind)}
+                {
+                    "path": "<stdin>" if arg == "-" else arg,
+                    "findings": fshown,
+                    "errors": ferr,
+                    "total": len(ffind),
+                }
             )
         if out_path:
             try:
@@ -716,16 +728,27 @@ def main(argv: list[str] | None = None) -> int:
         any_err = any(r["errors"] for r in results)
         any_find = any(r["total"] for r in results)
         return 1 if any_err or (strict and any_find) else 0
-    try:
-        text = Path(argv[0]).read_text(encoding="utf-8-sig")
-    except OSError as exc:
-        sys.stderr.write("cannot read %s (%s)\n" % (argv[0], exc))
-        return 2
-    try:
-        request = json.loads(text)
-    except ValueError as exc:
-        sys.stderr.write("cannot parse %s (%s)\n" % (argv[0], exc))
-        return 2
+    if argv[0] == "-":
+        if do_fix or watch_seconds > 0:
+            sys.stderr.write("- (stdin) supports neither --fix nor --watch\n")
+            return 2
+        text = sys.stdin.read()
+        try:
+            request = json.loads(text)
+        except ValueError as exc:
+            sys.stderr.write("cannot parse stdin (%s)\n" % exc)
+            return 2
+    else:
+        try:
+            text = Path(argv[0]).read_text(encoding="utf-8-sig")
+        except OSError as exc:
+            sys.stderr.write("cannot read %s (%s)\n" % (argv[0], exc))
+            return 2
+        try:
+            request = json.loads(text)
+        except ValueError as exc:
+            sys.stderr.write("cannot parse %s (%s)\n" % (argv[0], exc))
+            return 2
     if not isinstance(request, dict):
         sys.stderr.write("request JSON must be an object\n")
         return 2

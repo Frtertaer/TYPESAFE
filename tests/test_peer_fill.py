@@ -332,6 +332,59 @@ class PeerFillTests(unittest.TestCase):
             for r in rows:
                 self.assertEqual(r.keys() - {"kind", "name", "path"}, set())
 
+    def test_list_csv_emits_rows(self) -> None:
+        import csv as _csv
+        import io as _io
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hermes = base / "hermes"
+            home = base / "home"
+            write_skill(hermes / "skills", "jwt-auth", JWT_MD)
+            env = dict(__import__("os").environ)
+            env.pop("TYPESAFE_API_KEY", None)
+            env["JEV_CONSULT_LOG"] = "0"
+            env["USERPROFILE"] = str(home)
+            env["HOME"] = str(home)
+            argv = [
+                sys.executable,
+                str(SCRIPTS / "peer_fill.py"),
+                "--harness",
+                "claude-code",
+                "--home",
+                str(home),
+                "--hermes-home",
+                str(hermes),
+                "--list",
+                "--csv",
+            ]
+            proc = subprocess.run(
+                argv, capture_output=True, text=True, env=env, cwd=str(base)
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = list(_csv.reader(_io.StringIO(proc.stdout)))
+            self.assertEqual(rows[0], ["kind", "name", "path"])
+            self.assertIn("jwt-auth", {r[1] for r in rows[1:]})
+            proc = subprocess.run(
+                argv + ["--keys", "name,kind"],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=str(base),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = list(_csv.reader(_io.StringIO(proc.stdout)))
+            self.assertEqual(rows[0], ["name", "kind"])
+            proc = subprocess.run(
+                argv + ["--keys", " ,"],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=str(base),
+            )
+            self.assertEqual(proc.returncode, 2)
+
     def test_json_fill_emits_outcome_object(self) -> None:
         import subprocess
 

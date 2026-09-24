@@ -492,6 +492,42 @@ class CatalogFillTests(unittest.TestCase):
                 rows, [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
             )
 
+    def test_list_csv_emits_rows(self) -> None:
+        import csv as _csv
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            hits = [{"name": "jwt-auth", "identifier": "owner/jwt-auth"}]
+            argv = [
+                "catalog_fill.py",
+                "--task",
+                "jwt",
+                "--harness",
+                "claude-code",
+                "--cwd",
+                str(base),
+                "--list",
+                "--csv",
+            ]
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                sys, "argv", argv
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(io.StringIO(buf.getvalue())))
+            self.assertEqual(rows[0], ["name", "identifier"])
+            self.assertEqual(rows[1], ["jwt-auth", "owner/jwt-auth"])
+            buf = io.StringIO()
+            with patch.object(FILL, "search_hits", return_value=hits), patch.object(
+                sys, "argv", argv + ["--keys", "identifier"]
+            ), patch("sys.stdout", buf):
+                rc = FILL.main()
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(io.StringIO(buf.getvalue())))
+            self.assertEqual(rows[0], ["identifier"])
+
     def test_watch_fail_fast_breaks_on_first_hit(self) -> None:
         import io
 

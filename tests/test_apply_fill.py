@@ -226,6 +226,51 @@ class ApplyFillTests(unittest.TestCase):
         for row in rows:
             self.assertEqual(set(row), {"kind", "name", "id"})
 
+    def test_list_csv_emits_rows(self) -> None:
+        import csv as _csv
+        from io import StringIO
+        from contextlib import redirect_stderr, redirect_stdout
+
+        hits = [FILL.as_item("mcp", "beta", "b mcp")]
+        with patch.object(FILL, "search_hits", return_value=hits):
+            with patch.object(
+                sys, "argv", ["apply_fill.py", "--task", "beta", "--list", "--csv"]
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(StringIO(buf.getvalue())))
+            self.assertEqual(rows[0], ["kind", "name", "id"])
+            self.assertEqual(rows[1][1], "beta")
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "apply_fill.py", "--task", "beta", "--list",
+                    "--csv", "--keys", "name",
+                ],
+            ):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = FILL.main()
+            self.assertEqual(rc, 0)
+            rows = list(_csv.reader(StringIO(buf.getvalue())))
+            self.assertEqual(rows[0], ["name"])
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "apply_fill.py", "--task", "beta", "--list",
+                    "--csv", "--keys", " ,",
+                ],
+            ):
+                buf, err = StringIO(), StringIO()
+                with redirect_stdout(buf), redirect_stderr(err):
+                    rc = FILL.main()
+            self.assertEqual(rc, 2)
+            self.assertIn("--keys names no fields", err.getvalue())
+
     def test_show_prints_matching_record(self) -> None:
         from io import StringIO
         from contextlib import redirect_stdout

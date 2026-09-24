@@ -552,6 +552,17 @@ def main() -> int:
         help="With --list: emit one {name, identifier} JSON row per line instead of the array.",
     )
     parser.add_argument(
+        "--csv",
+        action="store_true",
+        help="With --list: emit the items as CSV rows (name,identifier header).",
+    )
+    parser.add_argument(
+        "--keys",
+        metavar="a,b",
+        default="",
+        help="With --list --jsonl/--csv: keep only these keys in each row / as the columns (rc 2 on an empty list).",
+    )
+    parser.add_argument(
         "--schema",
         action="store_true",
         help="Print the decisions.jsonl fill-entry contract and exit (--json emits the object).",
@@ -822,17 +833,33 @@ def main() -> int:
                     for item in (hits or [])
                 ]
                 sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+            elif getattr(args, "csv", False):
+                keys = _watch.key_projection(args)
+                if keys is None:
+                    return 2
+                _watch.csv_table(
+                    [
+                        {
+                            "name": item.get("name") or "?",
+                            "identifier": item.get("identifier") or "",
+                        }
+                        for item in (hits or [])
+                    ],
+                    keys or ["name", "identifier"],
+                )
             elif getattr(args, "jsonl", False):
+                keys = _watch.key_projection(args)
+                if keys is None:
+                    return 2
                 for item in (hits or []):
+                    row = {
+                        "name": item.get("name") or "?",
+                        "identifier": item.get("identifier") or "",
+                    }
+                    if keys:
+                        row = {k: row.get(k) for k in keys}
                     sys.stdout.write(
-                        json.dumps(
-                            {
-                                "name": item.get("name") or "?",
-                                "identifier": item.get("identifier") or "",
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
+                        json.dumps(row, ensure_ascii=False) + "\n"
                     )
             else:
                 for item in (hits or []):

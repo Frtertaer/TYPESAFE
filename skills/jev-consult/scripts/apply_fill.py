@@ -412,6 +412,17 @@ def main() -> int:
         help="With --list: emit one {kind, name, id} JSON row per line instead of the array.",
     )
     parser.add_argument(
+        "--csv",
+        action="store_true",
+        help="With --list: emit the items as CSV rows (kind,name,id header).",
+    )
+    parser.add_argument(
+        "--keys",
+        metavar="a,b",
+        default="",
+        help="With --list --jsonl/--csv: keep only these keys in each row / as the columns (rc 2 on an empty list).",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit the outcome as a JSON object instead of a text line.",
@@ -721,18 +732,35 @@ def main() -> int:
                         for item in items
                     ]
                     sys.stdout.write(json.dumps(rows, indent=2) + "\n")
+                elif getattr(args, "csv", False):
+                    keys = _watch.key_projection(args)
+                    if keys is None:
+                        return 2
+                    _watch.csv_table(
+                        [
+                            {
+                                "kind": item.get("kind") or "?",
+                                "name": item.get("name") or "?",
+                                "id": item.get("id") or "",
+                            }
+                            for item in items
+                        ],
+                        keys or ["kind", "name", "id"],
+                    )
                 elif getattr(args, "jsonl", False):
+                    keys = _watch.key_projection(args)
+                    if keys is None:
+                        return 2
                     for item in items:
+                        row = {
+                            "kind": item.get("kind") or "?",
+                            "name": item.get("name") or "?",
+                            "id": item.get("id") or "",
+                        }
+                        if keys:
+                            row = {k: row.get(k) for k in keys}
                         sys.stdout.write(
-                            json.dumps(
-                                {
-                                    "kind": item.get("kind") or "?",
-                                    "name": item.get("name") or "?",
-                                    "id": item.get("id") or "",
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
+                            json.dumps(row, ensure_ascii=False) + "\n"
                         )
                 else:
                     for item in items:

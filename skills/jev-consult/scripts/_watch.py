@@ -264,6 +264,20 @@ def csv_table(rows: list, cols: list, out=None) -> None:
     stream.write(buf.getvalue())
 
 
+def key_projection(args) -> list | None:
+    """Parse an --keys/--cols-style a,b attr into a field list; [] when the
+    flag is absent/empty, None on a non-empty-but-blank value (rc 2 caller).
+    """
+    raw = getattr(args, "keys", "") or ""
+    if not raw:
+        return []
+    keys = [k.strip() for k in raw.split(",") if k.strip()]
+    if not keys:
+        sys.stderr.write("--keys names no fields\n")
+        return None
+    return keys
+
+
 def load_baseline(path: str, fields=("path", "rule", "message")) -> set:
     """Load a baseline findings file written by a lint's --baseline-write/--out.
     Accepts {"findings": [...]} or a bare list; '-' reads the baseline JSON

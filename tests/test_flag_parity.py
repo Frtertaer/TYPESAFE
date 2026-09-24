@@ -54,9 +54,9 @@ class FlagParityTest(unittest.TestCase):
             "--unchanged-max", "--verify",
         }
         extras = {
-            "apply_fill.py": {"--status", "--list", "--show", "--self-test", "--jsonl"},
-            "peer_fill.py": {"--status", "--list", "--show", "--self-test", "--jsonl"},
-            "catalog_fill.py": {"--clear", "--status", "--list", "--show", "--self-test", "--jsonl"},
+            "apply_fill.py": {"--status", "--list", "--show", "--self-test", "--jsonl", "--csv", "--keys"},
+            "peer_fill.py": {"--status", "--list", "--show", "--self-test", "--jsonl", "--csv", "--keys"},
+            "catalog_fill.py": {"--clear", "--status", "--list", "--show", "--self-test", "--jsonl", "--csv", "--keys"},
         }
         for name, allowed in extras.items():
             path = SCRIPTS / name

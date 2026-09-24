@@ -817,6 +817,64 @@ class TraceTests(unittest.TestCase):
             self.assertEqual(len(got), 1)
             self.assertIn("gap_s", got[0])
 
+    def test_payload_subcommands_jsonl_emit_one_line(self) -> None:
+        """Every object-emitting trace subcommand takes --jsonl: the payload
+        prints as one compact JSON line that parses."""
+        import time
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trace.json"
+            cases = [
+                ["init", "--plan", "p", "--jsonl"],
+                ["show", "--jsonl"],
+                ["set", "--step", "s1", "--jsonl"],
+                ["bump", "--jsonl"],
+                ["record", "--pick", "p1", "--jsonl"],
+                ["suggest", "--pick", "p2", "--jsonl"],
+                ["prune", "--older-than", "999999999", "--jsonl"],
+                ["undo", "--dry-run", "--jsonl"],
+                ["stats", "--jsonl"],
+                ["state", "--jsonl"],
+                ["env", "--jsonl"],
+                ["self-test", "--jsonl"],
+            ]
+            for args in cases:
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    rc = tr.main(["--file", str(path)] + args)
+                self.assertEqual(rc, 0, args)
+                out = buf.getvalue()
+                self.assertNotIn("\n\n", out.strip(), args)
+                payload = json.loads(out.strip())
+                self.assertTrue(
+                    isinstance(payload, dict) and payload, args
+                )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(["--file", str(path), "schema", "--jsonl"])
+            self.assertEqual(rc, 0)
+            rows = [
+                json.loads(l) for l in buf.getvalue().splitlines() if l.strip()
+            ]
+            self.assertTrue(
+                all(r["key"] and "required" in r for r in rows)
+            )
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = tr.main(
+                    ["--file", str(path), "schema", "--jsonl",
+                     "--keys", "key"]
+                )
+            self.assertEqual(rc, 0)
+            rows = [
+                json.loads(l) for l in buf.getvalue().splitlines() if l.strip()
+            ]
+            self.assertEqual(
+                [sorted(r) for r in rows], [["key"]] * len(rows)
+            )
+
     def test_history_csv_md_and_view_tables(self) -> None:
         import time
         import csv as _csv

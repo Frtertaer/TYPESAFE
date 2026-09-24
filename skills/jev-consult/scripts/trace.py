@@ -249,9 +249,10 @@ def record(trace: dict[str, Any], pick: str, kind: str = "") -> dict[str, Any]:
     return data
 
 
-def emit(payload: Any, jq: str = "") -> int:
+def emit(payload: Any, jq: str = "", jsonl: bool = False) -> int:
     """Print payload JSON; with jq, print just that dotted field (rc 2 on miss).
-    A comma list `a,b` digs every field and emits them as an object."""
+    A comma list `a,b` digs every field and emits them as an object.
+    With jsonl, print the payload as one compact JSON line instead of pretty."""
     if jq:
         fields = [f.strip() for f in jq.split(",") if f.strip()]
         values: dict[str, Any] = {}
@@ -278,6 +279,9 @@ def emit(payload: Any, jq: str = "") -> int:
         out = values[fields[0]] if len(fields) == 1 else values
         sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
         return 0
+    if jsonl:
+        sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        return 0
     json.dump(payload, sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
     return 0
@@ -294,7 +298,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         data["current_step"] = args.step
     path = Path(args.file) if args.file else default_path()
     save(data, path)
-    return emit({"path": str(path), "trace": data}, getattr(args, "jq", ""))
+    return emit({"path": str(path), "trace": data}, getattr(args, "jq", ""), getattr(args, "jsonl", False))
 
 
 def cmd_show(args: argparse.Namespace) -> int:
@@ -361,7 +365,7 @@ def cmd_show(args: argparse.Namespace) -> int:
             return 1
         sys.stderr.write("wrote %s\n" % out_path)
         return 0
-    emit({"path": str(path), "exists": exists, "age_seconds": age_seconds, "trace": data})
+    emit({"path": str(path), "exists": exists, "age_seconds": age_seconds, "trace": data}, jsonl=getattr(args, "jsonl", False))
     return 0
 
 
@@ -389,16 +393,17 @@ def cmd_set(args: argparse.Namespace) -> int:
         return emit(
             {"path": str(path), "trace": data, "dry_run": True},
             getattr(args, "jq", ""),
+            getattr(args, "jsonl", False),
         )
     save(data, path)
-    return emit({"path": str(path), "trace": data}, getattr(args, "jq", ""))
+    return emit({"path": str(path), "trace": data}, getattr(args, "jq", ""), getattr(args, "jsonl", False))
 
 
 def cmd_bump(args: argparse.Namespace) -> int:
     path = Path(args.file) if args.file else default_path()
     data = bump(load(path), error=args.error or "")
     save(data, path)
-    return emit({"path": str(path), "trace": data}, getattr(args, "jq", ""))
+    return emit({"path": str(path), "trace": data}, getattr(args, "jq", ""), getattr(args, "jsonl", False))
 
 
 def cmd_record(args: argparse.Namespace) -> int:
@@ -426,7 +431,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         notes.append(entry)
         data["notes"] = notes[-50:]
     save(data, path)
-    return emit({"path": str(path), "trace": data}, getattr(args, "jq", ""))
+    return emit({"path": str(path), "trace": data}, getattr(args, "jq", ""), getattr(args, "jsonl", False))
 
 
 def cmd_suggest(args: argparse.Namespace) -> int:
@@ -474,7 +479,7 @@ def cmd_suggest(args: argparse.Namespace) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
             return 1
     if args.dry_run:
-        emit(request)
+        emit(request, jsonl=getattr(args, "jsonl", False))
         return 0
     pick = args.pick
     confidence = None
@@ -512,7 +517,7 @@ def cmd_suggest(args: argparse.Namespace) -> int:
     rc = emit_jq(payload, args.jq)
     if rc is not None:
         return rc
-    emit(payload)
+    emit(payload, jsonl=getattr(args, "jsonl", False))
     return 0
 
 
@@ -839,43 +844,45 @@ def cmd_prune(args: argparse.Namespace) -> int:
     """Delete the trace file when its mtime is older than --older-than seconds."""
     path = Path(args.file) if args.file else default_path()
     jq = getattr(args, "jq", "")
+    jl = getattr(args, "jsonl", False)
     if str(path) == "-":
-        return emit({"path": "-", "removed": False, "reason": "stdin is read-only"}, jq)
+        return emit({"path": "-", "removed": False, "reason": "stdin is read-only"}, jq, jl)
     if not path.is_file():
-        return emit({"path": str(path), "removed": False, "reason": "missing"}, jq)
+        return emit({"path": str(path), "removed": False, "reason": "missing"}, jq, jl)
     try:
         path_mtime = path.stat().st_mtime
         age = time.time() - path_mtime
     except OSError as exc:
-        return emit({"path": str(path), "removed": False, "reason": "stat failed: %s" % exc}, jq)
+        return emit({"path": str(path), "removed": False, "reason": "stat failed: %s" % exc}, jq, jl)
     if age < float(args.older_than):
-        return emit({"path": str(path), "removed": False, "reason": "fresh", "age_seconds": round(age, 3)}, jq)
+        return emit({"path": str(path), "removed": False, "reason": "fresh", "age_seconds": round(age, 3)}, jq, jl)
     if getattr(args, "dry_run", False):
-        return emit({"path": str(path), "removed": False, "reason": "dry-run", "age_seconds": round(age, 3), "would_remove": True}, jq)
+        return emit({"path": str(path), "removed": False, "reason": "dry-run", "age_seconds": round(age, 3), "would_remove": True}, jq, jl)
     try:
         # Re-check right before unlink: a save landing between stat() and
         # unlink() must not lose the fresh trace.
         if path.stat().st_mtime != path_mtime:
-            return emit({"path": str(path), "removed": False, "reason": "changed"}, jq)
+            return emit({"path": str(path), "removed": False, "reason": "changed"}, jq, jl)
         path.unlink()
     except OSError as exc:
-        rc = emit({"path": str(path), "removed": False, "reason": "unlink failed: %s" % exc}, jq)
+        rc = emit({"path": str(path), "removed": False, "reason": "unlink failed: %s" % exc}, jq, jl)
         return rc or 1
-    return emit({"path": str(path), "removed": True, "age_seconds": round(age, 3)}, jq)
+    return emit({"path": str(path), "removed": True, "age_seconds": round(age, 3)}, jq, jl)
 
 
 def cmd_undo(args: argparse.Namespace) -> int:
     """Drop the last --n history picks (the inverse of record)."""
     path = Path(args.file) if args.file else default_path()
     jq = getattr(args, "jq", "")
+    jl = getattr(args, "jsonl", False)
     if str(path) == "-":
-        return emit({"path": "-", "removed": [], "reason": "stdin is read-only"}, jq)
+        return emit({"path": "-", "removed": [], "reason": "stdin is read-only"}, jq, jl)
     data = load(path)
     history = list(data.get("history") or [])
     if not history:
         return emit(
             {"path": str(path), "removed": [], "history": 0, "reason": "empty"},
-            jq,
+            jq, jl,
         )
     n = max(1, min(int(args.n), len(history)))
     removed = history[len(history) - n :]
@@ -888,7 +895,7 @@ def cmd_undo(args: argparse.Namespace) -> int:
                 "history": len(history),
                 "dry_run": True,
             },
-            jq,
+            jq, jl,
         )
     data["history"] = history[: len(history) - n]
     save(data, path)
@@ -898,7 +905,7 @@ def cmd_undo(args: argparse.Namespace) -> int:
             "removed": removed,
             "history": len(data["history"]),
         },
-        jq,
+        jq, jl,
     )
 
 
@@ -981,7 +988,10 @@ def cmd_env(args: argparse.Namespace) -> int:
         out = values[fields[0]] if len(fields) == 1 else values
         sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
         return 0
-    text = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    if getattr(args, "jsonl", False):
+        text = json.dumps(report, sort_keys=True, ensure_ascii=False) + "\n"
+    else:
+        text = json.dumps(report, indent=2, sort_keys=True) + "\n"
     sys.stdout.write(text)
     if getattr(args, "out", ""):
         try:
@@ -1004,7 +1014,16 @@ def cmd_schema(args: argparse.Namespace) -> int:
         "history": {"required": True, "type": "list[pick], last 20 records"},
         "notes": {"required": True, "type": "list[{iso, text}], last 50 notes"},
     }
-    if getattr(args, "json", False):
+    if getattr(args, "jsonl", False):
+        keys = _key_projection(args)
+        if keys is None:
+            return 2
+        for key in rows:
+            row = {"key": key, **rows[key]}
+            if keys:
+                row = {k: row.get(k) for k in keys}
+            sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
+    elif getattr(args, "json", False):
         sys.stdout.write(json.dumps(rows, indent=2) + "\n")
     else:
         for key in rows:
@@ -1034,6 +1053,7 @@ def cmd_self_test(args: argparse.Namespace) -> int:
             "last_pick": back.get("last_pick"),
         },
         getattr(args, "jq", ""),
+        getattr(args, "jsonl", False),
     )
     if rc:
         return rc
@@ -1934,7 +1954,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
     rc = emit_jq(out, getattr(args, "jq", ""))
     if rc is not None:
         return rc
-    emit(out)
+    emit(out, jsonl=getattr(args, "jsonl", False))
     return 0
 
 
@@ -2064,7 +2084,7 @@ def cmd_state(args: argparse.Namespace) -> int:
             sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
             return 1
     else:
-        emit(state)
+        emit(state, jsonl=getattr(args, "jsonl", False))
     return 0
 
 
@@ -2078,12 +2098,14 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--plan", default=None, help="Plan text (default JEV_TRACE_PLAN env; '-' reads it from stdin)")
     init.add_argument("--step", default="")
     init.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
+    init.add_argument("--jsonl", action="store_true", help="Emit the payload as one compact JSON line (for piping)")
     init.set_defaults(func=cmd_init)
     show = sub.add_parser("show", help="Print the trace (empty object if missing)")
     show.add_argument("--pretty", action="store_true", help="Key fields as text lines.")
     show.add_argument("--key", default="", help="Print only this field's value")
     show.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the trace (rc 2 on unknown key; takes precedence over --key)")
     show.add_argument("--out", default="", help="Write the show JSON to PATH instead of stdout (ignored with --key/--pretty)")
+    show.add_argument("--jsonl", action="store_true", help="Emit the payload as one compact JSON line (for piping)")
     show.set_defaults(func=cmd_show)
     setter = sub.add_parser("set", help="Update fields")
     setter.add_argument("--plan", help="Plan text ('-' reads it from stdin)")
@@ -2098,11 +2120,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Set an arbitrary trace field (repeatable)",
     )
     setter.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
+    setter.add_argument("--jsonl", action="store_true", help="Emit the payload as one compact JSON line (for piping)")
     setter.add_argument("--dry-run", action="store_true", help="Emit the would-be trace without writing the file")
     setter.set_defaults(func=cmd_set)
     bump_cmd = sub.add_parser("bump", help="Increment attempt_count")
     bump_cmd.add_argument("--error", default="")
     bump_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
+    bump_cmd.add_argument("--jsonl", action="store_true", help="Emit the payload as one compact JSON line (for piping)")
     bump_cmd.set_defaults(func=cmd_bump)
     rec = sub.add_parser("record", help="Store a Jev pick")
     rec.add_argument("--pick", required=True)
@@ -2111,6 +2135,7 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--step", default="")
     rec.add_argument("--note", default=None, help="Append a freeform note to trace.notes ('-' reads stdin; default JEV_TRACE_NOTE)")
     rec.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
+    rec.add_argument("--jsonl", action="store_true", help="Emit the payload as one compact JSON line (for piping)")
     rec.set_defaults(func=cmd_record)
     prune_cmd = sub.add_parser(
         "prune", help="Delete the trace file when older than --older-than seconds"
@@ -2127,6 +2152,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Age in seconds before the trace may be removed",
     )
     prune_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
+    prune_cmd.add_argument("--jsonl", action="store_true", help="Emit the payload as one compact JSON line (for piping)")
     prune_cmd.set_defaults(func=cmd_prune)
     undo_cmd = sub.add_parser(
         "undo", help="Drop the last --n history picks (the inverse of record)"
@@ -2143,11 +2169,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report the picks that would be dropped without writing",
     )
     undo_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
+    undo_cmd.add_argument("--jsonl", action="store_true", help="Emit the payload as one compact JSON line (for piping)")
     undo_cmd.set_defaults(func=cmd_undo)
     state_cmd = sub.add_parser(
         "state", help="Emit trace as a bare state dict (scaffold --state input)"
     )
     state_cmd.add_argument("--out", help="Write JSON here instead of stdout")
+    state_cmd.add_argument("--jsonl", action="store_true", help="Emit the payload as one compact JSON line (for piping)")
     state_cmd.add_argument(
         "--watch",
         metavar="S",
@@ -2166,6 +2194,7 @@ def build_parser() -> argparse.ArgumentParser:
     stats_cmd = sub.add_parser("stats", help="Summary: counts, last pick, file age")
     stats_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the stats payload (rc 2 on unknown key)")
     stats_cmd.add_argument("--out", default="", help="Write the stats JSON to PATH instead of stdout")
+    stats_cmd.add_argument("--jsonl", action="store_true", help="Emit the payload as one compact JSON line (for piping)")
     stats_cmd.add_argument("--watch", metavar="S", type=float, default=0.0, help="Re-print a {ts,exists,attempt_count,history,inspected} tick every S seconds (JEV_TRACE_WATCH_MAX caps ticks)")
     stats_cmd.add_argument("--max-ticks", metavar="N", type=int, default=0, help="With --watch: stop after N ticks (overrides JEV_TRACE_WATCH_MAX)")
     stats_cmd.add_argument("--watch-max", metavar="S", type=float, default=0.0, help="With --watch: stop after S elapsed seconds")
@@ -2250,6 +2279,7 @@ def build_parser() -> argparse.ArgumentParser:
     sug.add_argument("--pick", default="", help="Skip Jev; record this choice directly")
     sug.add_argument("--kind", default="suggest", help="Kind tag for the history entry (default suggest)")
     sug.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the result payload (rc 2 on unknown key)")
+    sug.add_argument("--jsonl", action="store_true", help="Emit the payload as one compact JSON line (for piping)")
     diff_cmd = sub.add_parser(
         "diff",
         help="Diff two trace files key-by-key: scalars under changed, list items under added/removed, plus only_a/only_b keys and exists flags",
@@ -2293,6 +2323,8 @@ def build_parser() -> argparse.ArgumentParser:
         "schema", help="Print the .jev-trace.json key contract and exit"
     )
     schema_cmd.add_argument("--json", action="store_true", help="Emit the contract as JSON")
+    schema_cmd.add_argument("--jsonl", action="store_true", help="Emit one {key, required, type} row per line (--keys picks the fields)")
+    schema_cmd.add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these fields in each row (rc 2 on an empty list)")
     schema_cmd.set_defaults(func=cmd_schema)
     env_cmd = sub.add_parser(
         "env",
@@ -2301,12 +2333,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     env_cmd.add_argument("--jq", metavar="KEY", default="", help="Print just one dotted-path field of the env report (rc 2 on unknown key)")
     env_cmd.add_argument("--out", metavar="PATH", default="", help="Also write the env report JSON to PATH (fail-open)")
+    env_cmd.add_argument("--jsonl", action="store_true", help="Emit the payload as one compact JSON line (for piping)")
     env_cmd.set_defaults(func=cmd_env)
     selftest = sub.add_parser(
         "self-test",
         help="Record+read a pick on a temp trace; exit 1 when it does not round-trip",
     )
     selftest.add_argument("--jq", metavar="KEY", default="", help="Print just this dotted-path field of the emitted payload (rc 2 on unknown key)")
+    selftest.add_argument("--jsonl", action="store_true", help="Emit the payload as one compact JSON line (for piping)")
     selftest.set_defaults(func=cmd_self_test)
     return parser
 

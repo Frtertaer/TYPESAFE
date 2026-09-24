@@ -1096,7 +1096,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--chains",
         action="store_true",
-        help="List prompt_head values consulted at least --chain-min times (rc 1 when any; --json emits {chains: [...]})",
+        help="List prompt_head values consulted at least --chain-min times (rc 1 when any; --json emits {chains: [...]}, --jsonl one row per line, --md a table)",
     )
     parser.add_argument(
         "--chain-min",
@@ -1749,6 +1749,23 @@ def main(argv: list[str] | None = None) -> int:
         rows = prompt_chains(entries, int(getattr(args, "chain_min", 2)))
         if args.json:
             sys.stdout.write(json.dumps({"chains": rows}, indent=2) + "\n")
+        elif getattr(args, "jsonl", False):
+            for row in rows:
+                sys.stdout.write(json.dumps(row, sort_keys=True) + "\n")
+        elif getattr(args, "md", False):
+            _watch.md_table(
+                [
+                    {
+                        "prompt_head": r["prompt_head"],
+                        "count": r["count"],
+                        "first": _iso_full(r["first_ts"]) or "?",
+                        "last": _iso_full(r["last_ts"]) or "?",
+                        "statuses": ",".join(r["statuses"]),
+                    }
+                    for r in rows
+                ],
+                ["prompt_head", "count", "first", "last", "statuses"],
+            )
         else:
             sys.stdout.write(format_chains(rows) + "\n")
         return 1 if rows else 0

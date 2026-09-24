@@ -3818,6 +3818,23 @@ class ChainsTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("no chains", proc.stdout)
 
+    def test_chains_jsonl_and_md_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._log(tmp)
+            proc = run_cli("--file", str(path), "--chains", "--jsonl")
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            rows = [json.loads(l) for l in proc.stdout.splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["prompt_head"], "which hook")
+            self.assertEqual(rows[0]["count"], 3)
+
+            proc = run_cli("--file", str(path), "--chains", "--md")
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            self.assertTrue(
+                proc.stdout.startswith("| prompt_head | count | first | last | statuses |")
+            )
+            self.assertIn("| which hook | 3 |", proc.stdout)
+
 
 class ReasonFilterTest(unittest.TestCase):
     def _log(self, tmp: str) -> Path:

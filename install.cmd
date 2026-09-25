@@ -12,7 +12,14 @@ if not defined PY (
     exit /b 1
 )
 
-%PY% scripts\install.py --setup %*
+rem Only offer the interactive menu when stdin/stdout are real consoles;
+rem unattended runs keep the previous unattended-install behaviour.
+powershell -NoProfile -Command "exit ([int]([Console]::IsInputRedirected -or [Console]::IsOutputRedirected))" >nul 2>nul
+if errorlevel 1 (
+    %PY% scripts\install.py %*
+) else (
+    %PY% scripts\install.py --setup %*
+)
 exit /b %ERRORLEVEL%
 
 :try

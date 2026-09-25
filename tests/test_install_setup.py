@@ -219,8 +219,46 @@ class KeyWriteTests(unittest.TestCase):
             env_path = home / ".claude" / ".env"
             self.assertTrue(install.env_file_has_key(env_path))
             self.assertIn("sekret-12345", env_path.read_text(encoding="utf-8"))
-            # bundle .env (repo_root under --source) got the key too
+            # bundle .env (repo_root under --source) and ~/.env got the key too
             self.assertTrue(install.env_file_has_key(bundle / ".env"))
+            self.assertTrue(install.env_file_has_key(home / ".env"))
+
+    def test_write_api_key_chmod_600(self) -> None:
+        if os.name == "nt":
+            self.skipTest("posix mode bits only")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            install.write_api_key(path, "sekret")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_write_api_key_rejects_newline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            with self.assertRaises(SystemExit):
+                install.write_api_key(path, "good\nINJECTED=1")
+            self.assertFalse(path.exists())
+
+    def test_run_doctor_passes_hermes_home(self) -> None:
+        import subprocess
+
+        calls = []
+
+        def fake_run(cmd, **_kw):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = make_bundle(Path(tmp))
+            install.set_source(str(bundle))
+            hermes = Path(tmp) / "custom-hermes"
+            with patch.object(subprocess, "run", fake_run), patch.object(
+                install, "hermes_home", return_value=hermes
+            ), patch.object(install, "user_home", return_value=Path(tmp)):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    install.run_doctor(["hermes"])
+        self.assertIn("--hermes-home", calls[0])
+        self.assertIn(str(hermes), calls[0])
 
 
 class BootstrapScriptTests(unittest.TestCase):
@@ -268,8 +306,14 @@ class BootstrapScriptTests(unittest.TestCase):
         self.assertIn("python.org", proc.stderr)
 
     def test_wrappers_forward_to_setup(self) -> None:
-        self.assertIn("--setup", (ROOT / "install.sh").read_text(encoding="utf-8"))
-        self.assertIn("--setup", (ROOT / "install.cmd").read_text(encoding="utf-8"))
+        sh_text = (ROOT / "install.sh").read_text(encoding="utf-8")
+        cmd_text = (ROOT / "install.cmd").read_text(encoding="utf-8")
+        self.assertIn("--setup", sh_text)
+        self.assertIn("--setup", cmd_text)
+        # wrappers only force --setup on a real terminal; unattended runs
+        # keep the old plain-install behaviour
+        self.assertIn("-t 0", sh_text)
+        self.assertIn("IsInputRedirected", cmd_text)
 
 
 class PackageReleaseTests(unittest.TestCase):

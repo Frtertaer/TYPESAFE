@@ -16,4 +16,7 @@ if [ -z "$PY" ]; then
     echo "Get it from https://www.python.org/downloads/ - on Windows tick 'Add python.exe to PATH'." >&2
     exit 1
 fi
-exec $PY scripts/install.py --setup "$@"
+if [ -t 0 ] && [ -t 1 ]; then
+    set -- --setup "$@"
+fi
+exec $PY scripts/install.py "$@"

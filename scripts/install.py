@@ -683,8 +683,9 @@ def detected_agents(report: dict) -> list[str]:
 
 
 def harness_env_paths(agents: list[str]) -> list[Path]:
-    """Per-harness dotenv files the setup key prompt writes to, plus the
-    repo (or bundle) .env so doctor's cwd check sees it too."""
+    """Dotenv files the setup key prompt writes to: each selected harness's
+    .env, the repo (or bundle) .env, and ~/.env. The last two are locations
+    jev.py/doctor.py actually read, so the key works outside the repo too."""
     home = user_home()
     hermes = hermes_home()
     mapping = {
@@ -698,14 +699,16 @@ def harness_env_paths(agents: list[str]) -> list[Path]:
         path = mapping.get(name)
         if path is not None and path not in paths:
             paths.append(path)
-    repo_env = repo_root() / ".env"
-    if repo_env not in paths:
-        paths.append(repo_env)
+    for extra in (repo_root() / ".env", home / ".env"):
+        if extra not in paths:
+            paths.append(extra)
     return paths
 
 
 def write_api_key(path: Path, value: str) -> str:
     """Upsert TYPESAFE_API_KEY in a dotenv file. Never prints the value."""
+    if "\n" in value or "\r" in value or "\x00" in value:
+        raise SystemExit("refusing to write a TYPESAFE_API_KEY containing a newline")
     out = []
     wrote = False
     if path.is_file():
@@ -726,6 +729,10 @@ def write_api_key(path: Path, value: str) -> str:
         out.append("TYPESAFE_API_KEY=" + value)
     path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write(path, "\n".join(out).rstrip("\n") + "\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
     return "wrote " + str(path)
 
 
@@ -734,9 +741,10 @@ def run_doctor(agents: list[str]) -> int:
     if not doctor.is_file():
         sys.stdout.write("doctor: skipped (missing %s)\n" % doctor)
         return 0
-    proc = subprocess.run(
-        [sys.executable, str(doctor), "--agents", ",".join(agents)]
-    )
+    cmd = [sys.executable, str(doctor), "--agents", ",".join(agents)]
+    if "hermes" in agents:
+        cmd += ["--hermes-home", str(hermes_home())]
+    proc = subprocess.run(cmd)
     sys.stdout.write("doctor: %s\n" % ("PASS" if proc.returncode == 0 else "FAIL"))
     return proc.returncode
 

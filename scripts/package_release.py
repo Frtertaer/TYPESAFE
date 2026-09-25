@@ -69,11 +69,33 @@ def _rmtree(path: Path) -> None:
         shutil.rmtree(path, onerror=_rmtree_fix)
 
 
+def _console_handle(stream) -> bool:
+    """True only for a real Windows console handle.
+
+    isatty() reports character devices like NUL as ttys on Windows, so
+    `jev-setup.cmd < nul` would otherwise look interactive; GetConsoleMode
+    succeeds only on console input/output handles.
+    """
+    try:
+        import ctypes
+        import msvcrt
+
+        handle = msvcrt.get_osfhandle(stream.fileno())
+        mode = ctypes.c_ulong()
+        return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+    except (ImportError, OSError, ValueError):
+        return False
+
+
 def _tty() -> bool:
     try:
-        return bool(sys.stdin.isatty() and sys.stdout.isatty())
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return False
     except (OSError, ValueError):
         return False
+    if os.name == "nt":
+        return _console_handle(sys.stdin) and _console_handle(sys.stdout)
+    return True
 
 
 def _stage() -> Path:
@@ -145,7 +167,9 @@ set "RC=%ERRORLEVEL%"
 rem A double-clicked console window closes on exit - keep it open so the
 rem user sees the menu result and the doctor verdict. Interactive consoles
 rem only; `jev-setup.cmd < nul` passes through untouched.
-powershell -NoProfile -Command "exit ([int]([Console]::IsInputRedirected -or [Console]::IsOutputRedirected))" >nul 2>nul
+rem The probe must see this script's own handles: redirecting its stdout
+rem would make IsOutputRedirected always true, so only stderr is nulled.
+powershell -NoProfile -Command "exit ([int]([Console]::IsInputRedirected -or [Console]::IsOutputRedirected))" 2>nul
 if not errorlevel 1 pause
 exit /b %RC%
 
@@ -185,7 +209,8 @@ def _write_windows_launcher(out: Path) -> Path:
     """Drop a double-clickable <pyz>.cmd next to the .pyz on disk."""
     cmd_path = out.with_suffix(".cmd")
     text = WINDOWS_LAUNCHER.replace("@PYZ@", out.name)
-    cmd_path.write_text(text.replace("\n", "\r\n"), encoding="utf-8")
+    # bytes: write_text() would translate our explicit \r\n into \r\r\n
+    cmd_path.write_bytes(text.replace("\n", "\r\n").encode("utf-8"))
     return cmd_path
 
 

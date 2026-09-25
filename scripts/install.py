@@ -810,11 +810,33 @@ def run_doctor(agents: list[str]) -> int:
     return proc.returncode
 
 
+def _console_handle(stream) -> bool:
+    """True only for a real Windows console handle.
+
+    isatty() reports character devices like NUL as ttys on Windows, so
+    `install.cmd < nul` would otherwise look interactive; GetConsoleMode
+    succeeds only on console input/output handles.
+    """
+    try:
+        import ctypes
+        import msvcrt
+
+        handle = msvcrt.get_osfhandle(stream.fileno())
+        mode = ctypes.c_ulong()
+        return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+    except (ImportError, OSError, ValueError):
+        return False
+
+
 def _tty() -> bool:
     try:
-        return bool(sys.stdin.isatty() and sys.stdout.isatty())
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return False
     except (OSError, ValueError):
         return False
+    if os.name == "nt":
+        return _console_handle(sys.stdin) and _console_handle(sys.stdout)
+    return True
 
 
 def _prompt(text: str) -> str:

@@ -4,8 +4,9 @@
 
 os.name is patched to "nt" where feasible (icacls via mocked subprocess);
 shutil.rmtree retry is simulated with a chmod-gated unlink. A real Windows
-pass of install.cmd - interactive and `< nul` redirected - is still needed
-manually; CI on windows-latest covers the Python parts.
+pass of install.cmd - interactive and `< nul` redirected - has been run on a
+live Windows box and produced the NUL-isatty / probe-stdout regressions
+encoded below; CI on windows-latest covers the Python parts.
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALL_PATH = ROOT / "scripts" / "install.py"
@@ -144,6 +145,68 @@ class InstallCmdTests(unittest.TestCase):
         self.assertIn("IsOutputRedirected", self.text)
         self.assertIn("--setup", self.text)
         self.assertIn("scripts\\install.py %*", self.text)
+
+    def test_gate_probe_does_not_redirect_own_stdout(self) -> None:
+        """`>nul` on the probe makes IsOutputRedirected always true inside
+        powershell - the gate would then report 'redirected' on a real
+        console. Only stderr may be silenced."""
+        for text in (self.text, package_release.WINDOWS_LAUNCHER):
+            line = next(l for l in text.splitlines() if "IsInputRedirected" in l)
+            self.assertIn("2>nul", line)
+            self.assertNotIn(">nul", line.replace("2>nul", ""))
+
+
+class TtyDetectionTests(unittest.TestCase):
+    """isatty() reports NUL/char devices as ttys on Windows; _tty() must
+    additionally demand a real console handle there."""
+
+    def _streams(self, stdin_tty=True, stdout_tty=True):
+        stdin = MagicMock()
+        stdout = MagicMock()
+        stdin.isatty.return_value = stdin_tty
+        stdout.isatty.return_value = stdout_tty
+        return stdin, stdout
+
+    def test_nt_rejects_char_device_stdin(self) -> None:
+        """`< nul` on a console: isatty()=True but no console mode."""
+        stdin, stdout = self._streams()
+        with patch.object(install.os, "name", "nt"), patch.object(
+            install.sys, "stdin", stdin
+        ), patch.object(install.sys, "stdout", stdout), patch.object(
+            install, "_console_handle", return_value=False
+        ):
+            self.assertFalse(install._tty())
+
+    def test_nt_real_console(self) -> None:
+        stdin, stdout = self._streams()
+        with patch.object(install.os, "name", "nt"), patch.object(
+            install.sys, "stdin", stdin
+        ), patch.object(install.sys, "stdout", stdout), patch.object(
+            install, "_console_handle", return_value=True
+        ):
+            self.assertTrue(install._tty())
+
+    def test_posix_skips_console_check(self) -> None:
+        stdin, stdout = self._streams()
+        with patch.object(install.os, "name", "posix"), patch.object(
+            install.sys, "stdin", stdin
+        ), patch.object(install.sys, "stdout", stdout), patch.object(
+            install, "_console_handle"
+        ) as ch:
+            self.assertTrue(install._tty())
+            ch.assert_not_called()
+
+    def test_piped_stdin_still_plain(self) -> None:
+        stdin, stdout = self._streams(stdin_tty=False)
+        with patch.object(install.sys, "stdin", stdin), patch.object(
+            install.sys, "stdout", stdout
+        ):
+            self.assertFalse(install._tty())
+
+    def test_bootstrap_tty_uses_console_handle(self) -> None:
+        """The pyz's embedded _tty() must carry the same NUL fix."""
+        self.assertIn("_console_handle", package_release.BOOTSTRAP)
+        self.assertIn("GetConsoleMode", package_release.BOOTSTRAP)
 
 
 class RemovePathTests(unittest.TestCase):
@@ -324,6 +387,8 @@ class StableBundleTests(unittest.TestCase):
             self.assertTrue(cmd.is_file())
             raw = cmd.read_bytes()
             self.assertIn(b"\r\n", raw)  # batch files need CRLF
+            self.assertNotIn(b"\r\r\n", raw)  # no double translation
+            self.assertNotIn(b"\n", raw.replace(b"\r\n", b""))  # no bare LF
             text = raw.decode("utf-8")
             self.assertIn('%~dp0jev-setup.pyz', text)
             py = text.index('call :try "py -3"')

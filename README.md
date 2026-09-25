@@ -8,7 +8,7 @@
 python scripts/install.py
 ```
 
-Windows: `install.cmd`. Unix: `sh install.sh`. Обёртки сами находят Python (`py -3` → `python3` → `python`; если нет — подсказывают https://www.python.org/downloads/ с галочкой «Add python.exe to PATH») и в интерактивном терминале открывают меню `--setup` (без TTY — обычная установка, как раньше).
+Windows: `install.cmd`. Unix: `sh install.sh`. Обёртки сами находят Python (`py -3` → `python` → `python3`; если нет — подсказывают https://www.python.org/downloads/ с галочкой «Add python.exe to PATH») и в интерактивном терминале открывают меню `--setup` (без TTY — обычная установка, как раньше). `py` без установленного Python 3 не считается находкой — обёртка проваливается к следующему кандидату.
 
 Ключ `TYPESAFE_API_KEY` человек кладёт сам (`.env.example` → локальный `.env` или env харнесса; меню `--setup` спрашивает его скрыто через getpass и пишет в `.env` харнесса). В git ключа нет. Инсталлятор пишет `TYPESAFE_API_KEY: set` или `missing`, значение не печатает.
 
@@ -29,7 +29,14 @@ python jev-setup.pyz
 curl -fsSL -o /tmp/jev-setup.pyz https://github.com/Frtertaer/TYPESAFE/releases/latest/download/jev-setup.pyz && python3 /tmp/jev-setup.pyz
 ```
 
-`jev-setup.pyz` уже содержит скилл, `install.py` и `doctor.py` — git clone не нужен. Нужен только Python 3 — https://www.python.org/downloads/ (при установке отметить «Add python.exe to PATH»). Откроется меню: **1) Install 2) Uninstall 3) Check (doctor) 4) Exit**. Меню само находит уже стоящие харнессы, спрашивает `TYPESAFE_API_KEY` скрыто (getpass) и пишет его в `.env` харнесса, бандла и `~/.env` (файлы — chmod 600), в конце прогоняет doctor и печатает PASS/FAIL.
+Windows: скачайте в одну папку оба файла и запустите `jev-setup.cmd` — двойным кликом или из консоли. Обёртка сама находит Python (`py -3`, затем `python`) и запускает лежащий рядом `jev-setup.pyz`:
+
+```text
+https://github.com/Frtertaer/TYPESAFE/releases/latest/download/jev-setup.pyz
+https://github.com/Frtertaer/TYPESAFE/releases/latest/download/jev-setup.cmd
+```
+
+`jev-setup.pyz` уже содержит скилл, `install.py` и `doctor.py` — git clone не нужен. Нужен только Python 3 — https://www.python.org/downloads/ (при установке отметить «Add python.exe to PATH»). Откроется меню: **1) Install 2) Uninstall 3) Check (doctor) 4) Exit**. Меню само находит уже стоящие харнессы, спрашивает `TYPESAFE_API_KEY` скрыто (getpass) и пишет его в `.env` харнесса, бандла и `~/.env` (файлы — chmod 600; на Windows — ACL только для владельца через `icacls`), в конце прогоняет doctor и печатает PASS/FAIL. Сам бандл распаковывается в `~/.jev-consult/bundle/` — метки `.jev-consult-source` и хуки указывают на стабильный путь, а не на временный каталог распаковки.
 
 Путь разработчика — clone:
 
@@ -42,7 +49,7 @@ python -m unittest discover -s tests      # прогон всей suite
 make test-jev                             # один test-файл по суффиксу (или python -m unittest tests.test_jev)
 ```
 
-Собрать `jev-setup.pyz` из clone: `python scripts/package_release.py` или `make package` (zipapp в `dist/`).
+Собрать `jev-setup.pyz` из clone: `python scripts/package_release.py` или `make package` (zipapp в `dist/` + `jev-setup.cmd` рядом).
 
 ## Что в репозитории
 
@@ -75,7 +82,7 @@ make test-jev                             # один test-файл по суфф
 | `~/.cache/jev-consult/decisions.jsonl` | Журнал решений хука, по строке на промпт (`JEV_CONSULT_LOG=0` выключает, `JEV_CONSULT_LOG=PATH` переадресует) |
 | `~/.cache/jev-consult/spill/` | Полные выводы, вырезанные compact (`<sha>.txt`, owner-only каталог, максимум 200 файлов / 256 МБ; `JEV_CONSULT_SPILL=0` выключает, `JEV_CONSULT_SPILL=PATH` переадресует) |
 | `scripts/install.py` | Копия скилла только в 4 харнесса (`--env` печатает resolved config JSON: agents/home/hermes_home/source/targets/existing/policy/key_set; `--jq KEY`/`--out PATH`); `--source DIR` — установка из распакованного бандла, `--setup` — интерактивное меню |
-| `scripts/package_release.py` | Сборка `dist/jev-setup.pyz` — однофайлового zipapp-инсталлятора (скилл + install.py + doctor), работает без git clone |
+| `scripts/package_release.py` | Сборка `dist/jev-setup.pyz` — однофайлового zipapp-инсталлятора (скилл + install.py + doctor) и `dist/jev-setup.cmd` для Windows; работает без git clone |
 | `install.cmd` / `install.sh` | Обёртки: bootstrap Python (`py -3` → `python3` → `python`, иначе подсказка python.org), затем `install.py --setup` в интерактивном терминале (без TTY — `install.py` как раньше) |
 | `tests/test_jev.py` / `test_inventory.py` / `test_inventory_hook.py` / `test_peer_fill.py` / `test_catalog_fill.py` / `test_apply_fill.py` / `test_trace.py` / `test_compare.py` / `test_compact.py` / `test_compact_hook.py` / `test_skill_evals.py` | Юнит-тесты без живого API |
 | `vendor/fast-jev-compaction` | MIT-снимок upstream; рантайм — `compact.py`, не плагин Claude |

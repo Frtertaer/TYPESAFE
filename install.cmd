@@ -4,8 +4,8 @@ cd /d "%~dp0"
 
 set "PY="
 call :try "py -3"
-if not defined PY call :try "python3"
 if not defined PY call :try "python"
+if not defined PY call :try "python3"
 if not defined PY (
     >&2 echo install.cmd: Python 3 not found on PATH.
     >&2 echo Download Python 3 from https://www.python.org/downloads/ - in the installer tick "Add python.exe to PATH".
@@ -23,7 +23,11 @@ if errorlevel 1 (
 exit /b %ERRORLEVEL%
 
 :try
+rem Probe by actually running the interpreter: a `py` launcher with no
+rem Python 3 installed exits with a launcher error and prints nothing to
+rem stdout, and Store-alias stubs only print an advert - both fall through.
 set "CAND=%~1"
-%CAND% -c "import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)" >nul 2>nul
-if not errorlevel 1 set "PY=%CAND%"
+set "MAJOR="
+for /f "delims=" %%v in ('%CAND% -c "import sys; print(sys.version_info[0])" 2^>nul') do set "MAJOR=%%v"
+if "%MAJOR%"=="3" set "PY=%CAND%"
 exit /b 0

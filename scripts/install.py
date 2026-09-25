@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -186,12 +187,41 @@ def parse_agents(raw: str | None) -> list[str]:
     return names
 
 
+def _rmtree_fix(func, path: str, _exc) -> None:
+    """rmtree onexc/onerror handler: clear the read-only bit and retry.
+
+    Windows refuses to unlink read-only files (and transient AV/indexer
+    locks surface as PermissionError), which otherwise aborts
+    reinstall/uninstall."""
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        pass
+    func(path)
+
+
+def _rmtree(path: Path) -> None:
+    # onexc replaces onerror in 3.12; same (func, path, exc) call shape.
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_rmtree_fix)
+    else:
+        shutil.rmtree(path, onerror=_rmtree_fix)
+
+
+def _unlink(path: Path) -> None:
+    try:
+        path.unlink()
+    except OSError:
+        os.chmod(path, stat.S_IWRITE)
+        path.unlink()
+
+
 def _remove_path(dest: Path) -> None:
     """Remove a file/symlink/dir at dest; rmtree refuses symlinks."""
     if dest.is_symlink() or not dest.is_dir():
-        dest.unlink()
+        _unlink(dest)
     else:
-        shutil.rmtree(dest)
+        _rmtree(dest)
 
 
 def copy_skill(src: Path, dest_parent: Path, dry_run: bool) -> Path:
@@ -729,11 +759,42 @@ def write_api_key(path: Path, value: str) -> str:
         out.append("TYPESAFE_API_KEY=" + value)
     path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write(path, "\n".join(out).rstrip("\n") + "\n")
+    _lock_down_env(path)
+    return "wrote " + str(path)
+
+
+def _lock_down_env(path: Path) -> None:
+    """Restrict a written .env to the owner: chmod 600 on POSIX, an
+    owner-only ACL on Windows where mode bits are a no-op. Never fatal -
+    a warning to stderr is all a failure earns."""
+    if os.name == "nt":
+        user = os.environ.get("USERNAME") or getpass.getuser()
+        try:
+            proc = subprocess.run(
+                [
+                    "icacls",
+                    str(path),
+                    "/inheritance:r",
+                    "/grant:r",
+                    "%s:F" % user,
+                ],
+                capture_output=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            sys.stderr.write(
+                "install.py: warning: could not set ACL on %s: %s\n" % (path, exc)
+            )
+            return
+        if proc.returncode != 0:
+            sys.stderr.write(
+                "install.py: warning: icacls %s exited %s\n" % (path, proc.returncode)
+            )
+        return
     try:
         os.chmod(path, 0o600)
     except OSError:
         pass
-    return "wrote " + str(path)
 
 
 def run_doctor(agents: list[str]) -> int:

@@ -140,7 +140,14 @@ if not defined PY (
 )
 
 %PY% "%~dp0@PYZ@" %*
-exit /b %ERRORLEVEL%
+set "RC=%ERRORLEVEL%"
+
+rem A double-clicked console window closes on exit - keep it open so the
+rem user sees the menu result and the doctor verdict. Interactive consoles
+rem only; `jev-setup.cmd < nul` passes through untouched.
+powershell -NoProfile -Command "exit ([int]([Console]::IsInputRedirected -or [Console]::IsOutputRedirected))" >nul 2>nul
+if not errorlevel 1 pause
+exit /b %RC%
 
 :try
 rem Run the interpreter: `py` present with no Python 3 exits with a

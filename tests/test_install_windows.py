@@ -333,6 +333,12 @@ class StableBundleTests(unittest.TestCase):
             self.assertLess(python, python3)
             self.assertIn("python.org", text)
             self.assertIn("exit /b", text)
+            # exit code survives the trailing pause; pause is TTY-gated so
+            # `jev-setup.cmd < nul` is unaffected
+            self.assertIn('set "RC=%ERRORLEVEL%"', text)
+            self.assertIn("exit /b %RC%", text)
+            self.assertLess(text.index("set \"RC=%ERRORLEVEL%\""), text.index("pause"))
+            self.assertIn("IsInputRedirected", text)
 
     def test_launcher_follows_pyz_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

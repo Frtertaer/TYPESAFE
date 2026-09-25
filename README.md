@@ -8,22 +8,41 @@
 python scripts/install.py
 ```
 
-Windows: `install.cmd`. Unix: `sh install.sh`. То же самое, что команда выше.
+Windows: `install.cmd`. Unix: `sh install.sh`. Обёртки сами находят Python (`py -3` → `python3` → `python`; если нет — подсказывают https://www.python.org/downloads/ с галочкой «Add python.exe to PATH») и открывают интерактивное меню `--setup`.
 
-Ключ `TYPESAFE_API_KEY` человек кладёт сам (`.env.example` → локальный `.env` или env харнесса). В git ключа нет. Инсталлятор пишет `TYPESAFE_API_KEY: set` или `missing`, значение не печатает.
+Ключ `TYPESAFE_API_KEY` человек кладёт сам (`.env.example` → локальный `.env` или env харнесса; меню `--setup` спрашивает его скрыто через getpass и пишет в `.env` харнесса). В git ключа нет. Инсталлятор пишет `TYPESAFE_API_KEY: set` или `missing`, значение не печатает.
 
 Открыл этот репозиторий как проект — копировать ничего не нужно: `AGENTS.md`, `CLAUDE.md` и `.hermes.md` уже в git.
 
 ## Быстрый старт
 
+Один файл, без git — путь для нетехнического пользователя:
+
+```text
+curl -fsSL -o jev-setup.pyz https://github.com/Frtertaer/TYPESAFE/releases/latest/download/jev-setup.pyz
+python jev-setup.pyz
+```
+
+Одной строкой (скачать и сразу открыть меню):
+
+```sh
+curl -fsSL -o /tmp/jev-setup.pyz https://github.com/Frtertaer/TYPESAFE/releases/latest/download/jev-setup.pyz && python3 /tmp/jev-setup.pyz
+```
+
+`jev-setup.pyz` уже содержит скилл, `install.py` и `doctor.py` — git clone не нужен. Нужен только Python 3 — https://www.python.org/downloads/ (при установке отметить «Add python.exe to PATH»). Откроется меню: **1) Install 2) Uninstall 3) Check (doctor) 4) Exit**. Меню само находит уже стоящие харнессы, спрашивает `TYPESAFE_API_KEY` скрыто (getpass) и пишет его в `.env` харнесса, в конце прогоняет doctor и печатает PASS/FAIL.
+
+Путь разработчика — clone:
+
 ```text
 git clone <repo-url> && cd TYPESAFE
-python scripts/install.py                 # ставит скилл в 4 харнесса
+python scripts/install.py                 # ставит скилл в 4 харнесса (голый запуск в TTY открывает меню)
 # TYPESAFE_API_KEY=... в .env или env харнесса (значение не печатать)
 python skills/jev-consult/scripts/doctor.py        # rc 0 = установка ок
 python -m unittest discover -s tests      # прогон всей suite
 make test-jev                             # один test-файл по суффиксу (или python -m unittest tests.test_jev)
 ```
+
+Собрать `jev-setup.pyz` из clone: `python scripts/package_release.py` или `make package` (zipapp в `dist/`).
 
 ## Что в репозитории
 
@@ -55,8 +74,9 @@ make test-jev                             # один test-файл по суфф
 | `skills/jev-consult/scripts/progress_core.py` | Движок леджера для `progress.py` и `policy_lint.py` (SQLite + GitEvidence); импортируется, отдельных команд нет |
 | `~/.cache/jev-consult/decisions.jsonl` | Журнал решений хука, по строке на промпт (`JEV_CONSULT_LOG=0` выключает, `JEV_CONSULT_LOG=PATH` переадресует) |
 | `~/.cache/jev-consult/spill/` | Полные выводы, вырезанные compact (`<sha>.txt`, owner-only каталог, максимум 200 файлов / 256 МБ; `JEV_CONSULT_SPILL=0` выключает, `JEV_CONSULT_SPILL=PATH` переадресует) |
-| `scripts/install.py` | Копия скилла только в 4 харнесса (`--env` печатает resolved config JSON: agents/home/hermes_home/targets/existing/policy/key_set; `--jq KEY`/`--out PATH`) |
-| `install.cmd` / `install.sh` | Обёртки одной команды |
+| `scripts/install.py` | Копия скилла только в 4 харнесса (`--env` печатает resolved config JSON: agents/home/hermes_home/source/targets/existing/policy/key_set; `--jq KEY`/`--out PATH`); `--source DIR` — установка из распакованного бандла, `--setup` — интерактивное меню |
+| `scripts/package_release.py` | Сборка `dist/jev-setup.pyz` — однофайлового zipapp-инсталлятора (скилл + install.py + doctor), работает без git clone |
+| `install.cmd` / `install.sh` | Обёртки: bootstrap Python (`py -3` → `python3` → `python`, иначе подсказка python.org), затем `install.py --setup` |
 | `tests/test_jev.py` / `test_inventory.py` / `test_inventory_hook.py` / `test_peer_fill.py` / `test_catalog_fill.py` / `test_apply_fill.py` / `test_trace.py` / `test_compare.py` / `test_compact.py` / `test_compact_hook.py` / `test_skill_evals.py` | Юнит-тесты без живого API |
 | `vendor/fast-jev-compaction` | MIT-снимок upstream; рантайм — `compact.py`, не плагин Claude |
 | `vendor/awesome-jev` | Снимок каталога (inspect-only) |
@@ -104,7 +124,7 @@ python skills/jev-consult/scripts/jev.py ping
 python scripts/install.py --uninstall
 ```
 
-Опции: `--agents hermes,codex` ставит только в часть харнессов; `--dry-run` показывает план без записи; `--check-key` печатает `TYPESAFE_API_KEY: set|missing` (значение — никогда).
+Опции: `--agents hermes,codex` ставит только в часть харнессов; `--dry-run` показывает план без записи; `--check-key` печатает `TYPESAFE_API_KEY: set|missing` (значение — никогда); `--setup` — интерактивное меню Install/Uninstall/Check/Exit (стартует и при голом запуске в TTY; без TTY выходит с rc 2 и подсказкой); `--source DIR` — ставит скилл из DIR (распакованный релиз-бандл с `skills/jev-consult` или сам каталог скилла) вместо репозитория.
 
 ## Новая сессия
 

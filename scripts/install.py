@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -37,12 +39,35 @@ You inspect; Jev decides. On every coding or planning task, load `jev-consult` a
 """
 
 
+_SOURCE: Path | None = None
+
+
+def set_source(raw: str | None) -> Path | None:
+    """Point the installer at an unpacked release bundle (or a bare
+    jev-consult skill dir) instead of the repo layout around __file__."""
+    global _SOURCE
+    if raw is None:
+        _SOURCE = None
+        return None
+    cand = Path(raw).expanduser()
+    if not cand.is_dir():
+        raise SystemExit("--source %s is not a directory" % raw)
+    _SOURCE = cand.resolve()
+    return _SOURCE
+
+
 def repo_root() -> Path:
+    if _SOURCE is not None:
+        return _SOURCE
     return Path(__file__).resolve().parent.parent
 
 
 def skill_source() -> Path:
-    return repo_root() / "skills" / "jev-consult"
+    root = repo_root()
+    if _SOURCE is not None and (root / "SKILL.md").is_file():
+        # --source pointed straight at a jev-consult skill directory
+        return root
+    return root / "skills" / "jev-consult"
 
 
 def user_home() -> Path:
@@ -636,11 +661,153 @@ def env_report(agents: list[str]) -> dict:
         "agents": list(agents),
         "home": str(home),
         "hermes_home": str(hermes),
+        "source": str(repo_root()),
         "targets": rendered,
         "existing": existing,
         "policy": os.environ.get("JEV_POLICY", "").strip() or "default",
         "key_set": key_is_set(),
     }
+
+
+def detected_agents(report: dict) -> list[str]:
+    """Harnesses that already have at least one install target on disk."""
+    existing = set(report.get("existing") or [])
+    tmap = report.get("targets") or {}
+    found = []
+    for name in ALLOWED:
+        groups = tmap.get(name) or {}
+        paths = [p for paths in groups.values() for p in paths]
+        if any(p in existing for p in paths):
+            found.append(name)
+    return found
+
+
+def harness_env_paths(agents: list[str]) -> list[Path]:
+    """Per-harness dotenv files the setup key prompt writes to, plus the
+    repo (or bundle) .env so doctor's cwd check sees it too."""
+    home = user_home()
+    hermes = hermes_home()
+    mapping = {
+        "hermes": hermes / ".env",
+        "claude-code": home / ".claude" / ".env",
+        "codex": home / ".codex" / ".env",
+        "grok": home / ".grok" / ".env",
+    }
+    paths = []
+    for name in agents:
+        path = mapping.get(name)
+        if path is not None and path not in paths:
+            paths.append(path)
+    repo_env = repo_root() / ".env"
+    if repo_env not in paths:
+        paths.append(repo_env)
+    return paths
+
+
+def write_api_key(path: Path, value: str) -> str:
+    """Upsert TYPESAFE_API_KEY in a dotenv file. Never prints the value."""
+    out = []
+    wrote = False
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                candidate = stripped
+                if candidate.lower().startswith("export "):
+                    candidate = candidate[7:].strip()
+                key = candidate.split("=", 1)[0].strip()
+                if key == "TYPESAFE_API_KEY":
+                    if not wrote:
+                        out.append("TYPESAFE_API_KEY=" + value)
+                        wrote = True
+                    continue
+            out.append(line)
+    if not wrote:
+        out.append("TYPESAFE_API_KEY=" + value)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write(path, "\n".join(out).rstrip("\n") + "\n")
+    return "wrote " + str(path)
+
+
+def run_doctor(agents: list[str]) -> int:
+    doctor = skill_source() / "scripts" / "doctor.py"
+    if not doctor.is_file():
+        sys.stdout.write("doctor: skipped (missing %s)\n" % doctor)
+        return 0
+    proc = subprocess.run(
+        [sys.executable, str(doctor), "--agents", ",".join(agents)]
+    )
+    sys.stdout.write("doctor: %s\n" % ("PASS" if proc.returncode == 0 else "FAIL"))
+    return proc.returncode
+
+
+def _tty() -> bool:
+    try:
+        return bool(sys.stdin.isatty() and sys.stdout.isatty())
+    except (OSError, ValueError):
+        return False
+
+
+def _prompt(text: str) -> str:
+    try:
+        return input(text).strip()
+    except EOFError:
+        return ""
+
+
+def _setup_menu() -> str:
+    sys.stdout.write(
+        "\njev-consult setup\n"
+        "  1) Install\n"
+        "  2) Uninstall\n"
+        "  3) Check (doctor)\n"
+        "  4) Exit\n"
+    )
+    return _prompt("choice [1-4]: ")
+
+
+def _setup_key(agents: list[str]) -> None:
+    if key_is_set():
+        sys.stdout.write("TYPESAFE_API_KEY: already set; Enter keeps it\n")
+    try:
+        value = getpass.getpass(
+            "TYPESAFE_API_KEY (input hidden; Enter skips): "
+        ).strip()
+    except EOFError:
+        return
+    if not value:
+        sys.stdout.write("TYPESAFE_API_KEY: skipped\n")
+        return
+    for path in harness_env_paths(agents):
+        sys.stdout.write("%s\n" % write_api_key(path, value))
+
+
+def run_setup(agents_arg: str | None = None) -> int:
+    """Interactive menu driven by detected harnesses; Enter exits."""
+    report = env_report(list(ALLOWED))
+    found = detected_agents(report)
+    if agents_arg:
+        agents = parse_agents(agents_arg)
+    else:
+        sys.stdout.write(
+            "harnesses detected: %s\n" % (", ".join(found) if found else "none")
+        )
+        raw = _prompt("agents [%s]: " % ",".join(found or list(ALLOWED)))
+        agents = parse_agents(raw) if raw else (found or list(ALLOWED))
+    while True:
+        choice = _setup_menu()
+        if choice in ("", "4", "q", "exit"):
+            return 0
+        if choice == "1":
+            _setup_key(agents)
+            install(agents, False)
+            run_doctor(agents)
+        elif choice == "2":
+            uninstall(agents, False)
+        elif choice == "3":
+            run_doctor(agents)
+        else:
+            sys.stdout.write("unknown choice %r\n" % choice)
 
 
 def emit_env(report: dict, jq: str | None, out: str | None) -> int:
@@ -708,7 +875,7 @@ def main(argv: list[str] | None = None) -> int:
         "--env",
         action="store_true",
         help="Print the resolved install config JSON (agents, home, "
-        "hermes_home, targets, existing, policy, key_set) and exit.",
+        "hermes_home, source, targets, existing, policy, key_set) and exit.",
     )
     parser.add_argument(
         "--jq",
@@ -717,13 +884,41 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--out", help="With --env: also write the report JSON to PATH (fail-open)."
     )
-    args = parser.parse_args(argv)
+    parser.add_argument(
+        "--source",
+        metavar="DIR",
+        help="Install from DIR (an unpacked release bundle holding "
+        "skills/jev-consult, or a bare jev-consult skill dir) instead of "
+        "the repo layout around install.py.",
+    )
+    parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="Interactive menu: Install / Uninstall / Check (doctor) / "
+        "Exit. Runs automatically when invoked with no args in a TTY; "
+        "ignored when other action flags are given.",
+    )
+    raw = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw)
+    if args.source:
+        set_source(args.source)
     if args.check_key:
         report_key()
         return 0 if key_is_set() else 1
-    agents = parse_agents(args.agents)
     if args.env:
-        return emit_env(env_report(agents), args.jq, args.out)
+        return emit_env(env_report(parse_agents(args.agents)), args.jq, args.out)
+    wants_setup = (args.setup and not (args.uninstall or args.agents or args.dry_run)) or (
+        not raw and _tty()
+    )
+    if wants_setup:
+        if not _tty():
+            sys.stderr.write(
+                "install.py --setup: interactive mode needs a TTY; "
+                "pass explicit flags (e.g. --agents) for non-interactive use\n"
+            )
+            return 2
+        return run_setup(args.agents)
+    agents = parse_agents(args.agents)
     if args.uninstall:
         return uninstall(agents, args.dry_run)
     return install(agents, args.dry_run)

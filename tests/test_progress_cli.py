@@ -337,6 +337,55 @@ class OneshotOutTests(unittest.TestCase):
             self.assertIn("cannot write", buf_err.getvalue())
 
 
+class SparkFlagTests(unittest.TestCase):
+    def _ledger(self, events):
+        ledger = Mock()
+        ledger.history.return_value = {
+            "stage": {"plan": {"goal": "g", "items": []}},
+            "events": events,
+        }
+        return ledger
+
+    def test_spark_renders_bar_line(self) -> None:
+        ledger = self._ledger([
+            {"sequence": 1, "kind": "assessment", "data": {"points": 1}},
+            {"sequence": 2, "kind": "assessment", "data": {"points": 5}},
+            {"sequence": 3, "kind": "assessment", "data": {"points": 9}},
+        ])
+        with patch.object(progress, "Ledger", return_value=ledger):
+            code, out = run_cli(["history", "s", "--spark", "points"])
+        self.assertEqual(code, 0)
+        self.assertIn("points ", out)
+        self.assertIn("min=1", out)
+        self.assertIn("max=9", out)
+        self.assertIn("n=3", out)
+        line = out.split()[1]
+        self.assertEqual(len(line), 3)
+        self.assertEqual(line[0], "▁")
+        self.assertEqual(line[2], "█")
+
+    def test_spark_flat_field_and_json(self) -> None:
+        ledger = self._ledger([
+            {"sequence": 1, "kind": "init", "data": {}},
+            {"sequence": 2, "kind": "note", "data": {}},
+        ])
+        with patch.object(progress, "Ledger", return_value=ledger):
+            code, out = run_cli(["history", "s", "--spark", "sequence"])
+        self.assertEqual(code, 0)
+        self.assertIn("sequence ", out)
+        self.assertIn("min=1", out)
+        self.assertIn("n=2", out)
+
+    def test_spark_no_numeric_values_rc2(self) -> None:
+        ledger = self._ledger([{"sequence": 1, "kind": "note", "data": {}}])
+        with patch.object(progress, "Ledger", return_value=ledger):
+            err = io.StringIO()
+            with redirect_stderr(err):
+                code, _out = run_cli(["history", "s", "--spark", "bogus"])
+        self.assertEqual(code, 2)
+        self.assertIn("spark:", err.getvalue())
+
+
 class MutatingVerdictTests(unittest.TestCase):
     def test_self_test_verdict_ok(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

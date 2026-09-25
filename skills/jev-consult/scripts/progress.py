@@ -37,6 +37,7 @@ def build_parser():
     commands.choices["history"].add_argument("--csv", action="store_true", help="Emit events as a CSV table (dict cells as JSON; --keys picks the columns)")
     commands.choices["history"].add_argument("--md", action="store_true", help="Emit events as a Markdown table (--keys picks the columns)")
     commands.choices["history"].add_argument("--keys", metavar="a,b", default="", help="With --jsonl/--csv/--md: keep only these keys in each event row / pick the columns (rc 2 on an empty list)")
+    commands.choices["history"].add_argument("--spark", metavar="FIELD", default="", help="Emit an ASCII sparkline over numeric FIELD values across events (event top-level first, then data.FIELD; rc 2 when none)")
     report = commands.add_parser("report", help="Print a markdown summary of a stage (plan, credits, events); --out writes it to a file")
     report.add_argument("--json", action="store_true", help="Emit a structured {stage, goal, action, points, awarded_items, blocked_items, events, ...} object instead of markdown (--out then writes the JSON)")
     report.add_argument("stage")
@@ -212,6 +213,50 @@ def _status_watch(ledger, args):
     if args.verdict and verdict_ok and not _write_verdict():
         return 1
     return 0 if tick.get("action") not in ("continue", "error") else 1
+
+
+_SPARK_BARS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
+
+
+def _spark_values(field, events):
+    values = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        raw = event.get(field, data.get(field))
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            values.append(float(raw))
+    return values
+
+
+def _spark_line(values):
+    lo, hi = min(values), max(values)
+    span = (hi - lo) or 1.0
+    return "".join(
+        _SPARK_BARS[min(len(_SPARK_BARS) - 1, int((v - lo) / span * (len(_SPARK_BARS) - 1)))]
+        for v in values
+    )
+
+
+def _emit_spark(field, result):
+    events = result.get("events") if isinstance(result, dict) else []
+    values = _spark_values(field, events if isinstance(events, list) else [])
+    if not values:
+        sys.stderr.write("spark: no numeric %r values across %d event(s)\n"
+                         % (field, len(events) if isinstance(events, list) else 0))
+        return 2
+    doc = {
+        "field": field,
+        "line": _spark_line(values),
+        "values": values,
+        "min": min(values),
+        "max": max(values),
+        "n": len(values),
+    }
+    sys.stdout.write("%s %s min=%g max=%g n=%d\n"
+                     % (field, doc["line"], doc["min"], doc["max"], doc["n"]))
+    return 0
 
 
 def _history_tick(ledger, stage, t0, prev_events):
@@ -543,6 +588,8 @@ def main(argv=None):
             if args.watch and args.watch > 0:
                 return _history_watch(ledger, args)
             result = ledger.history(args.stage)
+            if getattr(args, "spark", ""):
+                return _emit_spark(args.spark, result)
             if args.verdict:
                 events = result.get("events") if isinstance(result, dict) else None
                 if not _watch.write_verdict(

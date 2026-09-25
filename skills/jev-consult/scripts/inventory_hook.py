@@ -630,7 +630,39 @@ def env_report() -> dict:
     return report
 
 
-USAGE = 'Usage: python inventory_hook.py [--env|--events|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet] [--dedupe]\n       [--verdict PATH]] [--self-test]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n             (limit/ttl/dedupe/budget/payload caps/events/policy source,\n             sidecar+miss presence; --jq KEY prints one value, rc 2 unknown)\n  --events   print allowed hook event names and exit\n             (--json array, --jsonl/--csv/--md rows)\n  --dry-run  resolve the pick writing sidecar/miss as .jev-tools.dry.json /\n             .jev-tools-miss.dry.json instead of the live names\n  --simulate TEXT  run the hook on a synthetic UserPromptSubmit event with TEXT as the prompt and the process cwd (implies --dry-run; "-" reads TEXT from stdin)\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --version  print the pack policy version and exit\n  --self-test  run the emit machinery on synthetic payloads in a temp dir\n             (no Jev); prints self-test ok|FAIL per check, rc 0/1\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --dedupe   with --watch: skip emitting a tick identical to the previous\n             (ts/elapsed_s ignored; JEV_HOOK_WATCH_DEDUPE presets)\n  --unchanged-max N  with --watch: stop after N consecutive identical ticks\n  --verdict P  write a slim {verdict, ticks, winner, winner_stability, keys} JSON ("-" prints it to stderr instead of a file)\n  --schema   print the emitted payload key contract and exit (--json emits\n             the object); empty payload {} when the hook has nothing to add\n'
+def audit_report() -> dict:
+    """State of the hook's sidecar/miss markers in the resolved cwd."""
+    cwd = Path(os.environ.get("JEV_HOOK_CWD", "").strip() or ".")
+    sidecar_path = cwd / SIDECAR_NAME
+    miss_path = cwd / MISS_NAME
+    sidecar = read_sidecar(sidecar_path) if sidecar_path.is_file() else {}
+    miss = read_sidecar(miss_path) if miss_path.is_file() else {}
+    sidecar_age = sidecar_age_seconds(sidecar) if sidecar else None
+    miss_age = sidecar_age_seconds(miss) if miss else None
+    return {
+        "cwd": str(cwd),
+        "ttl_seconds": sidecar_ttl_seconds(),
+        "sidecar": {
+            "present": sidecar_path.is_file(),
+            "path": str(sidecar_path),
+            "valid": bool(sidecar),
+            "age_s": None if sidecar_age is None else int(sidecar_age),
+            "fresh": sidecar_fresh(sidecar) if sidecar else False,
+            "items": len(sidecar_items(sidecar)),
+            "note": sidecar.get("note"),
+        },
+        "miss": {
+            "present": miss_path.is_file(),
+            "path": str(miss_path),
+            "valid": bool(miss),
+            "age_s": None if miss_age is None else int(miss_age),
+            "fresh": sidecar_fresh(miss) if miss else False,
+            "task": miss.get("task"),
+        },
+    }
+
+
+USAGE = 'Usage: python inventory_hook.py [--env|--events|--audit|--help] [--dry-run] [--verbose]\n       [--debug] [--file PATH] [--out PATH] [--jq KEY] [--json|--jsonl]\n       [--watch S [--max-ticks N] [--watch-max S] [--fail-fast] [--quiet] [--dedupe]\n       [--verdict PATH]] [--self-test]\n\nReads one hook JSON event from stdin (or --file), shortlists installed items\nagainst the prompt by IDF, asks Jev for at most one pick, writes the sidecar\n.jev-tools.json / miss marker, and prints the hook payload JSON ({} when it\nhas nothing to add — the hook never exits non-zero on a bad event).\n\n  --audit    print the sidecar/miss state JSON for the resolved cwd\n             (present/valid/age_s/fresh/items per marker; --jq KEY digs one\n             field, rc 2 unknown)\n  --env      print the resolved JEV_HOOK_* config JSON and exit\n             (limit/ttl/dedupe/budget/payload caps/events/policy source,\n             sidecar+miss presence; --jq KEY prints one value, rc 2 unknown)\n  --events   print allowed hook event names and exit\n             (--json array, --jsonl/--csv/--md rows)\n  --dry-run  resolve the pick writing sidecar/miss as .jev-tools.dry.json /\n             .jev-tools-miss.dry.json instead of the live names\n  --simulate TEXT  run the hook on a synthetic UserPromptSubmit event with TEXT as the prompt and the process cwd (implies --dry-run; "-" reads TEXT from stdin)\n  --verbose  print the one-line reason when the payload would be {}\n  --debug    echo the LAST_DECISION record to stderr\n  --file P   read the event JSON from PATH instead of stdin\n  --out P    also write the emitted payload JSON to PATH (fail-open)\n  --jq KEY   print one dotted-path field of the emitted payload (rc 2 unknown)\n  --version  print the pack policy version and exit\n  --self-test  run the emit machinery on synthetic payloads in a temp dir\n             (no Jev); prints self-test ok|FAIL per check, rc 0/1\n  --watch S  re-run against the file/stdin every S seconds, tick JSON per pass\n  --dedupe   with --watch: skip emitting a tick identical to the previous\n             (ts/elapsed_s ignored; JEV_HOOK_WATCH_DEDUPE presets)\n  --unchanged-max N  with --watch: stop after N consecutive identical ticks\n  --verdict P  write a slim {verdict, ticks, winner, winner_stability, keys} JSON ("-" prints it to stderr instead of a file)\n  --schema   print the emitted payload key contract and exit (--json emits\n             the object); empty payload {} when the hook has nothing to add\n'
 
 
 def _self_test() -> int:
@@ -758,6 +790,27 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if "--self-test" in argv:
         return _self_test()
+    if "--audit" in argv:
+        report = audit_report()
+        if "--jq" in argv:
+            idx = argv.index("--jq")
+            if idx + 1 >= len(argv):
+                sys.stderr.write("--jq needs a KEY value\n")
+                return 2
+            key = argv[idx + 1]
+            val, found = _watch.dig(report, key)
+            if not found:
+                sys.stderr.write(
+                    "bad --jq key %r (audit has: %s)\n"
+                    % (key, ", ".join(sorted(report)))
+                )
+                return 2
+            sys.stdout.write(json.dumps(val, indent=2)
+                             if isinstance(val, (dict, list))
+                             else str(val) + "\n")
+            return 0
+        sys.stdout.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        return 0
     if "--schema" in argv:
         if "--json" in argv:
             sys.stdout.write(json.dumps(PAYLOAD_SCHEMA, indent=2) + "\n")

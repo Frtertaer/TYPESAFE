@@ -4063,5 +4063,88 @@ class EventSetTests(unittest.TestCase):
             self.assertEqual(sorted(HOOK.allowed_events()), ["extra_evt"])
 
 
+class AuditFlagTests(unittest.TestCase):
+    """--audit reports sidecar/miss marker state for the resolved cwd."""
+
+    def test_audit_empty_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_HOOK_CWD": tmp}):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(["--audit"])
+            self.assertEqual(rc, 0)
+            report = json.loads(buf.getvalue())
+            self.assertEqual(set(report), {"cwd", "ttl_seconds", "sidecar", "miss"})
+            self.assertFalse(report["sidecar"]["present"])
+            self.assertFalse(report["miss"]["present"])
+            self.assertIsNone(report["sidecar"]["age_s"])
+
+    def test_audit_reports_fresh_sidecar_and_stale_miss(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            now = time.time()
+            (base / ".jev-tools.json").write_text(
+                json.dumps({"written_at": now, "items": [{"name": "x"}]}),
+                encoding="utf-8",
+            )
+            (base / ".jev-tools-miss.json").write_text(
+                json.dumps({"written_at": 0, "task": "old miss"}),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_HOOK_CWD": tmp}):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(["--audit"])
+            self.assertEqual(rc, 0)
+            report = json.loads(buf.getvalue())
+            self.assertTrue(report["sidecar"]["present"])
+            self.assertTrue(report["sidecar"]["valid"])
+            self.assertTrue(report["sidecar"]["fresh"])
+            self.assertEqual(report["sidecar"]["items"], 1)
+            self.assertGreaterEqual(report["sidecar"]["age_s"], 0)
+            self.assertTrue(report["miss"]["present"])
+            self.assertFalse(report["miss"]["fresh"])
+            self.assertEqual(report["miss"]["task"], "old miss")
+
+    def test_audit_does_not_delete_stale_miss(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            miss = Path(tmp) / ".jev-tools-miss.json"
+            miss.write_text(json.dumps({"written_at": 0}), encoding="utf-8")
+            with patch.dict(os.environ, {"JEV_HOOK_CWD": tmp}):
+                with patch("sys.stdout", io.StringIO()):
+                    self.assertEqual(HOOK.main(["--audit"]), 0)
+            self.assertTrue(miss.is_file())
+
+    def test_audit_invalid_json_reports_valid_false(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".jev-tools.json").write_text("not json", encoding="utf-8")
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_HOOK_CWD": tmp}):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(["--audit"])
+            self.assertEqual(rc, 0)
+            sidecar = json.loads(buf.getvalue())["sidecar"]
+            self.assertTrue(sidecar["present"])
+            self.assertFalse(sidecar["valid"])
+            self.assertIsNone(sidecar["age_s"])
+
+    def test_audit_jq_digs_nested_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with patch.dict(os.environ, {"JEV_HOOK_CWD": tmp}):
+                with patch("sys.stdout", buf):
+                    rc = HOOK.main(["--audit", "--jq", "sidecar.present"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "False")
+
+    def test_audit_jq_bad_key_is_usage_error(self) -> None:
+        buf = io.StringIO()
+        err = io.StringIO()
+        with patch("sys.stdout", buf), patch("sys.stderr", err):
+            rc = HOOK.main(["--audit", "--jq", "nope.deeper"])
+        self.assertEqual(rc, 2)
+        self.assertIn("bad --jq key", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

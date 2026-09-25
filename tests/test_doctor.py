@@ -10,6 +10,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -458,6 +459,58 @@ class DoctorTests(unittest.TestCase):
             check = check_of(out, "decisions_verify")
             self.assertTrue(check["ok"], check)
             self.assertIn("verify: ok", check["detail"])
+
+    def test_decisions_freshness_reports_age(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            logdir = home / ".cache" / "jev-consult"
+            logdir.mkdir(parents=True)
+            (logdir / "decisions.jsonl").write_text(
+                '{"ts": %d, "jev_status": "ok"}\n' % int(time.time() - 30),
+                encoding="utf-8",
+            )
+            rc, out, _ = run_main(
+                ["--only", "decisions_freshness", "--home", str(home),
+                 "--hermes-home", str(home)],
+                env_extra={"JEV_CONSULT_LOG": ""},
+                cwd=tmp,
+            )
+            check = check_of(out, "decisions_freshness")
+            self.assertTrue(check["ok"], check)
+            self.assertIn("last entry", check["detail"])
+            self.assertIn("s ago", check["detail"])
+            self.assertEqual(rc, 0)
+
+    def test_decisions_freshness_no_timestamped_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            logdir = home / ".cache" / "jev-consult"
+            logdir.mkdir(parents=True)
+            (logdir / "decisions.jsonl").write_text(
+                '{"jev_status": "ok"}\nnot json\n', encoding="utf-8",
+            )
+            rc, out, _ = run_main(
+                ["--only", "decisions_freshness", "--home", str(home),
+                 "--hermes-home", str(home)],
+                env_extra={"JEV_CONSULT_LOG": ""},
+                cwd=tmp,
+            )
+            check = check_of(out, "decisions_freshness")
+            self.assertTrue(check["ok"], check)
+            self.assertEqual(check["detail"], "no timestamped entries")
+
+    def test_decisions_freshness_absent_when_no_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            home.mkdir()
+            rc, out, _ = run_main(
+                ["--only", "decisions_freshness", "--home", str(home),
+                 "--hermes-home", str(home)],
+                env_extra={"JEV_CONSULT_LOG": ""},
+                cwd=tmp,
+            )
+            self.assertIsNone(check_of(out, "decisions_freshness"))
+            self.assertEqual(rc, 0)
 
     def test_sidecars_missing_ok(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

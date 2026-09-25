@@ -60,6 +60,7 @@ CHECK_NAMES = (
     "smoke_self_test",
     "decisions_log",
     "decisions_verify",
+    "decisions_freshness",
     "sidecars",
     "progress_ledger",
 )
@@ -350,6 +351,24 @@ def check_common(home: Path, hermes: Path) -> list[dict]:
         except Exception as exc:
             detail = "unrunnable: %s" % exc
         out.append(_check("*", "decisions_verify", ok, detail))
+        newest = None
+        try:
+            for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                ts = row.get("ts")
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+                    newest = ts if newest is None else max(newest, ts)
+        except OSError:
+            pass
+        if newest is None:
+            out.append(_check("*", "decisions_freshness", True, "no timestamped entries"))
+        else:
+            age = max(0, time.time() - newest)
+            out.append(_check("*", "decisions_freshness", True,
+                              "last entry %ds ago" % int(age)))
     return out
 
 

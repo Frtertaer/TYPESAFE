@@ -572,6 +572,8 @@ def _collect(root, args, skip, sev_want, only, since_ts=None):
         findings = [f for f in findings if f.severity in sev_want]
     if only:
         findings = [f for f in findings if f.check in only]
+    if getattr(args, "by_check", False):
+        findings.sort(key=lambda f: (f.check, f.file, f.line or 0))
     if since_ts is not None:
         kept = []
         for f in findings:
@@ -649,26 +651,45 @@ def _print_csv(all_findings):
                       f.message, "yes" if f.suppressed else ""])
 
 
-def _print_report(root, skills, all_findings, suppressed, counts):
+def _print_report(root, skills, all_findings, suppressed, counts,
+                  by_check=False):
     print("agent-skill security scan v%s — %d skill(s) under %s\n" % (
         VERSION, len(skills), root))
-    by_skill = {}
-    for f in all_findings:
-        by_skill.setdefault(f.skill, []).append(f)
-    for sd in sorted(skills):
-        fs = by_skill.get(sd.name, [])
-        print("=== %s (%s) ===" % (sd.name, sd))
-        if not fs:
+    if by_check:
+        groups = {}
+        for f in all_findings:
+            groups.setdefault(f.check, []).append(f)
+        for check in sorted(groups):
+            fs = groups[check]
+            print("=== %s — %s ===" % (check, CHECKS.get(check, "")))
+            for f in fs:
+                loc = "%s:%s" % (f.file, f.line) if f.line else f.file
+                tag = " suppressed" if f.suppressed else ""
+                print("  [%s]%s %s %s (%s)\n      %s" % (
+                    f.severity, tag, f.check, loc, f.skill, f.message))
+                if f.evidence:
+                    print("      > %s" % f.evidence)
+            print()
+        if not groups:
             print("  clean — no findings\n")
-            continue
-        for f in fs:
-            loc = "%s:%s" % (f.file, f.line) if f.line else f.file
-            tag = " suppressed" if f.suppressed else ""
-            print("  [%s]%s %s %s\n      %s" % (
-                f.severity, tag, f.check, loc, f.message))
-            if f.evidence:
-                print("      > %s" % f.evidence)
-        print()
+    else:
+        by_skill = {}
+        for f in all_findings:
+            by_skill.setdefault(f.skill, []).append(f)
+        for sd in sorted(skills):
+            fs = by_skill.get(sd.name, [])
+            print("=== %s (%s) ===" % (sd.name, sd))
+            if not fs:
+                print("  clean — no findings\n")
+                continue
+            for f in fs:
+                loc = "%s:%s" % (f.file, f.line) if f.line else f.file
+                tag = " suppressed" if f.suppressed else ""
+                print("  [%s]%s %s %s\n      %s" % (
+                    f.severity, tag, f.check, loc, f.message))
+                if f.evidence:
+                    print("      > %s" % f.evidence)
+            print()
     print("Summary: %d CRITICAL, %d WARN, %d INFO" %
           (counts["CRITICAL"], counts["WARN"], counts["INFO"]) + (
               " (%d suppressed)" % suppressed if suppressed else ""))
@@ -746,6 +767,9 @@ def main(argv=None):
                     help="With --watch, stop after N ticks.")
     ap.add_argument("--unchanged-max", metavar="N", type=int, default=0,
                     help="With --watch, stop after N consecutive identical ticks.")
+    ap.add_argument("--by-check", action="store_true",
+                    help="Sort findings by check id (and group them under "
+                         "check headings in the text report).")
     ap.add_argument("--since", metavar="TS", default="",
                     help="Only report findings in files modified after TS "
                          "(epoch seconds or ISO8601; '-' reads stdin).")
@@ -956,7 +980,8 @@ def main(argv=None):
         elif args.csv:
             _print_csv(shown)
         else:
-            _print_report(root, skills, shown, suppressed, counts)
+            _print_report(root, skills, shown, suppressed, counts,
+                          by_check=args.by_check)
         break
     rank = SEV_RANK[fail_on]
     return 1 if any(counts[s] for s, r in SEV_RANK.items() if r >= rank) else 0

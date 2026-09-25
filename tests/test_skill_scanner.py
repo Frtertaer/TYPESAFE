@@ -928,6 +928,30 @@ class JsonlFlagTests(unittest.TestCase):
             self.assertEqual(len(payload["findings"]), 1)
             self.assertEqual(rc, 1)
 
+    def test_by_check_sorts_and_groups(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = make_skill(tmp, self.BAD)
+            rc, out, _ = self._run([str(skill), "--by-check"])
+            self.assertEqual(rc, 1)
+            self.assertIn("=== ", out)
+            checks = re.findall(r"^=== ([A-Z0-9]+) —", out, re.M)
+            self.assertEqual(checks, sorted(checks))
+            self.assertTrue(all(c in scanner.CHECKS for c in checks))
+            # findings inside each group carry the group check id
+            for check in checks:
+                start = out.index("=== %s —" % check)
+                nxt = out.find("\n=== ", start + 1)
+                section = out[start:] if nxt == -1 else out[start:nxt]
+                self.assertIn(" %s " % check, section)
+
+    def test_by_check_sorts_json_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = make_skill(tmp, self.BAD)
+            _, out, _ = self._run(
+                [str(skill), "--by-check", "--json"])
+            checks = [f["check"] for f in json.loads(out)["findings"]]
+            self.assertEqual(checks, sorted(checks))
+
     def test_since_filters_old_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             skill = make_skill(tmp, self.BAD)

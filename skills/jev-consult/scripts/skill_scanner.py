@@ -25,6 +25,7 @@ suppress self-matches.
 
 import argparse
 import csv
+import datetime
 import json
 import os
 import re
@@ -382,8 +383,10 @@ def scan_skill(skill_dir, include_fixtures=False, skip=None):
     fm = parse_frontmatter(text)
 
     def add(check, sev, file, line, msg, evidence):
-        findings.append(Finding(skill_name, check, sev, str(file.relative_to(skill_dir)),
-                                line, msg, evidence))
+        f = Finding(skill_name, check, sev, str(file.relative_to(skill_dir)),
+                    line, msg, evidence)
+        f.path = file  # absolute path for --since mtime filtering
+        findings.append(f)
 
     # --- Check 6: frontmatter hygiene -------------------------------------
     if fm is None:
@@ -540,7 +543,25 @@ def self_test():
     return 0
 
 
-def _collect(root, args, skip, sev_want, only):
+def _parse_since(text):
+    """Epoch seconds or ISO8601 timestamp ('-' reads stdin). Warns + None on
+    unparseable input."""
+    if text == "-":
+        text = sys.stdin.read().strip()
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    try:
+        return datetime.datetime.fromisoformat(
+            text.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        print("bad --since %r (want epoch seconds or ISO8601)" % text,
+              file=sys.stderr)
+        return None
+
+
+def _collect(root, args, skip, sev_want, only, since_ts=None):
     """One scan pass: discover, scan, filter, baseline-mark, count."""
     skills = discover_skills(root, skip=skip)
     findings = []
@@ -551,6 +572,16 @@ def _collect(root, args, skip, sev_want, only):
         findings = [f for f in findings if f.severity in sev_want]
     if only:
         findings = [f for f in findings if f.check in only]
+    if since_ts is not None:
+        kept = []
+        for f in findings:
+            path = getattr(f, "path", None)
+            try:
+                if path is not None and Path(path).stat().st_mtime > since_ts:
+                    kept.append(f)
+            except OSError:
+                kept.append(f)  # unreadable mtime: keep (fail-open)
+        findings = kept
     suppressed = 0
     if args.baseline or args.diff:
         baseline_keys = _load_baseline(args.diff or args.baseline)
@@ -715,6 +746,9 @@ def main(argv=None):
                     help="With --watch, stop after N ticks.")
     ap.add_argument("--unchanged-max", metavar="N", type=int, default=0,
                     help="With --watch, stop after N consecutive identical ticks.")
+    ap.add_argument("--since", metavar="TS", default="",
+                    help="Only report findings in files modified after TS "
+                         "(epoch seconds or ISO8601; '-' reads stdin).")
     ap.add_argument("--top", metavar="N", type=int, default=0,
                     help="Print at most N findings (summary counts still "
                          "reflect the full scan; with --watch applies per tick).")
@@ -772,6 +806,11 @@ def main(argv=None):
     if args.diff and args.baseline:
         print("--diff and --baseline are mutually exclusive", file=sys.stderr)
         return 2
+    since_ts = None
+    if args.since:
+        since_ts = _parse_since(args.since)
+        if since_ts is None:
+            return 2
     sev_want = None
     if args.severity:
         sev_want = set(_csv_arg(args.severity))
@@ -817,7 +856,7 @@ def main(argv=None):
     while True:
         tick += 1
         skills, all_findings, suppressed, counts = _collect(
-            root, args, skip, sev_want, only)
+            root, args, skip, sev_want, only, since_ts)
         shown = all_findings[:args.top] if args.top else all_findings
         payload = _payload_for(root, skills, shown, suppressed, counts)
 

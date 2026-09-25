@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -926,6 +927,32 @@ class JsonlFlagTests(unittest.TestCase):
             payload = json.loads(out)
             self.assertEqual(len(payload["findings"]), 1)
             self.assertEqual(rc, 1)
+
+    def test_since_filters_old_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = make_skill(tmp, self.BAD)
+            md = skill / "SKILL.md"
+            old = time.time() - 86400
+            os.utime(md, (old, old))
+            rc, out, _ = self._run(
+                [str(skill), "--since", str(time.time() - 3600)])
+            self.assertEqual(rc, 0)
+            self.assertNotIn("[CRITICAL]", out)
+            rc, out, _ = self._run(
+                [str(skill), "--since", str(time.time() - 2 * 86400)])
+            self.assertEqual(rc, 1)
+            self.assertIn("[CRITICAL]", out)
+
+    def test_since_accepts_iso_and_rejects_garbage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = make_skill(tmp, self.BAD)
+            rc, _out, _ = self._run(
+                [str(skill), "--since", "2000-01-01T00:00:00Z"])
+            self.assertEqual(rc, 1)
+            rc, _out, err = self._run(
+                [str(skill), "--since", "not-a-date"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --since", err)
 
     def test_top_caps_rows_keeps_full_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

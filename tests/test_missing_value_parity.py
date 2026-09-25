@@ -80,6 +80,7 @@ MISSING_VALUE_RC2 = {
         "--diff",
         "--top",
         "--since",
+        "--cols",
     ],
     "smoke.py": ["--only", "--repeat", "--jobs", "--timeout", "--baseline", "--baseline-write"],
     "trace.py": ["--file"],

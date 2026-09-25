@@ -841,6 +841,37 @@ class TableFlagTests(unittest.TestCase):
             rows = list(_csv.reader(io.StringIO(out)))
             self.assertTrue(any(r[5] == "yes" for r in rows[1:]))
 
+    def test_cols_subsets_csv_columns(self) -> None:
+        import csv as _csv
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = make_skill(tmp, self.BAD)
+            rc, out = self._run(
+                [str(skill), "--csv", "--cols", "severity,file"])
+            self.assertEqual(rc, 1)
+            rows = list(_csv.reader(io.StringIO(out)))
+            self.assertEqual(rows[0], ["severity", "file"])
+            self.assertGreaterEqual(len(rows), 2)
+            for row in rows[1:]:
+                self.assertEqual(len(row), 2)
+            self.assertTrue(any(r[0] == "CRITICAL" for r in rows[1:]))
+
+    def test_cols_unknown_name_rc2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = make_skill(tmp, self.BAD)
+            err = io.StringIO()
+            with redirect_stderr(err):
+                rc = scanner.main([str(skill), "--csv", "--cols", "severity,bogus"])
+            self.assertEqual(rc, 2)
+            self.assertIn("bad --cols", err.getvalue())
+
+    def test_cols_ignored_without_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = make_skill(tmp, self.BAD)
+            rc, out = self._run(
+                [str(skill), "--cols", "severity", "--json"])
+            self.assertEqual(rc, 1)
+            self.assertIn("findings", json.loads(out))
+
 
 class JsonlFlagTests(unittest.TestCase):
     """--jsonl emits one compact JSON line per finding."""

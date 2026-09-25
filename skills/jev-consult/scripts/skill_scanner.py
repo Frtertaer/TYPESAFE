@@ -642,13 +642,19 @@ def _print_md(root, skills, all_findings, suppressed, counts):
             " (%d suppressed)" % suppressed if suppressed else ""))
 
 
-def _print_csv(all_findings):
-    """CSV finding rows (severity,check,file,line,message,suppressed)."""
+CSV_COLS = ["severity", "check", "file", "line", "message", "suppressed"]
+
+
+def _print_csv(all_findings, cols=None):
+    """CSV finding rows; cols picks a subset of CSV_COLS (None = all)."""
+    cols = list(cols) if cols else list(CSV_COLS)
     out = csv.writer(sys.stdout)
-    out.writerow(["severity", "check", "file", "line", "message", "suppressed"])
+    out.writerow(cols)
     for f in all_findings:
-        out.writerow([f.severity, f.check, f.file, f.line or "",
-                      f.message, "yes" if f.suppressed else ""])
+        row = {"severity": f.severity, "check": f.check, "file": f.file,
+               "line": f.line or "", "message": f.message,
+               "suppressed": "yes" if f.suppressed else ""}
+        out.writerow([row[c] for c in cols])
 
 
 def _print_report(root, skills, all_findings, suppressed, counts,
@@ -750,6 +756,10 @@ def main(argv=None):
                     help="Emit findings as a markdown table instead of the text report.")
     ap.add_argument("--csv", action="store_true",
                     help="Emit findings as CSV rows instead of the text report.")
+    ap.add_argument("--cols", metavar="LIST", default="",
+                    help="With --csv: emit only these columns "
+                         "(comma list of severity,check,file,line,message,suppressed; "
+                         "rc 2 on unknown names).")
     ap.add_argument("--fail-on", metavar="SEV", default="",
                     help="Exit 1 on findings at this severity or above "
                          "(CRITICAL, WARN, INFO; default CRITICAL).")
@@ -978,7 +988,14 @@ def main(argv=None):
         elif args.md:
             _print_md(root, skills, shown, suppressed, counts)
         elif args.csv:
-            _print_csv(shown)
+            cols = _csv_arg(args.cols) if getattr(args, "cols", "") else []
+            bad = [c for c in cols if c not in CSV_COLS]
+            if bad or (getattr(args, "cols", "") and not cols):
+                sys.stderr.write(
+                    "bad --cols %r (have: %s)\n"
+                    % (", ".join(bad) or args.cols, ",".join(CSV_COLS)))
+                return 2
+            _print_csv(shown, cols or None)
         else:
             _print_report(root, skills, shown, suppressed, counts,
                           by_check=args.by_check)

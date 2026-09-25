@@ -2606,6 +2606,96 @@ class IndexCheckTests(unittest.TestCase):
             self.assertFalse(payload["ok"])
 
 
+class IndexStatsTests(unittest.TestCase):
+    """--index-stats totals index.jsonl rows (entries/bytes/ts span/bad lines)."""
+
+    def _index(self, target: Path, rows: list[dict]) -> None:
+        target.mkdir(parents=True, exist_ok=True)
+        text = "".join(json.dumps(r) + "\n" for r in rows)
+        (target / "index.jsonl").write_text(text, encoding="utf-8")
+
+    def test_stats_totals_and_ts_span(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            self._index(
+                target,
+                [
+                    {"ts": 100.0, "name": "a.txt", "bytes": 10},
+                    {"ts": 50.0, "name": "b.txt", "bytes": 20},
+                ],
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--index-stats", "--spill-dir", str(target), "--json"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["entries"], 2)
+            self.assertEqual(payload["bytes"], 30)
+            self.assertEqual(payload["oldest_ts"], 50.0)
+            self.assertEqual(payload["newest_ts"], 100.0)
+            self.assertEqual(payload["bad_lines"], 0)
+            self.assertEqual(payload["dir"], str(target))
+
+    def test_stats_counts_bad_lines_and_missing_index(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            target.mkdir()
+            (target / "index.jsonl").write_text(
+                "garbage\n" + json.dumps({"nope": 1}) + "\n",
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--index-stats", "--spill-dir", str(target)])
+            self.assertEqual(rc, 0)
+            self.assertIn("0 entries, 0 bytes, 2 bad lines", buf.getvalue())
+            empty = Path(tmp) / "empty"
+            empty.mkdir()
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(["--index-stats", "--spill-dir", str(empty), "--json"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue())["entries"], 0)
+
+    def test_missing_dir_rc2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            err = io.StringIO()
+            with patch("sys.stderr", err):
+                rc = C.main(
+                    ["--index-stats", "--spill-dir", str(Path(tmp) / "nope")]
+                )
+            self.assertEqual(rc, 2)
+            self.assertIn("no spill dir resolved", err.getvalue())
+
+    def test_include_dry_reports_dry_totals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "spill"
+            dry = target / "dry"
+            self._index(target, [{"ts": 1.0, "name": "a.txt", "bytes": 5}])
+            self._index(
+                dry,
+                [
+                    {"ts": 2.0, "name": "b.txt", "bytes": 7},
+                    {"ts": 3.0, "name": "c.txt", "bytes": 11},
+                ],
+            )
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                rc = C.main(
+                    [
+                        "--index-stats",
+                        "--spill-dir", str(target),
+                        "--include-dry",
+                        "--json",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload["entries"], 1)
+            self.assertEqual(payload["dry"]["entries"], 2)
+            self.assertEqual(payload["dry"]["bytes"], 18)
+
+
 class KeepTextTests(unittest.TestCase):
     def setUp(self):
         self._spill_env = patch.dict(os.environ, {"JEV_CONSULT_SPILL": "0"})

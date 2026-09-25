@@ -1830,6 +1830,57 @@ def check_spill_index(directory: Path | None = None) -> dict[str, Any]:
     }
 
 
+def spill_index_stats(directory: Path | None = None) -> dict[str, Any]:
+    """Totals over index.jsonl rows: entries, bytes, ts span, unparseable lines.
+
+    dir is None when no spill dir resolved; a missing index reads as zero rows.
+    """
+    target = directory if directory is not None else spill_dir_default()
+    if target is None or not target.is_dir():
+        return {
+            "entries": 0,
+            "bytes": 0,
+            "oldest_ts": None,
+            "newest_ts": None,
+            "bad_lines": 0,
+            "dir": None,
+        }
+    try:
+        lines = _spill_index_path(target).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    entries = 0
+    total = 0
+    ts_lo: float | None = None
+    ts_hi: float | None = None
+    bad = 0
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            bad += 1
+            continue
+        if not isinstance(row, dict) or not isinstance(row.get("name"), str):
+            bad += 1
+            continue
+        entries += 1
+        size = row.get("bytes")
+        if isinstance(size, int) and not isinstance(size, bool):
+            total += size
+        ts = row.get("ts")
+        if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+            ts_lo = ts if ts_lo is None else min(ts_lo, float(ts))
+            ts_hi = ts if ts_hi is None else max(ts_hi, float(ts))
+    return {
+        "entries": entries,
+        "bytes": total,
+        "oldest_ts": ts_lo,
+        "newest_ts": ts_hi,
+        "bad_lines": bad,
+        "dir": str(target),
+    }
+
+
 def prune_spill(
     directory: Path | None = None,
     older_than: float = 0.0,
@@ -2041,6 +2092,11 @@ def main(argv: list[str] | None = None) -> int:
         const="",
         default=None,
         help="Rebuild index.jsonl from the spill files on disk (file mtime as ts; DIR or the default spill dir).",
+    )
+    parser.add_argument(
+        "--index-stats",
+        action="store_true",
+        help="Report index.jsonl totals ({entries,bytes,oldest_ts,newest_ts,bad_lines,dir}; a missing index reads as zero rows, rc 2 when no dir resolves; --include-dry also reports the dry/ sibling index; --json emits the object)",
     )
     parser.add_argument(
         "--index-check",
@@ -2456,6 +2512,46 @@ def main(argv: list[str] | None = None) -> int:
                 % (len(report["stale"]), len(report["unindexed"]))
             )
         return 0 if report["ok"] else 1
+    if getattr(args, "index_stats", False):
+        directory = Path(args.spill_dir) if args.spill_dir else None
+        report = spill_index_stats(directory)
+        if report["dir"] is None:
+            sys.stderr.write("--index-stats: no spill dir resolved\n")
+            return 2
+        if getattr(args, "include_dry", False):
+            dry_dir = directory / "dry" if directory is not None else (
+                spill_dir_default() / "dry" if spill_dir_default() is not None else None
+            )
+            dry = spill_index_stats(dry_dir)
+            if dry["dir"] is not None:
+                report["dry"] = {
+                    key: dry[key]
+                    for key in ("entries", "bytes", "oldest_ts", "newest_ts", "bad_lines")
+                }
+        if args.json:
+            sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        else:
+            sys.stdout.write(
+                "index: %d entries, %d bytes, %d bad lines (oldest_ts=%s newest_ts=%s)\n"
+                % (
+                    report["entries"],
+                    report["bytes"],
+                    report["bad_lines"],
+                    report["oldest_ts"],
+                    report["newest_ts"],
+                )
+            )
+            dry_report = report.get("dry")
+            if dry_report is not None:
+                sys.stdout.write(
+                    "dry index: %d entries, %d bytes, %d bad lines\n"
+                    % (
+                        dry_report["entries"],
+                        dry_report["bytes"],
+                        dry_report["bad_lines"],
+                    )
+                )
+        return 0
     if getattr(args, "spill_stats", False):
         directory = Path(args.spill_dir) if args.spill_dir else None
         rows = [

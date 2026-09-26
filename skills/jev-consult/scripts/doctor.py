@@ -61,6 +61,11 @@ CHECK_NAMES = (
     "api_key",
     "policy",
     "policy_lint",
+    "local_lint",
+    "local_trace",
+    "local_decisions",
+    "local_compact",
+    "local_progress",
     "smoke_self_test",
     "decisions_log",
     "decisions_verify",
@@ -96,6 +101,11 @@ HINTS = {
     "jev-compact.json": "run python scripts/install.py --agents grok",
     "jev-tools.json": "run python scripts/install.py --agents grok",
     "hooks": "create .claude/settings.json with a hooks block or run python scripts/install.py --agents claude-code",
+    "local_lint": "restore skills/jev-consult/scripts/policy_lint.py",
+    "local_trace": "restore skills/jev-consult/scripts/trace.py",
+    "local_decisions": "restore skills/jev-consult/scripts/decisions.py",
+    "local_compact": "restore skills/jev-consult/scripts/compact.py",
+    "local_progress": "restore skills/jev-consult/scripts/progress.py",
     "api_key": "set TYPESAFE_API_KEY in the environment or a .env file",
     "policy": "restore skills/jev-consult/policy.json",
     "policy_lint": "fix the flagged keys in skills/jev-consult/policy.json (python skills/jev-consult/scripts/policy_lint.py)",
@@ -322,6 +332,36 @@ def _skill_check(agent: str, skill_dirs: list[Path]) -> dict:
         if (parent / "jev-consult" / "SKILL.md").is_file():
             return _check(agent, "skill", True, str(parent / "jev-consult"))
     return _check(agent, "skill", False, "jev-consult/SKILL.md missing under %s" % skill_dirs)
+
+
+LOCAL_TOOLS = {
+    "local_lint": "policy_lint.py",
+    "local_trace": "trace.py",
+    "local_decisions": "decisions.py",
+    "local_compact": "compact.py",
+    "local_progress": "progress.py",
+}
+
+
+def check_offline() -> list[dict]:
+    """The harness-free surface: which pack tools still run when no
+    harness is reachable. A tool counts as working when its script is
+    present and parses — the actual runs stay offline and read-only."""
+    out = []
+    for name, script in LOCAL_TOOLS.items():
+        path = SCRIPT_DIR / script
+        detail = str(path)
+        ok = False
+        if path.is_file():
+            try:
+                compile(path.read_text(encoding="utf-8"), str(path), "exec")
+                ok = True
+            except SyntaxError as exc:
+                detail = "%s: %s" % (path, exc)
+            except OSError as exc:
+                detail = "%s: unreadable (%s)" % (path, exc)
+        out.append(_check("*", name, ok, detail))
+    return out
 
 
 def _harness_home(agent: str, home: Path, hermes: Path) -> Path:
@@ -602,6 +642,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--home", help="Override user home (tests).")
     parser.add_argument("--hermes-home", help="Override Hermes home (tests).")
     parser.add_argument("--quiet", action="store_true", help="Report only failing checks")
+    parser.add_argument("--offline", action="store_true", help="Skip per-harness checks entirely (each agent's presence is marked skipped, not failed) and add local_* capability rows for the tools that still run without a harness: lint/trace/decisions/compact/progress")
     parser.add_argument(
         "--only",
         default="",
@@ -732,6 +773,8 @@ def main(argv: list[str] | None = None) -> int:
     def collect() -> tuple[list[dict], dict | None]:
         checks: list[dict] = check_common(home, hermes)
         checks += check_progress(Path.cwd())
+        if args.offline:
+            checks += check_offline()
         # An absent harness is not an install failure: emit one skipped
         # presence row and keep the run's ok untouched.
         for name, run in (
@@ -741,6 +784,17 @@ def main(argv: list[str] | None = None) -> int:
             ("codex", lambda: check_codex(home)),
         ):
             if name not in agents:
+                continue
+            if args.offline:
+                checks.append(
+                    {
+                        "agent": name,
+                        "check": "presence",
+                        "ok": True,
+                        "skipped": True,
+                        "detail": "%s skipped (--offline)" % name,
+                    }
+                )
                 continue
             hdir = _harness_home(name, home, hermes)
             if not hdir.exists():

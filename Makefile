@@ -1,7 +1,7 @@
 # Convenience targets — everything is plain `python` + stdlib only.
 # On Windows without make, run the recipes directly (see README).
 
-.PHONY: test lint smoke smoke-quick hooks-install package
+.PHONY: test lint smoke smoke-quick hooks-install package vendor-check vendor-check-fetch
 
 test:            ## full suite
 	python -m unittest discover -s tests
@@ -26,3 +26,9 @@ hooks-install:   ## wire .pre-commit-config.yaml locally
 
 package:         ## build dist/jev-setup.pyz (single-file installer)
 	python scripts/package_release.py
+
+vendor-check:    ## offline drift report for vendored snapshots (manifest/pins/diffs)
+	python scripts/vendor_check.py
+
+vendor-check-fetch: ## also compare each upstream HEAD against the pinned commit
+	python scripts/vendor_check.py --fetch

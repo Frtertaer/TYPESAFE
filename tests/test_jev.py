@@ -132,6 +132,21 @@ class DecideTests(unittest.TestCase):
         decision = jev.decide(answers, self.policy)
         self.assertEqual(decision["action"], "escalate")
 
+    def test_decide_returns_confidences(self) -> None:
+        decision = jev.decide(
+            {
+                "where": {
+                    "type": "choice",
+                    "choice": "new_module",
+                    "confidence": 0.8,
+                    "probabilities": {"new_module": 0.62, "none": 0.38},
+                }
+            },
+            self.policy,
+            irreversible=False,
+        )
+        self.assertEqual(decision["confidences"]["where"], 0.8)
+
     def test_noul_half_is_uncertain(self) -> None:
         answers = {"touch": {"type": "noul", "noul": 0.5}}
         reversible = jev.decide(answers, self.policy, irreversible=False)

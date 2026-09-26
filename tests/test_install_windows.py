@@ -14,6 +14,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -531,6 +532,76 @@ class ExeEntryTests(unittest.TestCase):
             # no bundle-* staging leftovers next to it
             self.assertEqual(
                 list((Path(tmp) / ".jev-consult").glob("bundle-*")), []
+            )
+
+    def test_stage_payload_failed_replace_restores_env(self) -> None:
+        """A failed bundle replace must not take the preserved .env down
+        with the stage dir — the key moves back to the bundle path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / ".jev-consult" / "bundle"
+            src = Path(tmp) / "payload-src"
+            (src / "marker").mkdir(parents=True)
+            bundle.mkdir(parents=True)
+            (bundle / ".env").write_text(
+                "TYPESAFE_API_KEY=k\n", encoding="utf-8"
+            )
+            real_move = shutil.move
+            calls = []
+
+            def flaky_move(src_p, dst_p):
+                calls.append(str(dst_p))
+                if len(calls) == 2:  # staged payload -> bundle
+                    raise OSError("simulated replace failure")
+                return real_move(src_p, dst_p)
+
+            with patch.object(exe_entry, "BUNDLE_DIR", bundle), patch.object(
+                exe_entry, "_payload_dir", return_value=src
+            ), patch.object(shutil, "move", flaky_move):
+                with self.assertRaises(OSError):
+                    exe_entry._stage_payload()
+            self.assertEqual(
+                (bundle / ".env").read_text(encoding="utf-8"),
+                "TYPESAFE_API_KEY=k\n",
+            )
+            self.assertEqual(
+                list((Path(tmp) / ".jev-consult").glob("bundle-*")), []
+            )
+
+    def test_package_stage_failed_replace_restores_env(self) -> None:
+        """Same restore contract in the pyz bootstrap's _stage()."""
+        # _stage lives inside BOOTSTRAP (it becomes the pyz __main__) —
+        # exec it so the embedded code is exercised for real.
+        ns = {"__name__": "bootstrap_under_test"}
+        exec(compile(package_release.BOOTSTRAP, "<bootstrap>", "exec"), ns)
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / ".jev-consult" / "bundle"
+            bundle.mkdir(parents=True)
+            (bundle / ".env").write_text(
+                "TYPESAFE_API_KEY=k\n", encoding="utf-8"
+            )
+            ns["BUNDLE_DIR"] = bundle
+
+            def fake_extract(dest):
+                payload = dest / "payload"
+                payload.mkdir()
+                return payload
+
+            ns["_extract"] = fake_extract
+            real_move = shutil.move
+            calls = []
+
+            def flaky_move(src_p, dst_p):
+                calls.append(str(dst_p))
+                if len(calls) == 2:  # extracted payload -> bundle
+                    raise OSError("simulated replace failure")
+                return real_move(src_p, dst_p)
+
+            with patch.object(shutil, "move", flaky_move):
+                with self.assertRaises(OSError):
+                    ns["_stage"]()
+            self.assertEqual(
+                (bundle / ".env").read_text(encoding="utf-8"),
+                "TYPESAFE_API_KEY=k\n",
             )
 
     def test_stage_runtime_unfrozen_is_noop(self) -> None:

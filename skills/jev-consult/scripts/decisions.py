@@ -69,6 +69,7 @@ ENTRY_SCHEMA_ROWS = {
     "shortlist_score_avg": {"required": True, "type": "number, mean IDF score of picks"},
     "winner": {"required": True, "type": "{kind, name}|null, applied pick"},
     "strong_pick": {"required": True, "type": "bool"},
+    "confidence": {"required": False, "type": "number|null, load_tools answer confidence (older entries lack it — calibrate falls back to top option probability)"},
     "latency_ms": {"required": True, "type": "number|null, Jev call latency"},
     "budget_ms": {"required": True, "type": "int, configured hook budget"},
     "over_budget": {"required": True, "type": "bool, latency exceeded budget"},
@@ -864,7 +865,10 @@ def _replay(item: dict, floor: float, strong: float, yes: float, no: float) -> s
     top = max(probs.values())
     load = max(probs.items(), key=lambda kv: kv[1])[0]
     in_shortlist = load in {str(x) for x in item.get("shortlist") or []}
-    if top < floor:
+    conf = item.get("confidence")
+    if not isinstance(conf, (int, float)) or isinstance(conf, bool) or conf != conf:
+        conf = top  # logged before the confidence field existed
+    if conf < floor:
         return "escalate"  # jev.decide conf_floor preempts the picker
     if load in ("none", ""):
         return "none"
@@ -971,7 +975,8 @@ def _noul_yes_recommendation(
 
 def calibrate(entries: list[dict], policy: dict | None = None,
               health_filter: bool = False,
-              eval_pairs: list[tuple] | None = None) -> dict:
+              eval_pairs: list[tuple] | None = None,
+              health_pool: list[dict] | None = None) -> dict:
     """Grid-search (confidence_floor, strong_pick) minimising
     escalate+weak-winner share; also a tight_gap separator for
     strong-vs-nonstrong winners. Deterministic: ties resolve to the
@@ -979,11 +984,16 @@ def calibrate(entries: list[dict], policy: dict | None = None,
     eval_pairs ((before, after) nouls from a compare --live payload),
     additionally recommends noul_yes against the eval separation
     interval and counts log entries whose replayed outcome would flip
-    under it — the false-accept growth signal."""
+    under it — the false-accept growth signal.
+
+    health_pool: the entries degraded-bucket detection reads. Filters
+    (e.g. --status winner) strip the error/timeout rows a bucket needs
+    to look degraded, so callers pass the unfiltered log slice here."""
     policy = policy or {}
     cur = _policy_thresholds(policy)
     eligible, skipped, excluded = [], 0, 0
-    degraded = _degraded_buckets(entries) if health_filter else set()
+    pool = health_pool if health_pool is not None else entries
+    degraded = _degraded_buckets(pool) if health_filter else set()
     for item in entries:
         if not _calibrate_eligible(item):
             skipped += 1
@@ -1101,6 +1111,13 @@ def calibrate(entries: list[dict], policy: dict | None = None,
         "entries": len(eligible),
         "skipped": skipped,
         "health_excluded": excluded,
+        "confidence_recorded": sum(
+            1
+            for i in eligible
+            if isinstance(i.get("confidence"), (int, float))
+            and not isinstance(i.get("confidence"), bool)
+            and i.get("confidence") == i.get("confidence")
+        ),
         "degraded_buckets": [
             {"harness": h, "window": w} for h, w in sorted(degraded)
         ] if degraded else [],
@@ -2485,6 +2502,7 @@ def main(argv: list[str] | None = None) -> int:
             policy=inventory._policy_dict(),
             health_filter=getattr(args, "harness_health", False),
             eval_pairs=eval_pairs,
+            health_pool=all_entries,
         )
         apply_arg = getattr(args, "apply", "") or ""
         if apply_arg == "-":
@@ -2504,6 +2522,12 @@ def main(argv: list[str] | None = None) -> int:
                 _policy_path(), report["recommended"]
             )
             target = Path(apply_arg)
+            if target.resolve() == _policy_path().resolve():
+                sys.stderr.write(
+                    "refusing to rewrite the active %s in place; pick a "
+                    "different --apply PATH\n" % _policy_path()
+                )
+                return 1
             try:
                 _atomic_write(target, patched)
             except OSError as exc:

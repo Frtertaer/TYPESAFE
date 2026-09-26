@@ -264,6 +264,7 @@ class CalibrateTest(unittest.TestCase):
         self.assertLess(
             report["cost"]["recommended"], report["cost"]["current"]
         )
+        self.assertEqual(report["confidence_recorded"], 0)
         self.assertLess(
             rec["confidence_floor"], rec["strong_pick"]
         )  # policy_lint P004 holds
@@ -326,6 +327,79 @@ class CalibrateTest(unittest.TestCase):
             self.assertEqual(before, after)  # never rewritten in place
             self.assertIn("@@", proc.stdout)
             self.assertIn('"strong_pick"', proc.stdout)
+
+    def test_apply_refuses_to_rewrite_active_policy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            policy = SCRIPTS.parent / "policy.json"
+            before = policy.read_bytes()
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate", "--apply", str(policy)
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("refusing", proc.stderr)
+            self.assertEqual(policy.read_bytes(), before)
+
+    def test_replay_prefers_logged_confidence(self):
+        item = {
+            "probabilities": {"skill_a": 0.9, "skill_b": 0.05},
+            "shortlist": ["skill_a"],
+            "need": 0.9,
+            "confidence": 0.1,
+        }
+        # logged confidence floors it even when the top option prob is high
+        self.assertEqual(
+            decisions._replay(item, 0.5, 0.85, 0.7, 0.3), "escalate"
+        )
+        # entries logged before the field fall back to the top option prob
+        legacy = dict(item)
+        del legacy["confidence"]
+        self.assertEqual(
+            decisions._replay(legacy, 0.5, 0.85, 0.7, 0.3), "strong_winner"
+        )
+        # high confidence + low top prob: live decide proceeds, so the
+        # floor must not escalate on the option probability
+        low_top = {
+            "probabilities": {"skill_a": 0.4, "skill_b": 0.35},
+            "shortlist": ["skill_a"],
+            "need": 0.9,
+            "confidence": 0.9,
+        }
+        self.assertEqual(
+            decisions._replay(low_top, 0.5, 0.85, 0.7, 0.3), "weak_winner"
+        )
+
+    def test_calibrate_health_pool_survives_status_filter(self):
+        rows = self._entries()
+        for i in range(3):
+            rows.append({
+                "ts": 1700000300 + i, "harness": "cursor",
+                "jev_status": "error", "jev_attempted": True,
+                "probabilities": {"skill_a": 0.99}, "need": 0.9,
+                "shortlist": ["skill_a"], "winner": None,
+            })
+        rows.append({
+            "ts": 1700000300, "harness": "cursor", "jev_status": "winner",
+            "strong_pick": True, "jev_attempted": True,
+            "probabilities": {"skill_a": 0.99}, "need": 0.9,
+            "shortlist": ["skill_a"],
+            "winner": {"kind": "skill", "name": "a"},
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, rows)
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate", "--harness-health",
+                "--status", "winner", "--json",
+            )
+        self.assertEqual(proc.returncode, 0)
+        report = json.loads(proc.stdout)
+        # the degraded cursor hour is detected from the unfiltered pool —
+        # its winner row is excluded even though --status hid the errors
+        self.assertEqual(report["health_excluded"], 1)
+        self.assertTrue(report["degraded_buckets"])
+        self.assertEqual(report["entries"], 7)
 
     def test_calibrate_health_excludes_degraded_buckets(self):
         rows = self._entries()

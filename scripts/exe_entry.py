@@ -96,14 +96,22 @@ def _stage_payload() -> Path:
         if env_file.is_file():
             saved = stage / ".env.preserved"
             shutil.move(str(env_file), str(saved))
-        if BUNDLE_DIR.is_symlink() or (BUNDLE_DIR.exists() and not BUNDLE_DIR.is_dir()):
-            BUNDLE_DIR.unlink()
-        elif BUNDLE_DIR.is_dir():
-            _rmtree(BUNDLE_DIR)
-        shutil.move(str(stage / "staged"), str(BUNDLE_DIR))
-        if saved is not None:
-            env_file.unlink(missing_ok=True)
-            shutil.move(str(saved), str(env_file))
+        try:
+            if BUNDLE_DIR.is_symlink() or (BUNDLE_DIR.exists() and not BUNDLE_DIR.is_dir()):
+                BUNDLE_DIR.unlink()
+            elif BUNDLE_DIR.is_dir():
+                _rmtree(BUNDLE_DIR)
+            shutil.move(str(stage / "staged"), str(BUNDLE_DIR))
+            if saved is not None:
+                env_file.unlink(missing_ok=True)
+                shutil.move(str(saved), str(env_file))
+        except BaseException:
+            # A failed replace must not take the key down with the stage
+            # dir — move the preserved .env back before cleaning up.
+            if saved is not None and saved.exists():
+                env_file.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(saved), str(env_file))
+            raise
         return BUNDLE_DIR
     finally:
         shutil.rmtree(stage, ignore_errors=True)

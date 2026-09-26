@@ -375,6 +375,7 @@ def decide(
     notes: list[str] = []
     picks: dict[str, Any] = {}
     all_probs: dict[str, Any] = {}
+    confidences: dict[str, float] = {}
     action = "proceed"
     conf_floor = _pfloat(
         policy_get(
@@ -434,6 +435,7 @@ def decide(
                 confidence = 0.0
             if not math.isfinite(confidence):
                 confidence = 0.0
+            confidences[qid] = confidence
             probabilities = answer.get("probabilities") or {}
             if not isinstance(probabilities, dict):
                 probabilities = {}
@@ -496,6 +498,7 @@ def decide(
                 confidence = 0.0
             if not math.isfinite(confidence):
                 confidence = 0.0
+            confidences[qid] = confidence
             if confidence < score_floor:
                 notes.append("%s: low score confidence %.3f" % (qid, confidence))
                 action = "escalate"
@@ -508,6 +511,7 @@ def decide(
         "action": action,
         "picks": picks,
         "probabilities": all_probs,
+        "confidences": confidences,
         "notes": notes,
         "irreversible": irreversible,
     }

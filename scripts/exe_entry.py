@@ -136,6 +136,10 @@ def _run_script(script: Path, argv: list[str]) -> int:
             runpy.run_path(str(script), run_name="__main__")
         except SystemExit as exc:
             code = exc.code
+            if isinstance(code, str) and code:
+                # SystemExit("<msg>") would otherwise exit silently — the
+                # string is the error message (e.g. a bad --agents name).
+                sys.stderr.write("%s\n" % code)
             return code if isinstance(code, int) else (0 if code in (None, "") else 1)
         return 0
     finally:

@@ -4620,8 +4620,9 @@ def step_install(tmp: Path) -> dict:
     writes = [p for p in home.rglob("*") if p.is_file()]
     ok = rc == 0 and "skill ->" in out and not writes
     if ok:
-        # --check-key reports set/missing and never echoes a value
-        env.pop("TYPESAFE_API_KEY", None)
+        # --check-key reports set/missing and never echoes a value; a stub
+        # key exercises the "set" branch on a clean CI runner
+        env["TYPESAFE_API_KEY"] = "smoke-stub-key"
         rc, out = _run(
             [str(repo_root / "scripts" / "install.py"), "--check-key"],
             env=env,

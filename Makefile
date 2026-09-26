@@ -1,7 +1,7 @@
 # Convenience targets — everything is plain `python` + stdlib only.
 # On Windows without make, run the recipes directly (see README).
 
-.PHONY: test lint smoke smoke-quick hooks-install
+.PHONY: test lint smoke smoke-quick hooks-install package
 
 test:            ## full suite
 	python -m unittest discover -s tests
@@ -23,3 +23,6 @@ smoke-quick:     ## fastest offline wiring check
 
 hooks-install:   ## wire .pre-commit-config.yaml locally
 	pre-commit install
+
+package:         ## build dist/jev-setup.pyz (single-file installer)
+	python scripts/package_release.py

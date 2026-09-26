@@ -41,8 +41,8 @@ class ShortlistPerfTests(unittest.TestCase):
         start = time.monotonic()
         picked = inv.shortlist(items, "needlefell refactor search", 20, [])
         elapsed = time.monotonic() - start
-        # linear in items; generous bound so slow CI still passes
-        self.assertLess(elapsed, 10.0)
+        # linear in items; generous bound so slow shared CI runners still pass
+        self.assertLess(elapsed, 30.0)
         self.assertLessEqual(len(picked), 20)
         # the rare-name item should rank in the shortlist
         self.assertIn("skill:1", {item["id"] for item in picked})

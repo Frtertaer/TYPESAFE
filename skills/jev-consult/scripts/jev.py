@@ -1047,8 +1047,12 @@ def env_report(args: argparse.Namespace) -> dict:
     policy = (getattr(args, "policy", "") or "").strip() or os.environ.get(
         "JEV_POLICY", ""
     ).strip()
+    try:
+        api_key_set = bool(load_api_key())
+    except SystemExit:
+        api_key_set = False
     return {
-        "api_key_set": bool(load_api_key()),
+        "api_key_set": api_key_set,
         "policy": policy if policy else "default",
         "timeout_seconds": env_timeout(),
         "watch_max": _watch.cap("JEV_PING_WATCH_MAX", None) if _watch else None,

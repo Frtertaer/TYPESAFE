@@ -152,6 +152,7 @@ class DoctorTests(unittest.TestCase):
 
     def test_matrix_prints_check_by_harness_grid(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "h").mkdir()  # hermes present -> its checks emit
             rc, _, text = run_main(
                 [
                     "--home", tmp,
@@ -663,6 +664,7 @@ class DoctorTests(unittest.TestCase):
 
     def test_failed_checks_carry_hints(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "h").mkdir()  # harness present but unconfigured
             rc, out, _ = run_main(
                 ["--agents", "hermes", "--home", tmp, "--hermes-home", str(Path(tmp) / "h")],
                 cwd=tmp,
@@ -738,6 +740,7 @@ class DoctorTests(unittest.TestCase):
         ]
 
         with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".claude").mkdir()  # harness present so the check runs
             buf = io.StringIO()
             with patch.dict(
                 os.environ,
@@ -750,7 +753,16 @@ class DoctorTests(unittest.TestCase):
                     os.chdir(tmp)
                     try:
                         with patch.object(sys, "stdout", buf):
-                            rc = DOC.main(["--agents", "claude-code", "--watch", "0.01"])
+                            rc = DOC.main(
+                                [
+                                    "--agents",
+                                    "claude-code",
+                                    "--home",
+                                    tmp,
+                                    "--watch",
+                                    "0.01",
+                                ]
+                            )
                     finally:
                         os.chdir(old)
             ticks = [
@@ -1115,7 +1127,8 @@ class DoctorSchemaTests(unittest.TestCase):
             self.assertIsInstance(check["detail"], str)
             for key in check:
                 self.assertIn(
-                    key, ("agent", "check", "ok", "detail", "hint", "suppressed"),
+                    key,
+                    ("agent", "check", "ok", "detail", "hint", "suppressed", "skipped"),
                     "undocumented check key %r" % key,
                 )
 
@@ -1241,6 +1254,9 @@ class DoctorBaselineTests(unittest.TestCase):
     def test_baseline_partial_suppression_still_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = self._empty_home(tmp)
+            # a present-but-broken harness contributes real failing checks,
+            # so suppressing only the api_key failure still fails the run
+            (home / ".claude").mkdir()
             argv = ["--home", str(home), "--hermes-home", str(home / "h"), "--agents", "claude-code"]
             rc, out, _ = run_main(argv, cwd=tmp)
             self.assertEqual(rc, 1)

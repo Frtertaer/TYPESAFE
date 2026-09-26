@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import re
 import shutil
+import stat
+import subprocess
 import sys
 from pathlib import Path
 
@@ -37,12 +40,35 @@ You inspect; Jev decides. On every coding or planning task, load `jev-consult` a
 """
 
 
+_SOURCE: Path | None = None
+
+
+def set_source(raw: str | None) -> Path | None:
+    """Point the installer at an unpacked release bundle (or a bare
+    jev-consult skill dir) instead of the repo layout around __file__."""
+    global _SOURCE
+    if raw is None:
+        _SOURCE = None
+        return None
+    cand = Path(raw).expanduser()
+    if not cand.is_dir():
+        raise SystemExit("--source %s is not a directory" % raw)
+    _SOURCE = cand.resolve()
+    return _SOURCE
+
+
 def repo_root() -> Path:
+    if _SOURCE is not None:
+        return _SOURCE
     return Path(__file__).resolve().parent.parent
 
 
 def skill_source() -> Path:
-    return repo_root() / "skills" / "jev-consult"
+    root = repo_root()
+    if _SOURCE is not None and (root / "SKILL.md").is_file():
+        # --source pointed straight at a jev-consult skill directory
+        return root
+    return root / "skills" / "jev-consult"
 
 
 def user_home() -> Path:
@@ -161,12 +187,41 @@ def parse_agents(raw: str | None) -> list[str]:
     return names
 
 
+def _rmtree_fix(func, path: str, _exc) -> None:
+    """rmtree onexc/onerror handler: clear the read-only bit and retry.
+
+    Windows refuses to unlink read-only files (and transient AV/indexer
+    locks surface as PermissionError), which otherwise aborts
+    reinstall/uninstall."""
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        pass
+    func(path)
+
+
+def _rmtree(path: Path) -> None:
+    # onexc replaces onerror in 3.12; same (func, path, exc) call shape.
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_rmtree_fix)
+    else:
+        shutil.rmtree(path, onerror=_rmtree_fix)
+
+
+def _unlink(path: Path) -> None:
+    try:
+        path.unlink()
+    except OSError:
+        os.chmod(path, stat.S_IWRITE)
+        path.unlink()
+
+
 def _remove_path(dest: Path) -> None:
     """Remove a file/symlink/dir at dest; rmtree refuses symlinks."""
     if dest.is_symlink() or not dest.is_dir():
-        dest.unlink()
+        _unlink(dest)
     else:
-        shutil.rmtree(dest)
+        _rmtree(dest)
 
 
 def copy_skill(src: Path, dest_parent: Path, dry_run: bool) -> Path:
@@ -238,8 +293,15 @@ def hook_script(skill_dest: Path, mark: str | None = None) -> Path:
     return skill_dest / "scripts" / (mark or HOOK_MARK)
 
 
+def _hook_interpreter() -> str:
+    """Interpreter path recorded in hook commands. Under the PyInstaller
+    exe this is the staged runtime copy (JEV_HOOK_PYTHON), not the
+    downloaded exe the user may delete after install."""
+    return os.environ.get("JEV_HOOK_PYTHON", "").strip() or sys.executable
+
+
 def grok_hook_command(script: Path) -> str:
-    exe = sys.executable.replace("\\", "/")
+    exe = _hook_interpreter().replace("\\", "/")
     path = str(script).replace("\\", "/")
     return '"%s" "%s"' % (exe, path)
 
@@ -350,7 +412,7 @@ def upsert_claude_event(
             "hooks": [
                 {
                     "type": "command",
-                    "command": sys.executable,
+                    "command": _hook_interpreter(),
                     "args": [str(script)],
                     "timeout": timeout,
                 }
@@ -636,11 +698,310 @@ def env_report(agents: list[str]) -> dict:
         "agents": list(agents),
         "home": str(home),
         "hermes_home": str(hermes),
+        "source": str(repo_root()),
         "targets": rendered,
         "existing": existing,
         "policy": os.environ.get("JEV_POLICY", "").strip() or "default",
         "key_set": key_is_set(),
     }
+
+
+def detected_agents(report: dict) -> list[str]:
+    """Harnesses that already have at least one install target on disk."""
+    existing = set(report.get("existing") or [])
+    tmap = report.get("targets") or {}
+    found = []
+    for name in ALLOWED:
+        groups = tmap.get(name) or {}
+        paths = [p for paths in groups.values() for p in paths]
+        if any(p in existing for p in paths):
+            found.append(name)
+    return found
+
+
+def harness_env_paths(agents: list[str]) -> list[Path]:
+    """Dotenv files the setup key prompt writes to: each selected harness's
+    .env, the repo (or bundle) .env, and ~/.env. The last two are locations
+    jev.py/doctor.py actually read, so the key works outside the repo too."""
+    home = user_home()
+    hermes = hermes_home()
+    mapping = {
+        "hermes": hermes / ".env",
+        "claude-code": home / ".claude" / ".env",
+        "codex": home / ".codex" / ".env",
+        "grok": home / ".grok" / ".env",
+    }
+    paths = []
+    for name in agents:
+        path = mapping.get(name)
+        if path is not None and path not in paths:
+            paths.append(path)
+    for extra in (repo_root() / ".env", home / ".env"):
+        if extra not in paths:
+            paths.append(extra)
+    return paths
+
+
+def write_api_key(path: Path, value: str) -> str:
+    """Upsert TYPESAFE_API_KEY in a dotenv file. Never prints the value."""
+    if "\n" in value or "\r" in value or "\x00" in value:
+        raise SystemExit("refusing to write a TYPESAFE_API_KEY containing a newline")
+    out = []
+    wrote = False
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                candidate = stripped
+                if candidate.lower().startswith("export "):
+                    candidate = candidate[7:].strip()
+                key = candidate.split("=", 1)[0].strip()
+                if key == "TYPESAFE_API_KEY":
+                    if not wrote:
+                        out.append("TYPESAFE_API_KEY=" + value)
+                        wrote = True
+                    continue
+            out.append(line)
+    if not wrote:
+        out.append("TYPESAFE_API_KEY=" + value)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write(path, "\n".join(out).rstrip("\n") + "\n")
+    _lock_down_env(path)
+    return "wrote " + str(path)
+
+
+def _lock_down_env(path: Path) -> None:
+    """Restrict a written .env to the owner: chmod 600 on POSIX, an
+    owner-only ACL on Windows where mode bits are a no-op. Never fatal -
+    a warning to stderr is all a failure earns."""
+    if os.name == "nt":
+        user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
+        if not user:
+            try:
+                user = getpass.getuser()
+            except Exception:
+                user = ""
+        if not user:
+            sys.stderr.write(
+                "install.py: warning: could not resolve a user for ACL on %s\n" % path
+            )
+            return
+        try:
+            proc = subprocess.run(
+                [
+                    "icacls",
+                    str(path),
+                    "/inheritance:r",
+                    "/grant:r",
+                    "%s:F" % user,
+                ],
+                capture_output=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            sys.stderr.write(
+                "install.py: warning: could not set ACL on %s: %s\n" % (path, exc)
+            )
+            return
+        if proc.returncode != 0:
+            sys.stderr.write(
+                "install.py: warning: icacls %s exited %s\n" % (path, proc.returncode)
+            )
+        return
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def _doctor_summary(data: object, rc: int) -> str:
+    """'PASS (2 harnesses ok, 2 not installed)'-style verdict line.
+
+    Absent harnesses (doctor reports them as skipped presence rows) are
+    not failures; only a present harness's failing checks are.
+    """
+    verdict = "PASS" if rc == 0 else "FAIL"
+    if not isinstance(data, dict):
+        return verdict
+    checks = data.get("checks")
+    if not isinstance(checks, list):
+        checks = []
+    checks = [c for c in checks if isinstance(c, dict)]
+    absent_raw = data.get("absent")
+    absent = sorted(
+        a for a in (absent_raw if isinstance(absent_raw, list) else []) if a
+    )
+    failing_agents = sorted(
+        {
+            c.get("agent")
+            for c in checks
+            if c.get("agent") not in (None, "*")
+            and not c.get("ok")
+            and not c.get("suppressed")
+        }
+    )
+    other_failed = sorted(
+        {
+            c.get("check")
+            for c in checks
+            if c.get("agent") == "*"
+            and not c.get("ok")
+            and not c.get("suppressed")
+        }
+    )
+    ok_agents = sorted(
+        {
+            c.get("agent")
+            for c in checks
+            if c.get("agent") not in (None, "*") and not c.get("skipped")
+        }
+        - set(failing_agents)
+    )
+    parts = []
+    if failing_agents:
+        parts.append("harnesses failing: " + ", ".join(failing_agents))
+    if other_failed:
+        parts.append("checks failing: " + ", ".join(other_failed))
+    if ok_agents:
+        parts.append(
+            "%d harness%s ok" % (len(ok_agents), "" if len(ok_agents) == 1 else "es")
+        )
+    if absent:
+        parts.append(
+            "%d not installed" % len(absent)
+        )
+    return "%s (%s)" % (verdict, "; ".join(parts)) if parts else verdict
+
+
+def run_doctor(agents: list[str]) -> int:
+    """Run the bundled doctor scoped to the harnesses the installer just
+    wrote (--agents), so a missing harness reads as 'not installed', not
+    as a broken install."""
+    doctor = skill_source() / "scripts" / "doctor.py"
+    if not doctor.is_file():
+        sys.stdout.write("doctor: skipped (missing %s)\n" % doctor)
+        return 0
+    cmd = [sys.executable, str(doctor), "--agents", ",".join(agents)]
+    if "hermes" in agents:
+        cmd += ["--hermes-home", str(hermes_home())]
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.stdout:
+        sys.stdout.write(proc.stdout)
+    if proc.stderr:
+        sys.stderr.write(proc.stderr)
+    try:
+        data = json.loads(proc.stdout)
+    except (TypeError, ValueError):
+        data = None
+    sys.stdout.write("doctor: %s\n" % _doctor_summary(data, proc.returncode))
+    return proc.returncode
+
+
+def _console_handle(stream) -> bool:
+    """True only for a real Windows console handle.
+
+    isatty() reports character devices like NUL as ttys on Windows, so
+    `install.cmd < nul` would otherwise look interactive; GetConsoleMode
+    succeeds only on console input/output handles.
+    """
+    try:
+        import ctypes
+        import msvcrt
+
+        handle = msvcrt.get_osfhandle(stream.fileno())
+        mode = ctypes.c_ulong()
+        return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+    except (ImportError, OSError, ValueError):
+        return False
+
+
+def _tty() -> bool:
+    try:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return False
+    except (OSError, ValueError):
+        return False
+    if os.name == "nt":
+        return _console_handle(sys.stdin) and _console_handle(sys.stdout)
+    return True
+
+
+def _prompt(text: str) -> str:
+    try:
+        return input(text).strip()
+    except EOFError:
+        return ""
+
+
+def _setup_menu() -> str:
+    sys.stdout.write(
+        "\njev-consult setup\n"
+        "  1) Install\n"
+        "  2) Uninstall\n"
+        "  3) Check (doctor)\n"
+        "  4) Exit\n"
+    )
+    return _prompt("choice [1-4]: ")
+
+
+DEFAULT_KEY_HELP = "ask your Jev/TypeSafe admin (or copy .env.example to .env)"
+
+
+def key_help() -> str:
+    """Where to get TYPESAFE_API_KEY; JEV_KEY_HELP_URL overrides the
+    default text with e.g. an org key portal URL."""
+    return os.environ.get("JEV_KEY_HELP_URL", "").strip() or DEFAULT_KEY_HELP
+
+
+def _setup_key(agents: list[str]) -> None:
+    sys.stdout.write("get a TYPESAFE_API_KEY: %s\n" % key_help())
+    if key_is_set():
+        sys.stdout.write("TYPESAFE_API_KEY: already set; Enter keeps it\n")
+    try:
+        value = getpass.getpass(
+            "TYPESAFE_API_KEY (input hidden; Enter skips): "
+        ).strip()
+    except EOFError:
+        return
+    if not value:
+        sys.stdout.write("TYPESAFE_API_KEY: skipped\n")
+        return
+    for path in harness_env_paths(agents):
+        sys.stdout.write("%s\n" % write_api_key(path, value))
+
+
+def run_setup(agents_arg: str | None = None) -> int:
+    """Interactive menu driven by detected harnesses; Enter exits."""
+    report = env_report(list(ALLOWED))
+    found = detected_agents(report)
+    if agents_arg:
+        agents = parse_agents(agents_arg)
+    else:
+        sys.stdout.write(
+            "harnesses detected: %s\n" % (", ".join(found) if found else "none")
+        )
+        raw = _prompt("agents [%s]: " % ",".join(found or list(ALLOWED)))
+        agents = parse_agents(raw) if raw else (found or list(ALLOWED))
+    while True:
+        choice = _setup_menu()
+        if choice in ("", "4", "q", "exit"):
+            return 0
+        if choice == "1":
+            _setup_key(agents)
+            install(agents, False)
+            run_doctor(agents)
+        elif choice == "2":
+            uninstall(agents, False)
+        elif choice == "3":
+            run_doctor(agents)
+        else:
+            sys.stdout.write("unknown choice %r\n" % choice)
 
 
 def emit_env(report: dict, jq: str | None, out: str | None) -> int:
@@ -708,7 +1069,7 @@ def main(argv: list[str] | None = None) -> int:
         "--env",
         action="store_true",
         help="Print the resolved install config JSON (agents, home, "
-        "hermes_home, targets, existing, policy, key_set) and exit.",
+        "hermes_home, source, targets, existing, policy, key_set) and exit.",
     )
     parser.add_argument(
         "--jq",
@@ -717,13 +1078,41 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--out", help="With --env: also write the report JSON to PATH (fail-open)."
     )
-    args = parser.parse_args(argv)
+    parser.add_argument(
+        "--source",
+        metavar="DIR",
+        help="Install from DIR (an unpacked release bundle holding "
+        "skills/jev-consult, or a bare jev-consult skill dir) instead of "
+        "the repo layout around install.py.",
+    )
+    parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="Interactive menu: Install / Uninstall / Check (doctor) / "
+        "Exit. Runs automatically when invoked with no args in a TTY; "
+        "ignored when other action flags are given.",
+    )
+    raw = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw)
+    if args.source:
+        set_source(args.source)
     if args.check_key:
         report_key()
         return 0 if key_is_set() else 1
-    agents = parse_agents(args.agents)
     if args.env:
-        return emit_env(env_report(agents), args.jq, args.out)
+        return emit_env(env_report(parse_agents(args.agents)), args.jq, args.out)
+    wants_setup = (args.setup and not (args.uninstall or args.agents or args.dry_run)) or (
+        not raw and _tty()
+    )
+    if wants_setup:
+        if not _tty():
+            sys.stderr.write(
+                "install.py --setup: interactive mode needs a TTY; "
+                "pass explicit flags (e.g. --agents) for non-interactive use\n"
+            )
+            return 2
+        return run_setup(args.agents)
+    agents = parse_agents(args.agents)
     if args.uninstall:
         return uninstall(agents, args.dry_run)
     return install(agents, args.dry_run)

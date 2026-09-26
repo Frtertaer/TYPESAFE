@@ -23,3 +23,7 @@ Thumbs.db
 .devin/progress.sqlite3*
 req*.json
 ans*.json
+
+# Windows-path fixtures tests may spill
+drive_*\*
+N:*

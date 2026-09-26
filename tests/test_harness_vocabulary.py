@@ -19,7 +19,11 @@ CANON = ("hermes", "claude-code", "codex", "grok")
 SEQ_RE = re.compile(r'[\(\[][^\]\)]*"[a-z-]+"[^\]\)]*[\)\]]')
 NAME_RE = re.compile(r'"([a-z][a-z-]*)"')
 
-BARE_CLAUDE_OK: dict = {}
+BARE_CLAUDE_OK: dict = {
+    "doctor.py": {
+        '"claude",  # the claude-code CLI binary name',
+    },
+}
 
 
 def _names_in(seq: str) -> list:

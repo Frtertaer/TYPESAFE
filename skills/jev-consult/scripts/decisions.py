@@ -676,6 +676,73 @@ def status_streaks(entries: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda r: (-r["best_streak"], r["harness"]))
 
 
+def harness_health(entries: list[dict]) -> list[dict]:
+    """Per (harness, UTC hour) timeout/error rates — a cheap quota signal.
+
+    jev_status 'timeout'/'error' come from the hook when the Jev call
+    stalls or fails; the window bucket is the hour the entry logged."""
+    buckets: dict[tuple[str, str], dict] = {}
+    for item in entries:
+        harness = str(item.get("harness") or "unknown")
+        ts = _entry_ts(item)
+        if ts is None:
+            window = "unknown"
+        else:
+            window = datetime.datetime.fromtimestamp(
+                ts, tz=datetime.timezone.utc
+            ).strftime("%Y-%m-%dT%H:00Z")
+        row = buckets.setdefault(
+            (harness, window),
+            {
+                "harness": harness,
+                "window": window,
+                "entries": 0,
+                "errors": 0,
+                "timeouts": 0,
+            },
+        )
+        row["entries"] += 1
+        status = str(item.get("jev_status") or "")
+        if status == "error":
+            row["errors"] += 1
+        elif status == "timeout":
+            row["timeouts"] += 1
+    rows = []
+    for r in buckets.values():
+        n = r["entries"]
+        rows.append(
+            dict(
+                r,
+                error_rate=round(r["errors"] / n, 4) if n else 0.0,
+                timeout_rate=round(r["timeouts"] / n, 4) if n else 0.0,
+            )
+        )
+    return sorted(rows, key=lambda r: (r["harness"], r["window"]))
+
+
+HEALTH_COLS = ["harness", "window", "entries", "errors", "timeouts", "error_rate", "timeout_rate"]
+
+
+def format_health(rows: list[dict]) -> str:
+    if not rows:
+        return "no entries"
+    lines = ["harness     window               entries  errors  timeouts  error_rate  timeout_rate"]
+    for r in rows:
+        lines.append(
+            "%-11s %-20s %-8d %-7d %-9d %-11g %g"
+            % (
+                r["harness"],
+                r["window"],
+                r["entries"],
+                r["errors"],
+                r["timeouts"],
+                r["error_rate"],
+                r["timeout_rate"],
+            )
+        )
+    return "\n".join(lines)
+
+
 def prompt_chains(entries: list[dict], min_n: int = 2) -> list[dict]:
     """prompt_head values consulted at least MIN_N times (loop detector)."""
     grouped: dict[str, list[dict]] = {}
@@ -1134,6 +1201,12 @@ def main(argv: list[str] | None = None) -> int:
         "--streaks",
         action="store_true",
         help="Print per-harness current/longest runs of consecutive same jev_status (--json emits {streaks: [...]})",
+    )
+    parser.add_argument(
+        "--harness-health",
+        dest="harness_health",
+        action="store_true",
+        help="Print per-harness per-UTC-hour timeout/error rates (quota signal; --json emits {harness_health: [...]})",
     )
     parser.add_argument(
         "--silent-since",
@@ -1924,6 +1997,20 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             sys.stdout.write(format_streaks(rows) + "\n")
+        return 0
+    if getattr(args, "harness_health", False):
+        rows = harness_health(entries)
+        if args.json:
+            sys.stdout.write(json.dumps({"harness_health": rows}, indent=2) + "\n")
+        elif getattr(args, "jsonl", False):
+            for row in rows:
+                sys.stdout.write(json.dumps(row, sort_keys=True) + "\n")
+        elif getattr(args, "md", False):
+            _watch.md_table(rows, HEALTH_COLS)
+        elif getattr(args, "csv", False):
+            _watch.csv_table(rows, HEALTH_COLS)
+        else:
+            sys.stdout.write(format_health(rows) + "\n")
         return 0
     if getattr(args, "silent_since", None) is not None:
         rows = silent_harnesses(entries, float(args.silent_since))

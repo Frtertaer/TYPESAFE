@@ -1283,6 +1283,15 @@ class DoctorBaselineTests(unittest.TestCase):
             self.assertFalse(out["ok"])
             self.assertEqual(out["suppressed"], 0)
 
+    def test_codex_inventory_hook_detail_names_hooks_trust(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / ".codex").mkdir(parents=True)
+            row = next(
+                r for r in DOC.check_codex(home) if r["check"] == "inventory_hook"
+            )
+            self.assertIn("/hooks", row["detail"])
+
     def test_baseline_verdict_passes_when_all_suppressed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = self._empty_home(tmp)

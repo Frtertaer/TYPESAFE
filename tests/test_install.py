@@ -725,5 +725,124 @@ class WrapperScriptTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr[:300])
 
+
+class HermesConfigBootstrapTests(unittest.TestCase):
+    """Fresh-HOME install must seed ~/.hermes/config.yaml so doctor's
+    plugin_enabled is a real PASS instead of a FAIL on a clean install."""
+
+    def test_fresh_layout_seeds_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = Path(tmp) / ".hermes"
+            (hermes / "skills").mkdir(parents=True)
+            self.assertIn(
+                "created", install.ensure_hermes_config(hermes, False)
+            )
+            config = hermes / "config.yaml"
+            self.assertEqual(
+                config.read_text(encoding="utf-8"), "plugins:\n  enabled:\n"
+            )
+            # the seeded block parses for enable_hermes_plugin
+            self.assertIn(
+                "enabled", install.enable_hermes_plugin(config, "jev-compact", False)
+            )
+
+    def test_no_layout_skips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = Path(tmp) / ".hermes"
+            self.assertIn(
+                "no harness layout", install.ensure_hermes_config(hermes, False)
+            )
+            self.assertFalse((hermes / "config.yaml").exists())
+
+    def test_empty_home_dir_is_not_layout(self) -> None:
+        """An empty ~/.hermes left behind by an aborted run is not a
+        harness layout — it must not get a config.yaml."""
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = Path(tmp) / ".hermes"
+            hermes.mkdir()
+            self.assertIn(
+                "no harness layout", install.ensure_hermes_config(hermes, False)
+            )
+            self.assertFalse((hermes / "config.yaml").exists())
+
+    def test_dry_run_fresh_home_projects_creation(self) -> None:
+        """--dry-run on a fresh HOME previews what the real run does:
+        the plugin copy creates the layout first, so the config line is
+        'create', not 'skipped'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = Path(tmp) / ".hermes"
+            self.assertIn("create", install.ensure_hermes_config(hermes, True))
+            self.assertFalse(hermes.exists())
+            # and the enable step must not then report the config missing
+            self.assertIn(
+                "enable jev-compact",
+                install.enable_hermes_plugin(hermes / "config.yaml", "jev-compact", True),
+            )
+
+    def test_existing_config_untouched(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = Path(tmp) / ".hermes"
+            hermes.mkdir()
+            config = hermes / "config.yaml"
+            config.write_text("server: {}\n", encoding="utf-8")
+            self.assertIn("exists", install.ensure_hermes_config(hermes, False))
+            self.assertEqual(config.read_text(encoding="utf-8"), "server: {}\n")
+
+    def test_dry_run_reports_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = Path(tmp) / ".hermes"
+            (hermes / "plugins").mkdir(parents=True)
+            self.assertIn("create", install.ensure_hermes_config(hermes, True))
+            self.assertFalse((hermes / "config.yaml").exists())
+
+    def test_install_hooks_seeds_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = Path(tmp) / ".hermes"
+            home = Path(tmp) / "home"
+            with patch.object(install, "hermes_home", return_value=hermes), patch.object(
+                install, "user_home", return_value=home
+            ):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    install.install_live_hooks(["hermes"], dry_run=False)
+            out = buf.getvalue()
+            self.assertIn("created", out)
+            self.assertIn("enabled", out)
+
+
+class RmtreeRetryTests(unittest.TestCase):
+    def test_transient_failure_retried_once(self) -> None:
+        calls: list[str] = []
+
+        def func(path: str) -> None:
+            calls.append(path)
+            if len(calls) == 1:
+                raise PermissionError("locked")
+
+        install._rmtree_fix(func, "p", None)
+        self.assertEqual(calls, ["p", "p"])
+
+    def test_persistent_failure_raises(self) -> None:
+        def func(path: str) -> None:
+            raise PermissionError("locked")
+
+        self.assertRaises(
+            PermissionError, install._rmtree_fix, func, "p", None
+        )
+
+
+class CodexTrustNoteTests(unittest.TestCase):
+    def test_install_hooks_prints_hooks_trust_step(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            with patch.object(install, "user_home", return_value=home), patch.object(
+                install, "hermes_home", return_value=Path(tmp) / "h"
+            ):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    install.install_live_hooks(["codex"], dry_run=True)
+            self.assertIn("/hooks", buf.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -239,7 +239,8 @@ def check_codex(home: Path) -> list[dict]:
             "codex",
             "inventory_hook",
             _has_hook_entry(hooks, "UserPromptSubmit", TOOLS_MARK),
-            "UserPromptSubmit in %s" % hooks_path,
+            "UserPromptSubmit in %s (Codex still needs the one-time /hooks trust)"
+            % hooks_path,
         )
     )
     return out

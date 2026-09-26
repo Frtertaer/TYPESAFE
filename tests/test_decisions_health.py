@@ -78,6 +78,28 @@ class HarnessHealthTests(unittest.TestCase):
         self.assertEqual(codex_h2["window"], "2023-11-14T23:00Z")
         self.assertEqual(codex_h2["error_rate"], 1.0)
 
+    def test_rates_use_attempted_calls_not_all_entries(self) -> None:
+        """dedupe/idf records never reached Jev — they must not dilute
+        or inflate the timeout/error denominator."""
+        rows = DEC.harness_health(
+            [
+                entry("codex", "winner", H10),
+                entry("codex", "dedupe", H10SAME),
+                entry("codex", "idf", H10SAME),
+                entry("codex", "timeout", H10SAME),
+            ]
+        )
+        (row,) = rows
+        self.assertEqual(row["entries"], 4)
+        self.assertEqual(row["attempted"], 2)
+        self.assertEqual(row["timeout_rate"], 0.5)
+
+    def test_no_attempted_calls_gives_zero_rates(self) -> None:
+        rows = DEC.harness_health([entry("codex", "dedupe", H10)])
+        self.assertEqual(rows[0]["attempted"], 0)
+        self.assertEqual(rows[0]["error_rate"], 0.0)
+        self.assertEqual(rows[0]["timeout_rate"], 0.0)
+
     def test_missing_ts_buckets_as_unknown(self) -> None:
         rows = DEC.harness_health([{"harness": "grok", "jev_status": "error"}])
         self.assertEqual(rows[0]["window"], "unknown")

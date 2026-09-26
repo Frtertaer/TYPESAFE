@@ -313,6 +313,35 @@ class LiveSummaryTests(unittest.TestCase):
             "doctor --live never ran: %r" % calls,
         )
 
+    def test_main_dry_run_live_never_probes(self) -> None:
+        """--dry-run --live must not launch real harness CLIs."""
+        import subprocess as sp
+
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return sp.CompletedProcess(
+                cmd, 0, stdout='{"ok": true, "checks": [], "absent": []}', stderr=""
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {
+                "USERPROFILE": tmp,
+                "HOME": tmp,
+                "HERMES_HOME": str(Path(tmp) / "hermes"),
+                "TYPESAFE_API_KEY": "",
+            }
+            with patch.dict(os.environ, env, clear=False), patch.object(
+                install.subprocess, "run", fake_run
+            ), redirect_stdout(io.StringIO()):
+                rc = install.main(["--agents", "codex", "--dry-run", "--live"])
+        self.assertEqual(rc, 0)
+        self.assertFalse(
+            any("--live" in cmd for cmd in calls),
+            "dry-run still probed: %r" % calls,
+        )
+
 
 class InstallCoverageTests(unittest.TestCase):
     def test_parse_agents(self) -> None:

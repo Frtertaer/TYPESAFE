@@ -413,14 +413,14 @@ class SecretTests(unittest.TestCase):
 class InstallTests(unittest.TestCase):
     def test_refuses_other_agents(self) -> None:
         with self.assertRaises(SystemExit):
-            install.parse_agents("cursor")
+            install.parse_agents("copilot")
         with self.assertRaises(SystemExit):
             install.parse_agents("all")
 
-    def test_default_four(self) -> None:
+    def test_default_six(self) -> None:
         self.assertEqual(
             install.parse_agents(None),
-            ["hermes", "claude-code", "codex", "grok"],
+            ["hermes", "claude-code", "codex", "grok", "cursor", "gemini"],
         )
 
     def test_path_map_uses_hermes_home(self) -> None:
@@ -432,11 +432,11 @@ class InstallTests(unittest.TestCase):
         self.assertTrue(
             any(path.parent.name == ".agents" for path in mapping["codex"]["skills"])
         )
-        gemini_paths = json.dumps(
+        skill_paths = json.dumps(
             {k: [str(p) for p in v["skills"]] for k, v in mapping.items()}
         )
-        self.assertNotIn(".gemini", gemini_paths)
-        self.assertNotIn(".cursor", gemini_paths)
+        self.assertIn(".gemini", skill_paths)
+        self.assertIn(".cursor", skill_paths)
 
     def test_repo_instruction_files_exist(self) -> None:
         for name in ("AGENTS.md", "CLAUDE.md", ".hermes.md"):

@@ -44,7 +44,7 @@ POLICY_PATH = SKILL_DIR / "policy.json"
 PLUGIN_NAME = "jev-compact"
 COMPACT_MARK = "compact_hook.py"
 TOOLS_MARK = "inventory_hook.py"
-ALLOWED = ("hermes", "claude-code", "codex", "grok")
+ALLOWED = ("hermes", "claude-code", "codex", "grok", "cursor", "gemini")
 
 # Every check name collect() can emit; --schema lists it and tests pin it.
 CHECK_NAMES = (
@@ -132,6 +132,8 @@ LIVE_PROBES = {
     ),
     "codex": ("codex", ("exec",)),
     "grok": ("grok", ("-p",)),
+    "cursor": ("cursor-agent", ("-p",)),
+    "gemini": ("gemini", ("-p",)),
 }
 LIVE_PROMPT = "ping"
 LIVE_LIMITED_RE = re.compile(
@@ -149,7 +151,7 @@ _SECRET_ASSIGN_RE = re.compile(
     re.IGNORECASE,
 )
 _SECRET_BLOB_RE = re.compile(
-    r"sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_-]{12,}|(?i)bearer\s+\S+"
+    r"sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_-]{12,}|(?i:bearer\s+\S+)"
 )
 # An unbroken token this long is an id/hash/credential, not prose — scrub
 # it regardless of scheme so unrecognized credential formats cannot leak.
@@ -371,6 +373,8 @@ def _harness_home(agent: str, home: Path, hermes: Path) -> Path:
         "claude-code": home / ".claude",
         "codex": home / ".codex",
         "grok": home / ".grok",
+        "cursor": home / ".cursor",
+        "gemini": home / ".gemini",
     }[agent]
 
 
@@ -451,6 +455,40 @@ def check_codex(home: Path) -> list[dict]:
             _has_hook_entry(hooks, "UserPromptSubmit", TOOLS_MARK),
             "UserPromptSubmit in %s (Codex still needs the one-time /hooks trust)"
             % hooks_path,
+        )
+    )
+    return out
+
+
+def check_cursor(home: Path) -> list[dict]:
+    out = [_skill_check("cursor", [home / ".cursor" / "skills"])]
+    hooks_path = home / ".cursor" / "hooks.json"
+    out.append(_json_validity_check("cursor", "hooks_json", hooks_path))
+    data = _load_json(hooks_path)
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    out.append(
+        _check(
+            "cursor",
+            "inventory_hook",
+            _has_hook_entry(hooks, "beforeSubmitPrompt", TOOLS_MARK),
+            "beforeSubmitPrompt in %s" % hooks_path,
+        )
+    )
+    return out
+
+
+def check_gemini(home: Path) -> list[dict]:
+    out = [_skill_check("gemini", [home / ".gemini" / "skills"])]
+    settings = home / ".gemini" / "settings.json"
+    out.append(_json_validity_check("gemini", "hooks_json", settings))
+    data = _load_json(settings)
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    out.append(
+        _check(
+            "gemini",
+            "inventory_hook",
+            _has_hook_entry(hooks, "BeforeAgent", TOOLS_MARK),
+            "BeforeAgent in %s" % settings,
         )
     )
     return out
@@ -782,6 +820,8 @@ def main(argv: list[str] | None = None) -> int:
             ("claude-code", lambda: check_claude(home)),
             ("grok", lambda: check_grok(home)),
             ("codex", lambda: check_codex(home)),
+            ("cursor", lambda: check_cursor(home)),
+            ("gemini", lambda: check_gemini(home)),
         ):
             if name not in agents:
                 continue

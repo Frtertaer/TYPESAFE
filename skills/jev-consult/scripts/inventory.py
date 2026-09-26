@@ -82,7 +82,7 @@ HOOK_LIMIT = 6
 HOOK_LIMIT_KEY = "hook_limit"
 SIDECAR_NAME = ".jev-tools.json"
 MISS_NAME = ".jev-tools-miss.json"
-HARNESSES = ("hermes", "claude-code", "codex", "grok")
+HARNESSES = ("hermes", "claude-code", "codex", "grok", "cursor", "gemini")
 CACHE_TTL = 45.0  # shipped default; policy.json scan_cache_seconds wins
 SIDECAR_TTL_KEY = "sidecar_ttl_seconds"
 DEFAULT_SIDECAR_TTL_SECONDS = 14400.0
@@ -90,7 +90,7 @@ _SCAN_CACHE: dict[str, tuple[float, list[dict]]] = {}
 
 # Scan payload + shortlist item contract (--schema).
 SCAN_SCHEMA_ROWS = {
-    "harness": {"required": True, "type": "string, detected harness (hermes|claude-code|codex|grok)"},
+    "harness": {"required": True, "type": "string, detected harness (hermes|claude-code|codex|grok|cursor|gemini)"},
     "task": {"required": True, "type": "string, the --task query text"},
     "counts": {"required": True, "type": "object{kind: int} totals across all scanned items"},
     "shortlist": {"required": True, "type": "list[item] IDF-ranked picks for --task"},
@@ -142,6 +142,10 @@ def detect_harness(script_path: Path) -> str:
         return "grok"
     if "/.codex/" in blob or "/.agents/" in blob:
         return "codex"
+    if "/.cursor/" in blob or blob.endswith("/.cursor"):
+        return "cursor"
+    if "/.gemini/" in blob or blob.endswith("/.gemini"):
+        return "gemini"
     if "hermes" in blob:
         return "hermes"
     if os.environ.get("HERMES_HOME", "").strip():
@@ -175,6 +179,18 @@ def roots_for(harness: str, home: Path | None = None, hermes: Path | None = None
             "skills": [home / ".grok" / "skills"],
             "plugins": [],
             "mcp_files": [],
+        }
+    if harness == "cursor":
+        return {
+            "skills": [home / ".cursor" / "skills"],
+            "plugins": [home / ".cursor" / "plugins"],
+            "mcp_files": [home / ".cursor" / "mcp.json"],
+        }
+    if harness == "gemini":
+        return {
+            "skills": [home / ".gemini" / "skills"],
+            "plugins": [home / ".gemini" / "extensions"],
+            "mcp_files": [home / ".gemini" / "settings.json"],
         }
     raise ValueError("unknown harness %s" % harness)
 
@@ -1382,7 +1398,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--harness",
         default="auto",
-        choices=("auto", "hermes", "claude-code", "codex", "grok"),
+        choices=("auto",) + HARNESSES,
     )
     try:
         env_limit = int(os.environ.get("JEV_LIMIT", "") or 12)

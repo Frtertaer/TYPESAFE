@@ -176,11 +176,22 @@ def _stage() -> Path:
     stage = Path(tempfile.mkdtemp(prefix="bundle-", dir=str(BUNDLE_DIR.parent)))
     try:
         payload = _extract(stage)
+        # A prior install hardened ~/.jev-consult/bundle/.env to a sole
+        # owner ACE — move the file itself (same volume) so the restage
+        # keeps both the key and its ACL, rather than deleting it.
+        env_file = BUNDLE_DIR / ".env"
+        saved = None
+        if env_file.is_file():
+            saved = stage / ".env.preserved"
+            shutil.move(str(env_file), str(saved))
         if BUNDLE_DIR.is_symlink() or (BUNDLE_DIR.exists() and not BUNDLE_DIR.is_dir()):
             BUNDLE_DIR.unlink()
         elif BUNDLE_DIR.is_dir():
             _rmtree(BUNDLE_DIR)
         shutil.move(str(payload), str(BUNDLE_DIR))
+        if saved is not None:
+            env_file.unlink(missing_ok=True)
+            shutil.move(str(saved), str(env_file))
         return BUNDLE_DIR
     finally:
         shutil.rmtree(stage, ignore_errors=True)

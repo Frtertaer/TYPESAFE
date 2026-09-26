@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "skills" / "jev-consult" / "scripts" / "inventory_hook.py"
 
-DEFAULT_EVENTS = ["UserPromptSubmit", "pre_llm_call"]
+DEFAULT_EVENTS = ["BeforeAgent", "UserPromptSubmit", "beforeSubmitPrompt", "pre_llm_call"]
 
 
 def run(argv: list, env: dict | None = None) -> subprocess.CompletedProcess:

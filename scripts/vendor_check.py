@@ -42,17 +42,56 @@ def _diff_stats(a: Path, b: Path) -> tuple[int, int]:
     return adds, dels
 
 
-def _upstream_head(repo: str) -> str | None:
+def _upstream_head(repo: str) -> tuple[str | None, str | None]:
+    """(sha, error) — error set when the remote couldn't be reached, so an
+    unreachable upstream reports as a failure instead of passing silently."""
     try:
         out = subprocess.run(
             ["git", "ls-remote", f"https://github.com/{repo}", "HEAD"],
             capture_output=True, text=True, timeout=30,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if out.returncode != 0 or not out.stdout.strip():
-        return None
-    return out.stdout.split()[0]
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, "ls-remote failed: %s" % exc
+    if out.returncode != 0:
+        return None, "ls-remote rc=%d: %s" % (out.returncode, (out.stderr or "").strip()[:120])
+    if not out.stdout.strip():
+        return None, "ls-remote returned no HEAD"
+    return out.stdout.split()[0], None
+
+
+def _manifest_errors(snapshots: object) -> list[str]:
+    """Structural validation — malformed entries exit 2, not traceback."""
+    problems = []
+    if not isinstance(snapshots, list):
+        return ["snapshots is not a list"]
+    for i, snap in enumerate(snapshots):
+        where = "snapshots[%d]" % i
+        if not isinstance(snap, dict):
+            problems.append("%s: not an object" % where)
+            continue
+        for key in ("dir", "upstream", "commit"):
+            if not isinstance(snap.get(key), str) or not snap[key]:
+                problems.append("%s: missing/non-string %r" % (where, key))
+        ported = snap.get("ported", [])
+        if not isinstance(ported, list):
+            problems.append("%s: 'ported' not a list" % where)
+            continue
+        for j, pair in enumerate(ported):
+            if not isinstance(pair, dict) or not all(
+                isinstance(pair.get(k), str) and pair[k] for k in ("vendor", "ours")
+            ):
+                problems.append("%s.ported[%d]: needs non-empty 'vendor' and 'ours'" % (where, j))
+    return problems
+
+
+def _within_repo(path: Path) -> bool:
+    """A manifest path must resolve inside the repo — '../' segments would
+    otherwise let PORTS.json point reads outside the checkout."""
+    try:
+        path.resolve().relative_to(ROOT)
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def main(argv) -> int:
@@ -67,16 +106,26 @@ def main(argv) -> int:
         print(f"vendor-check: missing {MANIFEST}", file=sys.stderr)
         return 2
     try:
-        snaps = json.loads(MANIFEST.read_text(encoding="utf-8"))["snapshots"]
-    except (ValueError, KeyError) as exc:
+        snaps = json.loads(MANIFEST.read_text(encoding="utf-8")).get("snapshots")
+    except (ValueError, AttributeError) as exc:
         print(f"vendor-check: invalid {MANIFEST}: {exc}", file=sys.stderr)
+        return 2
+    manifest_problems = _manifest_errors(snaps)
+    for problem in manifest_problems:
+        print(f"vendor-check: invalid {MANIFEST}: {problem}", file=sys.stderr)
+    if manifest_problems:
         return 2
 
     errors = []
     rows = []
     for snap in snaps:
-        d = ROOT / "vendor" / snap["dir"]
+        d = (ROOT / "vendor" / snap["dir"]).resolve()
         row = {"dir": snap["dir"], "upstream": snap["upstream"], "commit": snap["commit"][:12]}
+        if not _within_repo(d):
+            errors.append(f"{snap['dir']}: snapshot dir escapes repo")
+            row["status"] = "missing"
+            rows.append(row)
+            continue
         if not d.is_dir():
             errors.append(f"{snap['dir']}: snapshot directory missing")
             row["status"] = "missing"
@@ -91,8 +140,14 @@ def main(argv) -> int:
             row["status"] = "pin-mismatch"
         pairs = []
         for pair in snap.get("ported", []):
-            vend = d / pair["vendor"]
-            ours = ROOT / pair["ours"]
+            vend = (d / pair["vendor"]).resolve()
+            ours = (ROOT / pair["ours"]).resolve()
+            if not _within_repo(vend) or not _within_repo(ours):
+                errors.append(
+                    f"{snap['dir']}: ported pair escapes repo: "
+                    f"{pair['vendor']} -> {pair['ours']}"
+                )
+                continue
             if not vend.is_file():
                 errors.append(f"{snap['dir']}: vendored file {pair['vendor']} missing")
                 continue
@@ -103,10 +158,13 @@ def main(argv) -> int:
             pairs.append({"vendor": pair["vendor"], "ours": pair["ours"], "+": adds, "-": dels})
         row["pairs"] = pairs
         if fetch:
-            head = _upstream_head(snap["upstream"])
+            head, fetch_err = _upstream_head(snap["upstream"])
             row["upstream_head"] = head[:12] if head else None
             if head is None:
                 row["fetch"] = "unreachable"
+                errors.append(
+                    f"{snap['dir']}: could not reach {snap['upstream']}: {fetch_err}"
+                )
             elif head != snap["commit"]:
                 row["fetch"] = "upstream moved"
                 errors.append(
@@ -129,8 +187,10 @@ def main(argv) -> int:
                 print(f"  upstream HEAD {head}: {row['fetch']}")
             if show_diff:
                 for p in row.get("pairs", []):
-                    vend = ROOT / "vendor" / row["dir"] / p["vendor"]
-                    ours = ROOT / p["ours"]
+                    vend = (ROOT / "vendor" / row["dir"] / p["vendor"]).resolve()
+                    ours = (ROOT / p["ours"]).resolve()
+                    if not (_within_repo(vend) and _within_repo(ours)):
+                        continue
                     print("".join(difflib.unified_diff(
                         vend.read_text(encoding="utf-8", errors="replace").splitlines(True),
                         ours.read_text(encoding="utf-8", errors="replace").splitlines(True),

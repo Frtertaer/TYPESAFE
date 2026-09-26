@@ -21,6 +21,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: restore previous eval baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: eval-baseline.json
+          key: live-eval-baseline-${{ github.run_id }}
+          restore-keys: live-eval-baseline-
       - name: compare --live (guarded on the secret)
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
@@ -29,8 +35,17 @@ jobs:
             echo "skipped: TYPESAFE_API_KEY secret is not set" | tee eval-live.md
             exit 0
           fi
+          DIFF=""
+          [ -f eval-baseline.json ] && DIFF="--diff eval-baseline.json"
           python skills/jev-consult/scripts/compare.py --live --strict --json \
-            --out eval-live.json --report eval-live.md
+            --out eval-live.json --report eval-live.md $DIFF
+          cp eval-live.json eval-baseline.json
+      - name: save eval baseline for next run
+        if: always() && hashFiles('eval-baseline.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: eval-baseline.json
+          key: live-eval-baseline-${{ github.run_id }}
       - name: report to job summary
         if: always()
         run: cat eval-live.md >> "$GITHUB_STEP_SUMMARY" || true

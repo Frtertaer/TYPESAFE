@@ -392,6 +392,8 @@ def check_offline() -> list[dict]:
                 ok = True
             except SyntaxError as exc:
                 detail = "%s: %s" % (path, exc)
+            except OSError as exc:
+                detail = "%s: unreadable (%s)" % (path, exc)
         out.append(_check("*", name, ok, detail))
     return out
 

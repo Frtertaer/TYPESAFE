@@ -1141,7 +1141,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.uninstall:
         return uninstall(agents, args.dry_run)
     rc = install(agents, args.dry_run)
-    if args.live and rc == 0:
+    if args.live and not args.dry_run and rc == 0:
         rc = run_doctor(agents, live=True)
     return rc
 

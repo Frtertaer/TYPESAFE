@@ -676,11 +676,19 @@ def status_streaks(entries: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda r: (-r["best_streak"], r["harness"]))
 
 
+# jev_status values that mean no Jev call happened — dedupe replays a
+# sidecar pick, idf shortlists locally; only attempted calls belong in a
+# timeout/error rate denominator.
+_NO_CALL_STATUSES = {"dedupe", "idf", "skip", "disabled", ""}
+
+
 def harness_health(entries: list[dict]) -> list[dict]:
     """Per (harness, UTC hour) timeout/error rates — a cheap quota signal.
 
     jev_status 'timeout'/'error' come from the hook when the Jev call
-    stalls or fails; the window bucket is the hour the entry logged."""
+    stalls or fails; the window bucket is the hour the entry logged.
+    error_rate/timeout_rate divide by entries that actually attempted a
+    Jev call, so dedupe/idf records don't dilute the signal."""
     buckets: dict[tuple[str, str], dict] = {}
     for item in entries:
         harness = str(item.get("harness") or "unknown")
@@ -697,19 +705,22 @@ def harness_health(entries: list[dict]) -> list[dict]:
                 "harness": harness,
                 "window": window,
                 "entries": 0,
+                "attempted": 0,
                 "errors": 0,
                 "timeouts": 0,
             },
         )
         row["entries"] += 1
         status = str(item.get("jev_status") or "")
+        if status not in _NO_CALL_STATUSES:
+            row["attempted"] += 1
         if status == "error":
             row["errors"] += 1
         elif status == "timeout":
             row["timeouts"] += 1
     rows = []
     for r in buckets.values():
-        n = r["entries"]
+        n = r["attempted"]
         rows.append(
             dict(
                 r,
@@ -720,20 +731,26 @@ def harness_health(entries: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda r: (r["harness"], r["window"]))
 
 
-HEALTH_COLS = ["harness", "window", "entries", "errors", "timeouts", "error_rate", "timeout_rate"]
+HEALTH_COLS = [
+    "harness", "window", "entries", "attempted",
+    "errors", "timeouts", "error_rate", "timeout_rate",
+]
 
 
 def format_health(rows: list[dict]) -> str:
     if not rows:
         return "no entries"
-    lines = ["harness     window               entries  errors  timeouts  error_rate  timeout_rate"]
+    lines = [
+        "harness     window               entries  attempted  errors  timeouts  error_rate  timeout_rate"
+    ]
     for r in rows:
         lines.append(
-            "%-11s %-20s %-8d %-7d %-9d %-11g %g"
+            "%-11s %-20s %-8d %-9d %-7d %-9d %-11g %g"
             % (
                 r["harness"],
                 r["window"],
                 r["entries"],
+                r["attempted"],
                 r["errors"],
                 r["timeouts"],
                 r["error_rate"],

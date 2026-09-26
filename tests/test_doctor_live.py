@@ -86,7 +86,9 @@ class LiveProbeTests(unittest.TestCase):
         self.assertEqual(live_checks(out), [])
         self.assertNotIn("live", out)
 
-    def test_missing_binary_probes_as_skipped(self) -> None:
+    def test_missing_binary_fails_live_probe(self) -> None:
+        """Detected home but no CLI on PATH: the harness cannot run, so
+        the live check fails — only an absent home is skipped."""
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"
             (home / ".codex").mkdir(parents=True)
@@ -105,11 +107,104 @@ class LiveProbeTests(unittest.TestCase):
             )
         row = live_checks(out, "codex")
         self.assertIsNotNone(row)
-        self.assertTrue(row["ok"])
-        self.assertTrue(row["skipped"])
+        self.assertFalse(row["ok"])
+        self.assertNotIn("skipped", row)
         self.assertIn("codex", row["detail"])
         self.assertEqual(
             out["live"]["probes"]["codex"]["status"], "missing"
+        )
+        self.assertIsNone(out["live"]["fallback"])
+        self.assertEqual(rc, 1)
+
+    def test_successful_quota_wording_stays_available(self) -> None:
+        """A good answer that merely mentions quota on stdout is not
+        limited — quota classification reads stderr only on rc 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / ".codex").mkdir(parents=True)
+            bindir = Path(tmp) / "bin"
+            if os.name == "nt":
+                make_cli(bindir, "codex", "echo pong; quota remaining: 100\nexit /b 0")
+            else:
+                make_cli(bindir, "codex", "echo 'pong; quota remaining: 100'\nexit 0")
+            env = {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
+            rc, out, _ = run_main(
+                [
+                    "--agents", "codex",
+                    "--home", str(home),
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--live", "--live-timeout", "20",
+                ],
+                env_extra=env,
+                cwd=tmp,
+            )
+        self.assertEqual(
+            out["live"]["probes"]["codex"]["status"], "available"
+        )
+        self.assertTrue(live_checks(out, "codex")["ok"])
+
+    def test_probe_detail_redacts_secret_values(self) -> None:
+        """A CLI that echoes a credential alongside quota wording must
+        not leak it into doctor output."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / ".codex").mkdir(parents=True)
+            bindir = Path(tmp) / "bin"
+            if os.name == "nt":
+                make_cli(
+                    bindir, "codex",
+                    "echo usage limit; API_KEY=sk-secretvalue123456789 >&2\nexit /b 1",
+                )
+            else:
+                make_cli(
+                    bindir, "codex",
+                    "echo 'usage limit; API_KEY=sk-secretvalue123456789' >&2\nexit 1",
+                )
+            env = {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
+            rc, out, text = run_main(
+                [
+                    "--agents", "codex",
+                    "--home", str(home),
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--live", "--live-timeout", "20",
+                ],
+                env_extra=env,
+                cwd=tmp,
+            )
+        self.assertNotIn("sk-secretvalue123456789", text)
+        self.assertIn("<redacted>", live_checks(out, "codex")["detail"])
+        self.assertEqual(
+            out["live"]["probes"]["codex"]["status"], "limited"
+        )
+
+    def test_fallback_skips_broken_install(self) -> None:
+        """A CLI that answers but whose jev-consult setup fails doctor
+        is not offered as the fallback."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / ".codex").mkdir(parents=True)
+            (home / ".claude").mkdir(parents=True)  # no skills/jev-consult
+            bindir = Path(tmp) / "bin"
+            if os.name == "nt":
+                make_cli(bindir, "codex", "echo usage limit reached >&2\nexit /b 1")
+                make_cli(bindir, "claude", "echo pong\nexit /b 0")
+            else:
+                make_cli(bindir, "codex", "echo 'usage limit reached' >&2\nexit 1")
+                make_cli(bindir, "claude", "echo pong\nexit 0")
+            env = {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
+            rc, out, _ = run_main(
+                [
+                    "--agents", "claude-code,codex",
+                    "--home", str(home),
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--live", "--live-timeout", "20",
+                ],
+                env_extra=env,
+                cwd=tmp,
+            )
+        # claude answered but its skill check failed — no valid fallback
+        self.assertEqual(
+            out["live"]["probes"]["claude-code"]["status"], "available"
         )
         self.assertIsNone(out["live"]["fallback"])
 
@@ -126,6 +221,16 @@ class LiveProbeTests(unittest.TestCase):
                 make_cli(bindir, "codex", "echo 'usage limit reached' >&2\nexit 1")
                 make_cli(bindir, "claude", "echo pong\nexit 0")
             env = {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
+            # claude must pass its install checks to be a fallback
+            (home / ".claude" / "skills" / "jev-consult").mkdir(parents=True)
+            (home / ".claude" / "skills" / "jev-consult" / "SKILL.md").write_text("x")
+            settings = home / ".claude" / "settings.json"
+            settings.write_text(json.dumps({
+                "hooks": {
+                    "PostToolUse": [{"hooks": [{"command": "x compact_hook.py"}]}],
+                    "UserPromptSubmit": [{"hooks": [{"command": "x inventory_hook.py"}]}],
+                }
+            }))
             rc, out, _ = run_main(
                 [
                     "--agents", "claude-code,codex",

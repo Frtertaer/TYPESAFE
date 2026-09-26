@@ -127,6 +127,20 @@ LIVE_LIMITED_RE = re.compile(
     r"429|rate.?limit|usage.?limit|quota|too many requests|insufficient|overloaded|exceeded",
     re.IGNORECASE,
 )
+# Probe diagnostics quote a CLI's own stderr line — scrub secret-shaped
+# values so a harness echoing a credential never lands in doctor output.
+_SECRET_ASSIGN_RE = re.compile(
+    r"([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Za-z0-9_]*\s*[=:]\s*)\S+",
+    re.IGNORECASE,
+)
+_SECRET_BLOB_RE = re.compile(
+    r"sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_-]{12,}|(?i)bearer\s+\S+"
+)
+
+
+def _redact(text: str) -> str:
+    text = _SECRET_ASSIGN_RE.sub(lambda m: m.group(1) + "<redacted>", text)
+    return _SECRET_BLOB_RE.sub("<redacted>", text)
 
 
 def _live_probe(agent: str, timeout: float) -> dict:
@@ -151,17 +165,23 @@ def _live_probe(agent: str, timeout: float) -> dict:
         return {"status": "error", "detail": "timed out after %gs" % timeout}
     except OSError as exc:
         return {"status": "missing", "detail": "%s: %s" % (binary, exc)}
-    blob = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
-    hit = LIVE_LIMITED_RE.search(blob)
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+    # A successful answer is response text, not an error channel — only
+    # stderr wording can mean quota; otherwise "quota remaining: 100"
+    # inside a good answer would read as limited.
+    quota_text = stderr if proc.returncode == 0 else stdout + "\n" + stderr
+    hit = LIVE_LIMITED_RE.search(quota_text)
     if hit:
         line = next(
-            (ln.strip() for ln in blob.splitlines() if LIVE_LIMITED_RE.search(ln)),
+            (ln.strip() for ln in quota_text.splitlines() if LIVE_LIMITED_RE.search(ln)),
             hit.group(0),
         )
-        return {"status": "limited", "detail": "rate-limited: %s" % line[:120]}
+        return {"status": "limited", "detail": "rate-limited: %s" % _redact(line[:120])}
     if proc.returncode == 0:
         return {"status": "available", "detail": "answered (%s)" % binary}
-    tail = blob.splitlines()[-1][:120] if blob else ""
+    blob = (stdout + "\n" + stderr).strip()
+    tail = _redact(blob.splitlines()[-1][:120]) if blob else ""
     return {
         "status": "error",
         "detail": "rc=%d%s" % (proc.returncode, " " + tail if tail else ""),
@@ -171,8 +191,9 @@ def _live_probe(agent: str, timeout: float) -> dict:
 def _live_checks(agents: list, home: Path, hermes: Path, timeout: float):
     """Per-agent live_probe rows for harnesses detected on this box.
 
-    Returns (check rows, live payload): the payload's probes map carries
-    {status, detail} per probed agent and fallback the first available one."""
+    Returns (check rows, probes map). A detected harness home with no CLI
+    on PATH fails the check — the harness cannot run even though it is
+    installed; only an absent harness home is skipped, upstream."""
     out = []
     probes = {}
     for agent in agents:
@@ -180,31 +201,33 @@ def _live_checks(agents: list, home: Path, hermes: Path, timeout: float):
             continue  # absent harnesses stay skipped, not probed
         res = _live_probe(agent, timeout)
         probes[agent] = res
-        status = res["status"]
-        if status == "missing":
-            out.append(
-                {
-                    "agent": agent,
-                    "check": "live_probe",
-                    "ok": True,
-                    "skipped": True,
-                    "detail": res["detail"],
-                }
+        out.append(
+            _check(
+                agent,
+                "live_probe",
+                res["status"] == "available",
+                "%s: %s" % (res["status"], res["detail"]),
             )
-        else:
-            out.append(
-                _check(
-                    agent,
-                    "live_probe",
-                    status == "available",
-                    "%s: %s" % (status, res["detail"]),
-                )
-            )
-    fallback = next(
-        (a for a in ALLOWED if probes.get(a, {}).get("status") == "available"),
+        )
+    return out, probes
+
+
+def _live_fallback(probes: dict, checks: list) -> str | None:
+    """First available harness whose install checks all pass — an
+    answering CLI with a broken jev-consult setup is no fallback."""
+    broken = {
+        c["agent"]
+        for c in checks
+        if c["check"] != "live_probe" and not c["ok"] and not c.get("skipped")
+    }
+    return next(
+        (
+            a
+            for a in ALLOWED
+            if probes.get(a, {}).get("status") == "available" and a not in broken
+        ),
         None,
     )
-    return out, {"probes": probes, "fallback": fallback}
 
 
 def user_home() -> Path:
@@ -691,8 +714,9 @@ def main(argv: list[str] | None = None) -> int:
             checks += run()
         live = None
         if args.live and (not only or "live_probe" in only):
-            rows, live = _live_checks(agents, home, hermes, args.live_timeout)
+            rows, probes = _live_checks(agents, home, hermes, args.live_timeout)
             checks += rows
+            live = {"probes": probes, "fallback": _live_fallback(probes, checks)}
         if only:
             checks = [c for c in checks if c["check"] in only]
         return checks, live

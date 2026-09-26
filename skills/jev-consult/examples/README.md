@@ -33,4 +33,5 @@ python ../scripts/jev.py decide <answers-file>   # after an ask
 | `compare-cases.json` | `compare.py --cases` — unguarded vs trace+Jev sticky prompts |
 | `compact-transcript.json` | `compact.py --history` — small transcript to dry-run compaction on |
 | `progress-plan.json` | `progress.py lint` / `progress.py init` — stage plan with checks + items |
+| `progress-cases.json` | `progress.py calibrate` — golden contribution cases (`{id, diff, expect, jev}`; `--live` re-asks the model) |
 | `trace.template.json` | `.jev-trace.json` skeleton — copy it or let `trace.py init` write one |

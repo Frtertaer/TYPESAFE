@@ -1,0 +1,93 @@
+{
+ "goal": "Golden cases for the contribution rubric. Offline mode replays each case's canned `jev` answer through the real interpretation path, so a policy change (confidence_floor, choice_gap) or a response-shape change fails the matching case. `progress.py calibrate --live` re-asks Jev and catches model drift. expect: a rubric level or 'unscored'.",
+ "cases": [
+  {
+   "id": "clean_material",
+   "diff": "diff --git a/src/x.py b/src/x.py\nindex 111..222 100644\n--- a/src/x.py\n+++ b/src/x.py\n@@ -1,3 +1,4 @@\n def run():\n-    return load()\n+    return load(retries=2)\n",
+   "expect": "material",
+   "jev": {
+    "type": "choice",
+    "choice": "material",
+    "confidence": 0.92,
+    "probabilities": {"zero": 0.02, "small": 0.05, "material": 0.88, "major": 0.03, "none": 0.02}
+   }
+  },
+  {
+   "id": "clean_zero",
+   "diff": "diff --git a/src/x.py b/src/x.py\nindex 111..222 100644\n--- a/src/x.py\n+++ b/src/x.py\n@@ -1,2 +1,2 @@\n-    return 1\n+    return 1  # unchanged\n",
+   "expect": "zero",
+   "jev": {
+    "type": "choice",
+    "choice": "zero",
+    "confidence": 0.9,
+    "probabilities": {"zero": 0.9, "small": 0.03, "material": 0.02, "major": 0.01, "none": 0.04}
+   }
+  },
+  {
+   "id": "clean_small",
+   "diff": "diff --git a/src/x.py b/src/x.py\nindex 111..222 100644\n--- a/src/x.py\n+++ b/src/x.py\n@@ -1,2 +1,2 @@\n-x = 'a'\n+x = 'b'\n",
+   "expect": "small",
+   "jev": {
+    "type": "choice",
+    "choice": "small",
+    "confidence": 0.85,
+    "probabilities": {"zero": 0.03, "small": 0.86, "material": 0.05, "major": 0.02, "none": 0.04}
+   }
+  },
+  {
+   "id": "clean_major",
+   "diff": "diff --git a/src/x.py b/src/x.py\nindex 111..222 100644\n--- a/src/x.py\n+++ b/src/x.py\n@@ -1,5 +1,8 @@\n def auth():\n-    return None\n+    token = issue()\n+    verify(token)\n+    return token\n",
+   "expect": "major",
+   "jev": {
+    "type": "choice",
+    "choice": "major",
+    "confidence": 0.95,
+    "probabilities": {"zero": 0.01, "small": 0.02, "material": 0.04, "major": 0.91, "none": 0.02}
+   }
+  },
+  {
+   "id": "below_confidence_floor",
+   "diff": "diff --git a/src/x.py b/src/x.py\nindex 111..222 100644\n--- a/src/x.py\n+++ b/src/x.py\n@@ -1,2 +1,3 @@\n+    maybe()\n",
+   "expect": "unscored",
+   "jev": {
+    "type": "choice",
+    "choice": "material",
+    "confidence": 0.55,
+    "probabilities": {"zero": 0.05, "small": 0.1, "material": 0.7, "major": 0.1, "none": 0.05}
+   }
+  },
+  {
+   "id": "narrow_choice_gap",
+   "diff": "diff --git a/src/x.py b/src/x.py\nindex 111..222 100644\n--- a/src/x.py\n+++ b/src/x.py\n@@ -1,2 +1,3 @@\n+    tweak()\n",
+   "expect": "unscored",
+   "jev": {
+    "type": "choice",
+    "choice": "material",
+    "confidence": 0.9,
+    "probabilities": {"zero": 0.02, "small": 0.45, "material": 0.5, "major": 0.01, "none": 0.02}
+   }
+  },
+  {
+   "id": "voted_against",
+   "diff": "diff --git a/src/x.py b/src/x.py\nindex 111..222 100644\n--- a/src/x.py\n+++ b/src/x.py\n@@ -1,2 +1,3 @@\n+    move()\n",
+   "expect": "unscored",
+   "jev": {
+    "type": "choice",
+    "choice": "material",
+    "confidence": 0.9,
+    "probabilities": {"zero": 0.05, "small": 0.5, "material": 0.4, "major": 0.02, "none": 0.03}
+   }
+  },
+  {
+   "id": "insufficient_evidence",
+   "diff": "diff --git a/src/x.py b/src/x.py\nindex 111..222 100644\n--- a/src/x.py\n+++ b/src/x.py\n@@ -1,2 +1,3 @@\n+    unclear()\n",
+   "expect": "unscored",
+   "jev": {
+    "type": "choice",
+    "choice": "none",
+    "confidence": 0.9,
+    "probabilities": {"zero": 0.03, "small": 0.05, "material": 0.05, "major": 0.02, "none": 0.85}
+   }
+  }
+ ]
+}

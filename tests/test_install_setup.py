@@ -316,6 +316,136 @@ class BootstrapScriptTests(unittest.TestCase):
         self.assertIn("IsInputRedirected", cmd_text)
 
 
+class DoctorSummaryTests(unittest.TestCase):
+    """install.run_doctor prints a verdict that separates absent harnesses
+    from failing ones."""
+
+    def test_summary_counts_ok_and_absent(self) -> None:
+        data = {
+            "checks": [
+                {"agent": "claude-code", "check": "skill", "ok": True},
+                {"agent": "claude-code", "check": "presence", "ok": True},
+                {"agent": "codex", "check": "presence", "ok": True, "skipped": True},
+                {"agent": "grok", "check": "presence", "ok": True, "skipped": True},
+                {"agent": "*", "check": "api_key", "ok": True},
+            ],
+            "absent": ["codex", "grok"],
+        }
+        self.assertEqual(
+            install._doctor_summary(data, 0),
+            "PASS (1 harness ok; 2 not installed)",
+        )
+
+    def test_summary_names_failing_harnesses_and_checks(self) -> None:
+        data = {
+            "checks": [
+                {"agent": "hermes", "check": "skill", "ok": False},
+                {"agent": "*", "check": "api_key", "ok": False},
+            ],
+            "absent": ["grok"],
+        }
+        summary = install._doctor_summary(data, 1)
+        self.assertTrue(summary.startswith("FAIL"))
+        self.assertIn("hermes", summary)
+        self.assertIn("api_key", summary)
+        self.assertIn("1 not installed", summary)
+
+    def test_summary_falls_back_on_unparseable_stdout(self) -> None:
+        # e.g. a stub doctor (tests pin this shape) or a crash traceback
+        self.assertEqual(install._doctor_summary(None, 0), "PASS")
+        self.assertEqual(install._doctor_summary("x", 1), "FAIL")
+        self.assertEqual(install._doctor_summary({"checks": "x"}, 1), "FAIL")
+
+    def test_run_doctor_reprints_payload_and_summarizes(self) -> None:
+        import subprocess
+
+        payload = json.dumps(
+            {
+                "checks": [
+                    {"agent": "codex", "check": "presence", "ok": True, "skipped": True}
+                ],
+                "absent": ["codex"],
+            }
+        )
+
+        def fake_run(cmd, **kw):
+            return subprocess.CompletedProcess(cmd, 0, stdout=payload, stderr="")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = make_bundle(Path(tmp))
+            install.set_source(str(bundle))
+            try:
+                with patch.object(subprocess, "run", fake_run), patch.object(
+                    install, "user_home", return_value=Path(tmp)
+                ):
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        rc = install.run_doctor(["codex"])
+            finally:
+                install.set_source(None)
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertIn(payload, out)  # raw doctor JSON still printed
+        self.assertIn("doctor: PASS (1 not installed)", out)
+
+
+class KeyHelpTests(unittest.TestCase):
+    def test_key_help_default_mentions_admin(self) -> None:
+        env = dict(os.environ)
+        env.pop("JEV_KEY_HELP_URL", None)
+        with patch.dict(os.environ, env, clear=True):
+            self.assertIn("admin", install.key_help())
+
+    def test_key_help_env_override(self) -> None:
+        with patch.dict(
+            os.environ, {"JEV_KEY_HELP_URL": "https://keys.example.org"}
+        ):
+            self.assertEqual(install.key_help(), "https://keys.example.org")
+
+    def test_setup_key_prints_help_before_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = make_bundle(Path(tmp))
+            install.set_source(str(bundle))
+            home = Path(tmp) / "home"
+            env = {
+                "USERPROFILE": str(home),
+                "HOME": str(home),
+                "HERMES_HOME": str(Path(tmp) / "h"),
+                "JEV_KEY_HELP_URL": "https://keys.example.org/get-one",
+            }
+            try:
+                with patch.dict(os.environ, env, clear=True), patch.object(
+                    getpass, "getpass", return_value=""
+                ):
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        install._setup_key(["claude-code"])
+            finally:
+                install.set_source(None)
+        out = buf.getvalue()
+        self.assertIn("get a TYPESAFE_API_KEY", out)
+        self.assertIn("https://keys.example.org/get-one", out)
+
+
+class HookInterpreterTests(unittest.TestCase):
+    def test_default_is_running_interpreter(self) -> None:
+        env = dict(os.environ)
+        env.pop("JEV_HOOK_PYTHON", None)
+        with patch.dict(os.environ, env, clear=True):
+            self.assertEqual(install._hook_interpreter(), sys.executable)
+
+    def test_env_override_wins(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"JEV_HOOK_PYTHON": "C:\\jev-consult\\jev-runtime.exe"},
+        ):
+            self.assertEqual(
+                install._hook_interpreter(), "C:\\jev-consult\\jev-runtime.exe"
+            )
+            cmd = install.grok_hook_command(Path("x") / "hook.py")
+            self.assertIn("jev-runtime.exe", cmd)
+
+
 class PackageReleaseTests(unittest.TestCase):
     def test_build_pyz_and_run_env(self) -> None:
         import subprocess
@@ -352,6 +482,51 @@ class PackageReleaseTests(unittest.TestCase):
                 rc = package_release.main(["--out", str(out)])
             self.assertEqual(rc, 0)
             self.assertTrue(out.is_file())
+
+    def test_exe_flag_stages_pyinstaller_tree(self) -> None:
+        """--exe emits the spec/payload/build-exe.cmd tree; the real binary
+        needs a Windows host (PyInstaller cannot cross-compile)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "jev-setup.pyz"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = package_release.main(["--out", str(out), "--exe"])
+            self.assertEqual(rc, 0)
+            exe_dir = Path(tmp) / "exe"
+            spec = (exe_dir / "jev-setup.spec").read_text(encoding="utf-8")
+            self.assertIn('name="jev-setup-windows-amd64"', spec)
+            self.assertIn("console=True", spec)
+            self.assertIn('"payload"', spec)  # datas under _MEIPASS/payload
+            self.assertIn("hiddenimports", spec)
+            entry = exe_dir / "jev_setup_entry.py"
+            self.assertTrue(entry.is_file())
+            self.assertIn("_MEIPASS", entry.read_text(encoding="utf-8"))
+            cmd_text = (exe_dir / "build-exe.cmd").read_text(encoding="utf-8")
+            self.assertIn(package_release.PYINSTALLER_PIN, cmd_text)
+            self.assertTrue(
+                (exe_dir / "payload" / "skills" / "jev-consult" / "SKILL.md").is_file()
+            )
+            self.assertTrue(
+                (exe_dir / "payload" / "scripts" / "install.py").is_file()
+            )
+            built = exe_dir.parent / "jev-setup-windows-amd64.exe"
+            if os.name != "nt":
+                # no exe produced off-Windows; the message says so
+                self.assertFalse(built.exists())
+                self.assertIn("Windows host", buf.getvalue())
+
+    def test_stdlib_imports_cover_payload_network_deps(self) -> None:
+        """hiddenimports must name what datas scripts import — PyInstaller
+        does not analyze datas, so urllib.request/getpass would otherwise
+        be missing from the frozen binary."""
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "payload"
+            package_release._stage_payload(payload)
+            names = package_release._stdlib_imports(
+                payload, package_release.EXE_ENTRY
+            )
+        for need in ("urllib.request", "urllib.error", "getpass", "msvcrt"):
+            self.assertIn(need, names)
 
 
 if __name__ == "__main__":

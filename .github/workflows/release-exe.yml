@@ -1,0 +1,30 @@
+name: release-exe
+
+# Builds jev-setup-windows-amd64.exe (+ the pyz/cmd fallbacks) with
+# PyInstaller. Windows-only by nature: PyInstaller cannot cross-compile.
+# Manual trigger (workflow_dispatch) and version tags; attach the
+# artifacts to a GitHub Release or grab them from the run's artifacts.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check "pyinstaller==6.21.0"
+      - run: python scripts/package_release.py --exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jev-setup
+          path: |
+            dist/jev-setup-windows-amd64.exe
+            dist/jev-setup.pyz
+            dist/jev-setup.cmd
+          if-no-files-found: error

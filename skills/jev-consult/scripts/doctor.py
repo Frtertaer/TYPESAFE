@@ -45,6 +45,7 @@ ALLOWED = ("hermes", "claude-code", "codex", "grok")
 
 # Every check name collect() can emit; --schema lists it and tests pin it.
 CHECK_NAMES = (
+    "presence",
     "skill",
     "plugin_dir",
     "plugin_enabled",
@@ -73,6 +74,8 @@ DOCTOR_SCHEMA_ROWS = {
     "check.detail": {"required": True, "type": "string, human-readable evidence"},
     "check.hint": {"required": False, "type": "string, remediation hint (failing checks only)"},
     "check.suppressed": {"required": False, "type": "boolean, true when --baseline marked this failure known"},
+    "check.skipped": {"required": False, "type": "boolean, true when the agent's harness is not installed on this machine — its other checks were skipped, not failed"},
+    "absent": {"required": True, "type": "list[string], --agents whose harness home dir does not exist"},
 }
 
 BASELINE_FIELDS = ("agent", "check")
@@ -149,6 +152,16 @@ def _skill_check(agent: str, skill_dirs: list[Path]) -> dict:
         if (parent / "jev-consult" / "SKILL.md").is_file():
             return _check(agent, "skill", True, str(parent / "jev-consult"))
     return _check(agent, "skill", False, "jev-consult/SKILL.md missing under %s" % skill_dirs)
+
+
+def _harness_home(agent: str, home: Path, hermes: Path) -> Path:
+    """The dir whose existence marks the harness as installed on this box."""
+    return {
+        "hermes": hermes,
+        "claude-code": home / ".claude",
+        "codex": home / ".codex",
+        "grok": home / ".grok",
+    }[agent]
 
 
 def check_hermes(home: Path, hermes: Path) -> list[dict]:
@@ -534,14 +547,30 @@ def main(argv: list[str] | None = None) -> int:
     def collect() -> list[dict]:
         checks: list[dict] = check_common(home, hermes)
         checks += check_progress(Path.cwd())
-        if "hermes" in agents:
-            checks += check_hermes(home, hermes)
-        if "claude-code" in agents:
-            checks += check_claude(home)
-        if "grok" in agents:
-            checks += check_grok(home)
-        if "codex" in agents:
-            checks += check_codex(home)
+        # An absent harness is not an install failure: emit one skipped
+        # presence row and keep the run's ok untouched.
+        for name, run in (
+            ("hermes", lambda: check_hermes(home, hermes)),
+            ("claude-code", lambda: check_claude(home)),
+            ("grok", lambda: check_grok(home)),
+            ("codex", lambda: check_codex(home)),
+        ):
+            if name not in agents:
+                continue
+            hdir = _harness_home(name, home, hermes)
+            if not hdir.exists():
+                checks.append(
+                    {
+                        "agent": name,
+                        "check": "presence",
+                        "ok": True,
+                        "skipped": True,
+                        "detail": "%s not installed (no %s)" % (name, hdir),
+                    }
+                )
+                continue
+            checks.append(_check(name, "presence", True, str(hdir)))
+            checks += run()
         if only:
             checks = [c for c in checks if c["check"] in only]
         return checks
@@ -693,6 +722,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0 if last["ok"] else 1
     checks = collect()
+    absent = sorted(
+        a for a in agents if not _harness_home(a, home, hermes).exists()
+    )
     suppressed = _apply_baseline(checks)
     if suppressed:
         sys.stderr.write(
@@ -705,7 +737,12 @@ def main(argv: list[str] | None = None) -> int:
             if hint:
                 check["hint"] = hint.replace("<agent>", check["agent"])
     shown = checks if not args.quiet else [c for c in checks if not c["ok"]]
-    payload = {"ok": ok, "checks": shown, "suppressed": suppressed}
+    payload = {
+        "ok": ok,
+        "checks": shown,
+        "suppressed": suppressed,
+        "absent": absent,
+    }
     text = json.dumps(payload, indent=2) + "\n"
     if args.out:
         try:
@@ -741,7 +778,10 @@ def main(argv: list[str] | None = None) -> int:
                 % (
                     c.get("check") or "",
                     c.get("agent") or "",
-                    "yes" if c.get("ok") else ("suppressed" if c.get("suppressed") else "NO"),
+                    "skipped" if c.get("skipped")
+                    else "suppressed" if c.get("suppressed")
+                    else "yes" if c.get("ok")
+                    else "NO",
                     c.get("hint") or "",
                 )
             )
@@ -762,7 +802,8 @@ def main(argv: list[str] | None = None) -> int:
         grid: dict[str, dict[str, str]] = {}
         for c in shown:
             cell = (
-                "suppressed" if c.get("suppressed")
+                "skipped" if c.get("skipped")
+                else "suppressed" if c.get("suppressed")
                 else "yes" if c.get("ok")
                 else "NO"
             )
@@ -816,7 +857,9 @@ def main(argv: list[str] | None = None) -> int:
                     [
                         c.get("check") or "",
                         c.get("agent") or "",
-                        "suppressed" if c.get("suppressed") else ("yes" if c.get("ok") else "no"),
+                        "skipped" if c.get("skipped")
+                        else "suppressed" if c.get("suppressed")
+                        else ("yes" if c.get("ok") else "no"),
                         c.get("hint") or "",
                     ]
                 )

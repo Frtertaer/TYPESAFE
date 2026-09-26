@@ -293,8 +293,15 @@ def hook_script(skill_dest: Path, mark: str | None = None) -> Path:
     return skill_dest / "scripts" / (mark or HOOK_MARK)
 
 
+def _hook_interpreter() -> str:
+    """Interpreter path recorded in hook commands. Under the PyInstaller
+    exe this is the staged runtime copy (JEV_HOOK_PYTHON), not the
+    downloaded exe the user may delete after install."""
+    return os.environ.get("JEV_HOOK_PYTHON", "").strip() or sys.executable
+
+
 def grok_hook_command(script: Path) -> str:
-    exe = sys.executable.replace("\\", "/")
+    exe = _hook_interpreter().replace("\\", "/")
     path = str(script).replace("\\", "/")
     return '"%s" "%s"' % (exe, path)
 
@@ -405,7 +412,7 @@ def upsert_claude_event(
             "hooks": [
                 {
                     "type": "command",
-                    "command": sys.executable,
+                    "command": _hook_interpreter(),
                     "args": [str(script)],
                     "timeout": timeout,
                 }
@@ -797,7 +804,69 @@ def _lock_down_env(path: Path) -> None:
         pass
 
 
+def _doctor_summary(data: object, rc: int) -> str:
+    """'PASS (2 harnesses ok, 2 not installed)'-style verdict line.
+
+    Absent harnesses (doctor reports them as skipped presence rows) are
+    not failures; only a present harness's failing checks are.
+    """
+    verdict = "PASS" if rc == 0 else "FAIL"
+    if not isinstance(data, dict):
+        return verdict
+    checks = data.get("checks")
+    if not isinstance(checks, list):
+        checks = []
+    checks = [c for c in checks if isinstance(c, dict)]
+    absent_raw = data.get("absent")
+    absent = sorted(
+        a for a in (absent_raw if isinstance(absent_raw, list) else []) if a
+    )
+    failing_agents = sorted(
+        {
+            c.get("agent")
+            for c in checks
+            if c.get("agent") not in (None, "*")
+            and not c.get("ok")
+            and not c.get("suppressed")
+        }
+    )
+    other_failed = sorted(
+        {
+            c.get("check")
+            for c in checks
+            if c.get("agent") == "*"
+            and not c.get("ok")
+            and not c.get("suppressed")
+        }
+    )
+    ok_agents = sorted(
+        {
+            c.get("agent")
+            for c in checks
+            if c.get("agent") not in (None, "*") and not c.get("skipped")
+        }
+        - set(failing_agents)
+    )
+    parts = []
+    if failing_agents:
+        parts.append("harnesses failing: " + ", ".join(failing_agents))
+    if other_failed:
+        parts.append("checks failing: " + ", ".join(other_failed))
+    if ok_agents:
+        parts.append(
+            "%d harness%s ok" % (len(ok_agents), "" if len(ok_agents) == 1 else "es")
+        )
+    if absent:
+        parts.append(
+            "%d not installed" % len(absent)
+        )
+    return "%s (%s)" % (verdict, "; ".join(parts)) if parts else verdict
+
+
 def run_doctor(agents: list[str]) -> int:
+    """Run the bundled doctor scoped to the harnesses the installer just
+    wrote (--agents), so a missing harness reads as 'not installed', not
+    as a broken install."""
     doctor = skill_source() / "scripts" / "doctor.py"
     if not doctor.is_file():
         sys.stdout.write("doctor: skipped (missing %s)\n" % doctor)
@@ -805,8 +874,22 @@ def run_doctor(agents: list[str]) -> int:
     cmd = [sys.executable, str(doctor), "--agents", ",".join(agents)]
     if "hermes" in agents:
         cmd += ["--hermes-home", str(hermes_home())]
-    proc = subprocess.run(cmd)
-    sys.stdout.write("doctor: %s\n" % ("PASS" if proc.returncode == 0 else "FAIL"))
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.stdout:
+        sys.stdout.write(proc.stdout)
+    if proc.stderr:
+        sys.stderr.write(proc.stderr)
+    try:
+        data = json.loads(proc.stdout)
+    except (TypeError, ValueError):
+        data = None
+    sys.stdout.write("doctor: %s\n" % _doctor_summary(data, proc.returncode))
     return proc.returncode
 
 
@@ -857,7 +940,17 @@ def _setup_menu() -> str:
     return _prompt("choice [1-4]: ")
 
 
+DEFAULT_KEY_HELP = "ask your Jev/TypeSafe admin (or copy .env.example to .env)"
+
+
+def key_help() -> str:
+    """Where to get TYPESAFE_API_KEY; JEV_KEY_HELP_URL overrides the
+    default text with e.g. an org key portal URL."""
+    return os.environ.get("JEV_KEY_HELP_URL", "").strip() or DEFAULT_KEY_HELP
+
+
 def _setup_key(agents: list[str]) -> None:
+    sys.stdout.write("get a TYPESAFE_API_KEY: %s\n" % key_help())
     if key_is_set():
         sys.stdout.write("TYPESAFE_API_KEY: already set; Enter keeps it\n")
     try:

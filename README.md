@@ -16,27 +16,27 @@ Windows: `install.cmd`. Unix: `sh install.sh`. Обёртки сами нахо�
 
 ## Быстрый старт
 
-Один файл, без git — путь для нетехнического пользователя:
+Windows — один файл, Python не нужен вообще — путь для нетехнического пользователя. Скачайте `jev-setup-windows-amd64.exe` и запустите двойным кликом:
+
+```text
+https://github.com/Frtertaer/TYPESAFE/releases/latest/download/jev-setup-windows-amd64.exe
+```
+
+Linux/macOS, или Windows с уже установленным Python — `jev-setup.pyz` (zipapp, тоже один файл):
 
 ```text
 curl -fsSL -o jev-setup.pyz https://github.com/Frtertaer/TYPESAFE/releases/latest/download/jev-setup.pyz
 python jev-setup.pyz
 ```
 
-Одной строкой (скачать и сразу открыть меню):
-
-```sh
-curl -fsSL -o /tmp/jev-setup.pyz https://github.com/Frtertaer/TYPESAFE/releases/latest/download/jev-setup.pyz && python3 /tmp/jev-setup.pyz
-```
-
-Windows: скачайте в одну папку оба файла и запустите `jev-setup.cmd` — двойным кликом или из консоли. Обёртка сама находит Python (`py -3`, затем `python`) и запускает лежащий рядом `jev-setup.pyz`:
+Запасной вариант на Windows без exe (pyz + обёртка): скачайте в одну папку оба файла и запустите `jev-setup.cmd` — двойным кликом или из консоли. Обёртка сама находит Python (`py -3`, затем `python`) и запускает лежащий рядом `jev-setup.pyz`:
 
 ```text
 https://github.com/Frtertaer/TYPESAFE/releases/latest/download/jev-setup.pyz
 https://github.com/Frtertaer/TYPESAFE/releases/latest/download/jev-setup.cmd
 ```
 
-`jev-setup.pyz` уже содержит скилл, `install.py` и `doctor.py` — git clone не нужен. Нужен только Python 3 — https://www.python.org/downloads/ (при установке отметить «Add python.exe to PATH»). Откроется меню: **1) Install 2) Uninstall 3) Check (doctor) 4) Exit**. Меню само находит уже стоящие харнессы, спрашивает `TYPESAFE_API_KEY` скрыто (getpass) и пишет его в `.env` харнесса, бандла и `~/.env` (файлы — chmod 600; на Windows — ACL только для владельца через `icacls`), в конце прогоняет doctor и печатает PASS/FAIL. Сам бандл распаковывается в `~/.jev-consult/bundle/` — метки `.jev-consult-source` и хуки указывают на стабильный путь, а не на временный каталог распаковки.
+Exe, pyz и cmd несут одинаковый payload: скилл, `install.py` и `doctor.py` — git clone не нужен. Откроется меню: **1) Install 2) Uninstall 3) Check (doctor) 4) Exit**. Меню само находит уже стоящие харнессы, подсказывает, где взять `TYPESAFE_API_KEY` (переопределяется env `JEV_KEY_HELP_URL`), спрашивает ключ скрыто (getpass) и пишет его в `.env` харнесса, бандла и `~/.env` (файлы — chmod 600; на Windows — ACL только для владельца через `icacls`), в конце прогоняет doctor и печатает сводку вида `PASS (2 harnesses ok, 2 not installed)` — отсутствующий харнесс — не ошибка. Payload распаковывается в `~/.jev-consult/bundle/` — метки `.jev-consult-source` и хуки указывают на стабильный путь, а не на временный каталог. Дополнительно exe копирует себя в `~/.jev-consult/jev-runtime.exe` и записывает его в хуки (`JEV_HOOK_PYTHON`) — хуки работают и после удаления скачанного exe, без Python.
 
 Путь разработчика — clone:
 
@@ -49,7 +49,7 @@ python -m unittest discover -s tests      # прогон всей suite
 make test-jev                             # один test-файл по суффиксу (или python -m unittest tests.test_jev)
 ```
 
-Собрать `jev-setup.pyz` из clone: `python scripts/package_release.py` или `make package` (zipapp в `dist/` + `jev-setup.cmd` рядом).
+Собрать артефакты из clone: `python scripts/package_release.py` или `make package` (zipapp в `dist/` + `jev-setup.cmd` рядом). `python scripts/package_release.py --exe` дополнительно собирает exe: на Windows-хосте с PyInstaller — готовый `dist/jev-setup-windows-amd64.exe`, иначе — дерево `dist/exe/` (entry, payload, `jev-setup.spec`, `build-exe.cmd`), которое достраивает `build-exe.cmd` на Windows или CI-джоба `release-exe.yml` на `windows-latest`. PyInstaller не кросс-компилирует — Windows exe собирается только на Windows; в этом репозитории CI-раннер сейчас не подхватывает джобы, поэтому exe артефакт появится в релизе, когда Actions починят (или после ручного прогона `dist/exe/build-exe.cmd`).
 
 ## Что в репозитории
 
@@ -82,7 +82,8 @@ make test-jev                             # один test-файл по суфф
 | `~/.cache/jev-consult/decisions.jsonl` | Журнал решений хука, по строке на промпт (`JEV_CONSULT_LOG=0` выключает, `JEV_CONSULT_LOG=PATH` переадресует) |
 | `~/.cache/jev-consult/spill/` | Полные выводы, вырезанные compact (`<sha>.txt`, owner-only каталог, максимум 200 файлов / 256 МБ; `JEV_CONSULT_SPILL=0` выключает, `JEV_CONSULT_SPILL=PATH` переадресует) |
 | `scripts/install.py` | Копия скилла только в 4 харнесса (`--env` печатает resolved config JSON: agents/home/hermes_home/source/targets/existing/policy/key_set; `--jq KEY`/`--out PATH`); `--source DIR` — установка из распакованного бандла, `--setup` — интерактивное меню |
-| `scripts/package_release.py` | Сборка `dist/jev-setup.pyz` — однофайлового zipapp-инсталлятора (скилл + install.py + doctor) и `dist/jev-setup.cmd` для Windows; работает без git clone |
+| `scripts/package_release.py` | Сборка `dist/jev-setup.pyz` — однофайлового zipapp-инсталлятора (скилл + инсталлятор + doctor) и `dist/jev-setup.cmd` для Windows; `--exe` — PyInstaller-дерево/exe `jev-setup-windows-amd64.exe` в `dist/`; работает без git clone |
+| `scripts/exe_entry.py` | Entry point exe: распаковывает payload из `_MEIPASS` в `~/.jev-consult/bundle`, запускает install.py `--source`; `<exe> script.py` — replay скриптов для хуков без Python |
 | `install.cmd` / `install.sh` | Обёртки: bootstrap Python (`py -3` → `python3` → `python`, иначе подсказка python.org), затем `install.py --setup` в интерактивном терминале (без TTY — `install.py` как раньше) |
 | `tests/test_jev.py` / `test_inventory.py` / `test_inventory_hook.py` / `test_peer_fill.py` / `test_catalog_fill.py` / `test_apply_fill.py` / `test_trace.py` / `test_compare.py` / `test_compact.py` / `test_compact_hook.py` / `test_skill_evals.py` | Юнит-тесты без живого API |
 | `vendor/fast-jev-compaction` | MIT-снимок upstream; рантайм — `compact.py`, не плагин Claude |

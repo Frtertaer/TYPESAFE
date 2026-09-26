@@ -36,8 +36,11 @@ def load(path: Path, name: str):
     return module
 
 
+EXE_ENTRY_PATH = ROOT / "scripts" / "exe_entry.py"
+
 install = load(INSTALL_PATH, "install_jev_windows")
 package_release = load(PACKAGE_PATH, "package_release_windows")
+exe_entry = load(EXE_ENTRY_PATH, "exe_entry_windows")
 
 
 class WindowsAclTests(unittest.TestCase):
@@ -413,6 +416,138 @@ class StableBundleTests(unittest.TestCase):
             cmd = Path(tmp) / "custom.cmd"
             self.assertTrue(cmd.is_file())
             self.assertIn("%~dp0custom.pyz", cmd.read_text(encoding="utf-8"))
+
+
+class ExeEntryTests(unittest.TestCase):
+    """scripts/exe_entry.py — the PyInstaller entry point — exercised as an
+    importable module (the real binary needs a Windows host; a frozen
+    Linux onefile build verified the same paths end-to-end)."""
+
+    def test_payload_dir_unfrozen_is_repo_root(self) -> None:
+        self.assertEqual(exe_entry._payload_dir(), ROOT)
+
+    def test_payload_dir_frozen_is_meipass(self) -> None:
+        with patch.object(exe_entry.sys, "frozen", True, create=True), patch.object(
+            exe_entry.sys, "_MEIPASS", "/x/_MEIabc", create=True
+        ):
+            self.assertEqual(
+                exe_entry._payload_dir(), Path("/x/_MEIabc") / "payload"
+            )
+
+    def test_dispatch_runs_script_never_stages(self) -> None:
+        """`<exe> script.py args` replays the script in-process — the hook
+        path on Python-free boxes. No staging, no pause."""
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "probe.py"
+            script.write_text(
+                "import sys;\nprint('ARGS=' + ','.join(sys.argv[1:]))\n",
+                encoding="utf-8",
+            )
+            with patch.object(
+                exe_entry, "_stage_payload", side_effect=AssertionError
+            ), patch.object(exe_entry, "_pause", side_effect=AssertionError), patch.object(
+                exe_entry, "_stage_runtime", side_effect=AssertionError
+            ):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = exe_entry.main([str(script), "a", "b"])
+            self.assertEqual(rc, 0)
+            self.assertIn("ARGS=a,b", buf.getvalue())
+
+    def test_run_script_returns_system_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "die.py"
+            script.write_text("import sys; sys.exit(3)\n", encoding="utf-8")
+            self.assertEqual(exe_entry.main([str(script)]), 3)
+
+    def test_no_args_tty_runs_setup_then_pauses(self) -> None:
+        """Double-click path: stage -> install --source <bundle> --setup -> pause."""
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "bundle"
+            ran, paused = [], []
+            with patch.object(exe_entry, "_tty", return_value=True), patch.object(
+                exe_entry, "_stage_payload", return_value=payload
+            ), patch.object(exe_entry, "_stage_runtime", return_value=None), patch.object(
+                exe_entry, "_pause", lambda: paused.append(True)
+            ), patch.object(
+                exe_entry, "_run_script", lambda s, a: ran.append((s, a)) or 0
+            ):
+                rc = exe_entry.main([])
+            self.assertEqual(rc, 0)
+            script, args = ran[0]
+            self.assertEqual(script, payload / "scripts" / "install.py")
+            self.assertEqual(args[0:2], ["--source", str(payload)])
+            self.assertIn("--setup", args)
+            self.assertEqual(paused, [True])
+
+    def test_no_args_non_tty_no_setup_no_pause(self) -> None:
+        """Redirected run: plain install args, returns without pausing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "bundle"
+            ran = []
+            with patch.object(exe_entry, "_tty", return_value=False), patch.object(
+                exe_entry, "_stage_payload", return_value=payload
+            ), patch.object(exe_entry, "_stage_runtime", return_value=None), patch.object(
+                exe_entry, "_pause", side_effect=AssertionError
+            ), patch.object(
+                exe_entry, "_run_script", lambda s, a: ran.append((s, a)) or 0
+            ):
+                rc = exe_entry.main([])
+            self.assertEqual(rc, 0)
+            self.assertNotIn("--setup", ran[0][1])
+
+    def test_main_exports_hook_python_from_staged_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "bundle"
+            runtime = Path(tmp) / "jev-runtime.exe"
+            with patch.object(exe_entry, "_tty", return_value=False), patch.object(
+                exe_entry, "_stage_payload", return_value=payload
+            ), patch.object(
+                exe_entry, "_stage_runtime", return_value=runtime
+            ), patch.object(exe_entry, "_run_script", return_value=0), patch.dict(
+                os.environ, {}, clear=False
+            ):
+                os.environ.pop("JEV_HOOK_PYTHON", None)
+                exe_entry.main(["--check-key"])
+                self.assertEqual(os.environ.get("JEV_HOOK_PYTHON"), str(runtime))
+
+    def test_stage_payload_replaces_stale_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / ".jev-consult" / "bundle"
+            src = Path(tmp) / "payload-src"
+            (src / "skills" / "jev-consult").mkdir(parents=True)
+            (src / "skills" / "jev-consult" / "SKILL.md").write_text(
+                "x", encoding="utf-8"
+            )
+            bundle.mkdir(parents=True)
+            (bundle / "stale.txt").write_text("old", encoding="utf-8")
+            with patch.object(exe_entry, "BUNDLE_DIR", bundle), patch.object(
+                exe_entry, "_payload_dir", return_value=src
+            ):
+                out = exe_entry._stage_payload()
+            self.assertEqual(out, bundle)
+            self.assertTrue((bundle / "skills" / "jev-consult" / "SKILL.md").is_file())
+            self.assertFalse((bundle / "stale.txt").exists())
+            # no bundle-* staging leftovers next to it
+            self.assertEqual(
+                list((Path(tmp) / ".jev-consult").glob("bundle-*")), []
+            )
+
+    def test_stage_runtime_unfrozen_is_noop(self) -> None:
+        self.assertIsNone(exe_entry._stage_runtime())
+
+    def test_stage_runtime_frozen_copies_exe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_exe = Path(tmp) / "jev-setup-windows-amd64.exe"
+            fake_exe.write_bytes(b"MZ-fake")
+            runtime = Path(tmp) / "jev-consult" / "jev-runtime.exe"
+            runtime.parent.mkdir()
+            with patch.object(exe_entry.sys, "frozen", True, create=True), patch.object(
+                exe_entry.sys, "executable", str(fake_exe)
+            ), patch.object(exe_entry, "RUNTIME_EXE", runtime):
+                out = exe_entry._stage_runtime()
+            self.assertEqual(out, runtime)
+            self.assertEqual(runtime.read_bytes(), b"MZ-fake")
 
 
 if __name__ == "__main__":

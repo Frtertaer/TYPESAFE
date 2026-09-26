@@ -383,7 +383,7 @@ def scan_skill(skill_dir, include_fixtures=False, skip=None):
     fm = parse_frontmatter(text)
 
     def add(check, sev, file, line, msg, evidence):
-        f = Finding(skill_name, check, sev, str(file.relative_to(skill_dir)),
+        f = Finding(skill_name, check, sev, file.relative_to(skill_dir).as_posix(),
                     line, msg, evidence)
         f.path = file  # absolute path for --since mtime filtering
         findings.append(f)

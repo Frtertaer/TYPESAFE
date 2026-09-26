@@ -414,7 +414,7 @@ def handle(
             return {}
         return {
             "hookSpecificOutput": {
-                "hookEventName": "UserPromptSubmit",
+                "hookEventName": event or "UserPromptSubmit",
                 "additionalContext": note,
             }
         }
@@ -535,10 +535,15 @@ def handle(
         return {"context": note}
     if harness == "grok":
         return {}
-    if event == "UserPromptSubmit" or harness in {"claude-code", "codex"}:
+    if event in {"UserPromptSubmit", "beforeSubmitPrompt", "BeforeAgent"} or harness in {
+        "claude-code",
+        "codex",
+        "cursor",
+        "gemini",
+    }:
         return {
             "hookSpecificOutput": {
-                "hookEventName": "UserPromptSubmit",
+                "hookEventName": event or "UserPromptSubmit",
                 "additionalContext": note,
             }
         }
@@ -580,7 +585,7 @@ def allowed_events() -> set[str]:
     if raw:
         allowed = {part.strip() for part in raw.split(",") if part.strip()}
     else:
-        allowed = {"UserPromptSubmit", "pre_llm_call"}
+        allowed = {"UserPromptSubmit", "pre_llm_call", "beforeSubmitPrompt", "BeforeAgent"}
     skip = os.environ.get("JEV_HOOK_SKIP_EVENTS", "").strip()
     if skip:
         allowed -= {part.strip() for part in skip.split(",") if part.strip()}
@@ -753,8 +758,8 @@ def _self_test() -> int:
 # non-empty shape depends on the harness.
 PAYLOAD_SCHEMA = {
     "context": {"required": False, "type": "string injected note (hermes pre_llm_call)"},
-    "hookSpecificOutput": {"required": False, "type": "object (claude-code/codex UserPromptSubmit)"},
-    "hookSpecificOutput.hookEventName": {"required": True, "type": "string, always UserPromptSubmit"},
+    "hookSpecificOutput": {"required": False, "type": "object (claude-code/codex UserPromptSubmit, cursor beforeSubmitPrompt, gemini BeforeAgent)"},
+    "hookSpecificOutput.hookEventName": {"required": True, "type": "string, the triggering event name (UserPromptSubmit default)"},
     "hookSpecificOutput.additionalContext": {"required": True, "type": "string injected note"},
 }
 

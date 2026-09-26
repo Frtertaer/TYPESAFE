@@ -830,7 +830,7 @@ class InventoryHookTests(unittest.TestCase):
                 rc = HOOK.main(["--events"])
         self.assertEqual(rc, 0)
         names = buf.getvalue().split()
-        self.assertEqual(names, ["UserPromptSubmit", "pre_llm_call"])
+        self.assertEqual(names, ["BeforeAgent", "UserPromptSubmit", "beforeSubmitPrompt", "pre_llm_call"])
         buf = io.StringIO()
         with patch.dict(os.environ, {"JEV_HOOK_EVENTS": "b_event,a_event"}):
             with patch("sys.stdout", buf):
@@ -843,7 +843,7 @@ class InventoryHookTests(unittest.TestCase):
                 rc = HOOK.main(["--events", "--json"])
         self.assertEqual(rc, 0)
         self.assertEqual(
-            json.loads(buf.getvalue()), ["UserPromptSubmit", "pre_llm_call"]
+            json.loads(buf.getvalue()), ["BeforeAgent", "UserPromptSubmit", "beforeSubmitPrompt", "pre_llm_call"]
         )
         buf = io.StringIO()
         with patch.dict(os.environ, {"JEV_HOOK_EVENTS": ""}):
@@ -852,7 +852,7 @@ class InventoryHookTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         rows = [json.loads(l) for l in buf.getvalue().splitlines()]
         self.assertEqual(
-            rows, [{"event": "UserPromptSubmit"}, {"event": "pre_llm_call"}]
+            rows, [{"event": "BeforeAgent"}, {"event": "UserPromptSubmit"}, {"event": "beforeSubmitPrompt"}, {"event": "pre_llm_call"}]
         )
         buf = io.StringIO()
         with patch.dict(os.environ, {"JEV_HOOK_EVENTS": ""}):
@@ -863,7 +863,14 @@ class InventoryHookTests(unittest.TestCase):
 
         rows = list(_csv.reader(io.StringIO(buf.getvalue())))
         self.assertEqual(
-            rows, [["event"], ["UserPromptSubmit"], ["pre_llm_call"]]
+            rows,
+            [
+                ["event"],
+                ["BeforeAgent"],
+                ["UserPromptSubmit"],
+                ["beforeSubmitPrompt"],
+                ["pre_llm_call"],
+            ],
         )
         buf = io.StringIO()
         with patch.dict(os.environ, {"JEV_HOOK_EVENTS": ""}):
@@ -954,7 +961,10 @@ class InventoryHookTests(unittest.TestCase):
             with patch("sys.stdout", buf):
                 rc = HOOK.main(["--events"])
         self.assertEqual(rc, 0)
-        self.assertEqual(buf.getvalue().split(), ["UserPromptSubmit"])
+        self.assertEqual(
+            buf.getvalue().split(),
+            ["BeforeAgent", "UserPromptSubmit", "beforeSubmitPrompt"],
+        )
         items = INV.scan("hermes", hermes=FIXTURE)
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"JEV_HOOK_SKIP_EVENTS": "UserPromptSubmit"}):

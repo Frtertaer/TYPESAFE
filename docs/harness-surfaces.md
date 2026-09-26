@@ -1,10 +1,8 @@
 # Harness surface evaluation — Cursor & Gemini
 
-Evaluation of the hook/instruction surfaces of harnesses currently in
-`install.py`'s BLOCKED set. Both are viable extension targets; they stay
-blocked until the per-harness protocol work below lands. Checked
-2026-09-26 against vendor docs; re-verify before wiring — hook event
-names move fast.
+Evaluation of the hook/instruction surfaces of harnesses formerly in
+`install.py`'s BLOCKED set. Both are now wired (see "Status" under each);
+checked 2026-09-26 against vendor docs — hook event names move fast.
 
 ## Cursor — `cursor.com/docs/hooks.md`, `cursor.com/docs/reference/third-party-hooks.md`
 
@@ -18,11 +16,14 @@ names move fast.
   - `preCompact` — maps `PreCompact` → the `compact_hook.py` slot.
   - Claude hook names in a `matcher` field are auto-mapped
     (`UserPromptSubmit` → `beforeSubmitPrompt`), but event names are not.
-- Gaps to close before unblocking: project hooks only run in *trusted
-  workspaces* (same trust problem as Codex — needs the same one-time
-  step doc); `beforeSubmitPrompt` does not fire for cloud agents;
-  `targets()` needs a `.cursor` skill dir + `AGENTS.md`-style instruction
-  file (Cursor reads `.cursor/rules` / `AGENTS.md`).
+- Status: WIRED — `install.py` writes `~/.cursor/hooks.json`
+  `beforeSubmitPrompt` → `inventory_hook.py`, the skill to
+  `~/.cursor/skills/jev-consult`, and the instruction rule to
+  `~/.cursor/rules/jev-consult.mdc` (file-backed user rules; known to be
+  flaky under the Agents window — Cursor Settings rules are the
+  reliable path). `postToolUse` exists but can only rewrite MCP-tool
+  output (`updated_mcp_tool_output`), so `compact_hook.py` is not wired.
+  `beforeSubmitPrompt` does not fire for cloud agents.
 
 ## Gemini CLI — `geminicli.com/docs/hooks/`
 
@@ -32,14 +33,14 @@ names move fast.
   - `BeforeAgent` — after prompt submit, before planning;
     `hookSpecificOutput.additionalContext` appends to the prompt → the
     `inventory_hook.py` slot.
-  - `PreCompress` — before context compression → the `compact_hook.py`
-    slot.
-- Gaps to close before unblocking: settings.json is a shared config —
-  `upsert` must merge into the existing `hooks` object (same shape as
-  `upsert_claude_event`, new paths); hook entry schema is
-  `{matcher, hooks: [{name, type: "command", command}]}` — nested one
-  level deeper than Claude's; `targets()` needs `~/.gemini` skill dir +
-  `GEMINI.md` instruction file mapping.
+  - `PreCompress` — before context compression; it carries no tool
+    result, so nothing maps to `compact_hook.py` (PostToolUse-only).
+- Status: WIRED — `install.py` merges `BeforeAgent` →
+  `inventory_hook.py` into the `hooks` object of the shared
+  `~/.gemini/settings.json` (`{matcher, hooks: [{name, type: command,
+  command, timeout(ms)}]}` entries), the skill to
+  `~/.gemini/skills/jev-consult`, instructions to `~/.gemini/GEMINI.md`.
+  No tool-output rewrite event exists → no live compaction.
 
 ## Still unevaluated
 

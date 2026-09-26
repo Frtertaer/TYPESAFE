@@ -19,12 +19,10 @@ HOOK_MARK = "compact_hook.py"
 TOOLS_HOOK_MARK = "inventory_hook.py"
 PLUGIN_NAME = "jev-compact"
 
-ALLOWED = ("hermes", "claude-code", "codex", "grok")
-# cursor/gemini have viable hook surfaces but need per-harness protocol
-# work — see docs/harness-surfaces.md for the evaluation.
+ALLOWED = ("hermes", "claude-code", "codex", "grok", "cursor", "gemini")
+# Harnesses without a usable hook/instruction surface stay refused — see
+# docs/harness-surfaces.md for the evaluation.
 BLOCKED = {
-    "cursor",
-    "gemini",
     "antigravity",
     "windsurf",
     "cline",
@@ -38,9 +36,22 @@ MARKER_END = "<!-- jev-consult:end -->"
 SNIPPET = """<!-- jev-consult:start -->
 ## Jev consult (TypeSafe)
 
-You inspect; Jev decides. On every coding or planning task, load `jev-consult` and run its `scripts/jev.py` before you pick approach, keep vs change, architecture, library, delete, or good-enough. If `ask` stdout has no `decision.action`, do not pick architecture, library, or approach. Write the request with `scripts/jev.py scaffold` then `ask`. If you drift, get stuck, loop, or cannot solve, call Jev with that state and a Choice of next moves. If you do not know or do not remember, load `.jev-trace.json` and ask. A hook IDF-shortlists already-installed skills/plugins/MCP then one Jev pick (fail-open) for the user prompt (Claude UserPromptSubmit, Hermes pre_llm_call, Codex UserPromptSubmit in `~/.codex/hooks.json` — trust it in `/hooks` or Codex skips it). If `.jev-tools-miss.json` exists, run `scripts/peer_fill.py --from-miss`; if it prints `no_peer`, run `scripts/catalog_fill.py --from-miss` (Jev pick, inspect, `hermes skills install --yes` one skill); if that prints `no_catalog`, run `scripts/apply_fill.py --from-miss` (one Hermes plugin `--no-enable` or one official MCP). If `.jev-tools.json` exists and `scripts/inventory.py --check-sidecar` prints `fresh`, load those names. Else run `scripts/inventory.py` then Jev Choice on the shortlist. Do not ask the user to pick tools. Hook never auto-installs. Never `--force`. Never npx. Never `claude plugin install`. Never print `TYPESAFE_API_KEY`.
+You inspect; Jev decides. On every coding or planning task, load `jev-consult` and run its `scripts/jev.py` before you pick approach, keep vs change, architecture, library, delete, or good-enough. If `ask` stdout has no `decision.action`, do not pick architecture, library, or approach. Write the request with `scripts/jev.py scaffold` then `ask`. If you drift, get stuck, loop, or cannot solve, call Jev with that state and a Choice of next moves. If you do not know or do not remember, load `.jev-trace.json` and ask. A hook IDF-shortlists already-installed skills/plugins/MCP then one Jev pick (fail-open) for the user prompt (Claude UserPromptSubmit, Hermes pre_llm_call, Codex UserPromptSubmit in `~/.codex/hooks.json` — trust it in `/hooks` or Codex skips it, Cursor beforeSubmitPrompt in `~/.cursor/hooks.json`, Gemini BeforeAgent in `~/.gemini/settings.json`). If `.jev-tools-miss.json` exists, run `scripts/peer_fill.py --from-miss`; if it prints `no_peer`, run `scripts/catalog_fill.py --from-miss` (Jev pick, inspect, `hermes skills install --yes` one skill); if that prints `no_catalog`, run `scripts/apply_fill.py --from-miss` (one Hermes plugin `--no-enable` or one official MCP). If `.jev-tools.json` exists and `scripts/inventory.py --check-sidecar` prints `fresh`, load those names. Else run `scripts/inventory.py` then Jev Choice on the shortlist. Do not ask the user to pick tools. Hook never auto-installs. Never `--force`. Never npx. Never `claude plugin install`. Never print `TYPESAFE_API_KEY`.
 <!-- jev-consult:end -->
 """
+
+# Cursor user rules live under ~/.cursor/rules/*.mdc: the YAML frontmatter
+# must be the file's first lines, so it is written as a prologue ahead of
+# the marker block — and strip_snippet removes the dedicated file once
+# only the prologue remains.
+CURSOR_RULE_PROLOGUE = (
+    "---\n"
+    "description: jev-consult routing guidance — consult Jev before tool/approach picks\n"
+    "alwaysApply: true\n"
+    "---"
+)
+# Harnesses whose instruction file needs a header before the marker block.
+INSTRUCTION_PROLOGUES = {"cursor": CURSOR_RULE_PROLOGUE}
 
 
 _SOURCE: Path | None = None
@@ -172,6 +183,14 @@ def targets(home: Path | None = None, hermes: Path | None = None) -> dict[str, d
             "skills": [home / ".grok" / "skills"],
             "instructions": [home / ".grok" / "AGENTS.md"],
         },
+        "cursor": {
+            "skills": [home / ".cursor" / "skills"],
+            "instructions": [home / ".cursor" / "rules" / "jev-consult.mdc"],
+        },
+        "gemini": {
+            "skills": [home / ".gemini" / "skills"],
+            "instructions": [home / ".gemini" / "GEMINI.md"],
+        },
     }
 
 
@@ -262,7 +281,9 @@ def _remove_blocks(text: str) -> tuple[str, int]:
     return text, first
 
 
-def upsert_snippet(path: Path, dry_run: bool, snippet: str | None = None) -> str:
+def upsert_snippet(
+    path: Path, dry_run: bool, snippet: str | None = None, prologue: str | None = None
+) -> str:
     if dry_run:
         return "upsert " + str(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -273,6 +294,8 @@ def upsert_snippet(path: Path, dry_run: bool, snippet: str | None = None) -> str
         head = cleaned[:first].rstrip()
         tail = cleaned[first:].lstrip("\r\n")
         text = (head + "\n\n" if head else "") + block + tail
+    elif not text.strip() and prologue:
+        text = prologue.strip() + "\n\n" + block
     else:
         if text and not text.endswith("\n"):
             text += "\n"
@@ -283,7 +306,7 @@ def upsert_snippet(path: Path, dry_run: bool, snippet: str | None = None) -> str
     return "wrote " + str(path)
 
 
-def strip_snippet(path: Path, dry_run: bool) -> str:
+def strip_snippet(path: Path, dry_run: bool, prologue: str | None = None) -> str:
     if not path.exists():
         return "missing " + str(path)
     if dry_run:
@@ -292,6 +315,9 @@ def strip_snippet(path: Path, dry_run: bool) -> str:
     cleaned, first = _remove_blocks(text)
     if first < 0:
         return "no marker " + str(path)
+    if prologue is not None and cleaned.strip() == prologue.strip():
+        path.unlink()
+        return "removed " + str(path)
     text = (cleaned[:first].rstrip() + "\n" + cleaned[first:].lstrip("\n")).strip() + "\n"
     path.write_text(text, encoding="utf-8")
     return "stripped " + str(path)
@@ -492,6 +518,111 @@ def write_grok_hook(path: Path, script: Path, dry_run: bool) -> str:
     return write_grok_event(path, "PostToolUse", script, 8, dry_run)
 
 
+# Cursor: ~/.cursor/hooks.json is {"version": 1, "hooks": {<event>:
+# [{command, matcher?, timeout}]}} — flat entries, command is a shell
+# string (same "exe" "script" quoting as grok/codex).
+def upsert_cursor_event(
+    path: Path, event: str, script: Path, marker: str, timeout: int, dry_run: bool
+) -> str:
+    if dry_run:
+        return "upsert hook %s %s" % (event, path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return "invalid json " + str(path)
+        if not isinstance(data, dict):
+            return "invalid json " + str(path)
+    else:
+        data = {}
+    data.setdefault("version", 1)
+    hooks = data.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        hooks = {}
+        data["hooks"] = hooks
+    entries = hooks.setdefault(event, [])
+    if not isinstance(entries, list):
+        entries = []
+        hooks[event] = entries
+    entries[:] = [entry for entry in entries if not _entry_is_ours(entry, marker)]
+    entries.append({"command": grok_hook_command(script), "timeout": timeout})
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return "wrote hook %s %s" % (event, path)
+
+
+def strip_cursor_event(path: Path, event: str, marker: str, dry_run: bool) -> str:
+    if not path.exists():
+        return "missing " + str(path)
+    if dry_run:
+        return "strip hook %s %s" % (event, path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return "invalid json " + str(path)
+    if not isinstance(data, dict):
+        return "invalid json " + str(path)
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return "no hooks " + str(path)
+    entries = hooks.get(event)
+    if not isinstance(entries, list):
+        return "no %s " % event + str(path)
+    kept = [entry for entry in entries if not _entry_is_ours(entry, marker)]
+    if len(kept) == len(entries):
+        return "no marker " + str(path)
+    if kept:
+        hooks[event] = kept
+    else:
+        hooks.pop(event, None)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return "stripped hook %s %s" % (event, path)
+
+
+# Gemini CLI: ~/.gemini/settings.json holds a Claude-style nested "hooks"
+# map, but entries are {matcher, hooks: [{name, type, command, timeout}]}
+# and timeout is milliseconds.
+def upsert_gemini_event(
+    settings: Path, event: str, script: Path, marker: str, timeout_ms: int, dry_run: bool
+) -> str:
+    if dry_run:
+        return "upsert hook %s %s" % (event, settings)
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    if settings.exists():
+        try:
+            data = json.loads(settings.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return "invalid json " + str(settings)
+        if not isinstance(data, dict):
+            return "invalid json " + str(settings)
+    else:
+        data = {}
+    hooks = data.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        hooks = {}
+        data["hooks"] = hooks
+    entries = hooks.setdefault(event, [])
+    if not isinstance(entries, list):
+        entries = []
+        hooks[event] = entries
+    entries[:] = [entry for entry in entries if not _entry_is_ours(entry, marker)]
+    entries.append(
+        {
+            "matcher": "*",
+            "hooks": [
+                {
+                    "name": "jev-consult-%s" % marker.split(".")[0],
+                    "type": "command",
+                    "command": grok_hook_command(script),
+                    "timeout": timeout_ms,
+                }
+            ],
+        }
+    )
+    settings.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return "wrote hook %s %s" % (event, settings)
+
+
 def copy_hermes_plugin(src: Path, dest: Path, dry_run: bool) -> str:
     if dry_run:
         return "plugin -> " + str(dest)
@@ -644,6 +775,34 @@ def install_live_hooks(agents: list[str], dry_run: bool) -> None:
             "codex trust ~/.codex/hooks.json once via /hooks "
             "(Codex skips untrusted hooks)\n"
         )
+    if "cursor" in agents:
+        skill = home / ".cursor" / "skills" / "jev-consult"
+        sys.stdout.write(
+            "cursor %s\n"
+            % upsert_cursor_event(
+                home / ".cursor" / "hooks.json",
+                "beforeSubmitPrompt",
+                hook_script(skill, TOOLS_HOOK_MARK),
+                TOOLS_HOOK_MARK,
+                20,
+                dry_run,
+            )
+        )
+        sys.stdout.write("cursor live mutate: none (postToolUse cannot rewrite tool output)\n")
+    if "gemini" in agents:
+        skill = home / ".gemini" / "skills" / "jev-consult"
+        sys.stdout.write(
+            "gemini %s\n"
+            % upsert_gemini_event(
+                home / ".gemini" / "settings.json",
+                "BeforeAgent",
+                hook_script(skill, TOOLS_HOOK_MARK),
+                TOOLS_HOOK_MARK,
+                20000,
+                dry_run,
+            )
+        )
+        sys.stdout.write("gemini live mutate: none (no tool-output rewrite event)\n")
 
 
 def uninstall_live_hooks(agents: list[str], dry_run: bool) -> None:
@@ -672,6 +831,22 @@ def uninstall_live_hooks(agents: list[str], dry_run: bool) -> None:
             "codex %s\n"
             % strip_codex_event(home / ".codex" / "hooks.json", "UserPromptSubmit", TOOLS_HOOK_MARK, dry_run)
         )
+    if "cursor" in agents:
+        sys.stdout.write(
+            "cursor %s\n"
+            % strip_cursor_event(
+                home / ".cursor" / "hooks.json", "beforeSubmitPrompt", TOOLS_HOOK_MARK, dry_run
+            )
+        )
+    if "gemini" in agents:
+        # ~/.gemini/settings.json shares the nested {hooks: {event: [...]}}
+        # layout strip_claude_event walks.
+        sys.stdout.write(
+            "gemini %s\n"
+            % strip_claude_event(
+                home / ".gemini" / "settings.json", "BeforeAgent", TOOLS_HOOK_MARK, dry_run
+            )
+        )
 
 
 def install(agents: list[str], dry_run: bool) -> int:
@@ -685,7 +860,17 @@ def install(agents: list[str], dry_run: bool) -> int:
             dest = copy_skill(src, parent, dry_run)
             sys.stdout.write("%s skill -> %s\n" % (name, dest))
         for instruction in spec["instructions"]:
-            sys.stdout.write("%s %s\n" % (name, upsert_snippet(instruction, dry_run)))
+            sys.stdout.write(
+                "%s %s\n"
+                % (
+                    name,
+                    upsert_snippet(
+                        instruction,
+                        dry_run,
+                        prologue=INSTRUCTION_PROLOGUES.get(name),
+                    ),
+                )
+            )
     write_repo_instructions(dry_run)
     install_live_hooks(agents, dry_run)
     if not dry_run:
@@ -710,7 +895,15 @@ def uninstall(agents: list[str], dry_run: bool) -> int:
             if not dry_run and (dest.exists() or dest.is_symlink()):
                 _remove_path(dest)
         for instruction in spec["instructions"]:
-            sys.stdout.write("%s %s\n" % (name, strip_snippet(instruction, dry_run)))
+            sys.stdout.write(
+                "%s %s\n"
+                % (
+                    name,
+                    strip_snippet(
+                        instruction, dry_run, INSTRUCTION_PROLOGUES.get(name)
+                    ),
+                )
+            )
     uninstall_live_hooks(agents, dry_run)
     return 0
 
@@ -773,6 +966,8 @@ def harness_env_paths(agents: list[str]) -> list[Path]:
         "claude-code": home / ".claude" / ".env",
         "codex": home / ".codex" / ".env",
         "grok": home / ".grok" / ".env",
+        "cursor": home / ".cursor" / ".env",
+        "gemini": home / ".gemini" / ".env",
     }
     paths = []
     for name in agents:

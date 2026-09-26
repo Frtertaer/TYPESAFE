@@ -7,6 +7,7 @@ status mix, explicit/strong-pick rates, need_skill mean, latency percentiles.
 import argparse
 import csv
 import datetime
+import difflib
 import io
 import json
 import os
@@ -758,6 +759,339 @@ HEALTH_COLS = [
 ]
 
 
+# --calibrate -----------------------------------------------------------
+# Offline threshold recommendation: replay each replayable routing record
+# under candidate (confidence_floor, strong_pick) pairs using the same rule
+# order as inventory.resolve_picker (plus jev.decide's confidence-floor
+# escalate, which preempts the picker), then report the pair minimising
+# escalate + weak-winner share. Recommendations only — policy.json is never
+# rewritten here; --apply prints a diff or writes a patched copy.
+
+CALIBRATE_STEP = 0.05
+# A "strong pick" under 0.5 is no pick at all; keep the search above the
+# coin-flip line and the floor strictly below it (policy_lint P004).
+CALIBRATE_FLOOR_RANGE = (0.05, 0.90)
+CALIBRATE_STRONG_RANGE = (0.50, 0.99)
+# health buckets at or above this error+timeout rate are excluded from
+# calibration when --harness-health accompanies --calibrate.
+CALIBRATE_HEALTH_BAR = 0.5
+CALIBRATE_REPLAYABLE = {"winner", "escalate", "none"}
+
+
+def _policy_path() -> Path:
+    """The policy.json --apply would patch: JEV_POLICY wins, else the
+    bundled file — same precedence as inventory._policy_dict."""
+    env_path = os.environ.get("JEV_POLICY", "").strip()
+    if env_path:
+        return Path(env_path)
+    return Path(__file__).resolve().parent.parent / "policy.json"
+
+
+def _policy_thresholds(policy: dict) -> dict[str, float]:
+    def f(key: str, default: float) -> float:
+        try:
+            return float(policy.get(key, default))
+        except (TypeError, ValueError):
+            return default
+    return {
+        "confidence_floor": f("confidence_floor", 0.55),
+        "strong_pick": f("strong_pick", 0.85),
+        "tight_gap": f("tight_gap", 0.08),
+        "noul_yes": f("noul_yes", 0.7),
+        "noul_no": f("noul_no", 0.3),
+    }
+
+
+def _entry_window(item: dict) -> str:
+    ts = _entry_ts(item)
+    if ts is None:
+        return "unknown"
+    return datetime.datetime.fromtimestamp(
+        ts, tz=datetime.timezone.utc
+    ).strftime("%Y-%m-%dT%H:00Z")
+
+
+def _degraded_buckets(entries: list[dict]) -> set[tuple[str, str]]:
+    """(harness, utc-hour) pairs too sick to inform calibration."""
+    out = set()
+    for row in harness_health(entries):
+        if row["attempted"] and (
+            row["error_rate"] + row["timeout_rate"] >= CALIBRATE_HEALTH_BAR
+        ):
+            out.add((row["harness"], row["window"]))
+    return out
+
+
+def _probs_of(item: dict) -> dict[str, float] | None:
+    probs = item.get("probabilities")
+    if not isinstance(probs, dict) or not probs:
+        return None
+    out = {}
+    for key, value in probs.items():
+        if not isinstance(key, str):
+            return None
+        try:
+            out[key] = float(value)
+        except (TypeError, ValueError):
+            return None
+        if out[key] != out[key]:  # NaN
+            return None
+    return out
+
+
+def _need_of(item: dict) -> float | None:
+    need = item.get("need")
+    if not isinstance(need, (int, float)) or isinstance(need, bool):
+        return None
+    return float(need)
+
+
+def _calibrate_eligible(item: dict) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if item.get("explicit") is True or item.get("dedupe") is True:
+        return False
+    if str(item.get("jev_status") or "") not in CALIBRATE_REPLAYABLE:
+        return False
+    return _probs_of(item) is not None and _need_of(item) is not None
+
+
+def _replay(item: dict, floor: float, strong: float, yes: float, no: float) -> str:
+    """resolve_picker's rule chain under candidate thresholds; returns
+    strong_winner|weak_winner|escalate|none."""
+    probs = _probs_of(item) or {}
+    top = max(probs.values())
+    load = max(probs.items(), key=lambda kv: kv[1])[0]
+    in_shortlist = load in {str(x) for x in item.get("shortlist") or []}
+    if top < floor:
+        return "escalate"  # jev.decide conf_floor preempts the picker
+    if load in ("none", ""):
+        return "none"
+    if in_shortlist and top >= strong:
+        return "strong_winner"
+    need = _need_of(item) or 0.0
+    if need <= no:
+        return "none"
+    if need < yes:
+        return "escalate"
+    if not in_shortlist:
+        return "none"
+    return "weak_winner"
+
+
+def _top_gap(item: dict) -> float | None:
+    probs = _probs_of(item)
+    if not probs or len(probs) < 2:
+        return None
+    ordered = sorted(probs.values(), reverse=True)
+    return ordered[0] - ordered[1]
+
+
+def _grid(lo: float, hi: float, current: float) -> list[float]:
+    steps = int(round((hi - lo) / CALIBRATE_STEP)) + 1
+    values = {round(lo + i * CALIBRATE_STEP, 4) for i in range(steps)}
+    values.add(round(current, 4))
+    return sorted(v for v in values if lo <= v <= hi)
+
+
+def calibrate(entries: list[dict], policy: dict | None = None,
+              health_filter: bool = False) -> dict:
+    """Grid-search (confidence_floor, strong_pick) minimising
+    escalate+weak-winner share; also a tight_gap separator for
+    strong-vs-nonstrong winners. Deterministic: ties resolve to the
+    candidate closest to the current policy (no-churn bias)."""
+    policy = policy or {}
+    cur = _policy_thresholds(policy)
+    eligible, skipped, excluded = [], 0, 0
+    degraded = _degraded_buckets(entries) if health_filter else set()
+    for item in entries:
+        if not _calibrate_eligible(item):
+            skipped += 1
+            continue
+        if degraded and (
+            str(item.get("harness") or "unknown"), _entry_window(item)
+        ) in degraded:
+            excluded += 1
+            continue
+        eligible.append(item)
+
+    def score(floor: float, strong: float) -> dict:
+        # A winner is false when Jev's own record was not confident
+        # (strong_pick false) — replayed labels cannot whitewash it by
+        # lowering the candidate threshold.
+        counts = {"escalate": 0, "weak_winner": 0, "strong_winner": 0, "none": 0}
+        bad = 0
+        for item in eligible:
+            outcome = _replay(item, floor, strong, cur["noul_yes"], cur["noul_no"])
+            counts[outcome] += 1
+            if outcome in ("escalate", "weak_winner"):
+                bad += 1
+            elif outcome == "strong_winner" and not item.get("strong_pick"):
+                bad += 1
+        n = max(len(eligible), 1)
+        return {
+            "cost": round(bad / n, 4),
+            "rates": {k: round(v / n, 4) for k, v in counts.items()},
+        }
+
+    floors = _grid(*CALIBRATE_FLOOR_RANGE, cur["confidence_floor"])
+    strongs = _grid(*CALIBRATE_STRONG_RANGE, cur["strong_pick"])
+    best = None
+    for floor in floors:
+        for strong in strongs:
+            if floor >= strong:
+                continue  # policy_lint P004
+            cand = score(floor, strong)
+            key = (
+                cand["cost"],
+                abs(floor - cur["confidence_floor"])
+                + abs(strong - cur["strong_pick"]),
+                floor,
+                strong,
+            )
+            if best is None or key < best[0]:
+                best = (key, floor, strong, cand)
+    _, floor, strong, cand = best if best else (None, None, None, None)
+    rec = {"confidence_floor": floor, "strong_pick": strong}
+
+    # tight_gap: gap separating recorded strong winners from the rest
+    gaps = []
+    for item in eligible:
+        gap = _top_gap(item)
+        if gap is None:
+            continue
+        good = item.get("jev_status") == "winner" and bool(item.get("strong_pick"))
+        gaps.append((gap, good))
+    tight_rec = None
+    if len(gaps) >= 5 and any(g for _, g in gaps) and any(not g for _, g in gaps):
+        mids = sorted(
+            {(a + b) / 2 for (a, _), (b, _) in zip(gaps, sorted(gaps)[1:])}
+            or {gaps[0][0]}
+        )
+        best_gap = None
+        for t in mids:
+            tp = sum(1 for g, good in gaps if good and g >= t)
+            fp = sum(1 for g, good in gaps if not good and g >= t)
+            fn = sum(1 for g, good in gaps if good and g < t)
+            tn = sum(1 for g, good in gaps if not good and g < t)
+            j = (tp / (tp + fn) if tp + fn else 0.0) - (
+                fp / (fp + tn) if fp + tn else 0.0
+            )
+            key = (-j, t)
+            if best_gap is None or key < best_gap[0]:
+                best_gap = (key, t)
+        if best_gap is not None:
+            tight_rec = round(max(0.0, min(1.0, best_gap[1])), 4)
+    if tight_rec is None:
+        tight_rec = cur["tight_gap"]
+    rec["tight_gap"] = tight_rec
+
+    current_cost = score(cur["confidence_floor"], cur["strong_pick"])
+    at_boundary = [
+        name
+        for name, (rng, val) in {
+            "confidence_floor": (CALIBRATE_FLOOR_RANGE, rec["confidence_floor"]),
+            "strong_pick": (CALIBRATE_STRONG_RANGE, rec["strong_pick"]),
+        }.items()
+        if val is not None and (val == rng[0] or val == rng[1])
+    ]
+    return {
+        "entries": len(eligible),
+        "skipped": skipped,
+        "health_excluded": excluded,
+        "degraded_buckets": [
+            {"harness": h, "window": w} for h, w in sorted(degraded)
+        ] if degraded else [],
+        "current": cur,
+        "recommended": rec,
+        "delta": {
+            key: round((rec.get(key) if rec.get(key) is not None else cur[key]) - cur[key], 4)
+            for key in ("confidence_floor", "strong_pick", "tight_gap")
+        },
+        "cost": {
+            "current": current_cost["cost"],
+            "recommended": cand["cost"] if cand else None,
+        },
+        "rates": cand["rates"] if cand else {},
+        "grid": {
+            "step": CALIBRATE_STEP,
+            "confidence_floor": list(CALIBRATE_FLOOR_RANGE),
+            "strong_pick": list(CALIBRATE_STRONG_RANGE),
+        },
+        "at_boundary": at_boundary,
+        "constraint": "confidence_floor < strong_pick (policy_lint P004)",
+        "note": "recommendation only — apply consciously (--apply prints the diff)",
+    }
+
+
+def _calibrate_policy_patch(path: Path, rec: dict) -> tuple[str, str]:
+    """(old_text, new_text) of policy.json with only the three threshold
+    keys replaced; preserves every other key verbatim via json round-trip."""
+    old = path.read_text(encoding="utf-8") if path.is_file() else "{}\n"
+    try:
+        data = json.loads(old)
+    except ValueError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    for key in ("confidence_floor", "strong_pick", "tight_gap"):
+        if rec.get(key) is not None:
+            data[key] = rec[key]
+    new = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    return old, new
+
+
+def format_calibrate(report: dict) -> str:
+    cur = report["current"]
+    rec = report["recommended"]
+    lines = [
+        "calibrate: %d replayable entr%s (%d skipped, %d health-excluded)"
+        % (
+            report["entries"],
+            "y" if report["entries"] == 1 else "ies",
+            report["skipped"],
+            report["health_excluded"],
+        ),
+        "%-18s %8s %12s %8s" % ("threshold", "current", "recommended", "delta"),
+    ]
+    for key in ("confidence_floor", "strong_pick", "tight_gap"):
+        lines.append(
+            "%-18s %8.4f %12.4f %+8.4f"
+            % (key, cur[key], rec[key], report["delta"][key])
+        )
+    rates = report.get("rates") or {}
+    lines.append(
+        "rates under recommended: escalate=%g weak_winner=%g strong_winner=%g none=%g"
+        % (
+            rates.get("escalate", 0),
+            rates.get("weak_winner", 0),
+            rates.get("strong_winner", 0),
+            rates.get("none", 0),
+        )
+    )
+    lines.append(
+        "cost: current=%g recommended=%s"
+        % (
+            report["cost"]["current"],
+            report["cost"]["recommended"],
+        )
+    )
+    if report.get("at_boundary"):
+        lines.append("warning: hit grid boundary for %s" % ", ".join(report["at_boundary"]))
+    return "\n".join(lines)
+
+
+def _calibrate_md(report: dict) -> str:
+    cur = report["current"]
+    rec = report["recommended"]
+    rows = ["| threshold | current | recommended | delta |", "| --- | --- | --- | --- |"]
+    for key in ("confidence_floor", "strong_pick", "tight_gap"):
+        rows.append(
+            "| %s | %.4f | %.4f | %+.4f |" % (key, cur[key], rec[key], report["delta"][key])
+        )
+    return "\n".join(rows)
+
+
 def format_health(rows: list[dict]) -> str:
     if not rows:
         return "no entries"
@@ -1245,6 +1579,19 @@ def main(argv: list[str] | None = None) -> int:
         dest="harness_health",
         action="store_true",
         help="Print per-harness per-UTC-hour timeout/error rates (quota signal; --json emits {harness_health: [...]})",
+    )
+    parser.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="Replay filtered entries under candidate (confidence_floor, strong_pick) thresholds and recommend the pair minimising escalate+weak-winner share (--json/--md apply); combined with --harness-health it first drops harness x hour buckets whose error+timeout rate is degraded",
+    )
+    parser.add_argument(
+        "--apply",
+        nargs="?",
+        const="-",
+        default="",
+        metavar="PATH",
+        help="With --calibrate: bare flag prints a unified diff of the resolved policy.json; PATH writes a patched copy there instead (policy.json itself is never rewritten)",
     )
     parser.add_argument(
         "--silent-since",
@@ -1966,6 +2313,54 @@ def main(argv: list[str] | None = None) -> int:
             items = items[skip:]
         return items
     entries = _filtered(all_entries)
+    if getattr(args, "calibrate", False):
+        report = calibrate(
+            entries,
+            policy=inventory._policy_dict(),
+            health_filter=getattr(args, "harness_health", False),
+        )
+        apply_arg = getattr(args, "apply", "") or ""
+        if apply_arg == "-":
+            old, new = _calibrate_policy_patch(
+                _policy_path(), report["recommended"]
+            )
+            report["diff"] = "".join(
+                difflib.unified_diff(
+                    old.splitlines(keepends=True),
+                    new.splitlines(keepends=True),
+                    fromfile=str(_policy_path()),
+                    tofile=str(_policy_path()) + " (recommended)",
+                )
+            )
+        elif apply_arg:
+            _old, patched = _calibrate_policy_patch(
+                _policy_path(), report["recommended"]
+            )
+            target = Path(apply_arg)
+            try:
+                _atomic_write(target, patched)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (target, exc))
+                return 1
+            report["applied_to"] = str(target)
+            sys.stderr.write("wrote patched policy copy to %s\n" % target)
+        if args.json:
+            sys.stdout.write(json.dumps(report, indent=2) + "\n")
+        elif getattr(args, "md", False):
+            sys.stdout.write(_calibrate_md(report) + "\n")
+        else:
+            sys.stdout.write(format_calibrate(report) + "\n")
+        if apply_arg == "-" and not args.json:
+            sys.stdout.write(report["diff"])
+        if args.out:
+            try:
+                _atomic_write(
+                    Path(args.out), json.dumps(report, indent=2) + "\n"
+                )
+                sys.stderr.write("wrote %s\n" % args.out)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+        return 0
     if getattr(args, "evidence", False):
         data = evidence_report(entries)
         rendered = (

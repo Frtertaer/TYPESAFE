@@ -125,6 +125,8 @@ def _locked(fn):
     _stage() could move over a payload the other one just deleted. The
     mkdir lock is atomic on Windows and POSIX; a lock older than two
     minutes is stale (holder died mid-stage) and gets broken."""
+    # Fresh home: ~/.jev-consult itself may not exist yet.
+    LOCK_DIR.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + 30
     while True:
         try:
@@ -136,7 +138,28 @@ def _locked(fn):
             except OSError:
                 stale = True
             if stale:
-                shutil.rmtree(LOCK_DIR, ignore_errors=True)
+                # Claim the stale dir by renaming it aside first: a second
+                # waiter that also judged it stale must not rmtree a fresh
+                # lock created in the gap. Re-check the claimed dir and
+                # restore it if a live lock was grabbed mid-race.
+                claim = LOCK_DIR.with_name(
+                    "%s.stale.%d" % (LOCK_DIR.name, os.getpid())
+                )
+                try:
+                    os.rename(LOCK_DIR, claim)
+                except OSError:
+                    continue
+                try:
+                    still_stale = time.time() - claim.stat().st_mtime > 120
+                except OSError:
+                    still_stale = True
+                if still_stale:
+                    shutil.rmtree(claim, ignore_errors=True)
+                elif not LOCK_DIR.exists():
+                    try:
+                        os.rename(claim, LOCK_DIR)
+                    except OSError:
+                        pass  # leave the orphan; next stale sweep clears it
                 continue
             if time.monotonic() > deadline:
                 raise TimeoutError("jev-setup: bundle lock held by another setup process")
@@ -163,19 +186,7 @@ def _stage() -> Path:
         shutil.rmtree(stage, ignore_errors=True)
 
 
-def main() -> int:
-    cleanup = None
-    try:
-        payload = _locked(_stage)
-    except (OSError, TimeoutError) as exc:
-        temp = Path(tempfile.mkdtemp(prefix="jev-setup-"))
-        payload = _extract(temp)
-        cleanup = temp
-        sys.stderr.write(
-            "jev-setup: warning: could not stage %s (%s); "
-            "installed paths may go stale after this run\\n" % (BUNDLE_DIR, exc)
-        )
-    args = sys.argv[1:]
+def _run_child(payload: Path, args: list) -> int:
     cmd = [
         sys.executable,
         str(payload / "scripts" / "install.py"),
@@ -185,11 +196,27 @@ def main() -> int:
     if not args and _tty():
         cmd.append("--setup")
     cmd.extend(args)
+    return subprocess.call(cmd)
+
+
+def main() -> int:
+    args = sys.argv[1:]
     try:
-        return subprocess.call(cmd)
-    finally:
-        if cleanup is not None:
-            shutil.rmtree(cleanup, ignore_errors=True)
+        # The lock spans the child install too: install.py reads --source
+        # while it runs, so a concurrent setup must not swap the bundle
+        # out from under it.
+        return _locked(lambda: _run_child(_stage(), args))
+    except (OSError, TimeoutError) as exc:
+        run_dir = Path(tempfile.mkdtemp(prefix="jev-setup-"))
+        payload = _extract(run_dir)
+        sys.stderr.write(
+            "jev-setup: warning: could not stage %s (%s); "
+            "installed paths may go stale after this run\\n" % (BUNDLE_DIR, exc)
+        )
+        try:
+            return _run_child(payload, args)
+        finally:
+            shutil.rmtree(run_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

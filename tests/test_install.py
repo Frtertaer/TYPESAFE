@@ -625,6 +625,31 @@ class HermesConfigBootstrapTests(unittest.TestCase):
             )
             self.assertFalse((hermes / "config.yaml").exists())
 
+    def test_empty_home_dir_is_not_layout(self) -> None:
+        """An empty ~/.hermes left behind by an aborted run is not a
+        harness layout — it must not get a config.yaml."""
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = Path(tmp) / ".hermes"
+            hermes.mkdir()
+            self.assertIn(
+                "no harness layout", install.ensure_hermes_config(hermes, False)
+            )
+            self.assertFalse((hermes / "config.yaml").exists())
+
+    def test_dry_run_fresh_home_projects_creation(self) -> None:
+        """--dry-run on a fresh HOME previews what the real run does:
+        the plugin copy creates the layout first, so the config line is
+        'create', not 'skipped'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes = Path(tmp) / ".hermes"
+            self.assertIn("create", install.ensure_hermes_config(hermes, True))
+            self.assertFalse(hermes.exists())
+            # and the enable step must not then report the config missing
+            self.assertIn(
+                "enable jev-compact",
+                install.enable_hermes_plugin(hermes / "config.yaml", "jev-compact", True),
+            )
+
     def test_existing_config_untouched(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             hermes = Path(tmp) / ".hermes"

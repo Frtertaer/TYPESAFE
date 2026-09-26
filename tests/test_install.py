@@ -365,8 +365,11 @@ class InstallCoverageTests(unittest.TestCase):
         self.assertEqual(install.parse_agents(""), list(install.ALLOWED))
         self.assertEqual(install.parse_agents("claude-code"), ["claude-code"])
         self.assertEqual(install.parse_agents(" codex , grok "), ["codex", "grok"])
+        self.assertEqual(
+            install.parse_agents("cursor,gemini"), ["cursor", "gemini"]
+        )
         with self.assertRaises(SystemExit):
-            install.parse_agents("cursor")
+            install.parse_agents("copilot")
         with self.assertRaises(SystemExit):
             install.parse_agents("claude-code,copilot")
         with self.assertRaises(SystemExit):
@@ -376,10 +379,22 @@ class InstallCoverageTests(unittest.TestCase):
         home = Path("/home/u")
         hermes = Path("/hermes")
         mapping = install.targets(home, hermes)
-        self.assertEqual(set(mapping), {"hermes", "claude-code", "codex", "grok"})
+        self.assertEqual(
+            set(mapping),
+            {"hermes", "claude-code", "codex", "grok", "cursor", "gemini"},
+        )
         self.assertEqual(mapping["codex"]["skills"], [home / ".codex" / "skills", home / ".agents" / "skills"])
         self.assertEqual(mapping["hermes"]["instructions"], [])
         self.assertIn(home / ".claude" / "CLAUDE.md", mapping["claude-code"]["instructions"])
+        self.assertEqual(mapping["cursor"]["skills"], [home / ".cursor" / "skills"])
+        self.assertEqual(
+            mapping["cursor"]["instructions"],
+            [home / ".cursor" / "rules" / "jev-consult.mdc"],
+        )
+        self.assertEqual(mapping["gemini"]["skills"], [home / ".gemini" / "skills"])
+        self.assertEqual(
+            mapping["gemini"]["instructions"], [home / ".gemini" / "GEMINI.md"]
+        )
 
     def test_env_file_has_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -592,7 +607,7 @@ class IdempotentInstallTests(unittest.TestCase):
             for name, blob in repo_before.items():
                 self.assertEqual((ROOT / name).read_bytes(), blob)
 
-    def test_all_four_harnesses_install_to_tmp_home(self) -> None:
+    def test_all_six_harnesses_install_to_tmp_home(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             env = {
@@ -604,9 +619,7 @@ class IdempotentInstallTests(unittest.TestCase):
             with patch.dict(os.environ, env, clear=False):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
-                    rc = install.install(
-                        ["hermes", "claude-code", "codex", "grok"], False
-                    )
+                    rc = install.install(list(install.ALLOWED), False)
             self.assertEqual(rc, 0)
             expected_skill_dirs = [
                 base / "hermes" / "skills" / "jev-consult",
@@ -614,6 +627,8 @@ class IdempotentInstallTests(unittest.TestCase):
                 base / ".codex" / "skills" / "jev-consult",
                 base / ".agents" / "skills" / "jev-consult",
                 base / ".grok" / "skills" / "jev-consult",
+                base / ".cursor" / "skills" / "jev-consult",
+                base / ".gemini" / "skills" / "jev-consult",
             ]
             for d in expected_skill_dirs:
                 self.assertTrue(
@@ -623,11 +638,29 @@ class IdempotentInstallTests(unittest.TestCase):
                 base / ".claude" / "CLAUDE.md",
                 base / ".codex" / "AGENTS.md",
                 base / ".grok" / "AGENTS.md",
+                base / ".gemini" / "GEMINI.md",
             ):
                 self.assertTrue(doc.is_file(), "missing %s" % doc)
                 self.assertIn("jev-consult", doc.read_text(encoding="utf-8"))
+            rule = base / ".cursor" / "rules" / "jev-consult.mdc"
+            self.assertTrue(rule.is_file(), "missing %s" % rule)
+            rule_text = rule.read_text(encoding="utf-8")
+            self.assertTrue(rule_text.startswith("---"), rule_text[:80])
+            self.assertIn("alwaysApply: true", rule_text)
+            self.assertIn("<!-- jev-consult:start -->", rule_text)
+            cursor_hooks = json.loads(
+                (base / ".cursor" / "hooks.json").read_text(encoding="utf-8")
+            )
+            entries = cursor_hooks["hooks"]["beforeSubmitPrompt"]
+            self.assertIn("inventory_hook.py", json.dumps(entries))
+            self.assertEqual(cursor_hooks["version"], 1)
+            gemini_settings = json.loads(
+                (base / ".gemini" / "settings.json").read_text(encoding="utf-8")
+            )
+            entries = gemini_settings["hooks"]["BeforeAgent"]
+            self.assertIn("inventory_hook.py", json.dumps(entries))
 
-    def test_uninstall_all_four_leaves_tmp_home_clean(self) -> None:
+    def test_uninstall_all_six_leaves_tmp_home_clean(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             env = {
@@ -636,7 +669,7 @@ class IdempotentInstallTests(unittest.TestCase):
                 "HERMES_HOME": str(base / "hermes"),
                 "TYPESAFE_API_KEY": "",
             }
-            agents = ["hermes", "claude-code", "codex", "grok"]
+            agents = list(install.ALLOWED)
             with patch.dict(os.environ, env, clear=False):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
@@ -651,12 +684,26 @@ class IdempotentInstallTests(unittest.TestCase):
                 base / ".claude" / "CLAUDE.md",
                 base / ".codex" / "AGENTS.md",
                 base / ".grok" / "AGENTS.md",
+                base / ".gemini" / "GEMINI.md",
             ):
                 if doc.is_file():
                     self.assertNotIn(
                         "jev-consult", doc.read_text(encoding="utf-8"),
                         "snippet left in %s" % doc,
                     )
+            # cursor's dedicated .mdc is removed outright, and the hook
+            # entries it owned are stripped from both hook stores.
+            self.assertFalse((base / ".cursor" / "rules" / "jev-consult.mdc").exists())
+            cursor_hooks = json.loads(
+                (base / ".cursor" / "hooks.json").read_text(encoding="utf-8")
+            )
+            self.assertNotIn("beforeSubmitPrompt", cursor_hooks.get("hooks") or {})
+            gemini_settings_path = base / ".gemini" / "settings.json"
+            if gemini_settings_path.exists():
+                gemini_settings = json.loads(
+                    gemini_settings_path.read_text(encoding="utf-8")
+                )
+                self.assertNotIn("BeforeAgent", gemini_settings.get("hooks") or {})
 
     def test_dry_run_writes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

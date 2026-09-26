@@ -6962,12 +6962,32 @@ def step_schemas(tmp: Path) -> dict:
 
 
 def step_progress(tmp: Path) -> dict:
-    """Run `progress.py self-test`; fails when the ledger round-trip breaks."""
+    """Run `progress.py self-test` plus the golden-case calibration eval;
+    fails when the ledger round-trip or a rubric-level expectation breaks."""
     rc, out = _run(
         [str(SCRIPTS / "progress.py"), "self-test"],
         cwd=tmp,
     )
     ok = rc == 0 and '"self_test": "ok"' in out
+    cases = SCRIPTS.parent / "examples" / "progress-cases.json"
+    rc2, out2 = _run(
+        [str(SCRIPTS / "progress.py"), "calibrate", str(cases)],
+        cwd=tmp,
+    )
+    if not (rc2 == 0 and '"ok": true' in out2):
+        misses = []
+        try:
+            misses = [
+                "%s:%s" % (row["id"], row["got"])
+                for row in json.loads(out2)["calibrate"]["results"]
+                if not row["ok"]
+            ]
+        except (ValueError, KeyError):
+            pass
+        ok = False
+        out = out2 if misses or "error" in out2 else out
+        detail = "calibrate drift: %s" % ",".join(misses) if misses else out2.strip()[:120]
+        return _step("progress", ok, detail)
     return _step("progress", ok, out.strip()[:120] or "rc=%d" % rc)
 
 

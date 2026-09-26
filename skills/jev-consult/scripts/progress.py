@@ -16,7 +16,10 @@ if str(_SCRIPTS) not in sys.path:
 
 import _watch
 from inventory import atomic_write_text
-from progress_core import Ledger, ProgressError, read_json, validate_plan, validate_progress_policy
+from progress_core import (
+    Ledger, ProgressError, _diff_line_hashes, interpret_choice,
+    read_json, validate_plan, validate_progress_policy,
+)
 
 
 def build_parser():
@@ -40,8 +43,15 @@ def build_parser():
     commands.choices["history"].add_argument("--spark", metavar="FIELD", default="", help="Emit an ASCII sparkline over numeric FIELD values across events (event top-level first, then data.FIELD; rc 2 when none)")
     report = commands.add_parser("report", help="Print a markdown summary of a stage (plan, credits, events); --out writes it to a file")
     report.add_argument("--json", action="store_true", help="Emit a structured {stage, goal, action, points, awarded_items, blocked_items, events, ...} object instead of markdown (--out then writes the JSON)")
-    report.add_argument("stage")
+    report.add_argument("stage", nargs="?", help="Stage id (omit with --all)")
     report.add_argument("--out", metavar="PATH", default="", help="Write the markdown to PATH instead of stdout (prints {wrote, bytes} JSON); with --watch: append each tick line to PATH instead")
+    report.add_argument("--all", action="store_true", help="Aggregate every stage in the ledger: per-stage rows plus totals and per-rubric-category sums (no --watch)")
+    calibrate = commands.add_parser(
+        "calibrate",
+        help="Run golden cases through the contribution-grading path; canned answers by default, real Jev with --live",
+    )
+    calibrate.add_argument("cases", help="Golden-case JSON: {'cases': [{id, diff, expect, jev}]} ('-' reads stdin)")
+    calibrate.add_argument("--live", action="store_true", help="Ask Jev for each case instead of replaying its canned answer; needs TYPESAFE_API_KEY")
     for name in ("status", "history", "report"):
         sub = commands.choices[name]
         sub.add_argument("--watch", metavar="S", type=float, default=0.0,
@@ -139,6 +149,125 @@ def _report_md(summary: dict, hist: dict) -> str:
         )
         lines.append("| %s | %s | %s |" % (event.get("sequence", "?"), event.get("kind", "?"), str(detail).replace("|", "\\|")))
     return "\n".join(lines)
+
+
+def _report_all(ledger) -> dict:
+    """Aggregate every stage: per-stage rows, totals, per-rubric-category sums."""
+    rows = []
+    totals = {"stages": 0, "points": 0, "awarded": 0, "blocked": 0,
+              "assessments": 0, "model_attempts": 0, "tokens_used": 0}
+    categories = {}
+    for sid in ledger.stage_ids():
+        summary = ledger.status(sid)
+        hist = ledger.history(sid)
+        row = {
+            "stage": sid, "action": summary["action"], "reason": summary["reason"],
+            "points": summary["points"], "review_at": summary["review_at"],
+            "assessments": summary["assessment_count"],
+            "model_attempts": summary["model_attempts"],
+            "tokens_used": summary.get("tokens_used", 0),
+            "awarded": len(summary["awarded_items"]),
+            "blocked": len(summary["blocked_items"]),
+            "harmful": len(summary.get("harmful_items") or ()),
+        }
+        rows.append(row)
+        totals["stages"] += 1
+        totals["points"] += summary["points"]
+        totals["awarded"] += row["awarded"]
+        totals["blocked"] += row["blocked"]
+        totals["assessments"] += summary["assessment_count"]
+        totals["model_attempts"] += summary["model_attempts"]
+        totals["tokens_used"] += summary.get("tokens_used") or 0
+        for event in hist["events"]:
+            if event["kind"] != "assessment":
+                continue
+            level = event["data"].get("level") or "unscored"
+            bucket = categories.setdefault(level, {"count": 0, "points": 0})
+            bucket["count"] += 1
+            bucket["points"] += event["data"].get("points") or 0
+    return {"stages": rows, "totals": totals, "categories": categories}
+
+
+def _report_all_md(payload: dict) -> str:
+    """Markdown document for --all: stage table + rubric-category totals."""
+    lines = [
+        "# Progress report: all stages",
+        "",
+        "| stage | action | points | assessments | jev calls | tokens | awarded | blocked |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in payload["stages"]:
+        lines.append(
+            "| `%s` | %s (%s) | %s | %s | %s | %s | %s | %s |"
+            % (row["stage"], row["action"], row["reason"], row["points"],
+               row["assessments"], row["model_attempts"], row["tokens_used"],
+               row["awarded"], row["blocked"])
+        )
+    totals = payload["totals"]
+    lines += [
+        "",
+        "- Stages: %s; points: %s; awarded: %s; blocked: %s" % (
+            totals["stages"], totals["points"], totals["awarded"], totals["blocked"]),
+        "- Assessments: %s; Jev calls: %s; tokens: %s" % (
+            totals["assessments"], totals["model_attempts"], totals["tokens_used"]),
+        "",
+        "| rubric category | assessments | points |",
+        "| --- | --- | --- |",
+    ]
+    for level, bucket in sorted(payload["categories"].items()):
+        lines.append("| %s | %s | %s |" % (level, bucket["count"], bucket["points"]))
+    return "\n".join(lines)
+
+
+def _calibrate(args):
+    """Golden cases through the contribution-grading interpretation path.
+
+    Returns (payload, rc): rc 1 when any case drifts from its expected level.
+    """
+    policy = read_json(_policy_path(args.policy))
+    validate_progress_policy(policy)
+    doc = read_json(Path(args.cases))
+    cases = doc.get("cases") if isinstance(doc, dict) else doc
+    if not isinstance(cases, list) or not cases or not all(isinstance(case, dict) for case in cases):
+        raise ProgressError("INVALID_INPUT", "Calibration cases must be a list of {id, diff, expect, jev} objects")
+    template = policy["templates"]["contribution"]
+    results = []
+    for case in cases:
+        cid = str(case.get("id", ""))
+        diff = case.get("diff")
+        if not isinstance(diff, str):
+            raise ProgressError("INVALID_INPUT", "Calibration case %r needs a diff string" % cid)
+        expect = case.get("expect")
+        if not isinstance(expect, str) or not expect:
+            raise ProgressError("INVALID_INPUT", "Calibration case %r needs an expected level" % cid)
+        hashed = _diff_line_hashes(diff)
+        if args.live:
+            import jev
+            response = jev.post_systemone(
+                {"goal": cid, "diff": diff}, {"contribution": template}, policy,
+                timeout=policy["progress"]["api_timeout_seconds"], retries=0,
+            )
+        else:
+            canned = case.get("jev")
+            if not isinstance(canned, dict):
+                raise ProgressError(
+                    "INVALID_INPUT",
+                    "Calibration case %r needs a canned jev answer (or --live)" % cid,
+                )
+            response = {"answers": {"contribution": canned}}
+        got = interpret_choice(response, "contribution", template, policy)
+        level = got.get("choice")
+        results.append({
+            "id": cid, "expect": expect, "got": level or "unscored",
+            "reason": got.get("reason"),
+            "lines": len(hashed["added"]) + len(hashed["removed"]) + len(hashed["ops"]),
+            "ok": (level or "unscored") == expect,
+        })
+    ok = all(row["ok"] for row in results)
+    return (
+        {"ok": ok, "calibrate": {"cases": len(results), "ok": ok, "results": results}},
+        0 if ok else 1,
+    )
 
 
 def _status_tick(ledger, stage, t0):
@@ -535,6 +664,13 @@ def main(argv=None):
                 return rc
             sys.stdout.write(json.dumps(result, indent=2) + "\n")
             return 0
+        if args.command == "calibrate":
+            result, rc = _calibrate(args)
+            emit_rc = _emit_jq(result, args.jq)
+            if emit_rc is not None:
+                return emit_rc or rc
+            sys.stdout.write(json.dumps(result, indent=2) + "\n")
+            return rc
         repo = Path(args.repo).resolve()
         database = Path(args.db).resolve() if args.db else repo / ".devin" / "progress.sqlite3"
         if args.command == "env":
@@ -611,43 +747,69 @@ def main(argv=None):
         elif args.command == "self-test":
             result = _self_test(args)
         elif args.command == "report":
-            if getattr(args, "watch", 0) and args.watch > 0:
+            if getattr(args, "all", False):
+                if getattr(args, "watch", 0) and args.watch > 0:
+                    sys.stdout.write(json.dumps({"error": {"code": "INVALID_INPUT", "message": "--all cannot combine with --watch"}}) + "\n")
+                    return 1
+                payload = _report_all(ledger)
+                md = _report_all_md(payload)
+                if args.verdict and not _watch.write_verdict(
+                    args.verdict,
+                    {"verdict": "steady", "ticks": 1, "chars": len(md), "delta": None},
+                ):
+                    return 1
+                if getattr(args, "json", False):
+                    result = payload
+                elif args.out:
+                    atomic_write_text(Path(args.out), md)
+                    result = {"wrote": args.out, "bytes": len(md.encode("utf-8"))}
+                elif args.jq:
+                    result = {"report_md": md, **payload}
+                else:
+                    sys.stdout.write(md + "\n")
+                    return 0
+            elif getattr(args, "watch", 0) and args.watch > 0:
                 return _report_watch(ledger, args)
-            summary = ledger.status(args.stage)
-            hist = ledger.history(args.stage)
-            md = _report_md(summary, hist)
-            if args.verdict and not _watch.write_verdict(
-                args.verdict,
-                {"verdict": "steady", "ticks": 1, "chars": len(md), "delta": None},
-            ):
-                return 1
-            if getattr(args, "json", False):
-                result = {
-                    "stage": summary["stage_id"],
-                    "goal": hist["stage"].get("plan", {}).get("goal", ""),
-                    "action": summary["action"],
-                    "reason": summary["reason"],
-                    "points": summary["points"],
-                    "review_at": summary["review_at"],
-                    "assessment_count": summary["assessment_count"],
-                    "assessment_limit": summary["assessment_limit"],
-                    "model_attempts": summary["model_attempts"],
-                    "model_attempt_limit": summary["model_attempt_limit"],
-                    "awarded_items": summary["awarded_items"],
-                    "blocked_items": summary["blocked_items"],
-                    "failed_checks": summary.get("failed_checks"),
-                    "next_direction": summary.get("next_direction"),
-                    "events": len(hist["events"]),
-                }
-            elif args.out:
-                atomic_write_text(Path(args.out), md)
-                result = {"wrote": args.out, "bytes": len(md.encode("utf-8"))}
-            elif args.jq:
-                result = {"report_md": md, "stage": summary["stage_id"],
-                          "points": summary["points"], "action": summary["action"]}
             else:
-                sys.stdout.write(md + "\n")
-                return 0
+                if not args.stage:
+                    sys.stdout.write(json.dumps({"error": {"code": "INVALID_INPUT", "message": "report needs a stage id or --all"}}) + "\n")
+                    return 1
+            if not getattr(args, "all", False):
+                summary = ledger.status(args.stage)
+                hist = ledger.history(args.stage)
+                md = _report_md(summary, hist)
+                if args.verdict and not _watch.write_verdict(
+                    args.verdict,
+                    {"verdict": "steady", "ticks": 1, "chars": len(md), "delta": None},
+                ):
+                    return 1
+                if getattr(args, "json", False):
+                    result = {
+                        "stage": summary["stage_id"],
+                        "goal": hist["stage"].get("plan", {}).get("goal", ""),
+                        "action": summary["action"],
+                        "reason": summary["reason"],
+                        "points": summary["points"],
+                        "review_at": summary["review_at"],
+                        "assessment_count": summary["assessment_count"],
+                        "assessment_limit": summary["assessment_limit"],
+                        "model_attempts": summary["model_attempts"],
+                        "model_attempt_limit": summary["model_attempt_limit"],
+                        "awarded_items": summary["awarded_items"],
+                        "blocked_items": summary["blocked_items"],
+                        "failed_checks": summary.get("failed_checks"),
+                        "next_direction": summary.get("next_direction"),
+                        "events": len(hist["events"]),
+                    }
+                elif args.out:
+                    atomic_write_text(Path(args.out), md)
+                    result = {"wrote": args.out, "bytes": len(md.encode("utf-8"))}
+                elif args.jq:
+                    result = {"report_md": md, "stage": summary["stage_id"],
+                              "points": summary["points"], "action": summary["action"]}
+                else:
+                    sys.stdout.write(md + "\n")
+                    return 0
         else:
             result = ledger.review(args.stage, args.reason, args.reviewer, approve_finish=args.approve_finish)
     except ProgressError as exc:

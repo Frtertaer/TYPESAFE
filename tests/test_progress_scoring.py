@@ -354,5 +354,124 @@ class CalibrateTests(unittest.TestCase):
         self.assertIn("INVALID_INPUT", out)
 
 
+ADD_LINE = "diff --git a/core.py b/core.py\n--- a/core.py\n+++ b/core.py\n@@ -1,1 +1,2 @@\n keep\n+verified behavior\n"
+ADD_LINE_MOVED = "diff --git a/core.py b/core.py\n--- a/core.py\n+++ b/core.py\n@@ -1,1 +1,4 @@\n keep\n+verified behavior\n+  verified   behavior\n+unrelated new\n"
+TWO_FILE_SAME_LINE = (
+    "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,1 +1,2 @@\n keep\n+same call\n"
+    "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n@@ -1,1 +1,2 @@\n keep\n+same call\n"
+)
+
+
+class ReviewFixRegressionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.evidence = FakeEvidence()
+        self.ledger = progress.Ledger(self.root / "progress.sqlite3", self.root, evidence=self.evidence)
+        self.ledger.initialize(plan(), policy())
+        self.evidence.advance()
+
+    def assess(self, item="item_0", level="major", **kwargs):
+        return self.ledger.assess("reliability", item, "Verified outcome", asker=picker(level), **kwargs)
+
+    def test_usage_extra_keys_are_dropped(self):
+        base = picker("major")
+
+        def ask(state, questions, snapshot):
+            response = base.side_effect(state, questions, snapshot)
+            response["usage"] = {
+                "input_tokens": 10, "output_tokens": 5, "total_tokens": 15,
+            }
+            return response
+
+        self.evidence.diff_text = MODIFY
+        self.ledger.assess(
+            "reliability", "item_0", "Verified outcome", asker=Mock(side_effect=ask)
+        )
+        events = self.ledger.history("reliability")["events"]
+        usage = [e["data"].get("usage") for e in events if e["kind"] == "assessment"]
+        self.assertEqual(usage[-1], {"input_tokens": 10, "output_tokens": 5})
+
+    def test_reformatted_readdition_earns_nothing_new(self):
+        shared = plan()
+        shared["items"][0]["paths"] = ["shared.py"]
+        shared["items"][1]["paths"] = ["shared.py"]
+        ledger = progress.Ledger(
+            self.root / "shared.sqlite3", self.root, evidence=self.evidence
+        )
+        ledger.initialize(shared, policy())
+        self.evidence.advance(7)
+        self.evidence.diff_text = ADD_LINE
+        ledger.assess(
+            "reliability", "item_0", "Verified outcome", asker=picker("major")
+        )
+        self.evidence.advance(9)
+        self.evidence.diff_text = ADD_LINE_MOVED
+        result = ledger.assess(
+            "reliability", "item_1", "Verified outcome", asker=picker("major")
+        )
+        event = ledger.history("reliability")["events"][-1]
+        self.assertEqual(len(event["data"]["credit"]["added"]), 1)
+        self.assertEqual(result["points"], 6)
+
+    def test_same_line_in_other_path_still_earns(self):
+        self.evidence.diff_text = ADD_LINE
+        self.assess(item="item_0")
+        self.evidence.advance(3)
+        self.assess(item="item_1")
+        event = self.ledger.history("reliability")["events"][-1]
+        self.assertTrue(event["data"]["credit"]["added"])
+
+    def test_indexed_norm_binds_path(self):
+        raw = progress._diff_line_hashes(TWO_FILE_SAME_LINE)
+        infos = list(raw["added_norm"].values())
+        self.assertEqual(len({info["n"] for info in infos}), 2)
+        self.assertEqual(len({info["f"] for info in infos}), 1)
+
+    def test_normalize_preserves_string_literal_whitespace(self):
+        self.assertNotEqual(
+            progress._normalize_line('x = "a  b"'),
+            progress._normalize_line('x = "a b"'),
+        )
+        self.assertEqual(
+            progress._normalize_line('  x   =  "a  b"  '),
+            'x = "a  b"',
+        )
+        self.assertEqual(progress._normalize_line("  foo(1,   2)"), "foo(1, 2)")
+
+    def test_continue_review_with_penalties_replays(self):
+        ledger = progress.Ledger(
+            self.root / "harmful.sqlite3", self.root, evidence=self.evidence
+        )
+        ledger.initialize(plan(), harmful_policy())
+        self.evidence.advance(9)
+        self.evidence.diff_text = MODIFY
+        ledger.assess(
+            "reliability", "item_0", "Harmful outcome", asker=picker("harmful")
+        )
+        for n in range(1, 6):
+            self.evidence.advance(9 + n)
+            result = ledger.assess(
+                "reliability", "item_%d" % n, "Verified outcome", asker=picker("major")
+            )
+        self.assertEqual(result["action"], "review_required")
+        ledger.review(
+            "reliability", "Evidence reviewed", "test-reviewer",
+            asker=picker("continue"),
+        )
+        status = ledger.status("reliability")
+        self.assertEqual(status["review_at"], 25)
+
+    def test_report_watch_requires_stage_or_all(self):
+        report_tests = ReportAllTests()
+        ledger = report_tests._ledger()
+        with patch.object(progress_cli, "Ledger", return_value=ledger):
+            code, out = run_cli(["report", "--watch", "1"])
+        self.assertEqual(code, 1)
+        payload = json.loads(out)
+        self.assertEqual(payload["error"]["code"], "INVALID_INPUT")
+
+
 if __name__ == "__main__":
     unittest.main()

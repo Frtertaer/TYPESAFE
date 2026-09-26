@@ -138,10 +138,15 @@ def validate_progress_policy(policy: dict) -> None:
         raise ProgressError("INVALID_POLICY", "Policies must not embed credential-like values")
     _text(policy.get("model"), "model")
     settings = policy.get("progress")
-    _fields(settings, (*PROGRESS_INTS, *PROGRESS_TIMES, *PROGRESS_PROBABILITIES, "points"))
+    _fields(settings, (*PROGRESS_INTS, *PROGRESS_TIMES, *PROGRESS_PROBABILITIES, "points"),
+            ("max_tokens", "harmful"))
     for key in PROGRESS_INTS:
         if type(settings[key]) is not int or settings[key] <= 0:
             raise ProgressError("INVALID_POLICY", "progress." + key + " must be a positive integer")
+    if "max_tokens" in settings and (type(settings["max_tokens"]) is not int or settings["max_tokens"] <= 0):
+        raise ProgressError("INVALID_POLICY", "progress.max_tokens must be a positive integer")
+    if "harmful" in settings and type(settings["harmful"]) is not bool:
+        raise ProgressError("INVALID_POLICY", "progress.harmful opt-in must be a boolean")
     for key in (*PROGRESS_TIMES, *PROGRESS_PROBABILITIES):
         value = settings[key]
         if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
@@ -172,7 +177,12 @@ def validate_progress_policy(policy: dict) -> None:
     criteria = templates["contribution"]["criteria"]
     if not isinstance(points, dict) or set(points) != set(criteria) - {"none"} or len(points) < 2:
         raise ProgressError("INVALID_POLICY", "Point categories must match the contribution rubric")
-    if any(type(value) is not int or value < 0 for value in points.values()):
+    if "harmful" in points or "harmful" in criteria:
+        if settings.get("harmful") is not True:
+            raise ProgressError("INVALID_POLICY", "The harmful category requires an explicit progress.harmful opt-in")
+        if type(points.get("harmful")) is not int or points["harmful"] >= 0:
+            raise ProgressError("INVALID_POLICY", "The harmful category must carry a negative integer weight")
+    if any(type(value) is not int or value < 0 for key, value in points.items() if key != "harmful"):
         raise ProgressError("INVALID_POLICY", "Contribution points must be nonnegative integers")
     if points.get("zero") != 0 or len(set(points.values())) != len(points):
         raise ProgressError("INVALID_POLICY", "Zero must be distinct and each category needs a distinct value")
@@ -272,7 +282,7 @@ def interpret_choice(response: dict, name: str, question: dict, policy: dict) ->
 
 def _denied(reason: str, questions: dict, called: bool) -> dict:
     return {
-        "called_jev": called, "model": None, "reason": reason,
+        "called_jev": called, "model": None, "reason": reason, "usage": None,
         "results": {qid: {"choice": None, "confidence": None, "reason": reason} for qid in questions},
     }
 
@@ -291,10 +301,21 @@ def _ask(state: dict, questions: dict, policy: dict, asker=None) -> dict:
         parsed = jev.validate_response(response, questions)
         results = {qid: _interpret_answer(parsed["answers"][qid], policy) for qid in questions}
         model = response.get("model") if isinstance(response, dict) else None
+        usage = parsed.get("usage")
+        if isinstance(usage, dict):
+            # validate_response tolerates extra usage fields (e.g.
+            # total_tokens); the ledger's event schema does not — keep
+            # only the two budget keys before anything persists it.
+            usage = {
+                key: usage[key]
+                for key in ("input_tokens", "output_tokens")
+                if key in usage
+            }
         return {
             "called_jev": True,
             "model": model if isinstance(model, str) and not _sensitive(model) else None,
             "reason": None, "results": results,
+            "usage": usage if isinstance(usage, dict) else None,
         }
     except SystemExit as exc:
         message = str(exc)
@@ -498,10 +519,90 @@ def _content_digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", "surrogateescape")).hexdigest()
 
 
+_WS_RE = re.compile(r"\s+")
+
+
+def _normalize_line(text: str) -> str:
+    """Whitespace-insensitive view of a diff line: indentation churn and
+    interior spacing collapse to a single form — except inside a string
+    literal, where whitespace changes program behavior and stays literal.
+    A best-effort line scanner (no multi-line/triple-quote awareness)."""
+    out: list[str] = []
+    in_quote = ""
+    pending_ws = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if in_quote:
+            out.append(ch)
+            if ch == "\\" and i + 1 < len(text):
+                out.append(text[i + 1])
+                i += 1
+            elif ch == in_quote:
+                in_quote = ""
+        elif ch in "\"'":
+            if pending_ws and out:
+                out.append(" ")
+            pending_ws = False
+            in_quote = ch
+            out.append(ch)
+        elif ch.isspace():
+            pending_ws = True
+        else:
+            if pending_ws and out:
+                out.append(" ")
+            pending_ws = False
+            out.append(ch)
+        i += 1
+    return "".join(out).strip()
+
+
+def _norm_digest(text: str, context: str = "") -> str:
+    """Path-free digest of a normalized line bound to a normalized
+    neighbor context (context + hunk position): pure reformats and
+    renames keep it; a line relocated or reordered does not."""
+    return hashlib.sha256(
+        (context + "\x00" + _normalize_line(text)).encode("utf-8", "surrogateescape")
+    ).hexdigest()
+
+
+_OPS_PATH_RE = re.compile(r"[ab]/\S+")
+_GIT_HEADER_RE = re.compile(r"diff --git a/(.+) b/(.+)$")
+
+
+def _ops_norm(line: str) -> str:
+    """Structural-op identity: full line with the a//b// path tokens
+    stripped, so a rename keeps structural credit but a binary or blob
+    replacement (a different index hash) still reads as a new change."""
+    return _content_digest(_normalize_line(_OPS_PATH_RE.sub("", line)))
+
+
+def _git_paths(header: str) -> tuple[str, str]:
+    """(old, new) paths from a 'diff --git a/OLD b/NEW' header."""
+    m = _GIT_HEADER_RE.match(header.strip())
+    return (m.group(1), m.group(2)) if m else ("", "")
+
+
+def _ops_norm_info(line: str, path: str) -> dict:
+    """Norm record for a structural op: n binds the op text to its file
+    (the same mode/index change on another path is a different change);
+    f stays path-free for verified-move retention."""
+    stripped = _OPS_PATH_RE.sub("", line)
+    return {
+        "n": _content_digest(path + "\x00" + _normalize_line(stripped)),
+        "p": path,
+        "f": _ops_norm(line),
+    }
+
+
 def _diff_line_hashes(diff: str) -> dict:
     added, removed, ops = [], [], []
+    norms = {"added": {}, "removed": {}, "ops": {}}
     sections = {}
     old_file = new_file = header = ""
+    block_old = block_new = ""
+    deleted_paths: set = set()
+    created_paths: set = set()
     in_hunk = saw_hunk = binary_section = False
     pending_index = []
     hunk_lines = []
@@ -509,23 +610,38 @@ def _diff_line_hashes(diff: str) -> dict:
     def flush_hunk():
         nonlocal hunk_lines
         context = fingerprint(sorted(text for kind, text in hunk_lines if kind == " "))
+        norm_context = fingerprint(sorted(_normalize_line(text) for kind, text in hunk_lines if kind == " "))
         for index, (kind, text) in enumerate(hunk_lines):
             if kind == "+":
                 digest = _line_digest(new_file, context + "\x00" + str(index) + "\x00" + text)
                 added.append(digest)
-                sections.setdefault(new_file, []).append((digest, _content_digest(text)))
+                norms["added"][digest] = {
+                    "n": _norm_digest(text, new_file + "\x00" + norm_context + "\x00" + str(index)),
+                    "p": new_file, "f": _norm_digest(text),
+                }
+                sections.setdefault(new_file, []).append(
+                    (digest, _content_digest(text), _norm_digest(text))
+                )
             elif kind == "-":
-                removed.append(_line_digest(old_file, context + "\x00" + str(index) + "\x00" + text))
+                digest = _line_digest(old_file, context + "\x00" + str(index) + "\x00" + text)
+                removed.append(digest)
+                norms["removed"][digest] = {
+                    "n": _norm_digest(text, old_file + "\x00" + norm_context + "\x00" + str(index)),
+                    "p": old_file, "f": _norm_digest(text),
+                }
         hunk_lines = []
 
     for line in diff.split("\n"):
         if line.startswith("diff --git"):
             flush_hunk()
             if binary_section:
-                ops.extend(pending_index)
+                for digest, norm in pending_index:
+                    ops.append(digest)
+                    norms["ops"][digest] = norm
             pending_index = []
             binary_section = in_hunk = False
             old_file = new_file = ""
+            block_old, block_new = _git_paths(line)
             header = line
         elif line.startswith("@@"):
             flush_hunk()
@@ -545,29 +661,48 @@ def _diff_line_hashes(diff: str) -> dict:
             target = line[4:]
             new_file = target[2:] if target.startswith("b/") else target
         elif line.startswith("index "):
-            pending_index.append(_line_digest(header, line))
+            pending_index.append(
+                (_line_digest(header, line), _ops_norm_info(line, block_new or block_old))
+            )
         elif line.startswith(BINARY_MARKERS):
             binary_section = True
-            ops.append(_line_digest(header, line))
+            digest = _line_digest(header, line)
+            ops.append(digest)
+            norms["ops"][digest] = _ops_norm_info(line, block_new or block_old)
         elif line.startswith(STRUCTURAL_PREFIXES):
-            ops.append(_line_digest(header, line))
+            digest = _line_digest(header, line)
+            ops.append(digest)
+            norms["ops"][digest] = _ops_norm_info(line, block_new or block_old)
+            if line.startswith("deleted file mode"):
+                deleted_paths.add(block_old)
+            elif line.startswith("new file mode"):
+                created_paths.add(block_new)
     flush_hunk()
     if binary_section:
-        ops.extend(pending_index)
+        for digest, norm in pending_index:
+            ops.append(digest)
+            norms["ops"][digest] = norm
     if not saw_hunk:
         added, removed, ops = [], [], []
+        norms = {"added": {}, "removed": {}, "ops": {}}
         sections = {}
         old_file = new_file = header = ""
+        deleted_paths = set()
+        created_paths = set()
         binary_section = False
         pending_index = []
         position = 0
+        block_old = block_new = ""
         for line in diff.split("\n"):
             if line.startswith("diff --git"):
                 if binary_section:
-                    ops.extend(pending_index)
+                    for digest, norm in pending_index:
+                        ops.append(digest)
+                        norms["ops"][digest] = norm
                 pending_index = []
                 binary_section = False
                 old_file = new_file = ""
+                block_old, block_new = _git_paths(line)
                 header = line
                 position = 0
             elif line.startswith("--- "):
@@ -580,30 +715,152 @@ def _diff_line_hashes(diff: str) -> dict:
                 path = new_file or header
                 digest = _line_digest(path, str(position) + "\x00" + line[1:])
                 added.append(digest)
-                sections.setdefault(path, []).append((digest, _content_digest(line[1:])))
+                norms["added"][digest] = {
+                    "n": _norm_digest(line[1:], path + "\x00" + str(position)),
+                    "p": path, "f": _norm_digest(line[1:]),
+                }
+                sections.setdefault(path, []).append(
+                    (digest, _content_digest(line[1:]), _norm_digest(line[1:]))
+                )
                 position += 1
             elif line.startswith("-"):
-                removed.append(_line_digest(old_file or header, str(position) + "\x00" + line[1:]))
+                path = old_file or header
+                digest = _line_digest(path, str(position) + "\x00" + line[1:])
+                removed.append(digest)
+                norms["removed"][digest] = {
+                    "n": _norm_digest(line[1:], path + "\x00" + str(position)),
+                    "p": path, "f": _norm_digest(line[1:]),
+                }
                 position += 1
             elif line.startswith("index "):
-                pending_index.append(_line_digest(header, line))
+                pending_index.append(
+                    (_line_digest(header, line), _ops_norm_info(line, block_new or block_old))
+                )
             elif line.startswith(BINARY_MARKERS):
                 binary_section = True
-                ops.append(_line_digest(header, line))
+                digest = _line_digest(header, line)
+                ops.append(digest)
+                norms["ops"][digest] = _ops_norm_info(line, block_new or block_old)
             elif line.startswith(STRUCTURAL_PREFIXES):
-                ops.append(_line_digest(header, line))
+                digest = _line_digest(header, line)
+                ops.append(digest)
+                norms["ops"][digest] = _ops_norm_info(line, block_new or block_old)
+                if line.startswith("deleted file mode"):
+                    deleted_paths.add(block_old)
+                elif line.startswith("new file mode"):
+                    created_paths.add(block_new)
         if binary_section:
-            ops.extend(pending_index)
-    return {"added": sorted(added), "removed": sorted(removed), "ops": sorted(ops), "sections": sections}
+            for digest, norm in pending_index:
+                ops.append(digest)
+                norms["ops"][digest] = norm
+    return {
+        "added": sorted(added), "removed": sorted(removed), "ops": sorted(ops),
+        "added_norm": norms["added"], "removed_norm": norms["removed"],
+        "ops_norm": norms["ops"],
+        "sections": sections,
+        "deleted": sorted(deleted_paths),
+        "created": sorted(created_paths),
+    }
 
 
-def _credited_retained(credit: dict, diff: str) -> bool:
+def _move_destinations(wide: dict, path: str, credit: dict, current: dict = None) -> set:
+    """Created paths plausibly holding the credited file's last-known
+    content: every baseline line that survived the credited change plus
+    the credited additions must appear together, and none of the lines
+    the credit removed may resurface. Requires at least one uncredited
+    carryover line — a one-line file's move is not provable this way.
+
+    ``current`` is the (possibly path-scoped) parse of the same diff;
+    the delete block for `path` is visible in both, so baseline lines
+    are collected from either."""
+    sources = [wide] + ([current] if current is not None else [])
+    baseline = Counter()
+    for src in sources:
+        baseline |= Counter(
+            info["f"]
+            for info in src["removed_norm"].values()
+            if isinstance(info, dict) and info.get("p") == path and info.get("f")
+        )
+    credited_removed = Counter(
+        info["f"]
+        for info in (credit.get("removed_norm") or {}).values()
+        if isinstance(info, dict) and info.get("p") == path and info.get("f")
+    )
+    survivors = baseline - credited_removed
+    if not survivors:
+        return set()
+    credited_added = Counter(
+        info["f"]
+        for info in (credit.get("added_norm") or {}).values()
+        if isinstance(info, dict) and info.get("p") == path and info.get("f")
+    )
+    expected = survivors + credited_added
+    out = set()
+    for dest in wide["created"]:
+        added_f = Counter(norm for _d, _c, norm in wide["sections"].get(dest, ()))
+        if expected <= added_f and not any(credited_removed[f] for f in added_f):
+            out.add(dest)
+    return out
+
+
+def _credited_retained(credit: dict, diff: str, wide_diff: str = None) -> bool:
+    """Credited lines still present in the current diff — exactly by raw
+    digest, by normalized in-place digest (reformats), or by pure-text
+    digest after the credited file itself was deleted (the shape a move
+    takes under --no-renames: delete + create). A file reverted to
+    baseline is absent from the diff entirely and never qualifies.
+
+    ``diff`` may be scoped to the credited item's paths; a delete block
+    for the credited path is still visible there because the old side of
+    a move matches the pathspec. ``wide_diff`` — the unscoped
+    baseline->candidate diff — supplies the move destination scan so
+    content moved to a path outside the item's scope is still found.
+
+    Cross-path fallback only accepts a verified move: the credited file
+    must be deleted in this diff, and a created path must contain the
+    file's last-known content (uncredited baseline survivors plus the
+    credited additions, with none of the credited removals reappearing).
+    A single identical line elsewhere is not evidence of a move."""
     current = _diff_line_hashes(diff)
-    for key in ("added", "removed", "ops"):
+    wide = _diff_line_hashes(wide_diff) if wide_diff is not None else current
+    deleted_now = set(current["deleted"]) | set(wide["deleted"])
+    for key, norm_key in zip(CREDIT_RAW, CREDIT_NORM):
         needed = Counter(credit.get(key, ()))
         present = Counter(current[key])
-        if any(present[digest] < count for digest, count in needed.items()):
+        missing = {digest: count - present[digest]
+                   for digest, count in needed.items() if present[digest] < count}
+        if not missing:
+            continue
+        norms = credit.get(norm_key)
+        if not isinstance(norms, dict):
             return False
+        present_n = Counter(
+            info["n"] for info in current[norm_key].values() if isinstance(info, dict)
+        )
+        for digest, short in missing.items():
+            info = norms.get(digest)
+            if not isinstance(info, dict):
+                return False
+            if info.get("n") and present_n[info["n"]] >= short:
+                present_n[info["n"]] -= short
+                continue
+            path = info.get("p")
+            if not path or path not in deleted_now or not info.get("f"):
+                return False
+            if key == "removed":
+                # The file's deletion removes the line anew — the credited
+                # removal persists while the file stays deleted. A move
+                # destination that reintroduces the text is disqualified
+                # inside _move_destinations.
+                continue
+            destinations = _move_destinations(wide, path, credit, current)
+            pool = Counter(
+                dst["f"]
+                for dst in wide[norm_key].values()
+                if isinstance(dst, dict) and dst.get("p") in destinations
+            )
+            if pool[info["f"]] < short:
+                return False
     return True
 
 
@@ -626,71 +883,191 @@ def _active_credits(events, before_sequence=None):
     return active
 
 
+CREDIT_RAW = ("added", "removed", "ops")
+CREDIT_NORM = ("added_norm", "removed_norm", "ops_norm")
+CREDIT_SECTS = ("sections", "sections_norm")
+
+
 def _credited_union(events, before_sequence=None):
-    total = {"added": Counter(), "removed": Counter(), "ops": Counter()}
+    total = {key: Counter() for key in CREDIT_RAW}
+    for key in CREDIT_NORM:
+        total[key] = {}  # raw digest -> {n, p, f}; last writer wins
     for credit in _active_credits(events, before_sequence).values():
-        for key in ("added", "removed", "ops"):
+        for key in CREDIT_RAW:
             total[key].update(credit.get(key, ()))
+        for key in CREDIT_NORM:
+            norms = credit.get(key)
+            if isinstance(norms, dict):
+                total[key].update(norms)
     return total
 
 
 def _credited_sections(events, before_sequence=None):
+    """Prior credited sections as (content digests, norm digests) pairs
+    per path — old credits carry only the content list."""
     sections = []
     for credit in _active_credits(events, before_sequence).values():
-        if isinstance(credit.get("sections"), dict):
-            sections.extend(credit["sections"].values())
+        contents = credit.get("sections")
+        if not isinstance(contents, dict):
+            continue
+        norms = credit.get("sections_norm")
+        norms = norms if isinstance(norms, dict) else {}
+        for path, lines in contents.items():
+            sections.append((lines, norms.get(path, [])))
     return sections
 
 
+def _suppress_norm_dupes(digests, norms_now, credited_norms):
+    """Drop earned digests that repeat a line already credited in the same
+    file: a normalized (path, content) match means reformats and in-file
+    moves of a credited line earn nothing new. A copy into a different
+    path still earns — it is new content placement, not a reformat."""
+    cfp = Counter(
+        (info["p"], info["f"])
+        for info in credited_norms.values()
+        if isinstance(info, dict) and info.get("p") and info.get("f")
+    )
+    kept = []
+    for digest in digests:
+        info = norms_now.get(digest)
+        if not isinstance(info, dict):
+            kept.append(digest)
+            continue
+        key = (info.get("p"), info.get("f"))
+        if info.get("p") and info.get("f") and cfp[key] > 0:
+            cfp[key] -= 1
+            continue
+        kept.append(digest)
+    return kept
+
+
 def _earned_credit(raw, credited, credited_sections):
+    """Credit a diff earns now: raw line digests minus the credited union,
+    minus credited sections blindly re-added (content digest, or its
+    normalized digest when the section was reformatted), minus credited
+    norm-equivalents. The *_norm lists stored alongside are the retention
+    channel used by _credited_retained."""
     added = Counter(raw["added"]) - credited["added"]
     removed = Counter(raw["removed"]) - credited["removed"]
     ops = Counter(raw["ops"]) - credited["ops"]
+    counts = {"added": added, "removed": removed, "ops": ops}
+    for kind, norm_key in zip(CREDIT_RAW, CREDIT_NORM):
+        norms_now = raw.get(norm_key) or {}
+        credited_norms = credited.get(norm_key) or {}
+        if isinstance(norms_now, dict) and isinstance(credited_norms, dict):
+            counts[kind] = Counter(
+                _suppress_norm_dupes(
+                    list(counts[kind].elements()), norms_now, credited_norms
+                )
+            )
+    added, removed, ops = counts["added"], counts["removed"], counts["ops"]
     for pairs in raw["sections"].values():
-        blind = Counter(content for _, content in pairs)
-        for prior in credited_sections:
+        blind = Counter(content for _, content, _n in pairs)
+        blind_norm = Counter(_n for _, _c, _n in pairs)
+        for prior, prior_norm in credited_sections:
             needed = Counter(prior)
+            needed_norm = Counter(prior_norm)
             if sum(needed.values()) >= 2 and needed <= blind:
-                remaining = needed.copy()
-                for digest, content in pairs:
-                    if remaining[content] > 0 and added[digest] > 0:
-                        remaining[content] -= 1
-                        added[digest] -= 1
+                channel = 1
+            elif sum(needed_norm.values()) >= 2 and needed_norm <= blind_norm:
+                channel = 2
+            else:
+                continue
+            use = needed if channel == 1 else needed_norm
+            remaining = use.copy()
+            for digest, content, norm in pairs:
+                key = content if channel == 1 else norm
+                if remaining[key] > 0 and added[digest] > 0:
+                    remaining[key] -= 1
+                    added[digest] -= 1
+            if channel == 1:
                 blind -= needed
-    credit = {"added": sorted(added.elements()), "removed": sorted(removed.elements()), "ops": sorted(ops.elements())}
+            else:
+                blind_norm -= needed_norm
+    credit = {
+        "added": sorted(added.elements()),
+        "removed": sorted(removed.elements()),
+        "ops": sorted(ops.elements()),
+    }
+    for kind, norm_key in zip(CREDIT_RAW, CREDIT_NORM):
+        keep = Counter(credit[kind])
+        norms = {}
+        for digest, info in raw[norm_key].items():
+            if keep[digest] > 0:
+                keep[digest] -= 1
+                norms[digest] = info
+        credit[norm_key] = norms
     sections = {}
+    sections_norm = {}
     remaining = Counter(credit["added"])
     for path, pairs in raw["sections"].items():
-        keep = []
-        for digest, content in pairs:
+        keep, keep_norm = [], []
+        for digest, content, norm in pairs:
             if remaining[digest] > 0:
                 remaining[digest] -= 1
                 keep.append(content)
+                keep_norm.append(norm)
         if keep:
             sections[path] = sorted(keep)
+            sections_norm[path] = sorted(keep_norm)
     if sections:
         credit["sections"] = sections
+        credit["sections_norm"] = sections_norm
     return credit
 
 
+def _align_credit_shape(stored, rebuilt):
+    """Drop norm channels from a rebuilt credit when the stored credit
+    predates them — old ledgers keep validating under the new code."""
+    if isinstance(stored, dict) and "added_norm" not in stored:
+        rebuilt = {
+            key: value
+            for key, value in rebuilt.items()
+            if key not in CREDIT_NORM + CREDIT_SECTS[1:]
+        }
+    return rebuilt
+
+
 def _credit_overlaps(credit, union) -> bool:
-    return any(Counter(credit.get(key, ())) & union[key] for key in ("added", "removed", "ops"))
+    if any(Counter(credit.get(key, ())) & union[key] for key in CREDIT_RAW):
+        return True
+    return any(
+        set(credit.get(key) or ()) & set(union.get(key) or ())
+        for key in CREDIT_NORM
+    )
 
 
 def _credit_ok(credit) -> bool:
-    if not isinstance(credit, dict) or not set(credit) - {"sections"} == {"added", "removed", "ops"}:
+    if not isinstance(credit, dict) or not set(credit) - set(CREDIT_SECTS) - set(CREDIT_NORM) == set(CREDIT_RAW):
         return False
     lines_ok = all(
-        isinstance(lines, list) and all(type(line) is str and HEX64_RE.fullmatch(line) is not None for line in lines)
-        for key, lines in credit.items() if key != "sections"
+        isinstance(credit[key], list) and all(type(line) is str and HEX64_RE.fullmatch(line) is not None for line in credit[key])
+        for key in CREDIT_RAW
     )
-    sections = credit.get("sections", {})
-    sections_ok = isinstance(sections, dict) and all(
-        isinstance(path, str) and isinstance(lines, list)
-        and all(type(line) is str and HEX64_RE.fullmatch(line) is not None for line in lines)
-        for path, lines in sections.items()
+    norms_ok = all(
+        credit.get(key) is None or (
+            isinstance(credit[key], dict)
+            and all(
+                type(digest) is str and HEX64_RE.fullmatch(digest) is not None
+                and isinstance(info, dict) and set(info) <= {"n", "p", "f"}
+                and type(info.get("n")) is str and HEX64_RE.fullmatch(info["n"]) is not None
+                and type(info.get("p")) is str
+                and type(info.get("f")) is str and HEX64_RE.fullmatch(info["f"]) is not None
+                for digest, info in credit[key].items()
+            )
+        )
+        for key in CREDIT_NORM
     )
-    return lines_ok and sections_ok
+    sections_ok = all(
+        isinstance(credit.get(key, {}), dict)
+        and all(
+            isinstance(path, str) and isinstance(lines, list)
+            and all(type(line) is str and HEX64_RE.fullmatch(line) is not None for line in lines)
+            for path, lines in credit.get(key, {}).items()
+        )
+        for key in CREDIT_SECTS
+    )
+    return lines_ok and norms_ok and sections_ok
 
 
 def _validate_event(stage, event):
@@ -702,6 +1079,16 @@ def _validate_event(stage, event):
         if kind != "review" and data["item_id"] not in items:
             raise ValueError()
         if type(data.get("called_jev", False)) is not bool:
+            raise ValueError()
+        usage = data.get("usage")
+        if usage is not None and (
+            not isinstance(usage, dict)
+            or set(usage) - {"input_tokens", "output_tokens"}
+            or any(
+                type(usage.get(key)) is not int or usage[key] < 0
+                for key in ("input_tokens", "output_tokens")
+            )
+        ):
             raise ValueError()
         for key in ("revision", "tree"):
             if key in data and (not isinstance(data[key], str) or REVISION_RE.fullmatch(data[key]) is None):
@@ -809,11 +1196,17 @@ def _summarize(stage: dict, events: list[dict]) -> dict:
     next_direction = None
     unresolved_review = None
     bypassed = False
+    penalties = {}
+    tokens_used = 0
     for event in events:
         _validate_event(stage, event)
         kind, data = event["kind"], event["data"]
         attempts_before = model_attempts
+        tokens_before = tokens_used
         model_attempts += int(data.get("called_jev") is True)
+        usage = data.get("usage")
+        if isinstance(usage, dict):
+            tokens_used += int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
         for check in data.get("checks", []):
             if _passed([check]):
                 failed_checks.discard(check["id"])
@@ -828,8 +1221,11 @@ def _summarize(stage: dict, events: list[dict]) -> dict:
                 award_credit.setdefault(data["item_id"], data["credit"])
                 if data["item_id"] not in invalidated:
                     active_credit.setdefault(data["item_id"], data["credit"])
+                penalties.pop(data["item_id"], None)
                 no_gain = unscored_streak = 0
             else:
+                if data["status"] == "scored" and data["points"] < 0:
+                    penalties[data["item_id"]] = data["points"]
                 no_gain += 1
                 unscored_streak = unscored_streak + 1 if data["status"] == "unscored" else 0
         elif kind == "invalidate":
@@ -838,10 +1234,16 @@ def _summarize(stage: dict, events: list[dict]) -> dict:
             invalidated.add(data["item_id"])
             active_credit.pop(data["item_id"], None)
         elif kind == "restore":
-            union = {"added": Counter(), "removed": Counter(), "ops": Counter()}
+            union = {key: Counter() for key in CREDIT_RAW}
+            for key in CREDIT_NORM:
+                union[key] = set()
             for item_id, credit in active_credit.items():
-                for key in ("added", "removed", "ops"):
+                for key in CREDIT_RAW:
                     union[key].update(credit.get(key, ()))
+                for key in CREDIT_NORM:
+                    norms = credit.get(key)
+                    if isinstance(norms, dict):
+                        union[key].update(norms)
             if (data["item_id"] not in invalidated or data.get("restores") != award_ids.get(data["item_id"])
                     or data.get("credit") != award_credit.get(data["item_id"])
                     or _credit_overlaps(data.get("credit") or {}, union)):
@@ -849,15 +1251,22 @@ def _summarize(stage: dict, events: list[dict]) -> dict:
             invalidated.discard(data["item_id"])
             active_credit[data["item_id"]] = data["credit"]
         elif kind == "review":
+            token_limit = settings.get("max_tokens")
             if data.get("over_budget") is True:
-                if (bypassed or attempts_before < settings["max_model_calls"] or data["approve_finish"] is not True):
+                exhausted = attempts_before >= settings["max_model_calls"] or (
+                    type(token_limit) is int and tokens_before >= token_limit
+                )
+                if bypassed or not exhausted or data["approve_finish"] is not True:
                     raise ProgressError("STORE_INVALID", "Over-budget review bypass is allowed once and requires finish approval")
                 bypassed = True
             if data["applied"]:
                 if not isinstance(data.get("evidence_replay"), dict):
                     raise ProgressError("STORE_INVALID", "An applied review requires replayable evidence")
                 if data["choice"] == "continue":
-                    running = sum(value for item, value in awards.items() if item not in invalidated)
+                    running = (
+                        sum(value for item, value in awards.items() if item not in invalidated)
+                        + sum(penalties.values())
+                    )
                     if type(data.get("review_at")) is not int or data["review_at"] != running + settings["review_points"]:
                         raise ProgressError("STORE_INVALID", "Applied review is inconsistent with recorded history")
                     review_at = data["review_at"]
@@ -877,11 +1286,19 @@ def _summarize(stage: dict, events: list[dict]) -> dict:
                 no_gain = unscored_streak = 0
             else:
                 unresolved_review = data["reason"]
-    points = sum(value for item, value in awards.items() if item not in invalidated)
+    points = sum(value for item, value in awards.items() if item not in invalidated) + sum(penalties.values())
+    token_limit = settings.get("max_tokens")
     if terminal:
         action, reason = terminal, terminal
-    elif model_attempts >= settings["max_model_calls"] or assessments >= settings["max_assessments"]:
-        action, reason = "budget_exhausted", "iteration_budget"
+    elif model_attempts >= settings["max_model_calls"] or assessments >= settings["max_assessments"] or (
+            type(token_limit) is int and tokens_used >= token_limit):
+        action = "budget_exhausted"
+        reason = (
+            "token_budget"
+            if type(token_limit) is int and tokens_used >= token_limit
+            and model_attempts < settings["max_model_calls"] and assessments < settings["max_assessments"]
+            else "iteration_budget"
+        )
     elif invalidated or failed_checks:
         action, reason = "repair_required", "invalidated" if invalidated else "checks_failed"
     elif points >= review_at:
@@ -899,6 +1316,8 @@ def _summarize(stage: dict, events: list[dict]) -> dict:
         "points": points, "review_at": review_at,
         "assessment_count": assessments, "assessment_limit": settings["max_assessments"],
         "model_attempts": model_attempts, "model_attempt_limit": settings["max_model_calls"],
+        "tokens_used": tokens_used, "token_limit": token_limit if type(token_limit) is int else None,
+        "harmful_items": sorted(penalties),
         "awarded_items": sorted(item for item in awards if item not in invalidated),
         "blocked_items": sorted(invalidated), "failed_checks": sorted(failed_checks),
         "action": action, "reason": reason, "next_direction": next_direction,
@@ -1138,6 +1557,7 @@ class Ledger:
         for event in self._events(db, stage, committed=False):
             if event["kind"] == "assessment" and event["data"].get("points", 0) > 0:
                 awards.setdefault(event["data"]["item_id"], event["data"])
+        full_diff = None
         for item_id in item_ids:
             if item_id not in state["awarded_items"]:
                 continue
@@ -1146,7 +1566,19 @@ class Ledger:
             retained = bool(diff.strip())
             if retained:
                 credit = (awards.get(item_id) or {}).get("credit")
-                retained = isinstance(credit, dict) and _credited_retained(credit, diff)
+                if isinstance(credit, dict):
+                    # Retention also reads the unscoped baseline->candidate
+                    # diff: a credited file moved outside this item's frozen
+                    # paths is still present work — the delete block proves
+                    # the move and the wide diff shows the moved-to content.
+                    # Earning stays scoped; only retention widens.
+                    if full_diff is None:
+                        full_diff = self.collector.diff(
+                            stage["baseline"]["revision"], before["revision"], settings
+                        )
+                    retained = _credited_retained(credit, diff, full_diff)
+                else:
+                    retained = False
             if not retained:
                 if self._snapshot(stage) != before:
                     raise ProgressError("WORKTREE_CHANGED", "Repository changed while checking retained credit")
@@ -1171,6 +1603,11 @@ class Ledger:
             db.commit()
             self._write_anchor(db)
         return _summarize(stage, [])
+
+    def stage_ids(self):
+        with self._database() as db:
+            db.execute("BEGIN")
+            return sorted(row["id"] for row in db.execute("SELECT id FROM stages"))
 
     def status(self, stage_id):
         with self._database() as db:
@@ -1219,7 +1656,10 @@ class Ledger:
         if event["kind"] == "assessment":
             credited = _credited_union(events, before_sequence=event["sequence"])
             sections = _credited_sections(events, before_sequence=event["sequence"])
-            if data.get("credit") != _earned_credit(_diff_line_hashes(candidate["diff"]), credited, sections):
+            if data.get("credit") != _align_credit_shape(
+                data.get("credit"),
+                _earned_credit(_diff_line_hashes(candidate["diff"]), credited, sections),
+            ):
                 raise ProgressError("EVIDENCE_MISMATCH", "Recorded credit does not match the reconstructed change")
         if event["kind"] == "restore" and not _credited_retained(metadata.get("credit") or {}, candidate["diff"]):
             raise ProgressError("EVIDENCE_MISMATCH", "Rebuilt evidence no longer retains the credited outcome")
@@ -1292,7 +1732,8 @@ class Ledger:
                     result.update(choice="zero", reason="already_credited")
                 else:
                     outcome = _ask(evidence, {"contribution": stage["policy"]["templates"]["contribution"]}, stage["policy"], asker)
-                    result = dict(outcome["results"]["contribution"], called_jev=outcome["called_jev"], model=outcome["model"])
+                    result = dict(outcome["results"]["contribution"], called_jev=outcome["called_jev"], model=outcome["model"],
+                                  usage=outcome.get("usage"))
             if self._snapshot(stage) != before:
                 raise ProgressError("WORKTREE_CHANGED", "Repository changed before the assessment could be recorded")
             choice = result["choice"]
@@ -1310,6 +1751,8 @@ class Ledger:
                 "checks": checks, "evidence_sha256": fingerprint(evidence),
                 "evidence_replay": None if withheld else {"metadata": _replay_metadata(evidence)},
             }
+            if isinstance(result.get("usage"), dict):
+                data["usage"] = result["usage"]
             self._append(db, stage_id, "assessment", data, attempt_id)
             return dict(_summarize(stage, self._events(db, stage, committed=False)), cached=False, assessment_id=attempt_id)
 
@@ -1375,7 +1818,11 @@ class Ledger:
             state = _summarize(stage, events)
             self._open(state)
             settings = stage["policy"]["progress"]
-            over_budget = state["model_attempts"] >= settings["max_model_calls"]
+            over_budget = (
+                state["model_attempts"] >= settings["max_model_calls"]
+                or (type(settings.get("max_tokens")) is int
+                    and state.get("tokens_used", 0) >= settings["max_tokens"])
+            )
             if over_budget and (not approve_finish or any(
                     event["kind"] == "review" and event["data"].get("over_budget") for event in events)):
                 raise ProgressError("BUDGET_EXHAUSTED", "Jev request-attempt budget is exhausted; human review is required")
@@ -1438,6 +1885,8 @@ class Ledger:
                 "evidence_sha256": fingerprint(evidence),
                 "evidence_replay": None if _sensitive(evidence) else {"metadata": _replay_metadata(evidence)},
             }
+            if isinstance(outcome.get("usage"), dict):
+                data["usage"] = outcome["usage"]
             self._append(db, stage_id, "review", data)
             return _summarize(stage, self._events(db, stage, committed=False))
 

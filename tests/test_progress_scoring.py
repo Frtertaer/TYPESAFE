@@ -127,6 +127,42 @@ class SemanticCreditTests(unittest.TestCase):
         self.assertEqual(stripped, rebuilt)
         self.assertFalse(progress._credited_retained(stripped, MODIFY_REFORMATTED))
 
+    def test_same_mode_change_on_other_path_does_not_retain(self):
+        credited = progress._diff_line_hashes(
+            "diff --git a/core_0.py b/core_0.py\nold mode 100644\nnew mode 100755\n"
+        )
+        credit = progress._earned_credit(credited, progress._credited_union([]), [])
+        current = "diff --git a/core_1.py b/core_1.py\nold mode 100644\nnew mode 100755\n"
+        self.assertFalse(progress._credited_retained(credit, current))
+
+    def test_move_outside_item_scope_keeps_credit(self):
+        credited = progress._diff_line_hashes('["core.py"]\n' + MODIFY)
+        credit = progress._earned_credit(credited, progress._credited_union([]), [])
+        scoped = (
+            '["core.py"]\n'
+            "diff --git a/core.py b/core.py\ndeleted file mode 100644\n"
+            "--- a/core.py\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-old behavior\n"
+        )
+        wide = "null\n" + scoped.split("\n", 1)[1] + (
+            "diff --git a/moved.py b/moved.py\nnew file mode 100644\n"
+            "--- /dev/null\n+++ b/moved.py\n@@ -0,0 +1,1 @@\n+verified behavior\n"
+        )
+        self.assertTrue(progress._credited_retained(credit, scoped, wide))
+        self.assertFalse(progress._credited_retained(credit, scoped))
+
+    def test_delete_elsewhere_does_not_retain_removed_credit(self):
+        credited = progress._diff_line_hashes(
+            '["x.py"]\n'
+            "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1,2 +1,1 @@\n keep\n-obsolete\n"
+        )
+        credit = progress._earned_credit(credited, progress._credited_union([]), [])
+        # x.py reverted to baseline (no diff block); y.py deleted with the same line
+        current = (
+            "diff --git a/y.py b/y.py\ndeleted file mode 100644\n"
+            "--- a/y.py\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-obsolete\n"
+        )
+        self.assertFalse(progress._credited_retained(credit, current))
+
     def test_credit_ok_rejects_malformed_norms(self):
         raw = progress._diff_line_hashes(MODIFY)
         credit = progress._earned_credit(raw, progress._credited_union([]), [])

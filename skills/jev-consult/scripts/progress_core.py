@@ -567,6 +567,7 @@ def _norm_digest(text: str, context: str = "") -> str:
 
 
 _OPS_PATH_RE = re.compile(r"[ab]/\S+")
+_GIT_HEADER_RE = re.compile(r"diff --git a/(.+) b/(.+)$")
 
 
 def _ops_norm(line: str) -> str:
@@ -576,11 +577,31 @@ def _ops_norm(line: str) -> str:
     return _content_digest(_normalize_line(_OPS_PATH_RE.sub("", line)))
 
 
+def _git_paths(header: str) -> tuple[str, str]:
+    """(old, new) paths from a 'diff --git a/OLD b/NEW' header."""
+    m = _GIT_HEADER_RE.match(header.strip())
+    return (m.group(1), m.group(2)) if m else ("", "")
+
+
+def _ops_norm_info(line: str, path: str) -> dict:
+    """Norm record for a structural op: n binds the op text to its file
+    (the same mode/index change on another path is a different change);
+    f stays path-free for verified-move retention."""
+    stripped = _OPS_PATH_RE.sub("", line)
+    return {
+        "n": _content_digest(path + "\x00" + _normalize_line(stripped)),
+        "p": path,
+        "f": _ops_norm(line),
+    }
+
+
 def _diff_line_hashes(diff: str) -> dict:
     added, removed, ops = [], [], []
     norms = {"added": {}, "removed": {}, "ops": {}}
     sections = {}
     old_file = new_file = header = ""
+    block_old = block_new = ""
+    deleted_paths: set = set()
     in_hunk = saw_hunk = binary_section = False
     pending_index = []
     hunk_lines = []
@@ -619,6 +640,7 @@ def _diff_line_hashes(diff: str) -> dict:
             pending_index = []
             binary_section = in_hunk = False
             old_file = new_file = ""
+            block_old, block_new = _git_paths(line)
             header = line
         elif line.startswith("@@"):
             flush_hunk()
@@ -638,16 +660,20 @@ def _diff_line_hashes(diff: str) -> dict:
             target = line[4:]
             new_file = target[2:] if target.startswith("b/") else target
         elif line.startswith("index "):
-            pending_index.append((_line_digest(header, line), {"n": _ops_norm(line), "p": "", "f": _ops_norm(line)}))
+            pending_index.append(
+                (_line_digest(header, line), _ops_norm_info(line, block_new or block_old))
+            )
         elif line.startswith(BINARY_MARKERS):
             binary_section = True
             digest = _line_digest(header, line)
             ops.append(digest)
-            norms["ops"][digest] = {"n": _ops_norm(line), "p": "", "f": _ops_norm(line)}
+            norms["ops"][digest] = _ops_norm_info(line, block_new or block_old)
         elif line.startswith(STRUCTURAL_PREFIXES):
             digest = _line_digest(header, line)
             ops.append(digest)
-            norms["ops"][digest] = {"n": _ops_norm(line), "p": "", "f": _ops_norm(line)}
+            norms["ops"][digest] = _ops_norm_info(line, block_new or block_old)
+            if line.startswith("deleted file mode"):
+                deleted_paths.add(block_old)
     flush_hunk()
     if binary_section:
         for digest, norm in pending_index:
@@ -658,9 +684,11 @@ def _diff_line_hashes(diff: str) -> dict:
         norms = {"added": {}, "removed": {}, "ops": {}}
         sections = {}
         old_file = new_file = header = ""
+        deleted_paths = set()
         binary_section = False
         pending_index = []
         position = 0
+        block_old = block_new = ""
         for line in diff.split("\n"):
             if line.startswith("diff --git"):
                 if binary_section:
@@ -670,6 +698,7 @@ def _diff_line_hashes(diff: str) -> dict:
                 pending_index = []
                 binary_section = False
                 old_file = new_file = ""
+                block_old, block_new = _git_paths(line)
                 header = line
                 position = 0
             elif line.startswith("--- "):
@@ -700,16 +729,20 @@ def _diff_line_hashes(diff: str) -> dict:
                 }
                 position += 1
             elif line.startswith("index "):
-                pending_index.append((_line_digest(header, line), {"n": _ops_norm(line), "p": "", "f": _ops_norm(line)}))
+                pending_index.append(
+                    (_line_digest(header, line), _ops_norm_info(line, block_new or block_old))
+                )
             elif line.startswith(BINARY_MARKERS):
                 binary_section = True
                 digest = _line_digest(header, line)
                 ops.append(digest)
-                norms["ops"][digest] = {"n": _ops_norm(line), "p": "", "f": _ops_norm(line)}
+                norms["ops"][digest] = _ops_norm_info(line, block_new or block_old)
             elif line.startswith(STRUCTURAL_PREFIXES):
                 digest = _line_digest(header, line)
                 ops.append(digest)
-                norms["ops"][digest] = {"n": _ops_norm(line), "p": "", "f": _ops_norm(line)}
+                norms["ops"][digest] = _ops_norm_info(line, block_new or block_old)
+                if line.startswith("deleted file mode"):
+                    deleted_paths.add(block_old)
         if binary_section:
             for digest, norm in pending_index:
                 ops.append(digest)
@@ -719,15 +752,25 @@ def _diff_line_hashes(diff: str) -> dict:
         "added_norm": norms["added"], "removed_norm": norms["removed"],
         "ops_norm": norms["ops"],
         "sections": sections,
+        "deleted": sorted(deleted_paths),
     }
 
 
-def _credited_retained(credit: dict, diff: str) -> bool:
+def _credited_retained(credit: dict, diff: str, wide_diff: str = None) -> bool:
     """Credited lines still present in the current diff — exactly by raw
     digest, by normalized in-place digest (reformats), or by pure-text
-    digest when the credited file itself is absent (rename/move)."""
+    digest after the credited file itself was deleted (the shape a move
+    takes under --no-renames: delete + create). A file reverted to
+    baseline is absent from the diff entirely and never qualifies.
+
+    ``diff`` may be scoped to the credited item's paths; a delete block
+    for the credited path is still visible there because the old side of
+    a move matches the pathspec. ``wide_diff`` — the unscoped
+    baseline->candidate diff — supplies the pure-text pool so content
+    moved to a path outside the item's scope is still found."""
     current = _diff_line_hashes(diff)
-    paths_now = set(current["sections"])
+    wide = _diff_line_hashes(wide_diff) if wide_diff is not None else current
+    deleted_now = set(current["deleted"]) | set(wide["deleted"])
     for key, norm_key in zip(CREDIT_RAW, CREDIT_NORM):
         needed = Counter(credit.get(key, ()))
         present = Counter(current[key])
@@ -742,7 +785,7 @@ def _credited_retained(credit: dict, diff: str) -> bool:
             info["n"] for info in current[norm_key].values() if isinstance(info, dict)
         )
         present_f = Counter(
-            info["f"] for info in current[norm_key].values() if isinstance(info, dict)
+            info["f"] for info in wide[norm_key].values() if isinstance(info, dict)
         )
         for digest, short in missing.items():
             info = norms.get(digest)
@@ -751,7 +794,7 @@ def _credited_retained(credit: dict, diff: str) -> bool:
             if info.get("n") and present_n[info["n"]] >= short:
                 present_n[info["n"]] -= short
                 continue
-            if (info.get("p") and info["p"] not in paths_now
+            if (info.get("p") and info["p"] in deleted_now
                     and info.get("f") and present_f[info["f"]] >= short):
                 present_f[info["f"]] -= short
                 continue
@@ -1452,6 +1495,7 @@ class Ledger:
         for event in self._events(db, stage, committed=False):
             if event["kind"] == "assessment" and event["data"].get("points", 0) > 0:
                 awards.setdefault(event["data"]["item_id"], event["data"])
+        full_diff = None
         for item_id in item_ids:
             if item_id not in state["awarded_items"]:
                 continue
@@ -1460,7 +1504,19 @@ class Ledger:
             retained = bool(diff.strip())
             if retained:
                 credit = (awards.get(item_id) or {}).get("credit")
-                retained = isinstance(credit, dict) and _credited_retained(credit, diff)
+                if isinstance(credit, dict):
+                    # Retention also reads the unscoped baseline->candidate
+                    # diff: a credited file moved outside this item's frozen
+                    # paths is still present work — the delete block proves
+                    # the move and the wide diff shows the moved-to content.
+                    # Earning stays scoped; only retention widens.
+                    if full_diff is None:
+                        full_diff = self.collector.diff(
+                            stage["baseline"]["revision"], before["revision"], settings
+                        )
+                    retained = _credited_retained(credit, diff, full_diff)
+                else:
+                    retained = False
             if not retained:
                 if self._snapshot(stage) != before:
                     raise ProgressError("WORKTREE_CHANGED", "Repository changed while checking retained credit")

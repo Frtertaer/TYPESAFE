@@ -619,6 +619,100 @@ class BootstrapHardeningTests(unittest.TestCase):
             self.assertRaises(TimeoutError, ns["_locked"], lambda: None)
             self.assertTrue(lock.exists())  # holder's lock left alone
 
+    def test_bootstrap_locked_creates_missing_parent(self) -> None:
+        """Fresh home: ~/.jev-consult doesn't exist — the lock dir's
+        parent is created instead of the mkdir raising OSError."""
+        ns = _bootstrap_ns()
+        with tempfile.TemporaryDirectory() as tmp:
+            ns["LOCK_DIR"] = Path(tmp) / "no-such-parent" / "bundle.lock"
+            self.assertEqual(ns["_locked"](lambda: 42), 42)
+            self.assertFalse(ns["LOCK_DIR"].exists())
+
+    def test_bootstrap_locked_stale_claim_restores_fresh_lock(self) -> None:
+        """Two waiters both judge a lock stale; if the other's fresh lock
+        lands between our stale check and our claim rename, the claimed
+        dir is fresh — restore it instead of deleting it."""
+        import shutil as real_shutil
+        import types
+
+        ns = _bootstrap_ns()
+        with tempfile.TemporaryDirectory() as tmp:
+            lock = Path(tmp) / "bundle.lock"
+            lock.mkdir()
+            stale = os.path.getmtime(lock) - 300
+            os.utime(lock, (stale, stale))
+            ns["LOCK_DIR"] = lock
+            # Interleave: our rename claim sees a FRESH lock dir (recent
+            # mtime), as if another process won the stale-break race.
+            fresh = Path(tmp) / "fresh-holder"
+            fresh.mkdir()
+            real_rename = os.rename
+
+            def swap_then_rename(src, dst):
+                os.rmdir(src)
+                real_rename(str(fresh), str(src))
+                return real_rename(src, dst)
+
+            ns["os"] = types.SimpleNamespace(
+                **{
+                    k: getattr(os, k)
+                    for k in dir(os)
+                    if not k.startswith("_") and k != "rename"
+                },
+                rename=swap_then_rename,
+            )
+            real_time = __import__("time")
+
+            def holder_finished(_s):
+                # the fresh lock's owner completes while we wait on it
+                real_shutil.rmtree(lock, ignore_errors=True)
+
+            ns["time"] = types.SimpleNamespace(
+                monotonic=real_time.monotonic,
+                time=real_time.time,
+                sleep=holder_finished,
+            )
+            self.assertEqual(ns["_locked"](lambda: "ran"), "ran")
+            self.assertFalse(lock.exists())  # our own lock released at end
+            self.assertFalse(fresh.exists())
+
+    def test_bootstrap_lock_held_while_child_runs(self) -> None:
+        """The bundle lock must stay held until the child installer
+        finishes — a second setup must not swap BUNDLE_DIR mid-install,
+        and --source stays the stable bundle path."""
+        import subprocess as real_subprocess
+        import types
+
+        ns = _bootstrap_ns()
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / ".jev-consult" / "bundle"
+            ns["BUNDLE_DIR"] = bundle
+            ns["LOCK_DIR"] = bundle.parent / "bundle.lock"
+            (bundle / "scripts").mkdir(parents=True)
+            (bundle / "scripts" / "install.py").write_text("x=1\n")
+            ns["_stage"] = lambda: bundle
+            calls = []
+
+            def call(cmd):
+                calls.append(list(cmd))
+                assert ns["LOCK_DIR"].exists(), "lock released before child ran"
+                return 0
+
+            ns["subprocess"] = types.SimpleNamespace(
+                call=call, DEVNULL=real_subprocess.DEVNULL
+            )
+            ns["_tty"] = lambda: False
+            ns["sys"] = types.SimpleNamespace(
+                argv=["jev-setup"],
+                executable=sys.executable,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+            )
+            self.assertEqual(ns["main"](), 0)
+            (cmd,) = calls
+            self.assertEqual(cmd[cmd.index("--source") + 1], str(bundle))
+            self.assertFalse(ns["LOCK_DIR"].exists())  # released at end
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

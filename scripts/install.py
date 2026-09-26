@@ -526,10 +526,21 @@ def ensure_hermes_config(hermes: Path, dry_run: bool) -> str:
     config = hermes / "config.yaml"
     if config.is_file():
         return "config.yaml exists"
-    if not (hermes / "skills").is_dir() and not (hermes / "plugins").is_dir() and not hermes.is_dir():
-        return "no harness layout; skipped %s" % config
     if dry_run:
+        # The hermes flow creates ~/.hermes/plugins before this call, so
+        # the real run always sees a layout — report the projection even
+        # on a fresh HOME.
         return "create %s" % config
+    try:
+        layout = (
+            (hermes / "skills").is_dir()
+            or (hermes / "plugins").is_dir()
+            or (hermes.is_dir() and any(hermes.iterdir()))
+        )
+    except OSError:
+        layout = False
+    if not layout:
+        return "no harness layout; skipped %s" % config
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text("plugins:\n  enabled:\n", encoding="utf-8")
     return "created %s" % config
@@ -537,6 +548,9 @@ def ensure_hermes_config(hermes: Path, dry_run: bool) -> str:
 
 def enable_hermes_plugin(config: Path, name: str, dry_run: bool) -> str:
     if not config.is_file():
+        if dry_run:
+            # ensure_hermes_config seeds config.yaml earlier in this run.
+            return "enable %s (config.yaml created this run)" % name
         return "missing " + str(config)
     text = config.read_text(encoding="utf-8")
     span = _enabled_span(text)

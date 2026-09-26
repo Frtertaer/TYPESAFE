@@ -677,9 +677,21 @@ def status_streaks(entries: list[dict]) -> list[dict]:
 
 
 # jev_status values that mean no Jev call happened — dedupe replays a
-# sidecar pick, idf shortlists locally; only attempted calls belong in a
-# timeout/error rate denominator.
-_NO_CALL_STATUSES = {"dedupe", "idf", "skip", "disabled", ""}
+# sidecar pick, idf shortlists locally, fill/budget/empty never reach the
+# network; only attempted calls belong in a timeout/error rate denominator.
+_NO_CALL_STATUSES = {"dedupe", "idf", "skip", "disabled", "fill", "budget", "empty", ""}
+# question markers that also mark a no-call record: "dedupe" replays carry
+# jev_status "winner", and "env"/"explicit" picks bypass Jev entirely.
+_NO_CALL_QUESTIONS = {"dedupe", "env", "explicit"}
+
+
+def _attempted_call(item: dict, status: str) -> bool:
+    return (
+        status not in _NO_CALL_STATUSES
+        and not item.get("dedupe")
+        and not item.get("explicit")
+        and str(item.get("question") or "") not in _NO_CALL_QUESTIONS
+    )
 
 
 def harness_health(entries: list[dict]) -> list[dict]:
@@ -712,7 +724,7 @@ def harness_health(entries: list[dict]) -> list[dict]:
         )
         row["entries"] += 1
         status = str(item.get("jev_status") or "")
-        if status not in _NO_CALL_STATUSES:
+        if _attempted_call(item, status):
             row["attempted"] += 1
         if status == "error":
             row["errors"] += 1

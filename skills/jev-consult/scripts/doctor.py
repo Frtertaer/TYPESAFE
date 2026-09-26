@@ -136,41 +136,58 @@ _SECRET_ASSIGN_RE = re.compile(
 _SECRET_BLOB_RE = re.compile(
     r"sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_-]{12,}|(?i)bearer\s+\S+"
 )
+# An unbroken token this long is an id/hash/credential, not prose — scrub
+# it regardless of scheme so unrecognized credential formats cannot leak.
+_SECRET_TOKEN_RE = re.compile(r"[A-Za-z0-9_+./=-]{24,}")
+# Probe output is a diagnostic, not data: cap what a malfunctioning CLI can
+# spool in memory before its timeout fires.
+_LIVE_MAX_BYTES = 65536
 
 
 def _redact(text: str) -> str:
     text = _SECRET_ASSIGN_RE.sub(lambda m: m.group(1) + "<redacted>", text)
-    return _SECRET_BLOB_RE.sub("<redacted>", text)
+    return _SECRET_TOKEN_RE.sub(
+        "<redacted>", _SECRET_BLOB_RE.sub("<redacted>", text)
+    )
+
+
+def _tail(fp) -> str:
+    """Last _LIVE_MAX_BYTES of a binary temp file, decoded lossily."""
+    fp.seek(0, os.SEEK_END)
+    fp.seek(max(0, fp.tell() - _LIVE_MAX_BYTES))
+    return fp.read().decode("utf-8", "replace")
 
 
 def _live_probe(agent: str, timeout: float) -> dict:
     """Run the harness CLI once with a minimal prompt; classify the answer.
 
-    Returns {status, detail}: available when rc 0 without quota wording,
-    limited on 429/rate-limit/quota/usage-limit stderr, missing when the
-    binary is absent, error on timeout/crash/other nonzero exits."""
+    Returns {status, detail}: available when rc 0 with a nonempty stdout
+    answer and no quota wording, limited on 429/rate-limit/quota/usage-limit
+    stderr, missing when the binary is absent, error on timeout/crash/
+    silent-success/other nonzero exits."""
     binary, argv = LIVE_PROBES.get(agent, (agent, ()))
     path = shutil.which(binary) or shutil.which(binary + ".exe")
     if not path:
         return {"status": "missing", "detail": "no %s on PATH" % binary}
     try:
-        proc = subprocess.run(
-            [path, *argv, LIVE_PROMPT],
-            capture_output=True,
-            timeout=timeout,
-            text=True,
-            errors="replace",
-        )
+        with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
+            rc = subprocess.run(
+                [path, *argv, LIVE_PROMPT],
+                stdin=subprocess.DEVNULL,
+                stdout=out_f,
+                stderr=err_f,
+                timeout=timeout,
+            ).returncode
+            stdout = _tail(out_f).strip()
+            stderr = _tail(err_f).strip()
     except subprocess.TimeoutExpired:
         return {"status": "error", "detail": "timed out after %gs" % timeout}
     except OSError as exc:
         return {"status": "missing", "detail": "%s: %s" % (binary, exc)}
-    stdout = (proc.stdout or "").strip()
-    stderr = (proc.stderr or "").strip()
     # A successful answer is response text, not an error channel — only
     # stderr wording can mean quota; otherwise "quota remaining: 100"
     # inside a good answer would read as limited.
-    quota_text = stderr if proc.returncode == 0 else stdout + "\n" + stderr
+    quota_text = stderr if rc == 0 else stdout + "\n" + stderr
     hit = LIVE_LIMITED_RE.search(quota_text)
     if hit:
         line = next(
@@ -178,13 +195,18 @@ def _live_probe(agent: str, timeout: float) -> dict:
             hit.group(0),
         )
         return {"status": "limited", "detail": "rate-limited: %s" % _redact(line[:120])}
-    if proc.returncode == 0:
+    if rc == 0:
+        # rc 0 with no answer text is not evidence the prompt was answered —
+        # a wrapper can exit cleanly after ignoring it. Only a nonempty
+        # stdout counts as available.
+        if not stdout:
+            return {"status": "error", "detail": "rc=0 with no response"}
         return {"status": "available", "detail": "answered (%s)" % binary}
     blob = (stdout + "\n" + stderr).strip()
     tail = _redact(blob.splitlines()[-1][:120]) if blob else ""
     return {
         "status": "error",
-        "detail": "rc=%d%s" % (proc.returncode, " " + tail if tail else ""),
+        "detail": "rc=%d%s" % (rc, " " + tail if tail else ""),
     }
 
 
@@ -212,6 +234,12 @@ def _live_checks(agents: list, home: Path, hermes: Path, timeout: float):
     return out, probes
 
 
+# Shared prerequisites for "the same setup works here": without the Jev
+# key or a parseable policy.json no harness can call Jev, however well its
+# CLI answered.
+_FALLBACK_PREREQS = {"api_key", "policy"}
+
+
 def _live_fallback(probes: dict, checks: list) -> str | None:
     """First available harness whose install checks all pass — an
     answering CLI with a broken jev-consult setup is no fallback."""
@@ -220,6 +248,14 @@ def _live_fallback(probes: dict, checks: list) -> str | None:
         for c in checks
         if c["check"] != "live_probe" and not c["ok"] and not c.get("skipped")
     }
+    if any(
+        c["agent"] == "*"
+        and c["check"] in _FALLBACK_PREREQS
+        and not c["ok"]
+        and not c.get("suppressed")
+        for c in checks
+    ):
+        return None
     return next(
         (
             a
@@ -812,6 +848,11 @@ def main(argv: list[str] | None = None) -> int:
         import time as _time
         from datetime import datetime, timezone
 
+        if args.live:
+            sys.stderr.write(
+                "watch + --live: every tick sends one prompt per detected "
+                "harness CLI — repeated probes consume harness quota\n"
+            )
         max_ticks = _watch.cap("JEV_DOCTOR_WATCH_MAX", args.max_ticks)
         dead = _watch.deadline("JEV_DOCTOR_WATCH_SECS", getattr(args, "watch_max", 0.0))
         count = 0

@@ -213,6 +213,8 @@ class LiveProbeTests(unittest.TestCase):
             home = Path(tmp) / "home"
             (home / ".codex").mkdir(parents=True)
             (home / ".claude").mkdir(parents=True)
+            # fallback requires the shared prerequisites (api_key) to pass
+            (home / ".env").write_text("TYPESAFE_API_KEY=test-key\n", encoding="utf-8")
             bindir = Path(tmp) / "bin"
             if os.name == "nt":
                 make_cli(bindir, "codex", "echo usage limit reached >&2\nexit /b 1")
@@ -333,6 +335,104 @@ class LiveProbeTests(unittest.TestCase):
         self.assertEqual(
             [c["check"] for c in out["checks"]], ["live_probe"]
         )
+
+    def test_silent_success_is_not_available(self) -> None:
+        """rc 0 with no stdout answer is not evidence the prompt ran —
+        a wrapper can exit cleanly after ignoring it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / ".codex").mkdir(parents=True)
+            bindir = Path(tmp) / "bin"
+            if os.name == "nt":
+                make_cli(bindir, "codex", "exit /b 0")
+            else:
+                make_cli(bindir, "codex", "exit 0")
+            env = {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
+            rc, out, _ = run_main(
+                [
+                    "--agents", "codex",
+                    "--home", str(home),
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--live", "--live-timeout", "20",
+                ],
+                env_extra=env,
+                cwd=tmp,
+            )
+        probe = out["live"]["probes"]["codex"]
+        self.assertEqual(probe["status"], "error")
+        self.assertIn("no response", probe["detail"])
+        self.assertFalse(live_checks(out, "codex")["ok"])
+        self.assertIsNone(out["live"]["fallback"])
+
+    def test_unrecognized_credential_shape_redacted(self) -> None:
+        """A quota line carrying a bare long token (no known secret
+        prefix, no KEY= assignment) must not reach doctor output."""
+        token = "xMilk9" * 8 + "drop7"
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / ".codex").mkdir(parents=True)
+            bindir = Path(tmp) / "bin"
+            if os.name == "nt":
+                make_cli(
+                    bindir, "codex",
+                    "echo usage limit hit, auth %s >&2\nexit /b 1" % token,
+                )
+            else:
+                make_cli(
+                    bindir, "codex",
+                    "echo 'usage limit hit, auth %s' >&2\nexit 1" % token,
+                )
+            env = {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
+            rc, out, text = run_main(
+                [
+                    "--agents", "codex",
+                    "--home", str(home),
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--live", "--live-timeout", "20",
+                ],
+                env_extra=env,
+                cwd=tmp,
+            )
+        self.assertNotIn(token, text)
+        self.assertEqual(
+            out["live"]["probes"]["codex"]["status"], "limited"
+        )
+
+    def test_fallback_blocked_when_shared_key_missing(self) -> None:
+        """An answering CLI is no fallback when api_key fails — the same
+        setup cannot call Jev there either."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / ".codex").mkdir(parents=True)
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "skills" / "jev-consult").mkdir(parents=True)
+            (home / ".claude" / "skills" / "jev-consult" / "SKILL.md").write_text("x")
+            (home / ".claude" / "settings.json").write_text(json.dumps({
+                "hooks": {
+                    "PostToolUse": [{"hooks": [{"command": "x compact_hook.py"}]}],
+                    "UserPromptSubmit": [{"hooks": [{"command": "x inventory_hook.py"}]}],
+                }
+            }))
+            bindir = Path(tmp) / "bin"
+            if os.name == "nt":
+                make_cli(bindir, "claude", "echo pong\nexit /b 0")
+            else:
+                make_cli(bindir, "claude", "echo pong\nexit 0")
+            env = {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
+            rc, out, _ = run_main(
+                [
+                    "--agents", "claude-code",
+                    "--home", str(home),
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--live", "--live-timeout", "20",
+                ],
+                env_extra=env,
+                cwd=tmp,
+            )
+        self.assertEqual(
+            out["live"]["probes"]["claude-code"]["status"], "available"
+        )
+        self.assertIsNone(out["live"]["fallback"])
 
     def test_jq_reaches_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

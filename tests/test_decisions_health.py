@@ -100,6 +100,39 @@ class HarnessHealthTests(unittest.TestCase):
         self.assertEqual(rows[0]["error_rate"], 0.0)
         self.assertEqual(rows[0]["timeout_rate"], 0.0)
 
+    def test_replayed_and_sidecar_records_are_not_attempts(self) -> None:
+        """A dedupe-replayed or explicit 'winner' never reached Jev; fill /
+        budget / empty records likewise. Only the real timeout counts."""
+        rows = DEC.harness_health(
+            [
+                entry("codex", "timeout", H10),
+                dict(entry("codex", "winner", H10SAME), dedupe=True, question="dedupe"),
+                dict(entry("codex", "winner", H10SAME), explicit=True, question="explicit"),
+                dict(entry("codex", "winner", H10SAME), question="env"),
+                entry("codex", "fill", H10SAME),
+                entry("codex", "budget", H10SAME),
+                entry("codex", "empty", H10SAME),
+            ]
+        )
+        (row,) = rows
+        self.assertEqual(row["entries"], 7)
+        self.assertEqual(row["attempted"], 1)
+        self.assertEqual(row["timeouts"], 1)
+        self.assertEqual(row["timeout_rate"], 1.0)
+
+    def test_real_call_statuses_still_count(self) -> None:
+        """winner/none from a real Jev answer keep counting as attempts."""
+        rows = DEC.harness_health(
+            [
+                dict(entry("codex", "winner", H10), question="load_tools"),
+                entry("codex", "none", H10SAME),
+                entry("codex", "error", H10SAME),
+            ]
+        )
+        (row,) = rows
+        self.assertEqual(row["attempted"], 3)
+        self.assertEqual(row["error_rate"], round(1 / 3, 4))
+
     def test_missing_ts_buckets_as_unknown(self) -> None:
         rows = DEC.harness_health([{"harness": "grok", "jev_status": "error"}])
         self.assertEqual(rows[0]["window"], "unknown")

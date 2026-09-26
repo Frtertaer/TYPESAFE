@@ -1116,8 +1116,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if key_is_set() else 1
     if args.env:
         return emit_env(env_report(parse_agents(args.agents)), args.jq, args.out)
+    # --live is a modifier, not an action: `--live` alone in a terminal still
+    # opens the menu (Install/Uninstall/Check), just with live probing on.
     wants_setup = (args.setup and not (args.uninstall or args.agents or args.dry_run)) or (
-        not raw and _tty()
+        (not raw or set(raw) == {"--live"}) and _tty()
     )
     if wants_setup:
         if not _tty():

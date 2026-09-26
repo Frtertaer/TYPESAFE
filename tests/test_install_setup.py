@@ -140,6 +140,29 @@ class SetupModeTests(unittest.TestCase):
                 (home / ".claude" / "skills" / "jev-consult" / "SKILL.md").is_file()
             )
 
+    def test_live_alone_in_tty_opens_menu(self) -> None:
+        """--live is a modifier: bare `--live` in a terminal opens the
+        setup menu (with live probing on), it does not silently install
+        every harness."""
+        with patch.object(install, "_tty", return_value=True), patch.object(
+            install, "run_setup", return_value=0
+        ) as menu:
+            rc = install.main(["--live"])
+        self.assertEqual(rc, 0)
+        menu.assert_called_once()
+        self.assertTrue(menu.call_args.kwargs.get("live"))
+
+    def test_live_alone_non_tty_installs_then_probes(self) -> None:
+        """Without a TTY `--live` keeps the noninteractive path: install,
+        then the live doctor probe."""
+        with patch.object(install, "_tty", return_value=False), patch.object(
+            install, "install", return_value=0
+        ), patch.object(install, "run_doctor", return_value=0) as doc:
+            rc = install.main(["--live"])
+        self.assertEqual(rc, 0)
+        doc.assert_called_once()
+        self.assertTrue(doc.call_args.kwargs.get("live"))
+
     def test_setup_menu_installs_detected_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"

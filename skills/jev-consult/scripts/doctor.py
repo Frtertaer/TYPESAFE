@@ -14,6 +14,7 @@ import argparse
 import csv
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -124,7 +125,11 @@ LIVE_PROBES = {
 }
 LIVE_PROMPT = "ping"
 LIVE_LIMITED_RE = re.compile(
-    r"429|rate.?limit|usage.?limit|quota|too many requests|insufficient|overloaded|exceeded",
+    r"429|rate.?limit|usage.?limit|request.?limit|quota|too many requests"
+    r"|resource.?exhaust|overloaded"
+    # 'exceed*' only when a limit word is nearby — bare "context length
+    # exceeded" or "insufficient permissions" are not quota failures.
+    r"|\blimits?\s+exceed\w*|exceed\w*\s+[^.;\n]{0,20}\blimits?\b",
     re.IGNORECASE,
 )
 # Probe diagnostics quote a CLI's own stderr line — scrub secret-shaped
@@ -165,6 +170,8 @@ def _live_probe(agent: str, timeout: float) -> dict:
     answer and no quota wording, limited on 429/rate-limit/quota/usage-limit
     stderr, missing when the binary is absent, error on timeout/crash/
     silent-success/other nonzero exits."""
+    if not math.isfinite(timeout) or timeout <= 0:
+        return {"status": "error", "detail": "invalid timeout %gs" % timeout}
     binary, argv = LIVE_PROBES.get(agent, (agent, ()))
     path = shutil.which(binary) or shutil.which(binary + ".exe")
     if not path:

@@ -133,6 +133,40 @@ class HarnessHealthTests(unittest.TestCase):
         self.assertEqual(row["attempted"], 3)
         self.assertEqual(row["error_rate"], round(1 / 3, 4))
 
+    def test_jev_attempted_marker_excludes_precall_errors(self) -> None:
+        """A 'error'/'timeout' that never reached the network (marked
+        jev_attempted=False at the call boundary) counts in neither the
+        numerator nor the denominator — local failures are not harness
+        health."""
+        rows = DEC.harness_health(
+            [
+                dict(entry("codex", "error", H10), jev_attempted=False),
+                dict(entry("codex", "timeout", H10SAME), jev_attempted=False),
+                dict(entry("codex", "winner", H10SAME), jev_attempted=True),
+            ]
+        )
+        (row,) = rows
+        self.assertEqual(row["entries"], 3)
+        self.assertEqual(row["attempted"], 1)
+        self.assertEqual(row["errors"], 0)
+        self.assertEqual(row["timeouts"], 0)
+        self.assertEqual(row["error_rate"], 0.0)
+        self.assertEqual(row["timeout_rate"], 0.0)
+
+    def test_jev_attempted_marker_includes_call_failures(self) -> None:
+        """The marker wins over the status heuristic: a real call that
+        failed counts even when the row carries no question field."""
+        rows = DEC.harness_health(
+            [
+                dict(entry("codex", "error", H10), jev_attempted=True),
+                dict(entry("codex", "timeout", H10SAME), jev_attempted=True),
+            ]
+        )
+        (row,) = rows
+        self.assertEqual(row["attempted"], 2)
+        self.assertEqual(row["error_rate"], 0.5)
+        self.assertEqual(row["timeout_rate"], 0.5)
+
     def test_missing_ts_buckets_as_unknown(self) -> None:
         rows = DEC.harness_health([{"harness": "grok", "jev_status": "error"}])
         self.assertEqual(rows[0]["window"], "unknown")

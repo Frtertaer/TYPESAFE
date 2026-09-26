@@ -477,11 +477,67 @@ class StrictGateTest(unittest.TestCase):
         rows = [
             {"id": "ok", "after": {"called_jev": True, "noul": 0.9}},
             {"id": "low", "after": {"called_jev": True, "noul": 0.4}},
-            {"id": "none", "after": {"called_jev": True}},  # no noul: skip check
         ]
         failures = compare.strict_failures(rows, True)
         self.assertEqual(len(failures), 1)
         self.assertIn("low", failures[0])
+
+    def test_strict_failures_live_missing_noul_fails(self) -> None:
+        """A live run that scored a case must land a noul; a missing one
+        means the live answer never arrived — canned rows can't cover it."""
+        rows = [
+            {"id": "ok", "after": {"called_jev": True, "noul": 0.9}},
+            {"id": "unscored", "after": {"called_jev": True}},  # no noul
+        ]
+        failures = compare.strict_failures(rows, True)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("unscored", failures[0])
+        self.assertIn("no live noul", failures[0])
+
+    def test_strict_failures_live_error_is_failure(self) -> None:
+        """run() records live errors in result['error']; the strict gate
+        must surface that as a failure rather than passing canned rows."""
+        rows = [{"id": "a", "after": {"called_jev": True, "noul": 0.9}}]
+        self.assertEqual(compare.strict_failures(rows, True), [])
+        failures = compare.strict_failures(rows, True, error="boom")
+        self.assertEqual(failures[0], "live scoring failed: boom")
+
+    def test_cli_live_error_fails_strict(self) -> None:
+        """compare --live --strict with no reachable Jev must exit 1 —
+        a broken live run is a FAIL verdict, not a silent PASS."""
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            env = {k: v for k, v in os.environ.items() if k != "TYPESAFE_API_KEY"}
+            env["HOME"] = str(Path(tmp) / "home")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "skills" / "jev-consult" / "scripts" / "compare.py"),
+                    "--live", "--strict", "--cases", str(path),
+                ],
+                capture_output=True, text=True, env=env, cwd=tmp,
+            )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("live scoring failed", proc.stderr)
+
+    def test_cli_json_report_md_stays_markdown(self) -> None:
+        """--json --report X.md must not write raw JSON into a .md file —
+        the report object only goes to .json paths."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(CASES), encoding="utf-8")
+            report = Path(tmp) / "report.md"
+            proc = self.run_cli(
+                "--cases", str(path), "--json", "--report", str(report)
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = report.read_text(encoding="utf-8")
+            self.assertTrue(text.startswith("# compare report"))
+            self.assertIn("verdict: **PASS**", text)
+            self.assertRaises(ValueError, json.loads, text)
 
     def test_cli_strict_rc(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

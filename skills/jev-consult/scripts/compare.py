@@ -203,10 +203,16 @@ def _write_verdict(path: str, tick: dict[str, Any]) -> None:
     return _watch.write_verdict(path, payload)
 
 
-def strict_failures(rows: list[dict[str, Any]], live: bool) -> list[str]:
+def strict_failures(
+    rows: list[dict[str, Any]], live: bool, error: str = ""
+) -> list[str]:
     """CI gate: the guarded (after) side must have called Jev and, when live,
-    scored at least noul_yes on the case's question."""
+    scored at least noul_yes on the case's question. A live scoring error or
+    a missing noul is a failure — the canned row must not stand in for a live
+    score that never landed."""
     failures: list[str] = []
+    if error:
+        failures.append("live scoring failed: %s" % error)
     noul_yes = 0.7
     try:
         jev = load_jev()
@@ -222,7 +228,9 @@ def strict_failures(rows: list[dict[str, Any]], live: bool) -> list[str]:
             continue
         if live:
             an = after.get("noul")
-            if an is not None and an < noul_yes:
+            if an is None:
+                failures.append("%s: no live noul (live scoring missing)" % cid)
+            elif an < noul_yes:
                 failures.append("%s: after noul %.2f < %.2f" % (cid, an, noul_yes))
     return failures
 
@@ -249,6 +257,11 @@ def run(
                 rows[index]["before"]["noul"] = before.get("noul")
                 rows[index]["after"]["noul"] = after.get("noul")
                 rows[index]["model"] = after.get("model") or before.get("model")
+        except SystemExit as exc:
+            # jev.py reports missing key / invalid response via SystemExit —
+            # capture it as the run error so --strict fails cleanly instead
+            # of the CLI dying mid-report.
+            live_error = str(exc.code or exc) or "SystemExit"
         except Exception as exc:
             live_error = str(exc) or exc.__class__.__name__
     return {
@@ -391,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--csv", action="store_true", help="Emit the case rows as CSV (id,defect,... columns; --keys a,b overrides the columns)")
     parser.add_argument("--keys", metavar="a,b", default="", help="With --jsonl: keep only these keys in each emitted row (rc 2 on an empty list)")
     parser.add_argument("--out", metavar="PATH", default="", help="Also write the result JSON to PATH")
-    parser.add_argument("--report", metavar="PATH", default="", help="Write a markdown compare report (verdict + per-case table) to PATH; with --json writes the report object instead")
+    parser.add_argument("--report", metavar="PATH", default="", help="Write a markdown compare report (verdict + per-case table) to PATH; with --json writes the report object instead only when PATH ends in .json")
     parser.add_argument("--verdict", metavar="PATH", default="", help="Write a slim {verdict, cases, failures} JSON to PATH (in --watch mode refreshed every tick) '-' prints it to stdout.")
     parser.add_argument("--cases", default=os.environ.get("JEV_COMPARE_CASES", "") or None, help="Path to compare-cases.json ('-' reads cases JSON from stdin; needs a file for --watch/--diff)")
     parser.add_argument("--schema", action="store_true", help="Print the compare-cases.json key contract and exit (--json emits the object)")
@@ -551,7 +564,7 @@ def main(argv: list[str] | None = None) -> int:
                 path=args.cases or None,
                 only=only,
             )
-            failing = strict_failures(cur["rows"], args.live)
+            failing = strict_failures(cur["rows"], args.live, cur.get("error") or "")
             new_failures = sorted(set(failing) - prev_failures)
             prev_failures = set(failing)
             tick = {
@@ -693,12 +706,17 @@ def main(argv: list[str] | None = None) -> int:
             args.verdict,
             {
                 "cases": len(result["rows"]),
-                "failures": strict_failures(result["rows"], args.live),
+                "failures": strict_failures(
+                    result["rows"], args.live, result.get("error") or ""
+                ),
             },
         )
     if args.report:
-        failures = strict_failures(result["rows"], args.live)
-        if args.as_json:
+        failures = strict_failures(result["rows"], args.live, result.get("error") or "")
+        # --report is the human-readable artifact: JSON goes there only when
+        # the path itself asks for it (.json); '--json --report eval.md'
+        # keeps the markdown table, with the payload going to --out/stdout.
+        if args.as_json and Path(args.report).suffix.lower() == ".json":
             report_obj = {
                 "verdict": "PASS" if not failures else "FAIL",
                 "goal": result.get("goal"),
@@ -799,7 +817,7 @@ def main(argv: list[str] | None = None) -> int:
     if result.get("error"):
         sys.stderr.write("live scoring failed: %s\n" % result["error"])
     if args.strict:
-        failures = strict_failures(result["rows"], args.live)
+        failures = strict_failures(result["rows"], args.live, result.get("error") or "")
         for entry in (result.get("diff") or {}).get("regressions", []):
             failures.append(
                 "%s: regressed vs baseline (%s)" % (entry["id"], entry["why"])

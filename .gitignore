@@ -23,3 +23,6 @@ Thumbs.db
 .devin/progress.sqlite3*
 req*.json
 ans*.json
+
+# Windows paths written literally on POSIX by test fixtures
+N:*

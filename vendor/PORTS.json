@@ -1,0 +1,74 @@
+{
+  "snapshots": [
+    {
+      "dir": "awesome-jev",
+      "upstream": "AppitStudio/awesome-jev",
+      "commit": "e96ed33d96ff355e3cfefa6efa104e1eee95f4f0",
+      "note": "Catalog/docs only; README/LICENSE trimmed locally. No ported files.",
+      "ported": []
+    },
+    {
+      "dir": "awesome-llm-apps-skill-evals",
+      "upstream": "Shubhamsaboo/awesome-llm-apps",
+      "commit": "9e860951aaf5c82801779e43e748dcf92042879a",
+      "upstream_path": "agent_skills/evals/tools",
+      "note": "Subset vendored; run_trigger_evals.py is locally adapted.",
+      "ported": [
+        {"vendor": "skill_scanner.py", "ours": "skills/jev-consult/scripts/skill_scanner.py"},
+        {"vendor": "skill_lint.py", "ours": "skills/jev-consult/scripts/skill_lint.py"},
+        {"vendor": "run_trigger_evals.py", "ours": "skills/jev-consult/scripts/trigger_eval.py"}
+      ]
+    },
+    {
+      "dir": "fast-jev-compaction",
+      "upstream": "tamaratran/fast-jev-compaction",
+      "commit": "e3f262a7f4d42bd8dd32ced30d26176f7cb545b0",
+      "ported": [
+        {"vendor": "src/compact.ts", "ours": "skills/jev-consult/scripts/compact.py", "note": "ported to --history"}
+      ]
+    },
+    {
+      "dir": "jev-skill-suggester",
+      "upstream": "win4r/jev-skill-suggester",
+      "commit": "05fbd7ce9ec74a2f193c09276a8d4d077d9d5e5c",
+      "note": "Rules ported (untrusted metadata, block-scalar frontmatter, explicit-only); CLI not vendored into runtime.",
+      "ported": [
+        {"vendor": "SKILL.md", "ours": "skills/jev-consult/scripts/skill_scanner.py"}
+      ]
+    },
+    {
+      "dir": "jevcal",
+      "upstream": "abhixhek/jevcal",
+      "commit": "ae8f3144d69c9cb0e5e0a2c17f70b9d14714cb9f",
+      "upstream_path": "src/jevcal",
+      "ported": [
+        {"vendor": "lint.py", "ours": "skills/jev-consult/scripts/question_lint.py"}
+      ]
+    },
+    {
+      "dir": "omp-jev-compaction",
+      "upstream": "jerryfane/omp-jev-compaction",
+      "commit": "3719495ceb109c0d6e40d29053675f0d6ecb2e9f",
+      "ported": [
+        {"vendor": "src/spill.ts", "ours": "skills/jev-consult/scripts/compact.py"},
+        {"vendor": "src/cache-guard.ts", "ours": "skills/jev-consult/scripts/compact.py"}
+      ]
+    },
+    {
+      "dir": "skill-router",
+      "upstream": "lomeshdutta/skill-router",
+      "commit": "4c538d8be575d5dee09a220c3304bd311ed97903",
+      "ported": [
+        {"vendor": "router.py", "ours": "skills/jev-consult/scripts/inventory_hook.py"},
+        {"vendor": "questions.py", "ours": "skills/jev-consult/scripts/inventory.py"}
+      ]
+    },
+    {
+      "dir": "typesafeai-cli",
+      "upstream": "maddygoround/typesafeai-cli",
+      "commit": "ca87ffdebb13415d3d582efea243e77b8ce92387",
+      "note": "Inspect-only; live client stays jev.py. No ported files.",
+      "ported": []
+    }
+  ]
+}

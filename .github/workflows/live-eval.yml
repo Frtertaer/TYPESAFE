@@ -1,0 +1,44 @@
+name: live-eval
+
+# Scheduled regression eval: compare.py --live re-asks Jev on the sticky-prompt
+# corpus so model/policy drift surfaces as a diff, not silence. Weekly Monday
+# 06:00 UTC + manual dispatch. Requires the TYPESAFE_API_KEY repo secret;
+# without it the job reports "skipped" instead of failing.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  compare-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: compare --live (guarded on the secret)
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+        run: |
+          if [ -z "$TYPESAFE_API_KEY" ]; then
+            echo "skipped: TYPESAFE_API_KEY secret is not set" | tee eval-live.md
+            exit 0
+          fi
+          python skills/jev-consult/scripts/compare.py --live --strict --json \
+            --out eval-live.json --report eval-live.md
+      - name: report to job summary
+        if: always()
+        run: cat eval-live.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compare-live
+          path: |
+            eval-live.json
+            eval-live.md
+          if-no-files-found: warn

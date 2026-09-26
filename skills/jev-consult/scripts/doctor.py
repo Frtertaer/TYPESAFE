@@ -139,7 +139,7 @@ _SECRET_ASSIGN_RE = re.compile(
     re.IGNORECASE,
 )
 _SECRET_BLOB_RE = re.compile(
-    r"sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_-]{12,}|(?i)bearer\s+\S+"
+    r"sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_-]{12,}|(?i:bearer\s+\S+)"
 )
 # An unbroken token this long is an id/hash/credential, not prose — scrub
 # it regardless of scheme so unrecognized credential formats cannot leak.

@@ -222,9 +222,14 @@ def pick_with_jev(
     except SystemExit:
         return {"status": "skip", "winner": None}
     request = picker_request(task, harness, picked)
+    # `attempted` marks whether a real network call to Jev started, so
+    # health reporting can exclude pre-call failures (bad import, broken
+    # policy) from timeout/error rates over attempted calls.
+    attempted = False
     try:
         policy = jev_mod.load_policy()
         start = time.perf_counter()
+        attempted = True
         result = jev_mod.post_systemone(
             request["state"],
             request["questions"],
@@ -235,16 +240,17 @@ def pick_with_jev(
         latency_ms = int((time.perf_counter() - start) * 1000)
         answers = result.get("answers") or {}
         if not isinstance(answers, dict):
-            return {"status": "error", "winner": None}
+            return {"status": "error", "winner": None, "attempted": attempted}
         decision = jev_mod.decide(answers, policy, irreversible=False)
     except SystemExit as err:
         msg = str(err.code or "").lower()
         status = "timeout" if ("timed out" in msg or "timeout" in msg) else "error"
-        return {"status": status, "winner": None}
+        return {"status": status, "winner": None, "attempted": attempted}
     except Exception as err:
         status = "timeout" if isinstance(err, (TimeoutError, socket.timeout)) else "error"
-        return {"status": status, "winner": None}
+        return {"status": status, "winner": None, "attempted": attempted}
     picker = resolve_picker(picked, decision, policy)
+    picker["attempted"] = attempted
     try:
         need = float((decision.get("picks") or {}).get("need_skill"))
     except (TypeError, ValueError, AttributeError):
@@ -372,6 +378,7 @@ def handle(
         extra = {
             "jev_status": "dedupe" if winner is None else "winner",
             "dedupe": True,
+            "jev_attempted": False,
         }
         winner_out = winner if isinstance(winner, dict) else None
         if extra["jev_status"] == "winner" and winner_out and winner_out.get("name"):
@@ -386,6 +393,7 @@ def handle(
             "shortlist": [item.get("id") for item in picked],
             "explicit": False,
             "dedupe": True,
+            "jev_attempted": False,
             "jev_status": extra["jev_status"],
             "reason": _status_reason(extra["jev_status"], (winner_out or {}).get("name"), "dedupe"),
             "question": "dedupe",
@@ -444,7 +452,10 @@ def handle(
                     picker = got
             except Exception:
                 picker = {"status": "error", "winner": None}
-    extra = {"jev_status": str(picker.get("status") or "idf")}
+    extra = {
+        "jev_status": str(picker.get("status") or "idf"),
+        "jev_attempted": bool(picker.get("attempted")),
+    }
     if stale_match:
         extra["stale_sidecar"] = True
     if note_tag:
@@ -469,6 +480,7 @@ def handle(
         "shortlist_n": len(picked),
         "shortlist": [item.get("id") for item in picked],
         "explicit": explicit_winner is not None,
+        "jev_attempted": bool(extra.get("jev_attempted")),
         "jev_status": extra["jev_status"],
         "reason": _status_reason(extra["jev_status"], (winner or {}).get("name"), str(picker.get("question") or "")),
         "question": picker.get("question"),

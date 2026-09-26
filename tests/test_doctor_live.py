@@ -143,6 +143,90 @@ class LiveProbeTests(unittest.TestCase):
         )
         self.assertTrue(live_checks(out, "codex")["ok"])
 
+    def test_non_quota_wording_is_error_not_limited(self) -> None:
+        """Bare 'exceeded'/'insufficient' outside quota phrasing is a
+        plain CLI failure — 'context length exceeded' must not read as
+        rate-limited."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / ".codex").mkdir(parents=True)
+            (home / ".grok").mkdir(parents=True)
+            bindir = Path(tmp) / "bin"
+            if os.name == "nt":
+                make_cli(bindir, "codex", "echo context length exceeded >&2\nexit /b 1")
+                make_cli(bindir, "grok", "echo insufficient permissions >&2\nexit /b 1")
+            else:
+                make_cli(bindir, "codex", "echo 'context length exceeded' >&2\nexit 1")
+                make_cli(bindir, "grok", "echo 'insufficient permissions' >&2\nexit 1")
+            env = {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
+            rc, out, _ = run_main(
+                [
+                    "--agents", "codex,grok",
+                    "--home", str(home),
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--live", "--live-timeout", "20",
+                ],
+                env_extra=env,
+                cwd=tmp,
+            )
+        self.assertEqual(out["live"]["probes"]["codex"]["status"], "error")
+        self.assertEqual(out["live"]["probes"]["grok"]["status"], "error")
+
+    def test_qualified_quota_wording_is_limited(self) -> None:
+        """'insufficient_quota'/'rate limit exceeded' keep classifying
+        as limited after the bare-word match tightened."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / ".codex").mkdir(parents=True)
+            (home / ".grok").mkdir(parents=True)
+            bindir = Path(tmp) / "bin"
+            if os.name == "nt":
+                make_cli(bindir, "codex", "echo error: insufficient_quota >&2\nexit /b 1")
+                make_cli(bindir, "grok", "echo rate limit exceeded >&2\nexit /b 1")
+            else:
+                make_cli(bindir, "codex", "echo 'error: insufficient_quota' >&2\nexit 1")
+                make_cli(bindir, "grok", "echo 'rate limit exceeded' >&2\nexit 1")
+            env = {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
+            rc, out, _ = run_main(
+                [
+                    "--agents", "codex,grok",
+                    "--home", str(home),
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--live", "--live-timeout", "20",
+                ],
+                env_extra=env,
+                cwd=tmp,
+            )
+        self.assertEqual(out["live"]["probes"]["codex"]["status"], "limited")
+        self.assertEqual(out["live"]["probes"]["grok"]["status"], "limited")
+
+    def test_invalid_live_timeout_reports_error(self) -> None:
+        """Zero/negative/non-finite --live-timeout never reaches
+        subprocess.run — the probe reports an invalid-timeout error."""
+        for bad in ("0", "-3", "nan"):
+            with tempfile.TemporaryDirectory() as tmp:
+                home = Path(tmp) / "home"
+                (home / ".codex").mkdir(parents=True)
+                bindir = Path(tmp) / "bin"
+                if os.name == "nt":
+                    make_cli(bindir, "codex", "echo pong\nexit /b 0")
+                else:
+                    make_cli(bindir, "codex", "echo pong\nexit 0")
+                env = {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
+                rc, out, _ = run_main(
+                    [
+                        "--agents", "codex",
+                        "--home", str(home),
+                        "--hermes-home", str(Path(tmp) / "h"),
+                        "--live", "--live-timeout", bad,
+                    ],
+                    env_extra=env,
+                    cwd=tmp,
+                )
+            probe = out["live"]["probes"]["codex"]
+            self.assertEqual(probe["status"], "error", bad)
+            self.assertIn("invalid timeout", probe["detail"], bad)
+
     def test_probe_detail_redacts_secret_values(self) -> None:
         """A CLI that echoes a credential alongside quota wording must
         not leak it into doctor output."""

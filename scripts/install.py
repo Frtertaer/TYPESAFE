@@ -875,10 +875,24 @@ def _doctor_summary(data: object, rc: int) -> str:
     probes = live.get("probes") if isinstance(live, dict) else None
     if isinstance(probes, dict):
         fallback = live.get("fallback")
+        # A limited probe is itself a failing live_probe check — gate
+        # 'installed' on the agent's *other* checks, so a broken setup
+        # doesn't read as installed just because its CLI answered 429.
+        setup_broken = {
+            c.get("agent")
+            for c in checks
+            if c.get("agent") not in (None, "*")
+            and c.get("check") != "live_probe"
+            and not c.get("ok")
+            and not c.get("suppressed")
+            and not c.get("skipped")
+        }
         for agent in ALLOWED:
             if (probes.get(agent) or {}).get("status") != "limited":
                 continue
-            if fallback and fallback != agent:
+            if agent in setup_broken:
+                line += "\n%s: CLI rate-limited (setup checks failing — see above)" % agent
+            elif fallback and fallback != agent:
                 line += "\n%s: installed (currently rate-limited — same setup works in %s)" % (
                     agent,
                     fallback,

@@ -266,6 +266,22 @@ class LiveSummaryTests(unittest.TestCase):
         self.assertIn("grok: installed (currently rate-limited)", text)
         self.assertNotIn("same setup works", text)
 
+    def test_limited_with_broken_setup_does_not_claim_installed(self) -> None:
+        """A limited probe makes its own live_probe check fail — the
+        'installed' wording must be gated on the agent's *other* checks;
+        when those fail the summary reports the rate limit without
+        claiming a working install."""
+        data = self._payload(
+            {"codex": {"status": "limited", "detail": "429"}}, None
+        )
+        data["checks"] = [
+            {"agent": "codex", "check": "live_probe", "ok": False},
+            {"agent": "codex", "check": "skill", "ok": False},
+        ]
+        text = install._doctor_summary(data, 1)
+        self.assertIn("codex: CLI rate-limited", text)
+        self.assertNotIn("codex: installed", text)
+
     def test_no_live_key_keeps_summary_unchanged(self) -> None:
         data = {"ok": True, "checks": [], "suppressed": 0, "absent": []}
         self.assertEqual(install._doctor_summary(data, 0), "PASS")

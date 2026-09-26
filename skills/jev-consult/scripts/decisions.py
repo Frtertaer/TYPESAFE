@@ -60,6 +60,7 @@ ENTRY_SCHEMA_ROWS = {
     "shortlist": {"required": True, "type": "list[string], shortlisted skill ids"},
     "explicit": {"required": True, "type": "bool, env-forced winner"},
     "jev_status": {"required": True, "type": "string, routing outcome (idf|skip|winner|miss|budget|none|...)"},
+    "jev_attempted": {"required": False, "type": "bool, a Jev network call was attempted (pre-call failures record false)"},
     "reason": {"required": True, "type": "string, why this status"},
     "question": {"required": True, "type": "string|null, Jev question asked"},
     "need": {"required": True, "type": "object|null, Jev ask payload"},
@@ -686,6 +687,12 @@ _NO_CALL_QUESTIONS = {"dedupe", "env", "explicit"}
 
 
 def _attempted_call(item: dict, status: str) -> bool:
+    # jev_attempted (written at the post_systemone call boundary) is the
+    # precise signal; the status/question heuristic below backfills it
+    # for entries written before the marker existed — those can still
+    # over-attribute pre-call import/policy errors to the harness.
+    if "jev_attempted" in item:
+        return bool(item["jev_attempted"])
     return (
         status not in _NO_CALL_STATUSES
         and not item.get("dedupe")
@@ -726,10 +733,12 @@ def harness_health(entries: list[dict]) -> list[dict]:
         status = str(item.get("jev_status") or "")
         if _attempted_call(item, status):
             row["attempted"] += 1
-        if status == "error":
-            row["errors"] += 1
-        elif status == "timeout":
-            row["timeouts"] += 1
+            # errors/timeouts count only against calls that left the
+            # machine — a pre-call 'error' is local, not harness health.
+            if status == "error":
+                row["errors"] += 1
+            elif status == "timeout":
+                row["timeouts"] += 1
     rows = []
     for r in buckets.values():
         n = r["attempted"]

@@ -18,6 +18,7 @@ import math
 import os
 import re
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -163,6 +164,25 @@ def _tail(fp) -> str:
     return fp.read().decode("utf-8", "replace")
 
 
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Kill a timed-out probe including any grandchildren: a bare
+    proc.kill() leaves e.g. a cmd-launched child alive on Windows, still
+    holding the cwd/handles of the caller's workspace."""
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    else:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        proc.kill()
+
+
 def _live_probe(agent: str, timeout: float) -> dict:
     """Run the harness CLI once with a minimal prompt; classify the answer.
 
@@ -176,19 +196,33 @@ def _live_probe(agent: str, timeout: float) -> dict:
     path = shutil.which(binary) or shutil.which(binary + ".exe")
     if not path:
         return {"status": "missing", "detail": "no %s on PATH" % binary}
+    popen_kw: dict = {}
+    if os.name == "nt":
+        popen_kw["creationflags"] = getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+        )
+    else:
+        popen_kw["start_new_session"] = True
     try:
         with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
-            rc = subprocess.run(
+            proc = subprocess.Popen(
                 [path, *argv, LIVE_PROMPT],
                 stdin=subprocess.DEVNULL,
                 stdout=out_f,
                 stderr=err_f,
-                timeout=timeout,
-            ).returncode
+                **popen_kw,
+            )
+            try:
+                rc = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                _kill_tree(proc)
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    pass
+                return {"status": "error", "detail": "timed out after %gs" % timeout}
             stdout = _tail(out_f).strip()
             stderr = _tail(err_f).strip()
-    except subprocess.TimeoutExpired:
-        return {"status": "error", "detail": "timed out after %gs" % timeout}
     except OSError as exc:
         return {"status": "missing", "detail": "%s: %s" % (binary, exc)}
     # A successful answer is response text, not an error channel — only

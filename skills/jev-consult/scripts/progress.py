@@ -747,6 +747,9 @@ def main(argv=None):
         elif args.command == "self-test":
             result = _self_test(args)
         elif args.command == "report":
+            if not getattr(args, "all", False) and not args.stage:
+                sys.stdout.write(json.dumps({"error": {"code": "INVALID_INPUT", "message": "report needs a stage id or --all"}}) + "\n")
+                return 1
             if getattr(args, "all", False):
                 if getattr(args, "watch", 0) and args.watch > 0:
                     sys.stdout.write(json.dumps({"error": {"code": "INVALID_INPUT", "message": "--all cannot combine with --watch"}}) + "\n")
@@ -770,10 +773,6 @@ def main(argv=None):
                     return 0
             elif getattr(args, "watch", 0) and args.watch > 0:
                 return _report_watch(ledger, args)
-            else:
-                if not args.stage:
-                    sys.stdout.write(json.dumps({"error": {"code": "INVALID_INPUT", "message": "report needs a stage id or --all"}}) + "\n")
-                    return 1
             if not getattr(args, "all", False):
                 summary = ledger.status(args.stage)
                 hist = ledger.history(args.stage)

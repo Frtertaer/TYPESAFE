@@ -302,6 +302,15 @@ def _ask(state: dict, questions: dict, policy: dict, asker=None) -> dict:
         results = {qid: _interpret_answer(parsed["answers"][qid], policy) for qid in questions}
         model = response.get("model") if isinstance(response, dict) else None
         usage = parsed.get("usage")
+        if isinstance(usage, dict):
+            # validate_response tolerates extra usage fields (e.g.
+            # total_tokens); the ledger's event schema does not — keep
+            # only the two budget keys before anything persists it.
+            usage = {
+                key: usage[key]
+                for key in ("input_tokens", "output_tokens")
+                if key in usage
+            }
         return {
             "called_jev": True,
             "model": model if isinstance(model, str) and not _sensitive(model) else None,
@@ -514,9 +523,38 @@ _WS_RE = re.compile(r"\s+")
 
 
 def _normalize_line(text: str) -> str:
-    """Whitespace-insensitive view of a diff line: indentation churn
-    and interior spacing collapse to a single form."""
-    return _WS_RE.sub(" ", text).strip()
+    """Whitespace-insensitive view of a diff line: indentation churn and
+    interior spacing collapse to a single form — except inside a string
+    literal, where whitespace changes program behavior and stays literal.
+    A best-effort line scanner (no multi-line/triple-quote awareness)."""
+    out: list[str] = []
+    in_quote = ""
+    pending_ws = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if in_quote:
+            out.append(ch)
+            if ch == "\\" and i + 1 < len(text):
+                out.append(text[i + 1])
+                i += 1
+            elif ch == in_quote:
+                in_quote = ""
+        elif ch in "\"'":
+            if pending_ws and out:
+                out.append(" ")
+            pending_ws = False
+            in_quote = ch
+            out.append(ch)
+        elif ch.isspace():
+            pending_ws = True
+        else:
+            if pending_ws and out:
+                out.append(" ")
+            pending_ws = False
+            out.append(ch)
+        i += 1
+    return "".join(out).strip()
 
 
 def _norm_digest(text: str, context: str = "") -> str:
@@ -556,7 +594,7 @@ def _diff_line_hashes(diff: str) -> dict:
                 digest = _line_digest(new_file, context + "\x00" + str(index) + "\x00" + text)
                 added.append(digest)
                 norms["added"][digest] = {
-                    "n": _norm_digest(text, norm_context + "\x00" + str(index)),
+                    "n": _norm_digest(text, new_file + "\x00" + norm_context + "\x00" + str(index)),
                     "p": new_file, "f": _norm_digest(text),
                 }
                 sections.setdefault(new_file, []).append(
@@ -566,7 +604,7 @@ def _diff_line_hashes(diff: str) -> dict:
                 digest = _line_digest(old_file, context + "\x00" + str(index) + "\x00" + text)
                 removed.append(digest)
                 norms["removed"][digest] = {
-                    "n": _norm_digest(text, norm_context + "\x00" + str(index)),
+                    "n": _norm_digest(text, old_file + "\x00" + norm_context + "\x00" + str(index)),
                     "p": old_file, "f": _norm_digest(text),
                 }
         hunk_lines = []
@@ -645,7 +683,7 @@ def _diff_line_hashes(diff: str) -> dict:
                 digest = _line_digest(path, str(position) + "\x00" + line[1:])
                 added.append(digest)
                 norms["added"][digest] = {
-                    "n": _norm_digest(line[1:], str(position)),
+                    "n": _norm_digest(line[1:], path + "\x00" + str(position)),
                     "p": path, "f": _norm_digest(line[1:]),
                 }
                 sections.setdefault(path, []).append(
@@ -657,7 +695,7 @@ def _diff_line_hashes(diff: str) -> dict:
                 digest = _line_digest(path, str(position) + "\x00" + line[1:])
                 removed.append(digest)
                 norms["removed"][digest] = {
-                    "n": _norm_digest(line[1:], str(position)),
+                    "n": _norm_digest(line[1:], path + "\x00" + str(position)),
                     "p": path, "f": _norm_digest(line[1:]),
                 }
                 position += 1
@@ -748,7 +786,7 @@ CREDIT_SECTS = ("sections", "sections_norm")
 def _credited_union(events, before_sequence=None):
     total = {key: Counter() for key in CREDIT_RAW}
     for key in CREDIT_NORM:
-        total[key] = set()
+        total[key] = {}  # raw digest -> {n, p, f}; last writer wins
     for credit in _active_credits(events, before_sequence).values():
         for key in CREDIT_RAW:
             total[key].update(credit.get(key, ()))
@@ -774,14 +812,50 @@ def _credited_sections(events, before_sequence=None):
     return sections
 
 
+def _suppress_norm_dupes(digests, norms_now, credited_norms):
+    """Drop earned digests that repeat a line already credited in the same
+    file: a normalized (path, content) match means reformats and in-file
+    moves of a credited line earn nothing new. A copy into a different
+    path still earns — it is new content placement, not a reformat."""
+    cfp = Counter(
+        (info["p"], info["f"])
+        for info in credited_norms.values()
+        if isinstance(info, dict) and info.get("p") and info.get("f")
+    )
+    kept = []
+    for digest in digests:
+        info = norms_now.get(digest)
+        if not isinstance(info, dict):
+            kept.append(digest)
+            continue
+        key = (info.get("p"), info.get("f"))
+        if info.get("p") and info.get("f") and cfp[key] > 0:
+            cfp[key] -= 1
+            continue
+        kept.append(digest)
+    return kept
+
+
 def _earned_credit(raw, credited, credited_sections):
     """Credit a diff earns now: raw line digests minus the credited union,
     minus credited sections blindly re-added (content digest, or its
-    normalized digest when the section was reformatted). The *_norm lists
-    stored alongside are the retention channel used by _credited_retained."""
+    normalized digest when the section was reformatted), minus credited
+    norm-equivalents. The *_norm lists stored alongside are the retention
+    channel used by _credited_retained."""
     added = Counter(raw["added"]) - credited["added"]
     removed = Counter(raw["removed"]) - credited["removed"]
     ops = Counter(raw["ops"]) - credited["ops"]
+    counts = {"added": added, "removed": removed, "ops": ops}
+    for kind, norm_key in zip(CREDIT_RAW, CREDIT_NORM):
+        norms_now = raw.get(norm_key) or {}
+        credited_norms = credited.get(norm_key) or {}
+        if isinstance(norms_now, dict) and isinstance(credited_norms, dict):
+            counts[kind] = Counter(
+                _suppress_norm_dupes(
+                    list(counts[kind].elements()), norms_now, credited_norms
+                )
+            )
+    added, removed, ops = counts["added"], counts["removed"], counts["ops"]
     for pairs in raw["sections"].values():
         blind = Counter(content for _, content, _n in pairs)
         blind_norm = Counter(_n for _, _c, _n in pairs)
@@ -853,7 +927,7 @@ def _credit_overlaps(credit, union) -> bool:
     if any(Counter(credit.get(key, ())) & union[key] for key in CREDIT_RAW):
         return True
     return any(
-        set(credit.get(key) or ()) & union.get(key, set())
+        set(credit.get(key) or ()) & set(union.get(key) or ())
         for key in CREDIT_NORM
     )
 
@@ -1084,7 +1158,10 @@ def _summarize(stage: dict, events: list[dict]) -> dict:
                 if not isinstance(data.get("evidence_replay"), dict):
                     raise ProgressError("STORE_INVALID", "An applied review requires replayable evidence")
                 if data["choice"] == "continue":
-                    running = sum(value for item, value in awards.items() if item not in invalidated)
+                    running = (
+                        sum(value for item, value in awards.items() if item not in invalidated)
+                        + sum(penalties.values())
+                    )
                     if type(data.get("review_at")) is not int or data["review_at"] != running + settings["review_points"]:
                         raise ProgressError("STORE_INVALID", "Applied review is inconsistent with recorded history")
                     review_at = data["review_at"]

@@ -54,10 +54,12 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
 BUNDLE_DIR = Path.home() / ".jev-consult" / "bundle"
+LOCK_DIR = BUNDLE_DIR.parent / "bundle.lock"
 
 
 def _extract(dest_dir: Path) -> Path:
@@ -74,7 +76,12 @@ def _rmtree_fix(func, path, _exc):
         os.chmod(path, stat.S_IWRITE)
     except OSError:
         pass
-    func(path)
+    try:
+        func(path)
+    except OSError:
+        # transient lock (AV/indexer) — settle briefly, retry once
+        time.sleep(0.05)
+        func(path)
 
 
 def _rmtree(path: Path) -> None:
@@ -113,6 +120,33 @@ def _tty() -> bool:
     return True
 
 
+def _locked(fn):
+    """Serialize the BUNDLE_DIR swap: two jev-setup processes racing
+    _stage() could move over a payload the other one just deleted. The
+    mkdir lock is atomic on Windows and POSIX; a lock older than two
+    minutes is stale (holder died mid-stage) and gets broken."""
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            os.mkdir(LOCK_DIR)
+            break
+        except FileExistsError:
+            try:
+                stale = time.time() - LOCK_DIR.stat().st_mtime > 120
+            except OSError:
+                stale = True
+            if stale:
+                shutil.rmtree(LOCK_DIR, ignore_errors=True)
+                continue
+            if time.monotonic() > deadline:
+                raise TimeoutError("jev-setup: bundle lock held by another setup process")
+            time.sleep(0.1)
+    try:
+        return fn()
+    finally:
+        shutil.rmtree(LOCK_DIR, ignore_errors=True)
+
+
 def _stage() -> Path:
     """Refresh BUNDLE_DIR with this pyz's payload and return it."""
     BUNDLE_DIR.parent.mkdir(parents=True, exist_ok=True)
@@ -132,8 +166,8 @@ def _stage() -> Path:
 def main() -> int:
     cleanup = None
     try:
-        payload = _stage()
-    except OSError as exc:
+        payload = _locked(_stage)
+    except (OSError, TimeoutError) as exc:
         temp = Path(tempfile.mkdtemp(prefix="jev-setup-"))
         payload = _extract(temp)
         cleanup = temp
@@ -165,6 +199,12 @@ if __name__ == "__main__":
 
 WINDOWS_LAUNCHER = '''@echo off
 setlocal
+
+if not exist "%~dp0@PYZ@" (
+    >&2 echo jev-setup.cmd: @PYZ@ not found in %~dp0.
+    >&2 echo Keep this .cmd and @PYZ@ in the same folder - or re-download the release.
+    exit /b 1
+)
 
 set "PY="
 call :try "py -3"

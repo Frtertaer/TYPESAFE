@@ -12,6 +12,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HOOK_MARK = "compact_hook.py"
@@ -19,6 +20,8 @@ TOOLS_HOOK_MARK = "inventory_hook.py"
 PLUGIN_NAME = "jev-compact"
 
 ALLOWED = ("hermes", "claude-code", "codex", "grok")
+# cursor/gemini have viable hook surfaces but need per-harness protocol
+# work — see docs/harness-surfaces.md for the evaluation.
 BLOCKED = {
     "cursor",
     "gemini",
@@ -197,7 +200,12 @@ def _rmtree_fix(func, path: str, _exc) -> None:
         os.chmod(path, stat.S_IWRITE)
     except OSError:
         pass
-    func(path)
+    try:
+        func(path)
+    except OSError:
+        # transient lock (AV/indexer) — settle briefly, retry once
+        time.sleep(0.05)
+        func(path)
 
 
 def _rmtree(path: Path) -> None:
@@ -511,6 +519,22 @@ def _enabled_span(text: str) -> tuple[int, int] | None:
     return (start, pos)
 
 
+def ensure_hermes_config(hermes: Path, dry_run: bool) -> str:
+    """Fresh-HOME installs create ~/.hermes dirs but not config.yaml, so
+    doctor's plugin_enabled FAILs on an otherwise clean install. Seed a
+    minimal plugins.enabled map — only when the harness layout is present."""
+    config = hermes / "config.yaml"
+    if config.is_file():
+        return "config.yaml exists"
+    if not (hermes / "skills").is_dir() and not (hermes / "plugins").is_dir() and not hermes.is_dir():
+        return "no harness layout; skipped %s" % config
+    if dry_run:
+        return "create %s" % config
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("plugins:\n  enabled:\n", encoding="utf-8")
+    return "created %s" % config
+
+
 def enable_hermes_plugin(config: Path, name: str, dry_run: bool) -> str:
     if not config.is_file():
         return "missing " + str(config)
@@ -585,6 +609,7 @@ def install_live_hooks(agents: list[str], dry_run: bool) -> None:
     if "hermes" in agents:
         dest = hermes / "plugins" / PLUGIN_NAME
         sys.stdout.write("hermes %s\n" % copy_hermes_plugin(src / "hermes-plugin", dest, dry_run))
+        sys.stdout.write("hermes %s\n" % ensure_hermes_config(hermes, dry_run))
         sys.stdout.write("hermes %s\n" % enable_hermes_plugin(hermes / "config.yaml", PLUGIN_NAME, dry_run))
     if "codex" in agents:
         skill = home / ".codex" / "skills" / "jev-consult"
@@ -600,6 +625,10 @@ def install_live_hooks(agents: list[str], dry_run: bool) -> None:
                 20,
                 dry_run,
             )
+        )
+        sys.stdout.write(
+            "codex trust ~/.codex/hooks.json once via /hooks "
+            "(Codex skips untrusted hooks)\n"
         )
 
 

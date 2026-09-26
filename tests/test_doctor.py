@@ -1345,6 +1345,27 @@ class OfflineModeTests(unittest.TestCase):
         self.assertEqual(checks[0]["check"], "local_lint")
         self.assertEqual(checks[0]["agent"], "*")
 
+    def test_offline_unreadable_tool_fails_not_raises(self) -> None:
+        """A present-but-unreadable script must report a failing check —
+        not raise and stop the rest of the offline diagnosis."""
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "unreadable.py"
+            bad.write_text("x = 1\n", encoding="utf-8")
+            real_read = Path.read_text
+
+            def denied(self, *a, **kw):
+                if self == bad:
+                    raise OSError("denied")
+                return real_read(self, *a, **kw)
+
+            with patch.object(DOC, "SCRIPT_DIR", Path(tmp)), patch.object(
+                DOC, "LOCAL_TOOLS", {"local_lint": "unreadable.py"}
+            ), patch.object(Path, "read_text", denied):
+                checks = DOC.check_offline()
+        self.assertEqual(len(checks), 1)
+        self.assertFalse(checks[0]["ok"])
+        self.assertIn("unreadable", checks[0]["detail"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

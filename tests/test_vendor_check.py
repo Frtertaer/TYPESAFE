@@ -80,13 +80,71 @@ class VendorCheckTests(unittest.TestCase):
         self.assertIn("manifest pins", err)
 
     def test_fetch_marks_moved_upstream(self) -> None:
-        with patch.object(VC, "_upstream_head", return_value="a" * 40):
+        with patch.object(VC, "_upstream_head", return_value=("a" * 40, None)):
             rc, out, _ = run_main(["--fetch", "--json"])
         self.assertEqual(rc, 1)
         payload = json.loads(out)
         self.assertTrue(
             all(s["fetch"] == "upstream moved" for s in payload["snapshots"])
         )
+
+    def test_unreachable_upstream_fails(self) -> None:
+        """--fetch must not pass silently when ls-remote can't reach the
+        upstream — an unreachable remote is a failure, not a pass."""
+        with patch.object(
+            VC, "_upstream_head", return_value=(None, "ls-remote failed: boom")
+        ):
+            rc, out, _ = run_main(["--fetch", "--json"])
+        self.assertEqual(rc, 1)
+        payload = json.loads(out)
+        self.assertFalse(payload["ok"])
+        self.assertTrue(
+            all(s["fetch"] == "unreachable" for s in payload["snapshots"])
+        )
+        self.assertTrue(any("could not reach" in e for e in payload["errors"]))
+
+    def test_malformed_manifest_exits_2(self) -> None:
+        """Structurally broken PORTS.json entries exit 2 with a readable
+        problem line — never a traceback."""
+        base = json.loads(VC.MANIFEST.read_text(encoding="utf-8"))
+        cases = [
+            {"snapshots": "not-a-list"},
+            {"snapshots": ["not-an-object"]},
+            {"snapshots": [{"upstream": "o/r", "commit": "a" * 40}]},
+            {"snapshots": [dict(base["snapshots"][0], ported=[{"vendor": "x"}])]},
+            {"snapshots": [dict(base["snapshots"][0], ported="notalist")]},
+        ]
+        for manifest in cases:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "PORTS.json"
+                path.write_text(json.dumps(manifest), encoding="utf-8")
+                with patch.object(VC, "MANIFEST", path):
+                    rc, _, err = run_main([])
+            self.assertEqual(rc, 2, err)
+            self.assertIn("invalid", err)
+            self.assertNotIn("Traceback", err)
+
+    def test_ported_paths_cannot_escape_repo(self) -> None:
+        """'../' in a manifest pair must not point reads outside the
+        checkout — it fails the pair instead."""
+        manifest = json.loads(VC.MANIFEST.read_text(encoding="utf-8"))
+        snap = manifest["snapshots"][0]
+        existing_vendor = (snap.get("ported") or [{}])[0].get("vendor", "x")
+        snap["ported"] = [
+            {"vendor": "../../../../etc/hostname", "ours": "README.md"},
+            {"vendor": existing_vendor, "ours": "../../../etc/passwd"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "PORTS.json"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            with patch.object(VC, "MANIFEST", path):
+                rc, out, _ = run_main(["--json"])
+        self.assertEqual(rc, 1)
+        payload = json.loads(out)
+        self.assertTrue(any("escapes repo" in e for e in payload["errors"]))
+        # escaped pairs produce no diff stats
+        lint = next(s for s in payload["snapshots"] if s["dir"] == snap["dir"])
+        self.assertEqual(lint["pairs"], [])
 
 
 if __name__ == "__main__":

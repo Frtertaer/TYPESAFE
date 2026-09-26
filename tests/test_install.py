@@ -282,6 +282,26 @@ class LiveSummaryTests(unittest.TestCase):
         self.assertIn("codex: CLI rate-limited", text)
         self.assertNotIn("codex: installed", text)
 
+    def test_limited_with_shared_check_broken_does_not_claim_installed(self) -> None:
+        """A failing shared prerequisite (api_key/policy/policy_lint) means
+        'same setup works elsewhere' is false for every harness — no
+        'installed' wording while shared checks fail."""
+        data = self._payload(
+            {
+                "codex": {"status": "limited", "detail": "429"},
+                "claude-code": {"status": "available", "detail": "answered"},
+            },
+            "claude-code",
+        )
+        data["checks"] = [
+            {"agent": "*", "check": "api_key", "ok": False},
+            {"agent": "codex", "check": "live_probe", "ok": False},
+        ]
+        text = install._doctor_summary(data, 1)
+        self.assertIn("codex: CLI rate-limited (setup checks failing", text)
+        self.assertNotIn("codex: installed", text)
+        self.assertNotIn("same setup works", text)
+
     def test_no_live_key_keeps_summary_unchanged(self) -> None:
         data = {"ok": True, "checks": [], "suppressed": 0, "absent": []}
         self.assertEqual(install._doctor_summary(data, 0), "PASS")

@@ -539,5 +539,90 @@ class LiveProbeTests(unittest.TestCase):
         self.assertEqual(text.strip(), "null")
 
 
+class OfflineLiveGuardTests(unittest.TestCase):
+    """--offline wins over --live: an offline run must not spawn any
+    harness CLI, and the payload carries no live block."""
+
+    def test_offline_live_combination_never_probes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / ".codex").mkdir(parents=True)
+            marker = Path(tmp) / "probed"
+            bindir = Path(tmp) / "bin"
+            if os.name == "nt":
+                make_cli(
+                    bindir, "codex",
+                    'echo. > "%s"\r\nexit /b 0' % marker,
+                )
+            else:
+                make_cli(bindir, "codex", "touch '%s'\nexit 0" % marker)
+            env = {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
+            rc, out, _ = run_main(
+                [
+                    "--agents", "codex",
+                    "--home", str(home),
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--offline", "--live",
+                ],
+                env_extra=env,
+                cwd=tmp,
+            )
+        self.assertFalse(marker.exists())
+        self.assertIsNotNone(out)
+        self.assertNotIn("live", out)
+        self.assertEqual(live_checks(out), [])
+
+    def test_policy_lint_failure_blocks_fallback(self):
+        """A broken shared policy_lint means 'same setup' cannot call Jev
+        on any harness — no fallback hint while it fails unsuppressed."""
+        probes = {"claude-code": {"status": "available"}}
+        checks = [
+            {"agent": "*", "check": "policy_lint", "ok": False},
+            {"agent": "claude-code", "check": "skill", "ok": True},
+        ]
+        self.assertIsNone(DOC._live_fallback(probes, checks))
+        checks[0]["suppressed"] = True
+        self.assertEqual(DOC._live_fallback(probes, checks), "claude-code")
+
+
+class KillTreeTests(unittest.TestCase):
+    def test_posix_killpg_targets_probe_pid_as_group(self):
+        """The probe spawns with start_new_session=True, so its process
+        group id is its own pid — a getpgid() lookup would race the probe
+        exiting before its group dies."""
+        if os.name == "nt":
+            self.skipTest("posix branch")
+        proc = unittest.mock.Mock()
+        proc.pid = 4321
+        with patch.object(DOC.os, "killpg") as killpg, patch.object(
+            DOC.os, "getpgid"
+        ) as getpgid:
+            DOC._kill_tree(proc)
+        killpg.assert_called_once_with(4321, DOC.signal.SIGKILL)
+        getpgid.assert_not_called()
+        proc.kill.assert_called_once()
+
+    def test_windows_taskkill_failure_falls_back_to_kill(self):
+        proc = unittest.mock.Mock()
+        proc.pid = 99
+        proc.poll.return_value = None
+        with patch.object(DOC.os, "name", "nt"), patch.object(
+            DOC.subprocess, "run", side_effect=OSError("no taskkill")
+        ):
+            DOC._kill_tree(proc)
+        proc.kill.assert_called_once()
+
+    def test_windows_taskkill_success_skips_kill_when_exited(self):
+        proc = unittest.mock.Mock()
+        proc.pid = 99
+        proc.poll.return_value = 0
+        with patch.object(DOC.os, "name", "nt"), patch.object(
+            DOC.subprocess, "run"
+        ) as run:
+            DOC._kill_tree(proc)
+        self.assertIn("taskkill", run.call_args[0][0][0])
+        proc.kill.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -179,15 +179,23 @@ def _kill_tree(proc: subprocess.Popen) -> None:
     proc.kill() leaves e.g. a cmd-launched child alive on Windows, still
     holding the cwd/handles of the caller's workspace."""
     if os.name == "nt":
-        subprocess.run(
-            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-        )
-    else:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        if proc.poll() is None:
+            proc.kill()
+    else:
+        # start_new_session=True at spawn makes the probe a session leader,
+        # so its process-group id is its own pid — no getpgid() lookup that
+        # can race with the probe exiting before the group dies.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError, OSError):
             pass
         proc.kill()
@@ -288,7 +296,7 @@ def _live_checks(agents: list, home: Path, hermes: Path, timeout: float):
 # Shared prerequisites for "the same setup works here": without the Jev
 # key or a parseable policy.json no harness can call Jev, however well its
 # CLI answered.
-_FALLBACK_PREREQS = {"api_key", "policy"}
+_FALLBACK_PREREQS = {"api_key", "policy", "policy_lint"}
 
 
 def _live_fallback(probes: dict, checks: list) -> str | None:
@@ -845,7 +853,9 @@ def main(argv: list[str] | None = None) -> int:
             checks.append(_check(name, "presence", True, str(hdir)))
             checks += run()
         live = None
-        if args.live and (not only or "live_probe" in only):
+        # --offline wins over --live: an offline run must not send prompts
+        # to harness CLIs or touch provider quota at all.
+        if args.live and not args.offline and (not only or "live_probe" in only):
             rows, probes = _live_checks(agents, home, hermes, args.live_timeout)
             checks += rows
             live = {"probes": probes, "fallback": _live_fallback(probes, checks)}

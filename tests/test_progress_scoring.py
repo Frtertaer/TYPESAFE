@@ -217,6 +217,158 @@ class SemanticCreditTests(unittest.TestCase):
         bad["added_norm"] = {digest: {"n": "zz", "p": "core_0.py", "f": info["f"]}
                              for digest, info in credit["added_norm"].items()}
         self.assertFalse(progress._credit_ok(bad))
+        bad = dict(credit)
+        bad["added_norm"] = {
+            digest: {**info, "n0": "not-hex"}
+            for digest, info in credit["added_norm"].items()
+        }
+        self.assertFalse(progress._credit_ok(bad))
+
+    # A dedent moves the line out of its block; the indent signature is
+    # relative (counts of context lines shallower/same/deeper), so a
+    # uniform reindent of the whole hunk — or no context at all — stays
+    # normalized-equal. `n0` keeps the indent-free digest so credits
+    # written before indent binding still match.
+
+    INDENTED_MODIFY = (
+        "diff --git a/core.py b/core.py\n--- a/core.py\n+++ b/core.py\n"
+        "@@ -1,4 +1,4 @@\n def f():\n     if approved:\n-        stale behavior\n"
+        "+        verified behavior\n     return 1\n"
+    )
+    INDENTED_REFORMAT = (
+        "diff --git a/core.py b/core.py\n--- a/core.py\n+++ b/core.py\n"
+        "@@ -1,4 +1,4 @@\n def f():\n     if approved:\n-        stale behavior\n"
+        "+        verified   behavior\n     return 1\n"
+    )
+    INDENTED_DEDENT = (
+        "diff --git a/core.py b/core.py\n--- a/core.py\n+++ b/core.py\n"
+        "@@ -1,4 +1,4 @@\n def f():\n     if approved:\n-        stale behavior\n"
+        "+verified   behavior\n     return 1\n"
+    )
+
+    def test_interior_reformat_with_context_keeps_credit(self):
+        credited = progress._diff_line_hashes('["core.py"]\n' + self.INDENTED_MODIFY)
+        credit = progress._earned_credit(credited, progress._credited_union([]), [])
+        current = '["core.py"]\n' + self.INDENTED_REFORMAT
+        self.assertTrue(progress._credited_retained(credit, current, current))
+
+    def test_dedent_out_of_block_revokes_credit(self):
+        credited = progress._diff_line_hashes('["core.py"]\n' + self.INDENTED_MODIFY)
+        credit = progress._earned_credit(credited, progress._credited_union([]), [])
+        current = '["core.py"]\n' + self.INDENTED_DEDENT
+        self.assertFalse(progress._credited_retained(credit, current, current))
+
+    def test_no_context_hunks_stay_indent_free(self):
+        credited = progress._diff_line_hashes('["core.py"]\n' + MODIFY)
+        credit = progress._earned_credit(credited, progress._credited_union([]), [])
+        self.assertTrue(
+            progress._credited_retained(credit, '["core.py"]\n' + MODIFY_REFORMATTED)
+        )
+
+    def test_legacy_unsigned_norm_digest_still_matches(self):
+        """Ledgers written before indent binding stored the unsigned
+        digest under "n" — retention must still resolve it via the
+        current line's indent-free companion digest."""
+        credited = progress._diff_line_hashes('["core.py"]\n' + self.INDENTED_MODIFY)
+        credit = progress._earned_credit(credited, progress._credited_union([]), [])
+        for info in credit["added_norm"].values():
+            info["n"] = info.pop("n0")
+        self.assertTrue(progress._credit_ok(credit))
+        self.assertTrue(
+            progress._credited_retained(
+                credit, '["core.py"]\n' + self.INDENTED_REFORMAT
+            )
+        )
+
+    REMOVE_X = (
+        '["x.py"]\n'
+        "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n"
+        "@@ -1,3 +1,2 @@\n keep\n-obsolete\n keep2\n"
+    )
+    X_DELETED = (
+        "diff --git a/x.py b/x.py\ndeleted file mode 100644\n"
+        "--- a/x.py\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-keep\n-keep2\n"
+    )
+    X_MOVED = X_DELETED + (
+        "diff --git a/moved.py b/moved.py\nnew file mode 100644\n"
+        "--- /dev/null\n+++ b/moved.py\n@@ -0,0 +1,2 @@\n+keep\n+keep2\n"
+    )
+
+    def test_file_deletion_revokes_removal_only_credit(self):
+        """A credit whose only evidence is a removed line disappears
+        with the file itself — no new destination means the removal
+        is no longer a distinct change."""
+        credited = progress._diff_line_hashes(self.REMOVE_X)
+        credit = progress._earned_credit(credited, progress._credited_union([]), [])
+        self.assertFalse(
+            progress._credited_retained(credit, self.X_DELETED, self.X_DELETED)
+        )
+
+    def test_removal_credit_survives_verified_move(self):
+        credited = progress._diff_line_hashes(self.REMOVE_X)
+        credit = progress._earned_credit(credited, progress._credited_union([]), [])
+        self.assertTrue(
+            progress._credited_retained(credit, self.X_MOVED, self.X_MOVED)
+        )
+
+
+class ScopedMoveEvidence(FakeEvidence):
+    """diff() honors the path filter like real git: the scoped view
+    only carries file blocks touching the item's path."""
+
+    def diff(self, baseline, revision, settings, paths=None):
+        if paths:
+            blocks = [
+                "diff --git " + block
+                for block in self.diff_text.split("diff --git ")[1:]
+                if Path(paths[0]).name in block
+            ]
+            return json.dumps(paths) + "\n" + "".join(blocks)
+        return json.dumps(paths) + "\n" + self.diff_text
+
+
+class RestoreWideDiffTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.evidence = ScopedMoveEvidence()
+        self.ledger = progress.Ledger(
+            self.root / "progress.sqlite3", self.root, evidence=self.evidence
+        )
+        self.ledger.initialize(plan(), policy())
+        self.evidence.advance()
+
+    def test_restore_verifies_move_visible_only_in_wide_diff(self):
+        """The credited file moved to a path outside the item's scope:
+        the scoped diff shows only the deletion, so restore (and the
+        evidence replay) must consult the unscoped diff to find the
+        verified destination."""
+        self.evidence.diff_text = (
+            "diff --git a/core_0.py b/core_0.py\n--- a/core_0.py\n"
+            "+++ b/core_0.py\n@@ -1,3 +1,3 @@\n keep one\n-old behavior\n"
+            "+verified behavior\n keep two\n"
+        )
+        self.assertEqual(
+            self.ledger.assess(
+                "reliability", "item_0", "Verified outcome", asker=picker("major")
+            )["points"],
+            3,
+        )
+        self.ledger.invalidate("reliability", "item_0", "Reverted")
+        self.evidence.advance(4)
+        self.evidence.diff_text = (
+            "diff --git a/core_0.py b/core_0.py\ndeleted file mode 100644\n"
+            "--- a/core_0.py\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-keep one\n"
+            "-old behavior\n-keep two\n"
+            "diff --git a/moved.py b/moved.py\nnew file mode 100644\n"
+            "--- /dev/null\n+++ b/moved.py\n@@ -0,0 +1,3 @@\n+keep one\n"
+            "+verified behavior\n+keep two\n"
+        )
+        restored = self.ledger.restore(
+            "reliability", "item_0", "Credited change moved intact", "reviewer"
+        )
+        self.assertEqual(restored["points"], 3)
 
 
 class HarmfulPolicyTests(unittest.TestCase):

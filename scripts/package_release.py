@@ -128,7 +128,10 @@ def _locked(fn):
     # Fresh home: ~/.jev-consult itself may not exist yet.
     LOCK_DIR.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + 30
+    attempts = 0
     while True:
+        if time.monotonic() > deadline:
+            raise TimeoutError("jev-setup: bundle lock held by another setup process")
         try:
             os.mkdir(LOCK_DIR)
             break
@@ -141,13 +144,17 @@ def _locked(fn):
                 # Claim the stale dir by renaming it aside first: a second
                 # waiter that also judged it stale must not rmtree a fresh
                 # lock created in the gap. Re-check the claimed dir and
-                # restore it if a live lock was grabbed mid-race.
+                # restore it if a live lock was grabbed mid-race. The claim
+                # name is unique per attempt — an orphaned claim from an
+                # earlier run with a recycled PID must not fail every retry.
+                attempts += 1
                 claim = LOCK_DIR.with_name(
-                    "%s.stale.%d" % (LOCK_DIR.name, os.getpid())
+                    "%s.stale.%d.%d" % (LOCK_DIR.name, os.getpid(), attempts)
                 )
                 try:
                     os.rename(LOCK_DIR, claim)
                 except OSError:
+                    time.sleep(0.1)
                     continue
                 try:
                     still_stale = time.time() - claim.stat().st_mtime > 120
@@ -161,8 +168,6 @@ def _locked(fn):
                     except OSError:
                         pass  # leave the orphan; next stale sweep clears it
                 continue
-            if time.monotonic() > deadline:
-                raise TimeoutError("jev-setup: bundle lock held by another setup process")
             time.sleep(0.1)
     try:
         return fn()

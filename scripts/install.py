@@ -930,10 +930,21 @@ def _doctor_summary(data: object, rc: int) -> str:
             and not c.get("suppressed")
             and not c.get("skipped")
         }
+        # Shared prerequisites are agent-less: a failing api_key/policy check
+        # means no harness can call Jev, so "installed" wording is wrong for
+        # every limited agent regardless of its own checks.
+        shared_broken = any(
+            c.get("agent") == "*"
+            and c.get("check") in ("api_key", "policy", "policy_lint")
+            and not c.get("ok")
+            and not c.get("suppressed")
+            and not c.get("skipped")
+            for c in checks
+        )
         for agent in ALLOWED:
             if (probes.get(agent) or {}).get("status") != "limited":
                 continue
-            if agent in setup_broken:
+            if agent in setup_broken or shared_broken:
                 line += "\n%s: CLI rate-limited (setup checks failing — see above)" % agent
             elif fallback and fallback != agent:
                 line += "\n%s: installed (currently rate-limited — same setup works in %s)" % (

@@ -9,6 +9,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -19,6 +20,26 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import _watch  # noqa: E402
+
+# Live-eval errors are jev/HTTP exceptions — they can echo the request
+# (headers, URL, body) including TYPESAFE_API_KEY. Reports land in job
+# artifacts and summaries, so scrub secret-shaped values at capture.
+_REDACT_ASSIGN = re.compile(
+    r"([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Za-z0-9_]*"
+    r"\s*[=:]\s*)\S+",
+    re.IGNORECASE,
+)
+_REDACT_BLOB = re.compile(
+    r"sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_-]{12,}|(?i:bearer\s+\S+)"
+)
+_REDACT_TOKEN = re.compile(r"[A-Za-z0-9_+./=-]{24,}")
+
+
+def _redact(text: str) -> str:
+    text = _REDACT_ASSIGN.sub(lambda m: m.group(1) + "<redacted>", text)
+    return _REDACT_TOKEN.sub(
+        "<redacted>", _REDACT_BLOB.sub("<redacted>", text)
+    )
 
 
 def load_jev():
@@ -261,9 +282,9 @@ def run(
             # jev.py reports missing key / invalid response via SystemExit —
             # capture it as the run error so --strict fails cleanly instead
             # of the CLI dying mid-report.
-            live_error = str(exc.code or exc) or "SystemExit"
+            live_error = _redact(str(exc.code or exc)) or "SystemExit"
         except Exception as exc:
-            live_error = str(exc) or exc.__class__.__name__
+            live_error = _redact(str(exc)) or exc.__class__.__name__
     return {
         "goal": blob.get("goal"),
         "live": live,

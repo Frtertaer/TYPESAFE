@@ -217,6 +217,23 @@ class RunTest(unittest.TestCase):
         self.assertIn("no jev", result["error"])
         self.assertEqual(len(result["rows"]), 2)
 
+    def test_run_live_error_redacts_secret_shaped_text(self) -> None:
+        """A live run's error string lands in the report and artifacts —
+        credential-shaped fragments must be masked before storage."""
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(
+                compare,
+                "load_jev",
+                side_effect=RuntimeError(
+                    "auth failed: TYPESAFE_API_KEY=sk-live-secret-123456789"
+                ),
+            ):
+                result = compare.run(live=True, as_json=False, path=self.write_cases(tmp))
+        self.assertNotIn("sk-live-secret-123456789", result["error"])
+        self.assertIn("<redacted>", result["error"])
+
 
 class CliTest(unittest.TestCase):
     def run_cli(self, *argv: str) -> subprocess.CompletedProcess:

@@ -619,6 +619,26 @@ class BootstrapHardeningTests(unittest.TestCase):
             self.assertRaises(TimeoutError, ns["_locked"], lambda: None)
             self.assertTrue(lock.exists())  # holder's lock left alone
 
+    def test_bootstrap_locked_stale_claim_retries_with_fresh_name(self) -> None:
+        """An orphaned claim from a recycled-PID run occupying
+        '.stale.<pid>.1' must not fail the retry — the next attempt
+        claims '.stale.<pid>.2' instead."""
+        ns = _bootstrap_ns()
+        with tempfile.TemporaryDirectory() as tmp:
+            lock = Path(tmp) / "bundle.lock"
+            lock.mkdir()
+            stale = os.path.getmtime(lock) - 300
+            os.utime(lock, (stale, stale))
+            # A file (not a dir) at the first claim name: rename(dir, file)
+            # fails on POSIX and Windows alike.
+            decoy = lock.parent / (
+                "%s.stale.%d.1" % (lock.name, os.getpid())
+            )
+            decoy.write_text("x")
+            ns["LOCK_DIR"] = lock
+            self.assertEqual(ns["_locked"](lambda: "ran"), "ran")
+            self.assertFalse(lock.exists())
+
     def test_bootstrap_locked_creates_missing_parent(self) -> None:
         """Fresh home: ~/.jev-consult doesn't exist — the lock dir's
         parent is created instead of the mkdir raising OSError."""

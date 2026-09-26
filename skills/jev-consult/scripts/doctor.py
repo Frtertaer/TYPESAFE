@@ -14,9 +14,12 @@ import argparse
 import csv
 import io
 import json
+import math
 import os
 import re
+import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -63,6 +66,7 @@ CHECK_NAMES = (
     "decisions_verify",
     "sidecars",
     "progress_ledger",
+    "live_probe",
 )
 
 DOCTOR_SCHEMA_ROWS = {
@@ -76,6 +80,9 @@ DOCTOR_SCHEMA_ROWS = {
     "check.suppressed": {"required": False, "type": "boolean, true when --baseline marked this failure known"},
     "check.skipped": {"required": False, "type": "boolean, true when the agent's harness is not installed on this machine — its other checks were skipped, not failed"},
     "absent": {"required": True, "type": "list[string], --agents whose harness home dir does not exist"},
+    "live": {"required": False, "type": "object, --live only: {probes: {agent: {status, detail}}, fallback}"},
+    "live.probes.status": {"required": True, "type": "string, per-agent: available|limited|missing|error"},
+    "live.fallback": {"required": True, "type": "string|null, first harness whose CLI probe answered"},
 }
 
 BASELINE_FIELDS = ("agent", "check")
@@ -96,11 +103,174 @@ HINTS = {
     "decisions_verify": "run python skills/jev-consult/scripts/decisions.py --verify and fix the flagged log lines",
     "sidecars": "delete the unparseable .jev-tools*.json sidecar in the cwd; the hook rewrites it",
     "hooks_json": "fix or delete the malformed hooks file; it blocks hook registration",
+    "live_probe": "harness CLI did not answer a minimal prompt; use the reported fallback harness until it recovers",
 }
 
 
 def _hint(name: str) -> str | None:
     return HINTS.get(name)
+
+
+# --live probes: each detected harness's CLI answers one minimal prompt.
+# (binary, argv-prefix before the prompt). Prompt-bearing headless modes;
+# quota exhaustion surfaces as stderr wording, not the exit code alone.
+LIVE_PROBES = {
+    "hermes": ("hermes", ("-p",)),
+    "claude-code": (
+        "claude",  # the claude-code CLI binary name
+        ("-p",),
+    ),
+    "codex": ("codex", ("exec",)),
+    "grok": ("grok", ("-p",)),
+}
+LIVE_PROMPT = "ping"
+LIVE_LIMITED_RE = re.compile(
+    r"429|rate.?limit|usage.?limit|request.?limit|quota|too many requests"
+    r"|resource.?exhaust|overloaded"
+    # 'exceed*' only when a limit word is nearby — bare "context length
+    # exceeded" or "insufficient permissions" are not quota failures.
+    r"|\blimits?\s+exceed\w*|exceed\w*\s+[^.;\n]{0,20}\blimits?\b",
+    re.IGNORECASE,
+)
+# Probe diagnostics quote a CLI's own stderr line — scrub secret-shaped
+# values so a harness echoing a credential never lands in doctor output.
+_SECRET_ASSIGN_RE = re.compile(
+    r"([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Za-z0-9_]*\s*[=:]\s*)\S+",
+    re.IGNORECASE,
+)
+_SECRET_BLOB_RE = re.compile(
+    r"sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_-]{12,}|(?i)bearer\s+\S+"
+)
+# An unbroken token this long is an id/hash/credential, not prose — scrub
+# it regardless of scheme so unrecognized credential formats cannot leak.
+_SECRET_TOKEN_RE = re.compile(r"[A-Za-z0-9_+./=-]{24,}")
+# Probe output is a diagnostic, not data: cap what a malfunctioning CLI can
+# spool in memory before its timeout fires.
+_LIVE_MAX_BYTES = 65536
+
+
+def _redact(text: str) -> str:
+    text = _SECRET_ASSIGN_RE.sub(lambda m: m.group(1) + "<redacted>", text)
+    return _SECRET_TOKEN_RE.sub(
+        "<redacted>", _SECRET_BLOB_RE.sub("<redacted>", text)
+    )
+
+
+def _tail(fp) -> str:
+    """Last _LIVE_MAX_BYTES of a binary temp file, decoded lossily."""
+    fp.seek(0, os.SEEK_END)
+    fp.seek(max(0, fp.tell() - _LIVE_MAX_BYTES))
+    return fp.read().decode("utf-8", "replace")
+
+
+def _live_probe(agent: str, timeout: float) -> dict:
+    """Run the harness CLI once with a minimal prompt; classify the answer.
+
+    Returns {status, detail}: available when rc 0 with a nonempty stdout
+    answer and no quota wording, limited on 429/rate-limit/quota/usage-limit
+    stderr, missing when the binary is absent, error on timeout/crash/
+    silent-success/other nonzero exits."""
+    if not math.isfinite(timeout) or timeout <= 0:
+        return {"status": "error", "detail": "invalid timeout %gs" % timeout}
+    binary, argv = LIVE_PROBES.get(agent, (agent, ()))
+    path = shutil.which(binary) or shutil.which(binary + ".exe")
+    if not path:
+        return {"status": "missing", "detail": "no %s on PATH" % binary}
+    try:
+        with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
+            rc = subprocess.run(
+                [path, *argv, LIVE_PROMPT],
+                stdin=subprocess.DEVNULL,
+                stdout=out_f,
+                stderr=err_f,
+                timeout=timeout,
+            ).returncode
+            stdout = _tail(out_f).strip()
+            stderr = _tail(err_f).strip()
+    except subprocess.TimeoutExpired:
+        return {"status": "error", "detail": "timed out after %gs" % timeout}
+    except OSError as exc:
+        return {"status": "missing", "detail": "%s: %s" % (binary, exc)}
+    # A successful answer is response text, not an error channel — only
+    # stderr wording can mean quota; otherwise "quota remaining: 100"
+    # inside a good answer would read as limited.
+    quota_text = stderr if rc == 0 else stdout + "\n" + stderr
+    hit = LIVE_LIMITED_RE.search(quota_text)
+    if hit:
+        line = next(
+            (ln.strip() for ln in quota_text.splitlines() if LIVE_LIMITED_RE.search(ln)),
+            hit.group(0),
+        )
+        return {"status": "limited", "detail": "rate-limited: %s" % _redact(line[:120])}
+    if rc == 0:
+        # rc 0 with no answer text is not evidence the prompt was answered —
+        # a wrapper can exit cleanly after ignoring it. Only a nonempty
+        # stdout counts as available.
+        if not stdout:
+            return {"status": "error", "detail": "rc=0 with no response"}
+        return {"status": "available", "detail": "answered (%s)" % binary}
+    blob = (stdout + "\n" + stderr).strip()
+    tail = _redact(blob.splitlines()[-1][:120]) if blob else ""
+    return {
+        "status": "error",
+        "detail": "rc=%d%s" % (rc, " " + tail if tail else ""),
+    }
+
+
+def _live_checks(agents: list, home: Path, hermes: Path, timeout: float):
+    """Per-agent live_probe rows for harnesses detected on this box.
+
+    Returns (check rows, probes map). A detected harness home with no CLI
+    on PATH fails the check — the harness cannot run even though it is
+    installed; only an absent harness home is skipped, upstream."""
+    out = []
+    probes = {}
+    for agent in agents:
+        if not _harness_home(agent, home, hermes).exists():
+            continue  # absent harnesses stay skipped, not probed
+        res = _live_probe(agent, timeout)
+        probes[agent] = res
+        out.append(
+            _check(
+                agent,
+                "live_probe",
+                res["status"] == "available",
+                "%s: %s" % (res["status"], res["detail"]),
+            )
+        )
+    return out, probes
+
+
+# Shared prerequisites for "the same setup works here": without the Jev
+# key or a parseable policy.json no harness can call Jev, however well its
+# CLI answered.
+_FALLBACK_PREREQS = {"api_key", "policy"}
+
+
+def _live_fallback(probes: dict, checks: list) -> str | None:
+    """First available harness whose install checks all pass — an
+    answering CLI with a broken jev-consult setup is no fallback."""
+    broken = {
+        c["agent"]
+        for c in checks
+        if c["check"] != "live_probe" and not c["ok"] and not c.get("skipped")
+    }
+    if any(
+        c["agent"] == "*"
+        and c["check"] in _FALLBACK_PREREQS
+        and not c["ok"]
+        and not c.get("suppressed")
+        for c in checks
+    ):
+        return None
+    return next(
+        (
+            a
+            for a in ALLOWED
+            if probes.get(a, {}).get("status") == "available" and a not in broken
+        ),
+        None,
+    )
 
 
 def user_home() -> Path:
@@ -461,6 +631,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline", metavar="PATH", default="", help="Mark checks recorded as failing in PATH (written by --baseline-write) as suppressed: they still print but do not fail the run, watch ticks, or verdict; '-' reads the baseline JSON from stdin")
     parser.add_argument("--baseline-write", metavar="PATH", default="", help="Snapshot the currently failing checks to PATH for later --baseline runs")
     parser.add_argument("--self-test", action="store_true", help="Run every check against a synthetic empty HOME; exit 1 when no check fails")
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Probe each detected harness's CLI with a minimal prompt; adds live_probe "
+        "checks (available/limited/missing/error) and a live.fallback hint naming "
+        "the first harness that answered. Opt-in: default stays read-only and offline.",
+    )
+    parser.add_argument(
+        "--live-timeout",
+        metavar="S",
+        type=float,
+        default=15.0,
+        help="Per-probe timeout in seconds for --live (default 15).",
+    )
     args = parser.parse_args(argv)
     if args.schema:
         rows = {key: dict(row) for key, row in DOCTOR_SCHEMA_ROWS.items()}
@@ -544,7 +728,7 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
         return 0
 
-    def collect() -> list[dict]:
+    def collect() -> tuple[list[dict], dict | None]:
         checks: list[dict] = check_common(home, hermes)
         checks += check_progress(Path.cwd())
         # An absent harness is not an install failure: emit one skipped
@@ -571,9 +755,14 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             checks.append(_check(name, "presence", True, str(hdir)))
             checks += run()
+        live = None
+        if args.live and (not only or "live_probe" in only):
+            rows, probes = _live_checks(agents, home, hermes, args.live_timeout)
+            checks += rows
+            live = {"probes": probes, "fallback": _live_fallback(probes, checks)}
         if only:
             checks = [c for c in checks if c["check"] in only]
-        return checks
+        return checks, live
 
     def _verdict_payload(checks_now: list[dict], ticks: int = 1) -> dict:
         agents: dict[str, bool] = {}
@@ -646,7 +835,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.baseline_write:
         failing = [
             {"agent": c["agent"], "check": c["check"]}
-            for c in collect()
+            for c in collect()[0]
             if not c["ok"]
         ]
         try:
@@ -666,6 +855,11 @@ def main(argv: list[str] | None = None) -> int:
         import time as _time
         from datetime import datetime, timezone
 
+        if args.live:
+            sys.stderr.write(
+                "watch + --live: every tick sends one prompt per detected "
+                "harness CLI — repeated probes consume harness quota\n"
+            )
         max_ticks = _watch.cap("JEV_DOCTOR_WATCH_MAX", args.max_ticks)
         dead = _watch.deadline("JEV_DOCTOR_WATCH_SECS", getattr(args, "watch_max", 0.0))
         count = 0
@@ -677,7 +871,7 @@ def main(argv: list[str] | None = None) -> int:
         unchanged = 0
         watch_t0 = _time.time()
         while True:
-            cur = collect()
+            cur, _ = collect()
             _apply_baseline(cur)
             failed = sum(1 for c in cur if not c["ok"] and not c.get("suppressed"))
             ok = failed == 0
@@ -721,7 +915,7 @@ def main(argv: list[str] | None = None) -> int:
         ):
             return 1
         return 0 if last["ok"] else 1
-    checks = collect()
+    checks, live = collect()
     absent = sorted(
         a for a in agents if not _harness_home(a, home, hermes).exists()
     )
@@ -743,6 +937,15 @@ def main(argv: list[str] | None = None) -> int:
         "suppressed": suppressed,
         "absent": absent,
     }
+    if live is not None:
+        payload["live"] = live
+        if live.get("fallback"):
+            for c in shown:
+                if c["check"] == "live_probe" and not c["ok"]:
+                    c["hint"] = (
+                        _hint("live_probe")
+                        + " (fallback: %s)" % live["fallback"]
+                    )
     text = json.dumps(payload, indent=2) + "\n"
     if args.out:
         try:

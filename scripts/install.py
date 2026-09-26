@@ -870,18 +870,49 @@ def _doctor_summary(data: object, rc: int) -> str:
         parts.append(
             "%d not installed" % len(absent)
         )
-    return "%s (%s)" % (verdict, "; ".join(parts)) if parts else verdict
+    line = "%s (%s)" % (verdict, "; ".join(parts)) if parts else verdict
+    live = data.get("live") if isinstance(data, dict) else None
+    probes = live.get("probes") if isinstance(live, dict) else None
+    if isinstance(probes, dict):
+        fallback = live.get("fallback")
+        # A limited probe is itself a failing live_probe check — gate
+        # 'installed' on the agent's *other* checks, so a broken setup
+        # doesn't read as installed just because its CLI answered 429.
+        setup_broken = {
+            c.get("agent")
+            for c in checks
+            if c.get("agent") not in (None, "*")
+            and c.get("check") != "live_probe"
+            and not c.get("ok")
+            and not c.get("suppressed")
+            and not c.get("skipped")
+        }
+        for agent in ALLOWED:
+            if (probes.get(agent) or {}).get("status") != "limited":
+                continue
+            if agent in setup_broken:
+                line += "\n%s: CLI rate-limited (setup checks failing — see above)" % agent
+            elif fallback and fallback != agent:
+                line += "\n%s: installed (currently rate-limited — same setup works in %s)" % (
+                    agent,
+                    fallback,
+                )
+            else:
+                line += "\n%s: installed (currently rate-limited)" % agent
+    return line
 
 
-def run_doctor(agents: list[str]) -> int:
+def run_doctor(agents: list[str], live: bool = False) -> int:
     """Run the bundled doctor scoped to the harnesses the installer just
     wrote (--agents), so a missing harness reads as 'not installed', not
-    as a broken install."""
+    as a broken install. --live additionally probes each harness's CLI."""
     doctor = skill_source() / "scripts" / "doctor.py"
     if not doctor.is_file():
         sys.stdout.write("doctor: skipped (missing %s)\n" % doctor)
         return 0
     cmd = [sys.executable, str(doctor), "--agents", ",".join(agents)]
+    if live:
+        cmd += ["--live"]
     if "hermes" in agents:
         cmd += ["--hermes-home", str(hermes_home())]
     proc = subprocess.run(
@@ -976,8 +1007,9 @@ def _setup_key(agents: list[str]) -> None:
         sys.stdout.write("%s\n" % write_api_key(path, value))
 
 
-def run_setup(agents_arg: str | None = None) -> int:
-    """Interactive menu driven by detected harnesses; Enter exits."""
+def run_setup(agents_arg: str | None = None, live: bool = False) -> int:
+    """Interactive menu driven by detected harnesses; Enter exits.
+    live=True adds a doctor --live CLI probe after Install/Check."""
     report = env_report(list(ALLOWED))
     found = detected_agents(report)
     if agents_arg:
@@ -995,11 +1027,11 @@ def run_setup(agents_arg: str | None = None) -> int:
         if choice == "1":
             _setup_key(agents)
             install(agents, False)
-            run_doctor(agents)
+            run_doctor(agents, live)
         elif choice == "2":
             uninstall(agents, False)
         elif choice == "3":
-            run_doctor(agents)
+            run_doctor(agents, live)
         else:
             sys.stdout.write("unknown choice %r\n" % choice)
 
@@ -1092,6 +1124,13 @@ def main(argv: list[str] | None = None) -> int:
         "Exit. Runs automatically when invoked with no args in a TTY; "
         "ignored when other action flags are given.",
     )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="After install/check, run doctor --live: probe each detected "
+        "harness's CLI once and report rate-limited harnesses with a "
+        "fallback hint.",
+    )
     raw = list(sys.argv[1:] if argv is None else argv)
     args = parser.parse_args(raw)
     if args.source:
@@ -1101,8 +1140,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if key_is_set() else 1
     if args.env:
         return emit_env(env_report(parse_agents(args.agents)), args.jq, args.out)
+    # --live is a modifier, not an action: `--live` alone in a terminal still
+    # opens the menu (Install/Uninstall/Check), just with live probing on.
     wants_setup = (args.setup and not (args.uninstall or args.agents or args.dry_run)) or (
-        not raw and _tty()
+        (not raw or set(raw) == {"--live"}) and _tty()
     )
     if wants_setup:
         if not _tty():
@@ -1111,11 +1152,14 @@ def main(argv: list[str] | None = None) -> int:
                 "pass explicit flags (e.g. --agents) for non-interactive use\n"
             )
             return 2
-        return run_setup(args.agents)
+        return run_setup(args.agents, live=args.live)
     agents = parse_agents(args.agents)
     if args.uninstall:
         return uninstall(agents, args.dry_run)
-    return install(agents, args.dry_run)
+    rc = install(agents, args.dry_run)
+    if args.live and not args.dry_run and rc == 0:
+        rc = run_doctor(agents, live=True)
+    return rc
 
 
 if __name__ == "__main__":

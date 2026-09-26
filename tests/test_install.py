@@ -230,6 +230,135 @@ class CopyAndSnippetTests(unittest.TestCase):
             self.assertEqual(settings.read_text(encoding="utf-8"), "[1, 2]")
 
 
+class LiveSummaryTests(unittest.TestCase):
+    """install.py --live forwards a doctor --live probe and the summary
+    annotates rate-limited harnesses with the reported fallback."""
+
+    def _payload(self, probes, fallback):
+        return {
+            "ok": False,
+            "checks": [],
+            "suppressed": 0,
+            "absent": [],
+            "live": {"probes": probes, "fallback": fallback},
+        }
+
+    def test_limited_harness_gets_quota_note_with_fallback(self) -> None:
+        data = self._payload(
+            {
+                "codex": {"status": "limited", "detail": "usage limit"},
+                "claude-code": {"status": "available", "detail": "answered"},
+            },
+            "claude-code",
+        )
+        text = install._doctor_summary(data, 1)
+        self.assertIn(
+            "codex: installed (currently rate-limited — same setup works in claude-code)",
+            text,
+        )
+        self.assertNotIn("claude-code: installed (currently", text)
+
+    def test_limited_without_fallback_has_no_recommendation(self) -> None:
+        data = self._payload(
+            {"grok": {"status": "limited", "detail": "429"}}, None
+        )
+        text = install._doctor_summary(data, 1)
+        self.assertIn("grok: installed (currently rate-limited)", text)
+        self.assertNotIn("same setup works", text)
+
+    def test_limited_with_broken_setup_does_not_claim_installed(self) -> None:
+        """A limited probe makes its own live_probe check fail — the
+        'installed' wording must be gated on the agent's *other* checks;
+        when those fail the summary reports the rate limit without
+        claiming a working install."""
+        data = self._payload(
+            {"codex": {"status": "limited", "detail": "429"}}, None
+        )
+        data["checks"] = [
+            {"agent": "codex", "check": "live_probe", "ok": False},
+            {"agent": "codex", "check": "skill", "ok": False},
+        ]
+        text = install._doctor_summary(data, 1)
+        self.assertIn("codex: CLI rate-limited", text)
+        self.assertNotIn("codex: installed", text)
+
+    def test_no_live_key_keeps_summary_unchanged(self) -> None:
+        data = {"ok": True, "checks": [], "suppressed": 0, "absent": []}
+        self.assertEqual(install._doctor_summary(data, 0), "PASS")
+
+    def test_run_doctor_live_forwards_flag(self) -> None:
+        import subprocess as sp
+
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            seen["cmd"] = cmd
+            return sp.CompletedProcess(cmd, 0, stdout='{"ok": true, "checks": [], "absent": []}', stderr="")
+
+        with patch.object(install.subprocess, "run", fake_run):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = install.run_doctor(["codex"], live=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("--live", seen["cmd"])
+        self.assertIn("codex", seen["cmd"])
+
+    def test_main_live_runs_doctor_after_install(self) -> None:
+        import subprocess as sp
+
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return sp.CompletedProcess(cmd, 0, stdout='{"ok": true, "checks": [], "absent": []}', stderr="")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {
+                "USERPROFILE": tmp,
+                "HOME": tmp,
+                "HERMES_HOME": str(Path(tmp) / "hermes"),
+                "TYPESAFE_API_KEY": "",
+            }
+            with patch.dict(os.environ, env, clear=False), patch.object(
+                install.subprocess, "run", fake_run
+            ), redirect_stdout(io.StringIO()):
+                rc = install.main(["--agents", "codex", "--live"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(
+            any("--live" in cmd for cmd in calls),
+            "doctor --live never ran: %r" % calls,
+        )
+
+    def test_main_dry_run_live_never_probes(self) -> None:
+        """--dry-run --live must not launch real harness CLIs."""
+        import subprocess as sp
+
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return sp.CompletedProcess(
+                cmd, 0, stdout='{"ok": true, "checks": [], "absent": []}', stderr=""
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {
+                "USERPROFILE": tmp,
+                "HOME": tmp,
+                "HERMES_HOME": str(Path(tmp) / "hermes"),
+                "TYPESAFE_API_KEY": "",
+            }
+            with patch.dict(os.environ, env, clear=False), patch.object(
+                install.subprocess, "run", fake_run
+            ), redirect_stdout(io.StringIO()):
+                rc = install.main(["--agents", "codex", "--dry-run", "--live"])
+        self.assertEqual(rc, 0)
+        self.assertFalse(
+            any("--live" in cmd for cmd in calls),
+            "dry-run still probed: %r" % calls,
+        )
+
+
 class InstallCoverageTests(unittest.TestCase):
     def test_parse_agents(self) -> None:
         self.assertEqual(install.parse_agents(None), list(install.ALLOWED))

@@ -1300,5 +1300,51 @@ class DoctorBaselineTests(unittest.TestCase):
             self.assertGreater(doc["suppressed"], 0)
 
 
+class OfflineModeTests(unittest.TestCase):
+    def _home_with_key(self, tmp: str) -> Path:
+        home = Path(tmp) / "home"
+        home.mkdir()
+        (home / ".env").write_text("TYPESAFE_API_KEY=test-key\n", encoding="utf-8")
+        return home
+
+    def test_offline_skips_harnesses_and_lists_local_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self._home_with_key(tmp)
+            # Seed a broken harness layout: normally plugin_enabled FAILs.
+            (home / ".hermes").mkdir()
+            (home / ".hermes" / "plugins").mkdir()
+            make_skill(home / ".hermes" / "skills")
+            rc, out, _ = run_main(
+                ["--offline", "--home", str(home), "--hermes-home", str(home / ".hermes")],
+                cwd=tmp,
+            )
+            self.assertIsNotNone(out)
+            presences = [c for c in out["checks"] if c["check"] == "presence"]
+            self.assertTrue(presences)
+            self.assertTrue(all(c.get("skipped") for c in presences))
+            harness_checks = [
+                c for c in out["checks"]
+                if c["agent"] != "*" and c["check"] != "presence"
+            ]
+            self.assertEqual(harness_checks, [])
+            local = {c["check"]: c for c in out["checks"] if c["check"].startswith("local_")}
+            self.assertEqual(
+                set(local),
+                {"local_lint", "local_trace", "local_decisions", "local_compact", "local_progress"},
+            )
+            self.assertTrue(all(c["ok"] for c in local.values()))
+            self.assertEqual(rc, 0)
+
+    def test_offline_local_check_fails_when_script_missing(self) -> None:
+        with patch.object(
+            DOC, "LOCAL_TOOLS", {"local_lint": "no_such_script_xyz.py"}
+        ):
+            checks = DOC.check_offline()
+        self.assertEqual(len(checks), 1)
+        self.assertFalse(checks[0]["ok"])
+        self.assertEqual(checks[0]["check"], "local_lint")
+        self.assertEqual(checks[0]["agent"], "*")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

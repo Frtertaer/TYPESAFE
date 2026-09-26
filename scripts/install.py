@@ -775,7 +775,17 @@ def _lock_down_env(path: Path) -> None:
     owner-only ACL on Windows where mode bits are a no-op. Never fatal -
     a warning to stderr is all a failure earns."""
     if os.name == "nt":
-        user = os.environ.get("USERNAME") or getpass.getuser()
+        user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
+        if not user:
+            try:
+                user = getpass.getuser()
+            except Exception:
+                user = ""
+        if not user:
+            sys.stderr.write(
+                "install.py: warning: could not resolve a user for ACL on %s\n" % path
+            )
+            return
         try:
             proc = subprocess.run(
                 [

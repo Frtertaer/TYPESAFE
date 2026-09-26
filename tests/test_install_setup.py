@@ -58,7 +58,8 @@ class SourceTests(unittest.TestCase):
             install.set_source(str(bundle))
             self.assertEqual(install.repo_root(), bundle.resolve())
             self.assertEqual(
-                install.skill_source(), bundle / "skills" / "jev-consult"
+                install.skill_source(),
+                (bundle / "skills" / "jev-consult").resolve(),
             )
 
     def test_source_accepts_bare_skill_dir(self) -> None:

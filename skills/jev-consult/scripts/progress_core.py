@@ -602,6 +602,7 @@ def _diff_line_hashes(diff: str) -> dict:
     old_file = new_file = header = ""
     block_old = block_new = ""
     deleted_paths: set = set()
+    created_paths: set = set()
     in_hunk = saw_hunk = binary_section = False
     pending_index = []
     hunk_lines = []
@@ -674,6 +675,8 @@ def _diff_line_hashes(diff: str) -> dict:
             norms["ops"][digest] = _ops_norm_info(line, block_new or block_old)
             if line.startswith("deleted file mode"):
                 deleted_paths.add(block_old)
+            elif line.startswith("new file mode"):
+                created_paths.add(block_new)
     flush_hunk()
     if binary_section:
         for digest, norm in pending_index:
@@ -685,6 +688,7 @@ def _diff_line_hashes(diff: str) -> dict:
         sections = {}
         old_file = new_file = header = ""
         deleted_paths = set()
+        created_paths = set()
         binary_section = False
         pending_index = []
         position = 0
@@ -743,6 +747,8 @@ def _diff_line_hashes(diff: str) -> dict:
                 norms["ops"][digest] = _ops_norm_info(line, block_new or block_old)
                 if line.startswith("deleted file mode"):
                     deleted_paths.add(block_old)
+                elif line.startswith("new file mode"):
+                    created_paths.add(block_new)
         if binary_section:
             for digest, norm in pending_index:
                 ops.append(digest)
@@ -753,7 +759,48 @@ def _diff_line_hashes(diff: str) -> dict:
         "ops_norm": norms["ops"],
         "sections": sections,
         "deleted": sorted(deleted_paths),
+        "created": sorted(created_paths),
     }
+
+
+def _move_destinations(wide: dict, path: str, credit: dict, current: dict = None) -> set:
+    """Created paths plausibly holding the credited file's last-known
+    content: every baseline line that survived the credited change plus
+    the credited additions must appear together, and none of the lines
+    the credit removed may resurface. Requires at least one uncredited
+    carryover line — a one-line file's move is not provable this way.
+
+    ``current`` is the (possibly path-scoped) parse of the same diff;
+    the delete block for `path` is visible in both, so baseline lines
+    are collected from either."""
+    sources = [wide] + ([current] if current is not None else [])
+    baseline = Counter()
+    for src in sources:
+        baseline |= Counter(
+            info["f"]
+            for info in src["removed_norm"].values()
+            if isinstance(info, dict) and info.get("p") == path and info.get("f")
+        )
+    credited_removed = Counter(
+        info["f"]
+        for info in (credit.get("removed_norm") or {}).values()
+        if isinstance(info, dict) and info.get("p") == path and info.get("f")
+    )
+    survivors = baseline - credited_removed
+    if not survivors:
+        return set()
+    credited_added = Counter(
+        info["f"]
+        for info in (credit.get("added_norm") or {}).values()
+        if isinstance(info, dict) and info.get("p") == path and info.get("f")
+    )
+    expected = survivors + credited_added
+    out = set()
+    for dest in wide["created"]:
+        added_f = Counter(norm for _d, _c, norm in wide["sections"].get(dest, ()))
+        if expected <= added_f and not any(credited_removed[f] for f in added_f):
+            out.add(dest)
+    return out
 
 
 def _credited_retained(credit: dict, diff: str, wide_diff: str = None) -> bool:
@@ -766,8 +813,14 @@ def _credited_retained(credit: dict, diff: str, wide_diff: str = None) -> bool:
     ``diff`` may be scoped to the credited item's paths; a delete block
     for the credited path is still visible there because the old side of
     a move matches the pathspec. ``wide_diff`` — the unscoped
-    baseline->candidate diff — supplies the pure-text pool so content
-    moved to a path outside the item's scope is still found."""
+    baseline->candidate diff — supplies the move destination scan so
+    content moved to a path outside the item's scope is still found.
+
+    Cross-path fallback only accepts a verified move: the credited file
+    must be deleted in this diff, and a created path must contain the
+    file's last-known content (uncredited baseline survivors plus the
+    credited additions, with none of the credited removals reappearing).
+    A single identical line elsewhere is not evidence of a move."""
     current = _diff_line_hashes(diff)
     wide = _diff_line_hashes(wide_diff) if wide_diff is not None else current
     deleted_now = set(current["deleted"]) | set(wide["deleted"])
@@ -784,9 +837,6 @@ def _credited_retained(credit: dict, diff: str, wide_diff: str = None) -> bool:
         present_n = Counter(
             info["n"] for info in current[norm_key].values() if isinstance(info, dict)
         )
-        present_f = Counter(
-            info["f"] for info in wide[norm_key].values() if isinstance(info, dict)
-        )
         for digest, short in missing.items():
             info = norms.get(digest)
             if not isinstance(info, dict):
@@ -794,11 +844,23 @@ def _credited_retained(credit: dict, diff: str, wide_diff: str = None) -> bool:
             if info.get("n") and present_n[info["n"]] >= short:
                 present_n[info["n"]] -= short
                 continue
-            if (info.get("p") and info["p"] in deleted_now
-                    and info.get("f") and present_f[info["f"]] >= short):
-                present_f[info["f"]] -= short
+            path = info.get("p")
+            if not path or path not in deleted_now or not info.get("f"):
+                return False
+            if key == "removed":
+                # The file's deletion removes the line anew — the credited
+                # removal persists while the file stays deleted. A move
+                # destination that reintroduces the text is disqualified
+                # inside _move_destinations.
                 continue
-            return False
+            destinations = _move_destinations(wide, path, credit, current)
+            pool = Counter(
+                dst["f"]
+                for dst in wide[norm_key].values()
+                if isinstance(dst, dict) and dst.get("p") in destinations
+            )
+            if pool[info["f"]] < short:
+                return False
     return True
 
 

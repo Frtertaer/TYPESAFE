@@ -23,8 +23,11 @@ from test_progress import FakeEvidence, answer, picker, plan, policy
 MODIFY = "diff --git a/core.py b/core.py\n--- a/core.py\n+++ b/core.py\n@@ -1,1 +1,1 @@\n-old behavior\n+verified behavior\n"
 MODIFY_REFORMATTED = "diff --git a/core.py b/core.py\n--- a/core.py\n+++ b/core.py\n@@ -1,1 +1,1 @@\n-  old   behavior\n+    verified   behavior\n"
 RENAMED = (
-    "diff --git a/core.py b/core.py\ndeleted file mode 100644\n--- a/core.py\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-old behavior\n"
-    "diff --git a/renamed.py b/renamed.py\nnew file mode 100644\n--- /dev/null\n+++ b/renamed.py\n@@ -0,0 +1,1 @@\n+verified behavior\n"
+    "diff --git a/core.py b/core.py\ndeleted file mode 100644\n--- a/core.py\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-keep one\n-old behavior\n-keep two\n"
+    "diff --git a/renamed.py b/renamed.py\nnew file mode 100644\n--- /dev/null\n+++ b/renamed.py\n@@ -0,0 +1,3 @@\n+keep one\n+verified behavior\n+keep two\n"
+)
+MODIFY_CTX = (
+    "diff --git a/core.py b/core.py\n--- a/core.py\n+++ b/core.py\n@@ -1,3 +1,3 @@\n keep one\n-old behavior\n+verified behavior\n keep two\n"
 )
 
 
@@ -79,7 +82,7 @@ class SemanticCreditTests(unittest.TestCase):
         self.assertFalse(any(e["kind"] == "invalidate" for e in events))
 
     def test_rename_delete_create_keeps_credit(self):
-        self.evidence.diff_text = MODIFY
+        self.evidence.diff_text = MODIFY_CTX
         self.assertEqual(self.assess()["points"], 3)
         self.evidence.advance(3)
         self.evidence.diff_text = RENAMED
@@ -87,6 +90,22 @@ class SemanticCreditTests(unittest.TestCase):
         self.assertEqual(result["points"], 3)
         events = self.ledger.history("reliability")["events"]
         self.assertFalse(any(e["kind"] == "invalidate" for e in events))
+
+    def test_single_line_move_is_not_provable(self):
+        """A move of a file whose every line is credited leaves no
+        uncredited carryover to prove the destination — revoked rather
+        than trusting one matching line."""
+        self.evidence.diff_text = MODIFY
+        self.assertEqual(self.assess()["points"], 3)
+        self.evidence.advance(3)
+        self.evidence.diff_text = (
+            "diff --git a/core.py b/core.py\ndeleted file mode 100644\n--- a/core.py\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-old behavior\n"
+            "diff --git a/renamed.py b/renamed.py\nnew file mode 100644\n--- /dev/null\n+++ b/renamed.py\n@@ -0,0 +1,1 @@\n+verified behavior\n"
+        )
+        result = self.assess()
+        self.assertEqual(result["points"], 0)
+        events = self.ledger.history("reliability")["events"]
+        self.assertTrue(any(e["kind"] == "invalidate" for e in events))
 
     def test_reorder_within_context_still_revokes(self):
         self.evidence.diff_text = (
@@ -136,19 +155,43 @@ class SemanticCreditTests(unittest.TestCase):
         self.assertFalse(progress._credited_retained(credit, current))
 
     def test_move_outside_item_scope_keeps_credit(self):
-        credited = progress._diff_line_hashes('["core.py"]\n' + MODIFY)
+        credited = progress._diff_line_hashes('["core.py"]\n' + MODIFY_CTX)
         credit = progress._earned_credit(credited, progress._credited_union([]), [])
         scoped = (
             '["core.py"]\n'
             "diff --git a/core.py b/core.py\ndeleted file mode 100644\n"
-            "--- a/core.py\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-old behavior\n"
+            "--- a/core.py\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-keep one\n-old behavior\n-keep two\n"
         )
         wide = "null\n" + scoped.split("\n", 1)[1] + (
             "diff --git a/moved.py b/moved.py\nnew file mode 100644\n"
-            "--- /dev/null\n+++ b/moved.py\n@@ -0,0 +1,1 @@\n+verified behavior\n"
+            "--- /dev/null\n+++ b/moved.py\n@@ -0,0 +1,3 @@\n+keep one\n+verified behavior\n+keep two\n"
         )
         self.assertTrue(progress._credited_retained(credit, scoped, wide))
         self.assertFalse(progress._credited_retained(credit, scoped))
+
+    def test_unrelated_file_with_same_line_is_not_a_move(self):
+        """The reviewer's case: core.py deleted, unrelated.py independently
+        created with the credited line — no carryover proof, so revoked."""
+        credited = progress._diff_line_hashes('["core.py"]\n' + MODIFY_CTX)
+        credit = progress._earned_credit(credited, progress._credited_union([]), [])
+        current = (
+            "diff --git a/core.py b/core.py\ndeleted file mode 100644\n"
+            "--- a/core.py\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-keep one\n-old behavior\n-keep two\n"
+            "diff --git a/unrelated.py b/unrelated.py\nnew file mode 100644\n"
+            "--- /dev/null\n+++ b/unrelated.py\n@@ -0,0 +1,1 @@\n+verified behavior\n"
+        )
+        self.assertFalse(progress._credited_retained(credit, current, current))
+
+    def test_move_reintroducing_removed_line_revokes(self):
+        credited = progress._diff_line_hashes('["core.py"]\n' + MODIFY_CTX)
+        credit = progress._earned_credit(credited, progress._credited_union([]), [])
+        current = (
+            "diff --git a/core.py b/core.py\ndeleted file mode 100644\n"
+            "--- a/core.py\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-keep one\n-old behavior\n-keep two\n"
+            "diff --git a/moved.py b/moved.py\nnew file mode 100644\n"
+            "--- /dev/null\n+++ b/moved.py\n@@ -0,0 +1,3 @@\n+keep one\n+verified behavior\n+keep two\n+old behavior\n"
+        )
+        self.assertFalse(progress._credited_retained(credit, current, current))
 
     def test_delete_elsewhere_does_not_retain_removed_credit(self):
         credited = progress._diff_line_hashes(

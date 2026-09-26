@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import socket
 import sys
@@ -257,6 +258,14 @@ def pick_with_jev(
         need = None
     picker["need"] = need
     picker["probabilities"] = (decision.get("probabilities") or {}).get("load_tools") or {}
+    lt_answer = answers.get("load_tools") or {}
+    try:
+        confidence = float(lt_answer.get("confidence"))
+    except (TypeError, ValueError):
+        confidence = None
+    picker["confidence"] = (
+        confidence if confidence is not None and math.isfinite(confidence) else None
+    )
     picker["latency_ms"] = latency_ms
     picker["question"] = "load_tools"
     return picker
@@ -486,6 +495,7 @@ def handle(
         "question": picker.get("question"),
         "need": picker.get("need"),
         "probabilities": picker.get("probabilities") or {},
+        "confidence": picker.get("confidence"),
         "shortlist_score_avg": _avg_score(picked, catalog, prompt),
         "winner": {"kind": winner.get("kind"), "name": winner.get("name")}
         if winner

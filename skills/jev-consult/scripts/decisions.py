@@ -66,6 +66,7 @@ ENTRY_SCHEMA_ROWS = {
     "question": {"required": True, "type": "string|null, Jev question asked"},
     "need": {"required": True, "type": "object|null, Jev ask payload"},
     "probabilities": {"required": True, "type": "object{option: p}, Jev softmax"},
+    "confidence": {"required": False, "type": "number|null, load_tools answer confidence (records pre-logging lack it)"},
     "shortlist_score_avg": {"required": True, "type": "number, mean IDF score of picks"},
     "winner": {"required": True, "type": "{kind, name}|null, applied pick"},
     "strong_pick": {"required": True, "type": "bool"},
@@ -847,6 +848,14 @@ def _need_of(item: dict) -> float | None:
     return float(need)
 
 
+def _confidence_of(item: dict) -> float | None:
+    conf = item.get("confidence")
+    if not isinstance(conf, (int, float)) or isinstance(conf, bool):
+        return None
+    conf = float(conf)
+    return conf if conf == conf else None  # NaN check
+
+
 def _calibrate_eligible(item: dict) -> bool:
     if not isinstance(item, dict):
         return False
@@ -854,7 +863,14 @@ def _calibrate_eligible(item: dict) -> bool:
         return False
     if str(item.get("jev_status") or "") not in CALIBRATE_REPLAYABLE:
         return False
-    return _probs_of(item) is not None and _need_of(item) is not None
+    # jev.decide gates on the answer's own confidence, not the largest
+    # probability — records logged before confidence was captured cannot
+    # be replayed and are excluded rather than approximated.
+    return (
+        _probs_of(item) is not None
+        and _need_of(item) is not None
+        and _confidence_of(item) is not None
+    )
 
 
 def _replay(item: dict, floor: float, strong: float, yes: float, no: float) -> str:
@@ -864,7 +880,8 @@ def _replay(item: dict, floor: float, strong: float, yes: float, no: float) -> s
     top = max(probs.values())
     load = max(probs.items(), key=lambda kv: kv[1])[0]
     in_shortlist = load in {str(x) for x in item.get("shortlist") or []}
-    if top < floor:
+    confidence = _confidence_of(item)
+    if confidence is None or confidence < floor:
         return "escalate"  # jev.decide conf_floor preempts the picker
     if load in ("none", ""):
         return "none"
@@ -971,6 +988,7 @@ def _noul_yes_recommendation(
 
 def calibrate(entries: list[dict], policy: dict | None = None,
               health_filter: bool = False,
+              health_entries: list[dict] | None = None,
               eval_pairs: list[tuple] | None = None) -> dict:
     """Grid-search (confidence_floor, strong_pick) minimising
     escalate+weak-winner share; also a tight_gap separator for
@@ -979,11 +997,20 @@ def calibrate(entries: list[dict], policy: dict | None = None,
     eval_pairs ((before, after) nouls from a compare --live payload),
     additionally recommends noul_yes against the eval separation
     interval and counts log entries whose replayed outcome would flip
-    under it — the false-accept growth signal."""
+    under it — the false-accept growth signal.
+
+    health_entries: the log to judge harness health from. Status/outcome
+    filters on the calibration set erase the very failures that mark a
+    bucket degraded, so callers pass the unfiltered log; falls back to
+    `entries`."""
     policy = policy or {}
     cur = _policy_thresholds(policy)
     eligible, skipped, excluded = [], 0, 0
-    degraded = _degraded_buckets(entries) if health_filter else set()
+    degraded = (
+        _degraded_buckets(health_entries if health_entries is not None else entries)
+        if health_filter
+        else set()
+    )
     for item in entries:
         if not _calibrate_eligible(item):
             skipped += 1
@@ -2484,6 +2511,7 @@ def main(argv: list[str] | None = None) -> int:
             entries,
             policy=inventory._policy_dict(),
             health_filter=getattr(args, "harness_health", False),
+            health_entries=all_entries,
             eval_pairs=eval_pairs,
         )
         apply_arg = getattr(args, "apply", "") or ""
@@ -2504,6 +2532,14 @@ def main(argv: list[str] | None = None) -> int:
                 _policy_path(), report["recommended"]
             )
             target = Path(apply_arg)
+            # --apply writes a review copy; the live policy.json is
+            # adopted deliberately, never through this path.
+            if target.resolve() == _policy_path().resolve():
+                sys.stderr.write(
+                    "--apply refuses %s: it is the live policy; pick a copy path\n"
+                    % target
+                )
+                return 1
             try:
                 _atomic_write(target, patched)
             except OSError as exc:

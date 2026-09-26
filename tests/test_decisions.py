@@ -212,6 +212,7 @@ class CalibrateTest(unittest.TestCase):
                 "ts": 1700000000 + i, "harness": "claude-code",
                 "jev_status": "winner", "strong_pick": True,
                 "probabilities": {"skill_a": 0.70, "skill_b": 0.05},
+                "confidence": 0.90,
                 "need": 0.8, "shortlist": ["skill_a", "skill_b"],
                 "winner": {"kind": "skill", "name": "a"},
             })
@@ -221,25 +222,28 @@ class CalibrateTest(unittest.TestCase):
                 "ts": 1700000100 + i, "harness": "claude-code",
                 "jev_status": "winner", "strong_pick": False,
                 "probabilities": {"skill_a": 0.55, "skill_b": 0.50},
+                "confidence": 0.90,
                 "need": 0.8, "shortlist": ["skill_a", "skill_b"],
                 "winner": {"kind": "skill", "name": "a"},
             })
-        # low-need prompts that escalated only because their top sat
+        # low-need prompts that escalated only because their confidence sat
         # under the floor — a lower floor routes them to none.
         for i in range(3):
             rows.append({
                 "ts": 1700000200 + i, "harness": "grok",
                 "jev_status": "escalate",
                 "probabilities": {"skill_a": 0.45, "skill_b": 0.30},
+                "confidence": 0.45,
                 "need": 0.2, "shortlist": ["skill_a", "skill_b"],
                 "winner": None,
             })
-        # genuine low-confidence escalations at top 0.40
+        # genuine low-confidence escalations at confidence 0.40
         for i in range(2):
             rows.append({
                 "ts": 1700000300 + i, "harness": "grok",
                 "jev_status": "escalate",
                 "probabilities": {"skill_a": 0.40, "skill_b": 0.35},
+                "confidence": 0.40,
                 "need": 0.6, "shortlist": ["skill_a", "skill_b"],
                 "winner": None,
             })
@@ -341,7 +345,8 @@ class CalibrateTest(unittest.TestCase):
         rows.append({
             "ts": 1700000300, "harness": "cursor", "jev_status": "winner",
             "strong_pick": True, "jev_attempted": True,
-            "probabilities": {"skill_a": 0.99}, "need": 0.9,
+            "probabilities": {"skill_a": 0.99}, "confidence": 0.95,
+            "need": 0.9,
             "shortlist": ["skill_a"],
             "winner": {"kind": "skill", "name": "a"},
         })
@@ -401,6 +406,7 @@ class CalibrateTest(unittest.TestCase):
         rows.append({
             "ts": 1700000400, "harness": "grok", "jev_status": "escalate",
             "probabilities": {"skill_a": 0.6, "skill_b": 0.2},
+            "confidence": 0.90,
             "need": 0.62, "shortlist": ["skill_a", "skill_b"],
             "winner": None,
         })
@@ -495,6 +501,72 @@ class CalibrateTest(unittest.TestCase):
             report = json.loads(proc.stdout)
             self.assertEqual(report["eval"]["positives"], 1)
             self.assertEqual(report["eval"]["negatives"], 1)
+
+    def test_calibrate_health_sees_past_status_filters(self):
+        # --status winner drops error/timeout rows; degraded buckets must
+        # still be computed from the unfiltered log or a sick hour would
+        # look healthy and feed its winners into the fit.
+        rows = []
+        for i in range(3):
+            rows.append({
+                "ts": 1700000300 + i, "harness": "cursor",
+                "jev_status": "error", "jev_attempted": True,
+            })
+        rows.append({
+            "ts": 1700000300, "harness": "cursor", "jev_status": "winner",
+            "strong_pick": True, "jev_attempted": True,
+            "probabilities": {"skill_a": 0.99}, "confidence": 0.95,
+            "need": 0.9, "shortlist": ["skill_a"],
+            "winner": {"kind": "skill", "name": "a"},
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, rows)
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate", "--harness-health",
+                "--status", "winner", "--json",
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        report = json.loads(proc.stdout)
+        self.assertTrue(report["degraded_buckets"])
+        self.assertEqual(report["health_excluded"], 1)
+        self.assertEqual(report["entries"], 0)
+
+    def test_calibrate_apply_refuses_live_policy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            live = SCRIPTS.parent / "policy.json"
+            before = live.read_bytes()
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate", "--apply", str(live),
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("live policy", proc.stderr)
+            self.assertEqual(live.read_bytes(), before)
+
+    def test_calibrate_replays_recorded_confidence_not_top_prob(self):
+        # jev.decide floors on the answer's own confidence: a high top
+        # probability with low confidence must still replay as escalate,
+        # and records without the field are excluded, not approximated.
+        import decisions
+
+        item = {
+            "jev_status": "escalate",
+            "probabilities": {"skill_a": 0.95, "skill_b": 0.02},
+            "confidence": 0.40,
+            "need": 0.8,
+            "shortlist": ["skill_a", "skill_b"],
+        }
+        self.assertEqual(
+            decisions._replay(item, 0.55, 0.85, 0.7, 0.3), "escalate"
+        )
+        self.assertEqual(
+            decisions._replay(item, 0.30, 0.85, 0.7, 0.3), "strong_winner"
+        )
+        legacy = {k: v for k, v in item.items() if k != "confidence"}
+        self.assertFalse(decisions._calibrate_eligible(legacy))
+        self.assertTrue(decisions._calibrate_eligible(item))
 
 
 class CliTest(unittest.TestCase):

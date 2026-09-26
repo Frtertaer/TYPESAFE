@@ -90,12 +90,15 @@ def _stage_payload() -> Path:
         _copytree(src, stage / "staged")
         # A prior install hardened bundle/.env to a sole owner ACE — move
         # the file itself (same volume) so the restage keeps both the key
-        # and its ACL instead of deleting it.
+        # and its ACL. It parks beside stage, never inside: stage is
+        # unconditionally removed on failure and would take the key with it.
         env_file = BUNDLE_DIR / ".env"
-        saved = None
+        saved = BUNDLE_DIR.parent / (".env.preserved.%d" % os.getpid())
         if env_file.is_file():
-            saved = stage / ".env.preserved"
+            saved.unlink(missing_ok=True)
             shutil.move(str(env_file), str(saved))
+        else:
+            saved = None
         if BUNDLE_DIR.is_symlink() or (BUNDLE_DIR.exists() and not BUNDLE_DIR.is_dir()):
             BUNDLE_DIR.unlink()
         elif BUNDLE_DIR.is_dir():
@@ -104,9 +107,17 @@ def _stage_payload() -> Path:
         if saved is not None:
             env_file.unlink(missing_ok=True)
             shutil.move(str(saved), str(env_file))
+            saved = None
         return BUNDLE_DIR
     finally:
         shutil.rmtree(stage, ignore_errors=True)
+        if saved is not None and saved.is_file():
+            try:
+                BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
+                env_file.unlink(missing_ok=True)
+                shutil.move(str(saved), str(env_file))
+            except OSError:
+                pass  # leave the preserved copy beside the bundle dir
 
 
 def _stage_runtime() -> Path | None:

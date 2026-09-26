@@ -552,6 +552,41 @@ class PackageReleaseTests(unittest.TestCase):
         for need in ("urllib.request", "urllib.error", "getpass", "msvcrt"):
             self.assertIn(need, names)
 
+    def test_exe_stage_payload_restores_env_on_failed_swap(self) -> None:
+        """A locked file mid-restage must not delete the only copy of
+        bundle/.env — the preserved file parks outside the staging dir
+        and is moved back on failure."""
+        import shutil as real_shutil
+
+        exe_entry = load(ROOT / "scripts" / "exe_entry.py", "exe_entry")
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / ".jev-consult"
+            bundle = parent / "bundle"
+            bundle.mkdir(parents=True)
+            env_file = bundle / ".env"
+            env_file.write_text("TYPESAFE_API_KEY=x\n", encoding="utf-8")
+            src = Path(tmp) / "payload-src"
+            src.mkdir()
+            (src / "marker").write_text("new", encoding="utf-8")
+
+            real_move = real_shutil.move
+
+            def flaky_move(src_path, dst):
+                if str(dst) == str(bundle):
+                    raise OSError("locked")
+                return real_move(src_path, dst)
+
+            with patch.object(exe_entry, "BUNDLE_DIR", bundle), patch.object(
+                exe_entry, "_payload_dir", return_value=src
+            ), patch.object(
+                exe_entry.shutil, "move", side_effect=flaky_move
+            ):
+                self.assertRaises(OSError, exe_entry._stage_payload)
+            self.assertEqual(
+                env_file.read_text(encoding="utf-8"), "TYPESAFE_API_KEY=x\n"
+            )
+            self.assertFalse(list(parent.glob(".env.preserved.*")))
+
 
 def _bootstrap_ns() -> dict:
     """Exec the pyz __main__ source into a namespace without running main()."""
@@ -712,6 +747,42 @@ class BootstrapHardeningTests(unittest.TestCase):
             (cmd,) = calls
             self.assertEqual(cmd[cmd.index("--source") + 1], str(bundle))
             self.assertFalse(ns["LOCK_DIR"].exists())  # released at end
+
+    def test_bootstrap_stage_restores_env_when_bundle_swap_fails(self) -> None:
+        """The pyz restage must not delete the only copy of bundle/.env
+        when the swap fails — the preserved file parks outside the
+        staging dir and is restored to the bundle on failure."""
+        import shutil as real_shutil
+        import types
+
+        ns = _bootstrap_ns()
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / ".jev-consult"
+            bundle = parent / "bundle"
+            bundle.mkdir(parents=True)
+            env_file = bundle / ".env"
+            env_file.write_text("TYPESAFE_API_KEY=x\n", encoding="utf-8")
+            ns["BUNDLE_DIR"] = bundle
+            payload = Path(tmp) / "payload-src"
+            payload.mkdir()
+            (payload / "marker").write_text("new", encoding="utf-8")
+            ns["_extract"] = lambda stage: payload
+
+            real_move = real_shutil.move
+
+            def flaky_move(src, dst):
+                if str(dst) == str(bundle):
+                    raise OSError("locked")
+                return real_move(src, dst)
+
+            ns["shutil"] = types.SimpleNamespace(
+                move=flaky_move, rmtree=real_shutil.rmtree
+            )
+            self.assertRaises(OSError, ns["_stage"])
+            self.assertEqual(
+                env_file.read_text(encoding="utf-8"), "TYPESAFE_API_KEY=x\n"
+            )
+            self.assertFalse(list(parent.glob(".env.preserved.*")))
 
 
 if __name__ == "__main__":

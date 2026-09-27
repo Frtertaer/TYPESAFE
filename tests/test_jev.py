@@ -2215,6 +2215,24 @@ class FallbackAndCategoryTests(unittest.TestCase):
         self.assertEqual(opener.calls, 2)
         self.assertEqual(opener.urls[-1], self.FALLBACK)
 
+    def test_fallback_failure_surfaces_as_systemexit(self) -> None:
+        # primary 503 + fallback 503: the caller must see the handled
+        # SystemExit, not the internal _RetryableFailure wrapper
+        policy = {
+            "endpoint": "https://api.typesafe.ai/v1/systemone",
+            "fallback_endpoint": self.FALLBACK,
+        }
+        opener = _UrlRecordingOpener([_http_error(503), _http_error(503)])
+        with self.assertRaises(SystemExit) as ctx:
+            with patch.dict(os.environ, self.ENV), patch.object(
+                jev, "load_api_key", return_value=self.ENV["TYPESAFE_API_KEY"]
+            ), patch("urllib.request.build_opener", return_value=opener), patch.object(
+                jev.time, "sleep"
+            ):
+                jev.post_systemone({"task": "t"}, self.QUESTIONS, policy, retries=0)
+        self.assertIn("503", str(ctx.exception))
+        self.assertEqual(opener.calls, 2)
+
     def test_resolve_noul_yes_dict(self) -> None:
         policy = {"noul_yes": {"default": 0.7, "unknown": 0.6}}
         self.assertEqual(jev.resolve_noul_yes(policy, "unknown"), 0.6)

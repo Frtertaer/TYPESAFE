@@ -942,10 +942,10 @@ def _file_unlock(fd: int) -> None:
         pass
 
 
-def append_decision(entry: dict, path: Path | None = None) -> None:
+def append_decision(entry: dict, path: Path | None = None) -> bool:
     target = path or decisions_log_path()
     if target is None:
-        return
+        return False
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -969,8 +969,9 @@ def append_decision(entry: dict, path: Path | None = None) -> None:
                 _file_unlock(fd)
         finally:
             os.close(fd)
+        return True
     except OSError:
-        pass
+        return False
 
 
 def write_sidecar(

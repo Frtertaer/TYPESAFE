@@ -1,5 +1,11 @@
 {
   "goal": "Cut stall, invented next step, drift, loop, and forgotten plan. Not IQ.",
+  "routing_pool": [
+    {"id": "skill:dep-audit", "kind": "skill", "name": "dep-audit", "description": "audit and upgrade project dependencies"},
+    {"id": "skill:db-migrate", "kind": "skill", "name": "db-migrate", "description": "plan and apply database schema migrations"},
+    {"id": "skill:api-contract", "kind": "skill", "name": "api-contract", "description": "design and check REST API contracts"},
+    {"id": "mcp:ci-watch", "kind": "mcp", "name": "ci-watch", "description": "watch CI runs and surface failures"}
+  ],
   "cases": [
     {
       "id": "off_track",

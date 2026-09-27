@@ -391,13 +391,33 @@ def lint_policy(policy) -> list[dict]:
 
     no_below = policy.get("noul_no")
     unsure = policy.get("noul_unsure")
-    yes_above = policy.get("noul_yes")
-    if isinstance(yes_above, dict):  # per-question map: order against its default
-        yes_above = yes_above.get("default")
+    yes_above_raw = policy.get("noul_yes")
+    # per-question map: ordering applies to `default` AND every override —
+    # a per-qid gate below noul_no/unsure flips the band semantics for that
+    # question alone
+    if isinstance(yes_above_raw, dict):
+        yes_gates = {
+            "default": yes_above_raw.get("default"),
+            **{
+                k: v
+                for k, v in yes_above_raw.items()
+                if k != "default"
+            },
+        }
+    else:
+        yes_gates = {"default": yes_above_raw}
+    yes_above = yes_gates.get("default")
     if _num(no_below) and _num(unsure) and not no_below < unsure:
         add("P004", "error", "noul_unsure", "need noul_no < noul_unsure (%.3g !< %.3g)" % (no_below, unsure), "bands must not overlap")
-    if _num(unsure) and _num(yes_above) and not unsure < yes_above:
-        add("P004", "error", "noul_yes", "need noul_unsure < noul_yes (%.3g !< %.3g)" % (unsure, yes_above), "bands must not overlap")
+    for gate_name, gate in yes_gates.items():
+        if _num(unsure) and _num(gate) and not unsure < gate:
+            add("P004", "error", "noul_yes" if gate_name == "default" else "noul_yes.%s" % gate_name,
+                "need noul_unsure < noul_yes%s (%.3g !< %.3g)" % ("." + gate_name if gate_name != "default" else "", unsure, gate),
+                "bands must not overlap")
+        if _num(no_below) and _num(gate) and not no_below < gate:
+            add("P004", "error", "noul_yes" if gate_name == "default" else "noul_yes.%s" % gate_name,
+                "need noul_no < noul_yes%s (%.3g !< %.3g)" % ("." + gate_name if gate_name != "default" else "", no_below, gate),
+                "bands must not overlap")
     conf_floor = policy.get("confidence_floor")
     strong = policy.get("strong_pick")
     if _num(conf_floor) and _num(strong) and not conf_floor < strong:

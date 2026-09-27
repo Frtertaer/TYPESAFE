@@ -4736,12 +4736,8 @@ class AcceptanceTest(unittest.TestCase):
                 "winner": {"kind": "skill", "name": "gamma"},
                 "latency_ms": 210, "budget_ms": 12000,
             },
-            # explicit feedback records
-            {
-                "ts": 1700000004, "harness": "manual",
-                "jev_status": "feedback", "feedback": "rejected",
-                "prompt_sha": "s3",
-            },
+            # explicit feedback records (feedback answers the newest
+            # preceding pick carrying its prompt_sha)
             {
                 "ts": 1700000005, "harness": "claude-code",
                 "jev_status": "winner", "prompt_sha": "s3",
@@ -4749,6 +4745,11 @@ class AcceptanceTest(unittest.TestCase):
                 "question": "naming",
                 "winner": {"kind": "skill", "name": "delta"},
                 "latency_ms": 90, "budget_ms": 12000,
+            },
+            {
+                "ts": 1700000006, "harness": "manual",
+                "jev_status": "feedback", "feedback": "rejected",
+                "prompt_sha": "s3",
             },
             # a miss
             {
@@ -4823,6 +4824,43 @@ class AcceptanceTest(unittest.TestCase):
         narrow = decisions.acceptance_report(entries, override_window=3)
         self.assertEqual(wide["overridden"], 1)
         self.assertEqual(narrow["overridden"], 0)
+
+    def test_acceptance_feedback_pairs_to_preceding_pick_only(self) -> None:
+        # A rejected record must override the newest pick BEFORE it — not
+        # a pick logged earlier for a different sha, and not the same-sha's
+        # first pick when a re-pick landed in between.
+        entries = [
+            {"ts": 1, "jev_status": "winner", "prompt_sha": "s",
+             "winner": {"name": "a"}},
+            {"ts": 2, "jev_status": "winner", "prompt_sha": "s",
+             "winner": {"name": "a"}},
+            {"ts": 3, "jev_status": "feedback", "feedback": "rejected",
+             "prompt_sha": "s"},
+        ]
+        data = decisions.acceptance_report(entries)
+        # pick#1 overridden by the same-winner re-pick? no — same winner
+        # name 'a' is not an override; pick#2 overridden by the feedback
+        self.assertEqual(data["overridden"], 1)
+        self.assertEqual(data["applied"], 0)
+
+    def test_acceptance_fill_before_pick_does_not_apply(self) -> None:
+        # A fill logged before the pick is stale evidence, not application.
+        entries = [
+            {"ts": 1, "harness": "h", "jev_status": "fill",
+             "prompt_head": "task"},
+            {"ts": 2, "harness": "h", "jev_status": "winner",
+             "prompt_sha": "s", "prompt_head": "task",
+             "winner": {"name": "a"}},
+        ]
+        data = decisions.acceptance_report(entries)
+        self.assertEqual(data["applied"], 0)
+        # fill after the pick does apply
+        entries.append(
+            {"ts": 3, "harness": "h", "jev_status": "fill",
+             "prompt_head": "task"}
+        )
+        data = decisions.acceptance_report(entries)
+        self.assertEqual(data["applied"], 1)
 
 
 class HtmlReportTest(unittest.TestCase):

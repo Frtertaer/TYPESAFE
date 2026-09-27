@@ -9,7 +9,9 @@ import importlib.util
 import io
 import json
 import os
+import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -20,14 +22,102 @@ if str(HERE) not in sys.path:
 
 import _watch  # noqa: E402
 
+# Evidence lines a coder-alone baseline could never contain: the Jev
+# consult's own outputs (picks, traces, sidecars).
+_JEV_EVIDENCE = re.compile(r"\bjev\b|\.jev-", re.IGNORECASE)
 
-def load_jev():
-    path = HERE / "jev.py"
-    spec = importlib.util.spec_from_file_location("jev_consult_jev", path)
+# Plausible installed-items pool for observed routing on negative cases:
+# the corpus's "routing_pool" overrides it. The items mimic a typical
+# dev-tooling install — specific enough that a mechanical prompt matching
+# one of them genuinely is a false-accept signal.
+DEFAULT_ROUTING_POOL = [
+    {
+        "id": "skill:dep-audit",
+        "kind": "skill",
+        "name": "dep-audit",
+        "description": "audit and upgrade project dependencies",
+    },
+    {
+        "id": "skill:db-migrate",
+        "kind": "skill",
+        "name": "db-migrate",
+        "description": "plan and apply database schema migrations",
+    },
+    {
+        "id": "skill:api-contract",
+        "kind": "skill",
+        "name": "api-contract",
+        "description": "design and check REST API contracts",
+    },
+    {
+        "id": "mcp:ci-watch",
+        "kind": "mcp",
+        "name": "ci-watch",
+        "description": "watch CI runs and surface failures",
+    },
+]
+
+
+def _load_module(filename: str, modname: str):
+    path = HERE / filename
+    spec = importlib.util.spec_from_file_location(modname, path)
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(mod)
     return mod
+
+
+def load_jev():
+    return _load_module("jev.py", "jev_consult_jev")
+
+
+def load_hook():
+    return _load_module("inventory_hook.py", "jev_consult_inventory_hook")
+
+
+def observed_consult(case: dict[str, Any], pool: list[dict]) -> bool | None:
+    """Drive the real prompt-hook routing path for the case's prompt:
+    inventory_hook.handle() with a stub chooser — True when the hook would
+    spend a Jev call (chooser invoked), False when it would not. Returns
+    None when the hook cannot run in this environment."""
+    prompt = str(case.get("prompt") or "").strip()
+    if not prompt:
+        return None
+    try:
+        hook = load_hook()
+    except Exception:
+        return None
+    called: list[bool] = []
+
+    def probe(*_args):
+        called.append(True)
+        return {"status": "idf", "winner": None}
+
+    old_log = os.environ.get("JEV_CONSULT_LOG")
+    os.environ["JEV_CONSULT_LOG"] = "0"  # keep probe records out of decisions.jsonl
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            hook.handle(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": prompt,
+                    "cwd": tmp,
+                    "session_id": "eval-%s" % (case.get("id") or "x"),
+                    "ts": int(time.time()),
+                },
+                items=pool,
+                harness="live-eval",
+                pick_fn=probe,
+                no_writes=True,
+            )
+    except Exception:
+        return None
+    finally:
+        if old_log is None:
+            os.environ.pop("JEV_CONSULT_LOG", None)
+        else:
+            os.environ["JEV_CONSULT_LOG"] = old_log
+    return bool(called)
 
 
 def cases_path() -> Path:
@@ -46,6 +136,14 @@ def load_cases(path: Path | str | None = None) -> dict[str, Any]:
         raise SystemExit("cases file is not JSON: %s" % exc)
     if not isinstance(data, dict) or not isinstance(data.get("cases"), list):
         raise SystemExit("compare-cases.json must have a cases list")
+    for case in data["cases"]:
+        if not isinstance(case, dict):
+            raise SystemExit("each case must be an object")
+        if "expect_call" in case and not isinstance(case["expect_call"], bool):
+            raise SystemExit(
+                "case %r: expect_call must be a JSON boolean — a truthy string "
+                "silently reads as 'call expected'" % case.get("id")
+            )
     return data
 
 
@@ -316,10 +414,18 @@ def strict_failures(
             failures.append("%s: guarded side did not call Jev" % cid)
             continue
         if not expect_call:
-            # negative case: the correct outcome is no Jev call at all;
-            # an optional max_noul still bounds the score when the
-            # after-state did get scored
-            if after.get("called_jev"):
+            # negative case: the correct outcome is no Jev call at all.
+            # observed_call is the real hook routing decision for the
+            # prompt (shortlist -> chooser); fall back to the fixture's
+            # declared flag only when the hook cannot run here.
+            observed = row.get("observed_call")
+            if observed is True:
+                failures.append(
+                    "%s: negative case routed to Jev (false-accept)" % cid
+                )
+            elif after.get("called_jev"):
+                # fixture contradiction: expect_call says the right outcome
+                # skips Jev, yet the after-state claims a call happened
                 failures.append(
                     "%s: negative case called Jev (false-accept)" % cid
                 )
@@ -365,6 +471,12 @@ def run(
     if only:
         cases = [case for case in cases if str(case.get("id") or "") in only]
     rows = [row_offline(case) for case in cases]
+    routing_pool = blob.get("routing_pool")
+    if not isinstance(routing_pool, list) or not routing_pool:
+        routing_pool = DEFAULT_ROUTING_POOL
+    for index, case in enumerate(cases):
+        if case.get("expect_call") is False:
+            rows[index]["observed_call"] = observed_consult(case, routing_pool)
     live_error = ""
     if live:
         try:
@@ -409,7 +521,21 @@ def run(
                     # The judge never sees last_pick/invented (side_state
                     # strips them), so the baseline arm substitutes
                     # current_step — the visible outcome of the naive pick.
-                    base_side = dict(case.get("after") or {})
+                    # ab.state overrides the whole side; otherwise copy
+                    # `after` minus evidence produced by the Jev consult
+                    # itself (a coder-alone state never contains it).
+                    base_state = ab_spec.get("state")
+                    if isinstance(base_state, dict):
+                        base_side = dict(base_state)
+                    else:
+                        base_side = dict(case.get("after") or {})
+                        inspected = base_side.get("inspected")
+                        if isinstance(inspected, list):
+                            base_side["inspected"] = [
+                                s
+                                for s in inspected
+                                if not _JEV_EVIDENCE.search(str(s))
+                            ]
                     base_side["last_pick"] = ab_spec["baseline_pick"]
                     base_side["current_step"] = ab_spec["baseline_step"]
                     base = score_live(jev, policy, case, base_side)

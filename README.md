@@ -215,12 +215,12 @@ weekly `live-eval` краснеет на корректных кейсах. Не
 | pick-rate | 26.9% (64 пика / 238 routing-записей) | `decisions.py --acceptance` |
 | override-rate | 0% — ни одного переопределённого пика в логе | то же |
 | latency | p50 104 ms, p95 142 ms при бюджете 12 000 ms | то же |
-| false-accept | негативные кейсы (`market_none`, `mechanical`) не вызывают Jev | `expect_call: false` |
+| false-accept | негативные кейсы (`market_none`, `mechanical`) не роутятся в Jev — проверено реальным hook-routing (shortlist → chooser не вызывается), а не флагом фикстуры | `expect_call: false` + `routing_pool` в корпусе |
 | калибровка | bands overlap → `flips=0`, гейт не трогали (не глушим без данных) | `--calibrate --eval` |
 
 A/B-метрика — главный аргумент: каждый кейс прогоняется дважды — состояние
 после пика Jev и то же состояние с baseline-пиком «кодер решил сам» —
-и судья сравнивает итоговый noul. `--ab` включён в weekly `live-eval.yml`;
+и судья сравнивает итоговый noul. Baseline-арм строится без Jev-evidence (строки `inspected` с упоминаниями Jev/`.jev-*` вырезаются — кодер-один их не видел бы); кейс может задать отдельное состояние полем `ab.state`. `--ab` включён в weekly `live-eval.yml`;
 артефакты прогона: `eval-live.json/md`, `eval-decisions.jsonl` (каждый
 eval-вызов пишется как routing-запись `harness=live-eval`),
 `eval-report.html` (одностраничный отчёт `decisions.py --html`: status mix,

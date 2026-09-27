@@ -1153,6 +1153,55 @@ class PerCaseGateTest(unittest.TestCase):
         rows[0]["after"]["called_jev"] = False
         self.assertEqual(compare.strict_failures(rows, True), [])
 
+    def test_strict_failures_observed_call_overrides_fixture(self) -> None:
+        # the gate fires on the hook's real routing decision even when the
+        # fixture's declared flag says no call happened
+        rows = [
+            {
+                "id": "neg", "expect_call": False, "observed_call": True,
+                "after": {"called_jev": False},
+            },
+        ]
+        failures = compare.strict_failures(rows, True)
+        self.assertIn("false-accept", failures[0])
+        rows[0]["observed_call"] = False
+        self.assertEqual(compare.strict_failures(rows, True), [])
+
+    def test_observed_consult_routes_matching_prompt(self) -> None:
+        # a prompt matching the pool reaches the chooser -> would consult
+        self.assertTrue(
+            compare.observed_consult(
+                {"id": "x", "prompt": "audit and upgrade the project dependencies"},
+                compare.DEFAULT_ROUTING_POOL,
+            )
+        )
+
+    def test_observed_consult_quiet_on_mechanical_prompt(self) -> None:
+        self.assertFalse(
+            compare.observed_consult(
+                {"id": "x", "prompt": "Fix the typo in the README badge URL."},
+                compare.DEFAULT_ROUTING_POOL,
+            )
+        )
+
+    def test_observed_consult_without_prompt_is_none(self) -> None:
+        self.assertIsNone(
+            compare.observed_consult({"id": "x"}, compare.DEFAULT_ROUTING_POOL)
+        )
+
+    def test_load_cases_rejects_nonbool_expect_call(self) -> None:
+        bad = {
+            "cases": [
+                {"id": "c", "prompt": "p", "expect_call": "false",
+                 "before": {}, "after": {}}
+            ]
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "cases.json"
+            f.write_text(json.dumps(bad), encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                compare.load_cases(f)
+
 
 class AbBlockTest(unittest.TestCase):
     def test_ab_block_computes_deltas(self) -> None:

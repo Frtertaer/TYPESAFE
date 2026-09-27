@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -339,15 +340,19 @@ def post_systemone(
         primary_endpoint = policy.get("endpoint") or ENDPOINT_DEFAULT
         if not fb_endpoint or fb_endpoint == primary_endpoint:
             raise err.original from None
-        result = _post_once(
-            state,
-            questions,
-            policy,
-            endpoint=fb_endpoint,
-            model=fb_model,
-            timeout=timeout,
-            retries=0,
-        )
+        try:
+            result = _post_once(
+                state,
+                questions,
+                policy,
+                endpoint=fb_endpoint,
+                model=fb_model,
+                timeout=timeout,
+                retries=0,
+            )
+        except _RetryableFailure as fb_err:
+            # unwrap: callers expect SystemExit, not the wrapper
+            raise fb_err.original from None
         result["model"] = result.get("model") or fb_model
         result["note"] = "model_fallback"
     return result
@@ -383,6 +388,14 @@ def _post_once(
     if SECRET_RE.search(text) or (key and key in text):
         raise SystemExit("Jev request blocked: suspected credential in state/questions")
     data = text.encode("utf-8")
+    host = urllib.parse.urlparse(endpoint).hostname or ""
+    scheme = urllib.parse.urlparse(endpoint).scheme.lower()
+    loopback = host == "localhost" or host.startswith("127.") or host == "::1"
+    if scheme == "http" and not loopback:
+        raise SystemExit(
+            "Jev endpoint refused: plain http would send the API key "
+            "unencrypted (loopback stubs are allowed)"
+        )
     request = urllib.request.Request(
         endpoint,
         data=data,
@@ -1217,21 +1230,41 @@ def cmd_self_test(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-def _decisions_log_path(override: str = "") -> Path:
-    if override:
-        return Path(override)
-    env = os.environ.get("JEV_CONSULT_LOG", "").strip()
-    if env:
-        return Path(env)
-    home = Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or Path.home())
-    return home / ".cache" / "jev-consult" / "decisions.jsonl"
-
-
 def cmd_feedback(args: argparse.Namespace) -> int:
     """Append an override outcome record so decisions.py --acceptance can
     pair it with the routing entry it answers to (same prompt_sha, or the
     newest routing entry when --sha is omitted)."""
-    path = _decisions_log_path(getattr(args, "file", "") or "")
+    override = (getattr(args, "file", "") or "").strip()
+    inventory = None
+    try:
+        import inventory  # same-dir script (sys.path primed above)
+    except ImportError:
+        pass
+    if override:
+        path: Path | None = Path(override)
+    elif inventory is not None:
+        path = inventory.decisions_log_path()
+    else:
+        env = os.environ.get("JEV_CONSULT_LOG", "").strip()
+        if env == "0":
+            path = None
+        elif env:
+            path = Path(env)
+        else:
+            home = Path(
+                os.environ.get("USERPROFILE") or os.environ.get("HOME") or Path.home()
+            )
+            path = home / ".cache" / "jev-consult" / "decisions.jsonl"
+    if path is None:
+        emit(
+            {
+                "feedback": args.verdict,
+                "prompt_sha": None,
+                "written": False,
+                "note": "decisions log disabled (JEV_CONSULT_LOG=0)",
+            }
+        )
+        return 0
     target_sha = (getattr(args, "sha", "") or "").strip()
     if not target_sha and path.is_file():
         try:
@@ -1254,13 +1287,18 @@ def cmd_feedback(args: argparse.Namespace) -> int:
         "prompt_sha": target_sha or None,
         "winner": (getattr(args, "winner", "") or "").strip() or None,
     }
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except OSError as exc:
-        sys.stderr.write("feedback: cannot append %s: %s\n" % (path, exc))
-        return 1
+    if inventory is not None:
+        if not inventory.append_decision(entry, path):
+            sys.stderr.write("feedback: cannot append %s\n" % path)
+            return 1
+    else:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError as exc:
+            sys.stderr.write("feedback: cannot append %s: %s\n" % (path, exc))
+            return 1
     emit({"feedback": args.verdict, "prompt_sha": entry["prompt_sha"], "file": str(path)})
     return 0
 

@@ -38,9 +38,21 @@ jobs:
           fi
           DIFF=""
           [ -f eval-baseline.json ] && DIFF="--diff eval-baseline.json"
+          set +e
           python skills/jev-consult/scripts/compare.py --live --strict --ab --json \
             --out eval-live.json --report eval-live.md $DIFF
-          cp eval-live.json eval-baseline.json
+          rc=$?
+          set -e
+          # Persist the fresh baseline even when the strict gate fails — the
+          # per-case "below gate N weeks" streaks only accumulate if the
+          # failed run is saved. A run that failed before scoring (error
+          # field set) does NOT replace the baseline: its missing nouls would
+          # poison next week's diff.
+          if [ -f eval-live.json ] && \
+             python -c "import json,sys; sys.exit(0 if not json.load(open('eval-live.json')).get('error') else 1)"; then
+            cp eval-live.json eval-baseline.json
+          fi
+          exit $rc
       - name: acceptance + html report on eval traffic
         if: always() && hashFiles('eval-decisions.jsonl') != ''
         env:

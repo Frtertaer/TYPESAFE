@@ -694,8 +694,11 @@ def acceptance_report(
       within the next `override_window` records
     - latency p50/p95 of routing entries against their budget_ms
 
-    Matching: feedback/fill records carry prompt_sha (explicit feedback) or
-    prompt_head+harness (fill writers never see prompt_sha) — both are used."""
+    Matching is order-aware: a feedback record answers the newest pick
+    carrying its prompt_sha that precedes it (earlier and later picks with
+    the same sha keep their own verdicts), and a fill counts only when it
+    lands after the pick on the same harness + prompt_head prefix — fills
+    logged earlier are stale evidence, not application."""
     routing = [
         e
         for e in entries
@@ -707,7 +710,6 @@ def acceptance_report(
         for e in routing
         if isinstance(e.get("winner"), dict) and e["winner"].get("name")
     ]
-    fills = [e for e in entries if str(e.get("jev_status") or "") == "fill"]
     feedback = [e for e in entries if str(e.get("jev_status") or "") == "feedback"]
 
     by_sha: dict[str, list[int]] = {}
@@ -716,25 +718,40 @@ def acceptance_report(
         if sha:
             by_sha.setdefault(sha, []).append(index)
 
-    accepted_fb = {
-        sha
-        for e in feedback
-        if e.get("feedback") == "accepted"
-        for sha in [str(e.get("prompt_sha") or "")]
-        if sha
-    }
-    rejected_fb = {
-        sha
-        for e in feedback
-        if e.get("feedback") == "rejected"
-        for sha in [str(e.get("prompt_sha") or "")]
-        if sha
-    }
+    # Order-aware pairing: a feedback record answers the newest pick with
+    # its prompt_sha that precedes it — earlier and later picks sharing the
+    # sha keep their own verdicts.
+    accepted_picks: set[int] = set()
+    rejected_picks: set[int] = set()
+    for fi, f in enumerate(entries):
+        if str(f.get("jev_status") or "") != "feedback":
+            continue
+        sha = str(f.get("prompt_sha") or "")
+        verdict = str(f.get("feedback") or "")
+        if not sha:
+            continue
+        cands = [
+            i
+            for i in by_sha.get(sha, [])
+            if i < fi
+            and str(entries[i].get("jev_status") or "") not in ("fill", "feedback")
+            and isinstance(entries[i].get("winner"), dict)
+            and entries[i]["winner"].get("name")
+        ]
+        if not cands:
+            continue
+        if verdict == "accepted":
+            accepted_picks.add(max(cands))
+        elif verdict == "rejected":
+            rejected_picks.add(max(cands))
 
-    fill_heads = {
-        (str(f.get("harness") or ""), str(f.get("prompt_head") or "")[:120])
-        for f in fills
-    }
+    # A fill counts as applied evidence only when it lands after the pick,
+    # on the same harness and prompt-head prefix.
+    fill_rows = [
+        (i, str(f.get("harness") or ""), str(f.get("prompt_head") or "")[:120])
+        for i, f in enumerate(entries)
+        if str(f.get("jev_status") or "") == "fill"
+    ]
     applied = overridden = strong = strong_ok = 0
     latencies: list[float] = []
     over_budget = 0
@@ -755,7 +772,7 @@ def acceptance_report(
         # different winner soon after (re-ask after the human ignored us),
         # or an explicit rejected feedback record names this sha.
         winner_name = str((pick.get("winner") or {}).get("name") or "")
-        over = sha in rejected_fb
+        over = pos in rejected_picks
         for later_idx in by_sha.get(sha, []):
             if later_idx <= pos or later_idx > pos + override_window:
                 continue
@@ -773,7 +790,10 @@ def acceptance_report(
         if over:
             overridden += 1
             bucket["overridden"] += 1
-        if sha in accepted_fb or (harness, head) in fill_heads:
+        if pos in accepted_picks or any(
+            fi > pos and fh == harness and fhead == head
+            for fi, fh, fhead in fill_rows
+        ):
             applied += 1
             bucket["applied"] += 1
         if pick.get("strong_pick"):

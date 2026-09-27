@@ -263,7 +263,7 @@ def pick_with_jev(
         need = None
     picker["need"] = need
     # need_skill_score is the same raw noul under the schema-v2 name; the log
-    # keeps `need` for v1 readers and both record the pre-gate value.
+    # keeps `need` for v1 readers. Pure telemetry — no longer gates routing.
     picker["need_skill_score"] = need
     try:
         conf = float((answers.get("load_tools") or {}).get("confidence"))

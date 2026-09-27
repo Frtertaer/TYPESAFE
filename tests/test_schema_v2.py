@@ -224,19 +224,21 @@ class ResolvePickerEscalateReasonTests(unittest.TestCase):
         self.assertEqual(out["status"], "none")
         self.assertEqual(out["escalate_reason"], "none_pick")
 
-    def test_need_gate_suppressions(self):
+    def test_need_gate_removed_pick_wins(self):
+        # The need_skill gate is retired: a resolvable pick wins regardless
+        # of the noul, which is still carried as telemetry only.
         low = inventory.resolve_picker(
             PICKED,
             {"action": "proceed", "picks": {"load_tools": "skill:alpha", "need_skill": 0.2}},
         )
-        self.assertEqual(low["status"], "none")
-        self.assertEqual(low["escalate_reason"], "need_gate")
+        self.assertEqual(low["status"], "winner")
+        self.assertIsNone(low["escalate_reason"])
         unsure = inventory.resolve_picker(
             PICKED,
             {"action": "proceed", "picks": {"load_tools": "skill:alpha", "need_skill": 0.5}},
         )
-        self.assertEqual(unsure["status"], "escalate")
-        self.assertEqual(unsure["escalate_reason"], "need_gate")
+        self.assertEqual(unsure["status"], "winner")
+        self.assertIsNone(unsure["escalate_reason"])
 
     def test_malformed_need_is_model_escalate(self):
         out = inventory.resolve_picker(
@@ -308,7 +310,8 @@ class PickWithJevSchemaV2Tests(unittest.TestCase):
         self.assertEqual(out["escalate_reason"], "confidence_floor")
         self.assertEqual(out["pick_confidence"], 0.3)
 
-    def test_need_gate_suppression_recorded(self):
+    def test_low_need_pick_wins_and_need_is_recorded(self):
+        # need_skill no longer gates the pick; it is still logged.
         sys.modules["jev"] = fake_jev(
             answers={
                 "load_tools": {"confidence": 0.9},
@@ -321,8 +324,8 @@ class PickWithJevSchemaV2Tests(unittest.TestCase):
             },
         )
         out = inventory_hook.pick_with_jev("t", "hermes", PICKED)
-        self.assertEqual(out["status"], "escalate")
-        self.assertEqual(out["escalate_reason"], "need_gate")
+        self.assertEqual(out["status"], "winner")
+        self.assertIsNone(out["escalate_reason"])
         self.assertEqual(out["need_skill_score"], 0.4)
 
     def test_missing_confidence_is_none(self):
@@ -561,12 +564,12 @@ class ReaderParityTests(unittest.TestCase):
         # under the default floor it stays an escalate, while the same record
         # without the field falls back to the top probability (0.6 -> none).
         entry = self._mixed()[3]
-        replayed = decisions._replay(dict(entry), 0.55, 0.85, 0.7, 0.3)
+        replayed = decisions._replay(dict(entry), 0.55, 0.85)
         self.assertEqual(replayed, "escalate")
         v1_entry = dict(entry)
         del v1_entry["pick_confidence"]
         self.assertEqual(
-            decisions._replay(v1_entry, 0.55, 0.85, 0.7, 0.3), "none"
+            decisions._replay(v1_entry, 0.55, 0.85), "none"
         )
         text = decisions.format_calibrate(report)
         self.assertIn("pick_confidence recorded on 3/5 entries", text)

@@ -185,16 +185,17 @@ class InventoryTests(unittest.TestCase):
             {"action": "proceed", "picks": {"load_tools": "none", "need_skill": 0.95}},
         )
         self.assertEqual(none["status"], "none")
+        # The need_skill gate is retired: a real pick wins at any noul value.
         low = inv.resolve_picker(
             picked,
             {"action": "proceed", "picks": {"load_tools": "skill_jwt_auth", "need_skill": 0.2}},
         )
-        self.assertEqual(low["status"], "none")
+        self.assertEqual(low["status"], "winner")
         unsure = inv.resolve_picker(
             picked,
             {"action": "proceed", "picks": {"load_tools": "skill_jwt_auth", "need_skill": 0.5}},
         )
-        self.assertEqual(unsure["status"], "escalate")
+        self.assertEqual(unsure["status"], "winner")
         bad = inv.resolve_picker(picked, {"action": "escalate", "picks": {}})
         self.assertEqual(bad["status"], "escalate")
 
@@ -227,19 +228,21 @@ class InventoryTests(unittest.TestCase):
                 "probabilities": {"load_tools": {"skill_jwt_auth": 0.6, "none": 0.4}},
             },
         )
-        self.assertEqual(weak_probs["status"], "escalate")
+        self.assertEqual(weak_probs["status"], "winner")
+        self.assertNotIn("strong", weak_probs)
         high_need = inv.resolve_picker(
             picked,
             {"action": "proceed", "picks": {"load_tools": "skill_jwt_auth", "need_skill": 0.8}},
         )
         self.assertEqual(high_need["status"], "winner")
         self.assertNotIn("strong", high_need)
+        # noul_yes no longer reaches the hook picker at all.
         strict = inv.resolve_picker(
             picked,
             {"action": "proceed", "picks": {"load_tools": "skill_jwt_auth", "need_skill": 0.8}},
             policy={"noul_yes": 0.9},
         )
-        self.assertEqual(strict["status"], "escalate")
+        self.assertEqual(strict["status"], "winner")
 
     def test_format_winner_note(self) -> None:
         note = inv.format_winner_note({"kind": "skill", "name": "jwt-auth"})

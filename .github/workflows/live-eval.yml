@@ -17,12 +17,12 @@ jobs:
   compare-live:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: restore previous eval baseline
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: eval-baseline.json
           key: live-eval-baseline-${{ github.run_id }}
@@ -30,6 +30,7 @@ jobs:
       - name: compare --live (guarded on the secret)
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          JEV_CONSULT_LOG: ${{ github.workspace }}/eval-decisions.jsonl
         run: |
           if [ -z "$TYPESAFE_API_KEY" ]; then
             echo "skipped: TYPESAFE_API_KEY secret is not set" | tee eval-live.md
@@ -37,23 +38,39 @@ jobs:
           fi
           DIFF=""
           [ -f eval-baseline.json ] && DIFF="--diff eval-baseline.json"
-          python skills/jev-consult/scripts/compare.py --live --strict --json \
+          python skills/jev-consult/scripts/compare.py --live --strict --ab --json \
             --out eval-live.json --report eval-live.md $DIFF
           cp eval-live.json eval-baseline.json
+      - name: acceptance + html report on eval traffic
+        if: always() && hashFiles('eval-decisions.jsonl') != ''
+        env:
+          JEV_CONSULT_LOG: ${{ github.workspace }}/eval-decisions.jsonl
+        run: |
+          {
+            echo ""
+            echo "## Acceptance (eval traffic)"
+            echo '```'
+            python skills/jev-consult/scripts/decisions.py --acceptance || true
+            echo '```'
+          } >> eval-live.md
+          python skills/jev-consult/scripts/decisions.py \
+            --html eval-report.html || true
       - name: save eval baseline for next run
         if: always() && hashFiles('eval-baseline.json') != ''
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: eval-baseline.json
           key: live-eval-baseline-${{ github.run_id }}
       - name: report to job summary
         if: always()
         run: cat eval-live.md >> "$GITHUB_STEP_SUMMARY" || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: compare-live
           path: |
             eval-live.json
             eval-live.md
+            eval-decisions.jsonl
+            eval-report.html
           if-no-files-found: warn

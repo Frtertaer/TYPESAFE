@@ -187,3 +187,41 @@ python skills/jev-consult/scripts/progress.py history reliability
 Когда калибровать: после изменения `templates`, смены модели, или когда
 weekly `live-eval` краснеет на корректных кейсах. Не калибровать по одному
 фейлу — noul гуляет ±0.08 между одинаковыми вызовами.
+
+Дополнительные механизмы того же цикла:
+
+- **per-category пороги**: `noul_yes` может быть объектом
+  `{"default": 0.7, "unknown": 0.6, ...}` — число обратно совместимо.
+  `decide`, `resolve_picker`, `compare.py` (через `min_noul` в кейсе)
+  читают per-question. Это и есть фикс для джиттера `unknown` — когда
+  данные подтвердят, кейс-гейт превращается в policy-гейт.
+- **fallback-модель**: `fallback_model`/`fallback_endpoint` в
+  `policy.json` — на 5xx/timeout/dead-endpoint основного один вызов на
+  fallback, записи помечаются `note: "model_fallback"`.
+- **человеческие отклонения**: `jev.py feedback accepted|rejected`
+  (по умолчанию берёт `prompt_sha` последней routing-записи) и детект
+  «повторный вопрос по тому же промпту с другим winner» дают
+  override-rate в `decisions.py --acceptance`.
+
+## Evidence
+
+Измерено на live-eval и накопленном `decisions.jsonl` (нояб. 2025+):
+
+| Метрика | Значение | Где |
+|---|---|---|
+| live-eval корпус | **17/17 PASS** против гейта | `compare.py --live --strict` |
+| **Jev vs без Jev (A/B)** | mean delta **+0.46 noul**, 7 побед / 0 поражений на 7 scored-arms | `compare.py --ab` |
+| A/B по кейсам | off_track +0.94 · progress_accept +0.81 · forget +0.51 · unknown +0.49 · library +0.22 · stuck +0.19 · market_tools +0.07 | eval-live.json |
+| pick-rate | 26.9% (64 пика / 238 routing-записей) | `decisions.py --acceptance` |
+| override-rate | 0% — ни одного переопределённого пика в логе | то же |
+| latency | p50 104 ms, p95 142 ms при бюджете 12 000 ms | то же |
+| false-accept | негативные кейсы (`market_none`, `mechanical`) не вызывают Jev | `expect_call: false` |
+| калибровка | bands overlap → `flips=0`, гейт не трогали (не глушим без данных) | `--calibrate --eval` |
+
+A/B-метрика — главный аргумент: каждый кейс прогоняется дважды — состояние
+после пика Jev и то же состояние с baseline-пиком «кодер решил сам» —
+и судья сравнивает итоговый noul. `--ab` включён в weekly `live-eval.yml`;
+артефакты прогона: `eval-live.json/md`, `eval-decisions.jsonl` (каждый
+eval-вызов пишется как routing-запись `harness=live-eval`),
+`eval-report.html` (одностраничный отчёт `decisions.py --html`: status mix,
+acceptance, latency, недельный дрейф).

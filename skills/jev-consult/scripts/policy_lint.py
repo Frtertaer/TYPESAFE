@@ -101,6 +101,8 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "choice",
     "dedupe_ttl_seconds",
     "env_file_max_bytes",
+    "fallback_endpoint",
+    "fallback_model",
     "fill_timeout_seconds",
     "hallucination",
     "hermes_install_timeout_seconds",
@@ -259,13 +261,29 @@ def lint_policy(policy) -> list[dict]:
     for key in PROB_FIELDS:
         value = policy.get(key)
         if key in policy and (not _num(value) or not 0.0 <= value <= 1.0):
-            add(
-                "P002",
-                "error",
-                key,
-                "%r must be a number in [0, 1], got %r" % (key, value),
-                "probability thresholds only make sense inside [0, 1]",
-            )
+            if key == "noul_yes" and isinstance(value, dict):
+                # per-question map: {default: p, <qid>: p}; every member
+                # must be a probability and "default" must be present
+                bad = {
+                    k: v for k, v in value.items()
+                    if not (_num(v) and 0.0 <= v <= 1.0) or not isinstance(k, str)
+                }
+                if bad or "default" not in value:
+                    add(
+                        "P002",
+                        "error",
+                        key,
+                        "noul_yes object must carry a 'default' and only prob values, got %r" % (value,),
+                        "use {default: p, <question_id>: p} or a plain number",
+                    )
+            else:
+                add(
+                    "P002",
+                    "error",
+                    key,
+                    "%r must be a number in [0, 1], got %r" % (key, value),
+                    "probability thresholds only make sense inside [0, 1]",
+                )
     escalate = policy.get("escalate_if")
     if escalate is not None and not isinstance(escalate, dict):
         add("P003", "error", "escalate_if", "escalate_if must be an object", "expected an object of thresholds")
@@ -360,19 +378,22 @@ def lint_policy(policy) -> list[dict]:
     if "require_hatch" in policy and not isinstance(policy["require_hatch"], bool):
         add("P002", "error", "require_hatch", "require_hatch must be a boolean", "use true or false")
 
-    endpoint = policy.get("endpoint")
-    if isinstance(endpoint, str) and endpoint and not endpoint.lower().startswith("https://"):
-        add(
-            "P011",
-            "error",
-            "endpoint",
-            "endpoint is not https: %r" % endpoint,
-            "jev.py POSTs the API key to this URL; never plain http",
-        )
+    for ekey in ("endpoint", "fallback_endpoint"):
+        endpoint = policy.get(ekey)
+        if isinstance(endpoint, str) and endpoint and not endpoint.lower().startswith("https://"):
+            add(
+                "P011",
+                "error",
+                ekey,
+                "%s is not https: %r" % (ekey, endpoint),
+                "jev.py POSTs the API key to this URL; never plain http",
+            )
 
     no_below = policy.get("noul_no")
     unsure = policy.get("noul_unsure")
     yes_above = policy.get("noul_yes")
+    if isinstance(yes_above, dict):  # per-question map: order against its default
+        yes_above = yes_above.get("default")
     if _num(no_below) and _num(unsure) and not no_below < unsure:
         add("P004", "error", "noul_unsure", "need noul_no < noul_unsure (%.3g !< %.3g)" % (no_below, unsure), "bands must not overlap")
     if _num(unsure) and _num(yes_above) and not unsure < yes_above:

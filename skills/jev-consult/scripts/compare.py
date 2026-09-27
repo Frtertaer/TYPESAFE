@@ -86,13 +86,72 @@ def score_live(jev, policy: dict[str, Any], case: dict[str, Any], side: dict[str
         "noul": noul_value(answers if isinstance(answers, dict) else {}, qid),
         "model": parsed.get("model"),
         "action": decided.get("action"),
+        "note": parsed.get("note"),
     }
+
+
+def _eval_log_path() -> Path:
+    env = os.environ.get("JEV_CONSULT_LOG", "").strip()
+    if env:
+        return Path(env)
+    home = Path(
+        os.environ.get("USERPROFILE") or os.environ.get("HOME") or str(Path.home())
+    )
+    return home / ".cache" / "jev-consult" / "decisions.jsonl"
+
+
+def log_eval_call(
+    case: dict[str, Any],
+    after: dict[str, Any],
+    latency_ms: float,
+    policy: dict[str, Any],
+) -> None:
+    """Append one routing-style record per live-scored case so the weekly
+    CI run leaves a real decisions.jsonl -- decisions.py --acceptance/--html
+    then reports on actual eval traffic, and the artifact accumulates
+    calibration data. Entries are tagged harness=live-eval + note=eval so
+    they stay separable from real harness records. Never raises."""
+    try:
+        import hashlib
+
+        prompt = str(case.get("prompt") or case.get("id") or "")
+        sha = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+        entry: dict[str, Any] = {
+            "ts": time.time(),
+            "harness": "live-eval",
+            "jev_status": "winner",
+            "jev_attempted": True,
+            "prompt_sha": sha,
+            "prompt_head": prompt[:120],
+            "question": str(case.get("score") or "on_track"),
+            "winner": {
+                "kind": "eval",
+                "name": str(
+                    (case.get("after") or {}).get("last_pick")
+                    or after.get("action")
+                    or "unknown"
+                ),
+            },
+            "latency_ms": int(latency_ms),
+            "budget_ms": int(
+                float(policy.get("hook_budget_seconds") or 12) * 1000
+            ),
+            "note": after.get("note") or "eval",
+            "noul": after.get("noul"),
+            "case": case.get("id"),
+        }
+        path = _eval_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def row_offline(case: dict[str, Any]) -> dict[str, Any]:
     before = case.get("before") or {}
     after = case.get("after") or {}
-    return {
+    row = {
         "id": case.get("id"),
         "defect": case.get("defect"),
         "score": case.get("score"),
@@ -108,6 +167,10 @@ def row_offline(case: dict[str, Any]) -> dict[str, Any]:
             "step": after.get("current_step"),
         },
     }
+    for key in ("min_noul", "max_noul", "expect_call", "note", "ab"):
+        if key in case:
+            row[key] = case[key]
+    return row
 
 
 def format_table(rows: list[dict[str, Any]], live: bool) -> str:
@@ -203,35 +266,90 @@ def _write_verdict(path: str, tick: dict[str, Any]) -> None:
     return _watch.write_verdict(path, payload)
 
 
+def case_gate(row: dict[str, Any], policy: dict[str, Any] | None = None) -> float:
+    """Effective yes-gate for a row: per-case min_noul wins, else the
+    resolved noul_yes for the case's score qid (per-category maps allowed)."""
+    try:
+        override = float(row.get("min_noul"))
+        return override
+    except (TypeError, ValueError):
+        pass
+    if policy is None:
+        try:
+            policy = load_jev().load_policy()
+        except Exception:
+            policy = {}
+    try:
+        jev = load_jev()
+        if hasattr(jev, "resolve_noul_yes"):
+            return jev.resolve_noul_yes(policy, str(row.get("score") or "on_track"))
+    except Exception:
+        pass
+    try:
+        return float(policy.get("noul_yes", 0.7))
+    except (TypeError, ValueError):
+        return 0.7
+
+
 def strict_failures(
     rows: list[dict[str, Any]], live: bool, error: str = ""
 ) -> list[str]:
-    """CI gate: the guarded (after) side must have called Jev and, when live,
-    scored at least noul_yes on the case's question. A live scoring error or
-    a missing noul is a failure — the canned row must not stand in for a live
+    """CI gate: the guarded (after) side must have called Jev (unless the case
+    sets expect_call: false — a negative case whose correct outcome is not
+    calling) and, when live, score within its noul band: after >= min_noul
+    (per-case field or the resolved noul_yes for the case's score question)
+    or, for negative cases, after <= max_noul. A live scoring error or a
+    missing noul is a failure — the canned row must not stand in for a live
     score that never landed."""
     failures: list[str] = []
     if error:
         failures.append("live scoring failed: %s" % error)
-    noul_yes = 0.7
     try:
-        jev = load_jev()
-        policy = jev.load_policy()
-        noul_yes = float(policy.get("noul_yes", 0.7))
+        policy = load_jev().load_policy()
     except Exception:
-        pass
+        policy = {}
     for row in rows:
         cid = str(row.get("id") or "?")
         after = row.get("after") or {}
-        if not after.get("called_jev"):
+        expect_call = bool(row.get("expect_call", True))
+        if expect_call and not after.get("called_jev"):
             failures.append("%s: guarded side did not call Jev" % cid)
+            continue
+        if not expect_call:
+            # negative case: the correct outcome is no Jev call at all;
+            # an optional max_noul still bounds the score when the
+            # after-state did get scored
+            if after.get("called_jev"):
+                failures.append(
+                    "%s: negative case called Jev (false-accept)" % cid
+                )
+            elif live:
+                max_noul = row.get("max_noul")
+                an = after.get("noul")
+                if isinstance(max_noul, (int, float)) and isinstance(
+                    an, (int, float)
+                ) and float(an) > float(max_noul):
+                    failures.append(
+                        "%s: after noul %.2f > max_noul %.2f (false-accept)"
+                        % (cid, float(an), float(max_noul))
+                    )
             continue
         if live:
             an = after.get("noul")
             if an is None:
                 failures.append("%s: no live noul (live scoring missing)" % cid)
-            elif an < noul_yes:
-                failures.append("%s: after noul %.2f < %.2f" % (cid, an, noul_yes))
+                continue
+            max_noul = row.get("max_noul")
+            if isinstance(max_noul, (int, float)):
+                if an > float(max_noul):
+                    failures.append(
+                        "%s: after noul %.2f > max_noul %.2f (false-accept)"
+                        % (cid, an, float(max_noul))
+                    )
+                continue
+            gate = case_gate(row, policy)
+            if an < gate:
+                failures.append("%s: after noul %.2f < %.2f" % (cid, an, gate))
     return failures
 
 
@@ -240,6 +358,7 @@ def run(
     as_json: bool,
     path: Path | None = None,
     only: set[str] | None = None,
+    ab: bool = False,
 ) -> dict[str, Any]:
     blob = load_cases(path)
     cases = list(blob["cases"])
@@ -272,10 +391,32 @@ def run(
                 )
             for index, case in enumerate(cases):
                 before = score_live(jev, policy, case, case.get("before") or {})
+                t0 = time.monotonic()
                 after = score_live(jev, policy, case, case.get("after") or {})
+                log_eval_call(
+                    case, after, (time.monotonic() - t0) * 1000.0, policy
+                )
                 rows[index]["before"]["noul"] = before.get("noul")
                 rows[index]["after"]["noul"] = after.get("noul")
                 rows[index]["model"] = after.get("model") or before.get("model")
+                ab_spec = case.get("ab")
+                if (
+                    ab
+                    and isinstance(ab_spec, dict)
+                    and ab_spec.get("baseline_pick")
+                    and ab_spec.get("baseline_step")
+                ):
+                    # The judge never sees last_pick/invented (side_state
+                    # strips them), so the baseline arm substitutes
+                    # current_step — the visible outcome of the naive pick.
+                    base_side = dict(case.get("after") or {})
+                    base_side["last_pick"] = ab_spec["baseline_pick"]
+                    base_side["current_step"] = ab_spec["baseline_step"]
+                    base = score_live(jev, policy, case, base_side)
+                    rows[index]["baseline"] = {
+                        "pick": ab_spec["baseline_pick"],
+                        "noul": base.get("noul"),
+                    }
         except SystemExit as exc:
             # jev.py reports missing key / invalid response via SystemExit —
             # capture it as the run error so --strict fails cleanly instead
@@ -288,6 +429,104 @@ def run(
         "live": live,
         "error": live_error,
         "rows": rows,
+    }
+
+
+def ab_block(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Jev-vs-baseline table: for cases carrying an `ab` block the live run
+    also scored the same guarded state with the baseline (naive) pick
+    substituted — delta = after_noul - baseline_noul is the value of Jev's
+    choice itself. before_noul stays the no-consult arm."""
+    deltas = []
+    for row in rows:
+        after = row.get("after") or {}
+        base = row.get("baseline") or {}
+        an = after.get("noul")
+        bn = base.get("noul")
+        delta = None
+        if isinstance(an, (int, float)) and isinstance(bn, (int, float)):
+            delta = round(float(an) - float(bn), 4)
+        deltas.append(
+            {
+                "id": row.get("id"),
+                "defect": row.get("defect"),
+                "jev_pick": after.get("last_pick"),
+                "baseline_pick": base.get("pick"),
+                "jev_noul": an,
+                "baseline_noul": bn,
+                "delta": delta,
+            }
+        )
+    scored = [d["delta"] for d in deltas if d["delta"] is not None]
+    return {
+        "cases": deltas,
+        "summary": {
+            "scored": len(scored),
+            "mean_delta": round(sum(scored) / len(scored), 4) if scored else None,
+            "wins": sum(1 for d in scored if d > 0),
+            "losses": sum(1 for d in scored if d < 0),
+        },
+    }
+
+
+def format_ab_md(ab: dict[str, Any]) -> str:
+    lines = [
+        "| case | jev_pick | baseline_pick | jev_noul | baseline_noul | delta |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in ab.get("cases") or []:
+        cells = [
+            str(row.get("id") or ""),
+            str(row.get("jev_pick") or "-"),
+            str(row.get("baseline_pick") or "-"),
+            "-" if row.get("jev_noul") is None else "%.2f" % row["jev_noul"],
+            "-" if row.get("baseline_noul") is None else "%.2f" % row["baseline_noul"],
+            "-" if row.get("delta") is None else "%+.2f" % row["delta"],
+        ]
+        lines.append("| " + " | ".join(cells) + " |")
+    summary = ab.get("summary") or {}
+    if summary.get("scored"):
+        lines.append(
+            "\nmean delta **%+.2f** over %d scored arms (%d wins / %d losses)."
+            % (summary["mean_delta"], summary["scored"], summary["wins"], summary["losses"])
+        )
+    return "\n".join(lines) + "\n"
+
+
+def update_streaks(
+    prior: dict[str, int], rows: list[dict[str, Any]], live: bool,
+    policy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Per-case consecutive-below-gate counter, carried across weekly runs
+    inside the cached eval-baseline.json payload. A case at or above its
+    gate (or a negative case under max_noul) resets to 0."""
+    streaks = dict(prior) if isinstance(prior, dict) else {}
+    out = {}
+    for row in rows:
+        cid = str(row.get("id") or "?")
+        after = row.get("after") or {}
+        an = after.get("noul")
+        below = False
+        if not row.get("expect_call", True):
+            # negative cases are false-accept controls, not floor-gated —
+            # a low noul there is expected, never a streak flag
+            below = False
+        elif live and isinstance(an, (int, float)):
+            max_noul = row.get("max_noul")
+            if isinstance(max_noul, (int, float)):
+                below = float(an) > float(max_noul)
+            else:
+                below = float(an) < case_gate(row, policy)
+        elif live:
+            below = True  # missing noul on a live run counts as below-gate
+        out[cid] = (int(streaks.get(cid) or 0) + 1) if below else 0
+    return {
+        "streaks": out,
+        "flags": sorted(
+            "case %s ниже гейта %d прогонов подряд" % (cid, n)
+            for cid, n in out.items()
+            if n >= 2
+        ),
     }
 
 
@@ -449,6 +688,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--quiet", action="store_true", help="With --watch: print only failing ticks to stdout (--out still logs all)")
     parser.add_argument("--fail-fast", action="store_true", help="With --watch: stop after the first tick with failures.")
     parser.add_argument("--unchanged-max", metavar="N", type=int, default=0, help="With --watch: stop after N consecutive identical ticks (volatile ts/elapsed_s ignored)")
+    parser.add_argument(
+        "--ab",
+        action="store_true",
+        help="Score an extra arm per case: the guarded state with the case's baseline_pick substituted — the \"Jev vs without Jev\" delta table (needs --live; cases without an ab block are skipped).",
+    )
     parser.add_argument("--baseline", metavar="PATH", default="", help="Write the current rows to PATH as a baseline file for a later --diff")
     parser.add_argument("--diff", metavar="PATH", default="", help="Load a --baseline file and add a diff block (regressions/improved/changed/added/removed) to the result payload; regressions also join the --strict failure list ('-' reads the baseline JSON from stdin; needs a file --cases, no --watch)")
     parser.add_argument("--trend", metavar="DIR", default="", help="Diff the current rows against every *.json baseline in DIR; adds a trend list ({file,ts,regressions,improved,changed,added,removed,unchanged} sorted by ts) to the payload and one stderr line per baseline")
@@ -582,6 +826,7 @@ def main(argv: list[str] | None = None) -> int:
                 as_json=args.as_json,
                 path=args.cases or None,
                 only=only,
+                ab=bool(getattr(args, "ab", False)),
             )
             failing = strict_failures(cur["rows"], args.live, cur.get("error") or "")
             new_failures = sorted(set(failing) - prev_failures)
@@ -620,7 +865,10 @@ def main(argv: list[str] | None = None) -> int:
         as_json=args.as_json,
         path=args.cases or None,
         only=only,
+        ab=bool(getattr(args, "ab", False)),
     )
+    if getattr(args, "ab", False):
+        result["ab"] = ab_block(result["rows"])
     if args.baseline:
         try:
             _atomic_write(
@@ -655,6 +903,18 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("baseline %s has no rows list\n" % args.diff)
             return 2
         result["diff"] = diff_baseline(base_rows, result["rows"], args.live)
+        prior_streaks = (
+            (raw.get("drift") or {}).get("streaks")
+            if isinstance(raw, dict)
+            else {}
+        ) or {}
+        try:
+            policy = load_jev().load_policy()
+        except Exception:
+            policy = {}
+        result["drift"] = update_streaks(prior_streaks, result["rows"], args.live, policy)
+        for flag in result["drift"]["flags"]:
+            sys.stderr.write("drift: %s\n" % flag)
         for entry in result["diff"]["regressions"]:
             sys.stderr.write(
                 "regression: %s (%s)\n" % (entry["id"], entry["why"])
@@ -754,6 +1014,15 @@ def main(argv: list[str] | None = None) -> int:
                 + "".join("- %s\n" % f for f in failures)
                 + "\n"
                 + format_md(result["rows"], live=args.live)
+                + "".join(
+                    "\n**drift flag**: %s\n" % flag
+                    for flag in (result.get("drift") or {}).get("flags") or []
+                )
+                + (
+                    "\n## Jev vs baseline (ab)\n\n" + format_ab_md(result["ab"])
+                    if isinstance(result.get("ab"), dict)
+                    else ""
+                )
             )
         try:
             _atomic_write(Path(args.report), text)

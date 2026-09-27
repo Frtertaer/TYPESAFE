@@ -6238,6 +6238,8 @@ def step_ask_verdict(tmp: Path) -> dict:
             # never listening)
             bad_policy = tmp / "policy-down.json"
             policy["endpoint"] = "http://127.0.0.1:1/v1/systemone"
+            policy.pop("fallback_endpoint", None)
+            policy.pop("fallback_model", None)
             bad_policy.write_text(json.dumps(policy), encoding="utf-8")
             env["JEV_POLICY"] = str(bad_policy)
             rc, out = _run(

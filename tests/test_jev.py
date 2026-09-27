@@ -2140,5 +2140,166 @@ class SchemaTests(unittest.TestCase):
             self.assertEqual(saved["policy"], "default")
 
 
+class _UrlRecordingOpener(_FakeOpener):
+    """_FakeOpener that records the request URL per call."""
+
+    def __init__(self, outcomes: list) -> None:
+        super().__init__(outcomes)
+        self.urls: list[str] = []
+
+    def open(self, request, timeout=None):
+        self.urls.append(request.full_url)
+        return super().open(request, timeout)
+
+
+class FallbackAndCategoryTests(unittest.TestCase):
+    QUESTIONS = {"sure": {"type": "noul", "instructions": "Sure?"}}
+    GOOD = {
+        "model": "jev-fb",
+        "answers": {"sure": {"type": "noul", "noul": 0.9}},
+    }
+    ENV = {"TYPESAFE_API_KEY": "dummy-test-key-not-a-real-secret"}
+    FALLBACK = "https://fallback.example.test/v1/systemone"
+
+    def _post(self, outcomes, policy, **kwargs):
+        opener = _UrlRecordingOpener(outcomes)
+        with patch.dict(os.environ, self.ENV), patch.object(
+            jev, "load_api_key", return_value=self.ENV["TYPESAFE_API_KEY"]
+        ), patch("urllib.request.build_opener", return_value=opener), patch.object(
+            jev.time, "sleep"
+        ):
+            result = jev.post_systemone({"task": "t"}, self.QUESTIONS, policy, **kwargs)
+        return result, opener
+
+    def test_503_primary_falls_back_once(self) -> None:
+        policy = {
+            "endpoint": "https://api.typesafe.ai/v1/systemone",
+            "fallback_endpoint": self.FALLBACK,
+            "fallback_model": "jev-stable",
+        }
+        result, opener = self._post(
+            [_http_error(503), self.GOOD], policy, retries=0
+        )
+        self.assertEqual(opener.calls, 2)
+        self.assertEqual(opener.urls[-1], self.FALLBACK)
+        self.assertEqual(result["note"], "model_fallback")
+        self.assertEqual(result["answers"], self.GOOD["answers"])
+
+    def test_no_fallback_reraises_original_exit(self) -> None:
+        policy = {"endpoint": "https://api.typesafe.ai/v1/systemone"}
+        opener = _UrlRecordingOpener([_http_error(503)])
+        with self.assertRaises(SystemExit) as ctx:
+            with patch.dict(os.environ, self.ENV), patch.object(
+                jev, "load_api_key", return_value=self.ENV["TYPESAFE_API_KEY"]
+            ), patch("urllib.request.build_opener", return_value=opener):
+                jev.post_systemone({"task": "t"}, self.QUESTIONS, policy, retries=0)
+        self.assertIn("503", str(ctx.exception))
+        self.assertEqual(opener.calls, 1)
+
+    def test_4xx_does_not_trigger_fallback(self) -> None:
+        # client errors are not retryable and never reach the fallback
+        policy = {"fallback_endpoint": self.FALLBACK}
+        opener = _UrlRecordingOpener([_http_error(400), self.GOOD])
+        with self.assertRaises(SystemExit):
+            with patch.dict(os.environ, self.ENV), patch.object(
+                jev, "load_api_key", return_value=self.ENV["TYPESAFE_API_KEY"]
+            ), patch("urllib.request.build_opener", return_value=opener):
+                jev.post_systemone({"task": "t"}, self.QUESTIONS, policy, retries=1)
+        self.assertEqual(opener.calls, 1)
+
+    def test_urlerror_falls_back(self) -> None:
+        policy = {"fallback_endpoint": self.FALLBACK}
+        result, opener = self._post(
+            [urllib.error.URLError("conn refused"), self.GOOD], policy
+        )
+        self.assertEqual(opener.calls, 2)
+        self.assertEqual(opener.urls[-1], self.FALLBACK)
+
+    def test_resolve_noul_yes_dict(self) -> None:
+        policy = {"noul_yes": {"default": 0.7, "unknown": 0.6}}
+        self.assertEqual(jev.resolve_noul_yes(policy, "unknown"), 0.6)
+        self.assertEqual(jev.resolve_noul_yes(policy, "on_track"), 0.7)
+        self.assertEqual(jev.resolve_noul_yes(policy), 0.7)
+        self.assertEqual(jev.resolve_noul_yes({"noul_yes": 0.8}, "any"), 0.8)
+        self.assertEqual(jev.resolve_noul_yes({}, "any"), 0.7)
+
+    def test_decide_uses_per_question_noul_yes(self) -> None:
+        policy = {"noul_yes": {"default": 0.7, "unknown": 0.9}}
+        out = jev.decide(
+            {"unknown": {"type": "noul", "noul": 0.8}}, policy
+        )
+        # 0.8 < per-category gate 0.9 → uncertain note, not "yes"
+        self.assertIn("uncertain", out["notes"][0])
+        out2 = jev.decide(
+            {"on_track": {"type": "noul", "noul": 0.8}}, policy
+        )
+        self.assertIn("yes", out2["notes"][0])
+
+
+class FeedbackCommandTests(unittest.TestCase):
+    def test_feedback_appends_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            routing = {
+                "ts": 1,
+                "harness": "claude-code",
+                "jev_status": "winner",
+                "prompt_sha": "abc123",
+                "winner": {"kind": "skill", "name": "alpha"},
+            }
+            path.write_text(json.dumps(routing) + "\n", encoding="utf-8")
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = jev.main(
+                    ["feedback", "accepted", "--file", str(path)]
+                )
+            self.assertEqual(rc, 0)
+            rows = [json.loads(l) for l in path.read_text().splitlines()]
+            self.assertEqual(rows[-1]["jev_status"], "feedback")
+            self.assertEqual(rows[-1]["feedback"], "accepted")
+            self.assertEqual(rows[-1]["prompt_sha"], "abc123")
+
+    def test_feedback_rejected_with_winner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = jev.main(
+                    [
+                        "feedback", "rejected",
+                        "--sha", "def456",
+                        "--winner", "beta",
+                        "--harness", "codex",
+                        "--file", str(path),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            row = json.loads(path.read_text().splitlines()[-1])
+            self.assertEqual(row["feedback"], "rejected")
+            self.assertEqual(row["prompt_sha"], "def456")
+            self.assertEqual(row["winner"], "beta")
+            self.assertEqual(row["harness"], "codex")
+
+    def test_feedback_skips_fill_and_feedback_when_picking_sha(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "decisions.jsonl"
+            lines = [
+                {"ts": 1, "jev_status": "winner", "prompt_sha": "s1",
+                 "winner": {"name": "a"}},
+                {"ts": 2, "jev_status": "fill", "prompt_sha": "s2"},
+                {"ts": 3, "jev_status": "feedback", "prompt_sha": "s3",
+                 "feedback": "accepted"},
+            ]
+            path.write_text(
+                "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
+            )
+            buf = io.StringIO()
+            with patch.object(sys, "stdout", buf):
+                rc = jev.main(["feedback", "rejected", "--file", str(path)])
+            self.assertEqual(rc, 0)
+            row = json.loads(path.read_text().splitlines()[-1])
+            self.assertEqual(row["prompt_sha"], "s1")
+
+
 if __name__ == "__main__":
     sys.exit(0 if unittest.main(verbosity=2) else 1)

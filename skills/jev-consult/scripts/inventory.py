@@ -1378,9 +1378,18 @@ def _policy_float(policy: dict | None, key: str, default: float) -> float:
     return default
 
 
+def _noul_yes_for(policy: dict | None, qid: str) -> float:
+    """noul_yes may be a number or {default, <qid>: ...} per-question map."""
+    raw = policy.get("noul_yes", 0.7) if isinstance(policy, dict) else 0.7
+    if isinstance(raw, dict):
+        picked = raw.get(qid, raw.get("default", 0.7))
+        return _policy_float({"noul_yes": picked}, "noul_yes", 0.7)
+    return _policy_float(policy, "noul_yes", 0.7)
+
+
 def resolve_picker(picked: list[dict], decision: dict | None, policy: dict | None = None) -> dict:
     """Map a Jev decide() payload to {status, winner}. Fail-open statuses: escalate."""
-    noul_yes = _policy_float(policy, "noul_yes", 0.7)
+    noul_yes = _noul_yes_for(policy, "need_skill")
     noul_no = _policy_float(policy, "noul_no", 0.3)
     strong_pick = _policy_float(policy, "strong_pick", 0.85)
     if not isinstance(decision, dict):

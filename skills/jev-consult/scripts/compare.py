@@ -11,7 +11,6 @@ import json
 import os
 import re
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -71,53 +70,39 @@ def load_jev():
     return _load_module("jev.py", "jev_consult_jev")
 
 
-def load_hook():
-    return _load_module("inventory_hook.py", "jev_consult_inventory_hook")
+_INV_MOD = None
+
+
+def load_inventory():
+    global _INV_MOD
+    if _INV_MOD is None:
+        _INV_MOD = _load_module("inventory.py", "jev_consult_inventory")
+    return _INV_MOD
 
 
 def observed_consult(case: dict[str, Any], pool: list[dict]) -> bool | None:
-    """Drive the real prompt-hook routing path for the case's prompt:
-    inventory_hook.handle() with a stub chooser — True when the hook would
-    spend a Jev call (chooser invoked), False when it would not. Returns
-    None when the hook cannot run in this environment."""
+    """The hook's real routing decision for the case's prompt: the same
+    explicit_mentions -> shortlist -> chooser gate inventory_hook.handle()
+    applies — True when the chooser would be invoked (a Jev call spent),
+    False when the prompt shortlists nothing or resolves by explicit
+    mention. Returns None when inventory cannot load here."""
     prompt = str(case.get("prompt") or "").strip()
     if not prompt:
         return None
     try:
-        hook = load_hook()
+        inv = load_inventory()
+        hits = inv.explicit_mentions(prompt, pool)
+        if len(hits) == 1:
+            return False  # explicit $name mention resolves without Jev
+        picked = inv.shortlist(
+            pool,
+            prompt,
+            inv.hook_limit(),
+            [str(h.get("name") or "") for h in hits],
+        )
+        return bool(picked)
     except Exception:
         return None
-    called: list[bool] = []
-
-    def probe(*_args):
-        called.append(True)
-        return {"status": "idf", "winner": None}
-
-    old_log = os.environ.get("JEV_CONSULT_LOG")
-    os.environ["JEV_CONSULT_LOG"] = "0"  # keep probe records out of decisions.jsonl
-    try:
-        with tempfile.TemporaryDirectory() as tmp:
-            hook.handle(
-                {
-                    "hook_event_name": "UserPromptSubmit",
-                    "prompt": prompt,
-                    "cwd": tmp,
-                    "session_id": "eval-%s" % (case.get("id") or "x"),
-                    "ts": int(time.time()),
-                },
-                items=pool,
-                harness="live-eval",
-                pick_fn=probe,
-                no_writes=True,
-            )
-    except Exception:
-        return None
-    finally:
-        if old_log is None:
-            os.environ.pop("JEV_CONSULT_LOG", None)
-        else:
-            os.environ["JEV_CONSULT_LOG"] = old_log
-    return bool(called)
 
 
 def cases_path() -> Path:

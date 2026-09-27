@@ -1371,6 +1371,142 @@ class StreakTestNew(unittest.TestCase):
         out = compare.update_streaks({"a": 5}, rows, False)
         self.assertEqual(out["streaks"]["a"], 0)
 
+    def test_update_streaks_warn_weeks_from_policy(self) -> None:
+        rows = [{"id": "a", "after": {"noul": 0.5}}]
+        # default warn=2: a single below-gate run does not flag
+        out = compare.update_streaks({}, rows, True, {"noul_yes": 0.7})
+        self.assertEqual(out["flags"], [])
+        # streak_warn_weeks=1 flags immediately
+        out = compare.update_streaks(
+            {}, rows, True, {"noul_yes": 0.7, "streak_warn_weeks": 1}
+        )
+        self.assertEqual(len(out["flags"]), 1)
+        self.assertEqual(out["warn_weeks"], 1)
+
+    def test_update_streaks_fail_weeks_lists_fails(self) -> None:
+        rows = [{"id": "a", "after": {"noul": 0.5}}]
+        policy = {"noul_yes": 0.7, "streak_warn_weeks": 2,
+                  "streak_fail_weeks": 3}
+        out = compare.update_streaks({"a": 2}, rows, True, policy)
+        self.assertEqual(out["streaks"]["a"], 3)
+        self.assertEqual(out["flags"], out["fails"])
+        self.assertIn("3 прогонов подряд", out["fails"][0])
+        # fail_weeks absent / 0 => off: warning may fire, fails stay empty
+        out = compare.update_streaks({"a": 9}, rows, True,
+                                     {"noul_yes": 0.7})
+        self.assertEqual(out["fails"], [])
+
+    def test_update_streaks_malformed_policy_falls_back(self) -> None:
+        rows = [{"id": "a", "after": {"noul": 0.5}}]
+        out = compare.update_streaks(
+            {"a": 1}, rows, True,
+            {"noul_yes": 0.7, "streak_warn_weeks": "nope",
+             "streak_fail_weeks": -2},
+        )
+        self.assertEqual(out["warn_weeks"], 2)
+        self.assertEqual(out["fail_weeks"], 0)
+        self.assertEqual(out["flags"], ["case a ниже гейта 2 прогонов подряд"])
+        self.assertEqual(out["fails"], [])
+
+
+class RunFailuresTest(unittest.TestCase):
+    def _result(self, **kw) -> dict:
+        base = {
+            "rows": [{"id": "a", "after": {"called_jev": True, "noul": 0.9}}]
+        }
+        base.update(kw)
+        return base
+
+    def test_strict_only_when_clean(self) -> None:
+        self.assertEqual(compare.run_failures(self._result(), True), [])
+
+    def test_regressions_join_failures(self) -> None:
+        result = self._result(
+            diff={"regressions": [{"id": "b", "why": "noul_regressed"}]}
+        )
+        failures = compare.run_failures(result, True)
+        self.assertEqual(failures, ["b: regressed vs baseline (noul_regressed)"])
+
+    def test_streak_fails_join_failures(self) -> None:
+        result = self._result(
+            drift={"fails": ["case a ниже гейта 3 прогонов подряд"]}
+        )
+        failures = compare.run_failures(result, True)
+        self.assertEqual(
+            failures, ["streak: case a ниже гейта 3 прогонов подряд"]
+        )
+
+    def test_flags_alone_do_not_fail(self) -> None:
+        result = self._result(
+            drift={"flags": ["case a ниже гейта 2 прогонов подряд"],
+                   "fails": []}
+        )
+        self.assertEqual(compare.run_failures(result, True), [])
+
+
+class HistoryTest(unittest.TestCase):
+    def _result(self) -> dict:
+        return {
+            "rows": [
+                {"id": "a", "expect_call": True,
+                 "after": {"noul": 0.9}},
+                {"id": "neg", "expect_call": False,
+                 "after": {"noul": 0.1}},  # excluded: low noul expected
+                {"id": "b", "expect_call": True,
+                 "after": {"noul": 0.7}},
+            ],
+            "ab": {"summary": {"mean_delta": 0.5}},
+            "drift": {"streaks": {"a": 1}},
+        }
+
+    def test_history_record_fields(self) -> None:
+        rec = compare.history_record(self._result(), [], "https://ci/1")
+        self.assertEqual(rec["verdict"], "PASS")
+        self.assertEqual(rec["run_url"], "https://ci/1")
+        self.assertEqual(rec["worst_noul"], 0.7)
+        self.assertEqual(rec["ab_mean_delta"], 0.5)
+        self.assertEqual(rec["streaks"], {"a": 1})
+        self.assertIsInstance(rec["ts"], int)
+
+    def test_history_record_fail_verdict(self) -> None:
+        rec = compare.history_record(self._result(), ["x"], "")
+        self.assertEqual(rec["verdict"], "FAIL")
+        self.assertIsNone(rec["run_url"])
+
+    def test_history_record_no_scored_rows(self) -> None:
+        rec = compare.history_record({"rows": []}, [], "")
+        self.assertIsNone(rec["worst_noul"])
+
+    def test_cli_history_appends_jsonl(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = Path(tmp) / "cases.json"
+            cases.write_text(json.dumps(CASES), encoding="utf-8")
+            hist = Path(tmp) / "sub" / "eval-history.jsonl"
+            proc = subprocess.run(
+                [sys.executable, str(COMPARE), "--cases", str(cases),
+                 "--json", "--history", str(hist),
+                 "--run-url", "https://ci/9"],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = [
+                json.loads(line)
+                for line in hist.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(len(lines), 1)
+            self.assertEqual(lines[0]["verdict"], "PASS")
+            self.assertEqual(lines[0]["run_url"], "https://ci/9")
+            # second run appends rather than overwriting
+            proc = subprocess.run(
+                [sys.executable, str(COMPARE), "--cases", str(cases),
+                 "--json", "--history", str(hist)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(
+                len(hist.read_text(encoding="utf-8").splitlines()), 2
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

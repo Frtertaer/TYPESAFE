@@ -4,6 +4,14 @@ name: live-eval
 # corpus so model/policy drift surfaces as a diff, not silence. Weekly Monday
 # 06:00 UTC + manual dispatch. Requires the TYPESAFE_API_KEY repo secret;
 # without it the job reports "skipped" instead of failing.
+#
+# Drift monitoring: the compare call also writes eval-verdict.json and appends
+# a run record to eval-history.jsonl (cached alongside the baseline).
+# decisions.py --acceptance-gate then checks miss/override rates against
+# policy.json miss_rate_max/override_rate_max (fail-open: no log = skip).
+# When the eval fails or a streak/alert fires, .github/scripts/drift_issue.py
+# composes an issue body and the job opens-or-comments on the single pinned
+# "live-eval drift watch" issue (label: drift).
 
 on:
   workflow_dispatch:
@@ -12,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   compare-live:
@@ -21,16 +30,19 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: restore previous eval baseline
+      - name: restore previous eval baseline + history
         uses: actions/cache/restore@v6
         with:
-          path: eval-baseline.json
+          path: |
+            eval-baseline.json
+            eval-history.jsonl
           key: live-eval-baseline-${{ github.run_id }}
           restore-keys: live-eval-baseline-
       - name: compare --live (guarded on the secret)
         env:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           JEV_CONSULT_LOG: ${{ github.workspace }}/eval-decisions.jsonl
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ -z "$TYPESAFE_API_KEY" ]; then
             echo "skipped: TYPESAFE_API_KEY secret is not set" | tee eval-live.md
@@ -40,20 +52,23 @@ jobs:
           [ -f eval-baseline.json ] && DIFF="--diff eval-baseline.json"
           set +e
           python skills/jev-consult/scripts/compare.py --live --strict --ab --json \
-            --out eval-live.json --report eval-live.md $DIFF
+            --out eval-live.json --report eval-live.md \
+            --verdict eval-verdict.json \
+            --history eval-history.jsonl --run-url "$RUN_URL" $DIFF
           rc=$?
           set -e
           # Persist the fresh baseline even when the strict gate fails — the
           # per-case "below gate N weeks" streaks only accumulate if the
           # failed run is saved. A run that failed before scoring (error
           # field set) does NOT replace the baseline: its missing nouls would
-          # poison next week's diff.
+          # poison next week's diff. --history follows the same rule inside
+          # compare.py (error -> no record appended).
           if [ -f eval-live.json ] && \
              python -c "import json,sys; sys.exit(0 if not json.load(open('eval-live.json')).get('error') else 1)"; then
             cp eval-live.json eval-baseline.json
           fi
           exit $rc
-      - name: acceptance + html report on eval traffic
+      - name: acceptance + harness health on eval traffic (fail-open)
         if: always() && hashFiles('eval-decisions.jsonl') != ''
         env:
           JEV_CONSULT_LOG: ${{ github.workspace }}/eval-decisions.jsonl
@@ -64,15 +79,62 @@ jobs:
             echo '```'
             python skills/jev-consult/scripts/decisions.py --acceptance || true
             echo '```'
+            echo ""
+            echo "## Harness health (eval traffic)"
+            echo '```'
+            python skills/jev-consult/scripts/decisions.py --harness-health || true
+            echo '```'
           } >> eval-live.md
+          # Miss/override gate vs policy.json miss_rate_max/override_rate_max.
+          # The alerts file feeds drift_issue.py; rc 1 (breach) is captured,
+          # not fatal — the issue step fires on the file's contents.
+          set +e
+          python skills/jev-consult/scripts/decisions.py --acceptance-gate \
+            | tee eval-alerts.txt
+          set -e
+      - name: html report (with run history)
+        if: always()
+        run: |
+          HIST=""
+          [ -f eval-history.jsonl ] && HIST="--history eval-history.jsonl"
           python skills/jev-consult/scripts/decisions.py \
-            --html eval-report.html || true
-      - name: save eval baseline for next run
+            --html eval-report.html $HIST \
+            --file eval-decisions.jsonl || true
+      - name: save eval baseline + history for next run
         if: always() && hashFiles('eval-baseline.json') != ''
         uses: actions/cache/save@v6
         with:
-          path: eval-baseline.json
+          path: |
+            eval-baseline.json
+            eval-history.jsonl
           key: live-eval-baseline-${{ github.run_id }}
+      - name: open or update the drift issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python .github/scripts/drift_issue.py eval-live.json \
+            --verdict eval-verdict.json --alerts eval-alerts.txt \
+            --run-url "$RUN_URL" --out drift-issue.md
+          if [ ! -s drift-issue.md ]; then
+            echo "no drift signal — no issue churn"
+            exit 0
+          fi
+          gh label create drift --description "live-eval drift signal" \
+            --color BFD4F2 2>/dev/null || true
+          ISSUE="$(gh issue list --label drift --state open \
+            --json number --jq '.[0].number' 2>/dev/null || true)"
+          if [ -n "$ISSUE" ]; then
+            echo "commenting on existing drift issue #$ISSUE"
+            gh issue comment "$ISSUE" --body-file drift-issue.md
+            gh issue pin "$ISSUE" 2>/dev/null || true
+          else
+            URL="$(gh issue create --title "live-eval drift watch" \
+              --label drift --body-file drift-issue.md)"
+            echo "opened $URL"
+            gh issue pin "${URL##*/}" 2>/dev/null || true
+          fi
       - name: report to job summary
         if: always()
         run: cat eval-live.md >> "$GITHUB_STEP_SUMMARY" || true
@@ -83,6 +145,10 @@ jobs:
           path: |
             eval-live.json
             eval-live.md
+            eval-verdict.json
+            eval-history.jsonl
             eval-decisions.jsonl
+            eval-alerts.txt
             eval-report.html
+            drift-issue.md
           if-no-files-found: warn

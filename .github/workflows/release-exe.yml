@@ -2,8 +2,9 @@ name: release-exe
 
 # Builds jev-setup-windows-amd64.exe (+ the pyz/cmd fallbacks) with
 # PyInstaller. Windows-only by nature: PyInstaller cannot cross-compile.
-# Manual trigger (workflow_dispatch) publishes to the rolling `nightly`
-# release; version-tag pushes publish to a release for that tag. Either
+# Manual triggers (workflow_dispatch) and every push to master publish to
+# the rolling `nightly` release; version-tag pushes publish to a release
+# for that tag. Either
 # way the newest run's release is marked "latest" so the README
 # releases/latest/download/... links keep resolving.
 
@@ -11,6 +12,7 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+    branches: [master]
 
 permissions:
   contents: write

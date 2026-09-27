@@ -127,6 +127,23 @@ class PolicyLintTests(unittest.TestCase):
         policy["escalate_if"]["noul_near"] = 0.9
         self.assertIn("P004", rule_ids(policy_lint.lint_policy(policy)))
 
+    def test_streak_fail_before_warn_ordering(self) -> None:
+        policy = base_policy()
+        policy["streak_warn_weeks"] = 4
+        policy["streak_fail_weeks"] = 2
+        self.assertIn("P004", rule_ids(policy_lint.lint_policy(policy)))
+
+    def test_streak_weeks_registered_types(self) -> None:
+        # the new keys validate when present: negative/non-numeric
+        # values are errors, not silently ignored
+        policy = base_policy()
+        policy["streak_warn_weeks"] = 0
+        findings = policy_lint.lint_policy(policy)
+        self.assertTrue(errors(findings))
+        policy = base_policy()
+        policy["miss_rate_max"] = 1.5
+        self.assertTrue(errors(policy_lint.lint_policy(policy)))
+
     def test_mirrored_threshold_drift_warns(self) -> None:
         policy = base_policy()
         policy["escalate_if"]["confidence_below"] = 0.9

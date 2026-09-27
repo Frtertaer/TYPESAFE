@@ -184,9 +184,10 @@ python skills/jev-consult/scripts/progress.py history reliability
    версионируются вместе с кодом; `decisions.py --calibrate` на старом
    eval-подтвердит возврат.
 
-Когда калибровать: после изменения `templates`, смены модели, или когда
-weekly `live-eval` краснеет на корректных кейсах. Не калибровать по одному
-фейлу — noul гуляет ±0.08 между одинаковыми вызовами.
+Когда калибровать: после изменения `templates`, смены модели, когда
+weekly `live-eval` краснеет на корректных кейсах, и регламентно —
+`--calibrate` примерно раз в неделю накопленных записей `decisions.jsonl`.
+Не калибровать по одному фейлу — noul гуляет ±0.08 между одинаковыми вызовами.
 
 Дополнительные механизмы того же цикла:
 
@@ -217,6 +218,16 @@ weekly `live-eval` краснеет на корректных кейсах. Не
 | latency | p50 104 ms, p95 142 ms при бюджете 12 000 ms | то же |
 | false-accept | негативные кейсы (`market_none`, `mechanical`) не роутятся в Jev — проверено реальным hook-routing (shortlist → chooser не вызывается), а не флагом фикстуры | `expect_call: false` + `routing_pool` в корпусе |
 | калибровка | bands overlap → `flips=0`, гейт не трогали (не глушим без данных) | `--calibrate --eval` |
+| dogfood-лог 2026-09-27 | 120 записей (91 routing + 24 feedback + 5 fill), 39 реальных Jev-вызовов: pick_rate 27.5%, applied 92%, override 0%, miss 61.5% (decision-relevant ~22%), strong-pick accuracy 100%, p50/p95 97/138 ms | `decisions.py --acceptance` |
+| калибровка на dogfood-логе | 39 replayable: `confidence_floor` 0.45 (1 flip escalate→none на явном consult-запросе — неверное направление, отклонён), `strong_pick` 0.85 без изменений, `tight_gap` 0.68 (вне replay-цепочки, flips=0 — артефакт), `noul_yes` — eval bands overlap (neg_max 0.93 > pos_min 0.68) → `flips=0`. Per-question `need_skill`: need=0.15–0.39 < 0.7 в 39/39 (расхождение подтверждено), но легальный гейт > `noul_unsure`=0.5 не даёт flips, а подразумеваемый ~0.32 сломал бы порядок полос P004. **policy.json не менялся — insufficient data** | `decisions.py --calibrate --eval` |
+
+Деталь, важная для следующего цикла: 7 из 9 `escalate` в dogfood-логе —
+не need-гейт, а preempt по confidence в `decide()` (need ≤ `noul_no`=0.3
+отдал бы `none`, не `escalate`). Подавляет слабые пики пол confidence_floor,
+а не `noul_yes` — и лог не хранит confidence пика, поэтому атрибуция
+по записи невосстановима. Рычаг для under-pick на явных consult-запросах —
+это `confidence_floor` или обход гейта для `explicit`/consult-литералов,
+а не `noul_yes`.
 
 A/B-метрика — главный аргумент: каждый кейс прогоняется дважды — состояние
 после пика Jev и то же состояние с baseline-пиком «кодер решил сам» —

@@ -381,7 +381,8 @@ class InstallCoverageTests(unittest.TestCase):
         mapping = install.targets(home, hermes)
         self.assertEqual(
             set(mapping),
-            {"hermes", "claude-code", "codex", "grok", "cursor", "gemini"},
+            {"hermes", "claude-code", "codex", "grok", "cursor", "gemini",
+             "windsurf", "opencode"},
         )
         self.assertEqual(mapping["codex"]["skills"], [home / ".codex" / "skills", home / ".agents" / "skills"])
         self.assertEqual(mapping["hermes"]["instructions"], [])
@@ -394,6 +395,22 @@ class InstallCoverageTests(unittest.TestCase):
         self.assertEqual(mapping["gemini"]["skills"], [home / ".gemini" / "skills"])
         self.assertEqual(
             mapping["gemini"]["instructions"], [home / ".gemini" / "GEMINI.md"]
+        )
+        self.assertEqual(
+            mapping["windsurf"]["skills"],
+            [home / ".codeium" / "windsurf" / "skills"],
+        )
+        self.assertEqual(
+            mapping["windsurf"]["instructions"],
+            [home / ".codeium" / "windsurf" / "memories" / "global_rules.md"],
+        )
+        self.assertEqual(
+            mapping["opencode"]["skills"],
+            [home / ".config" / "opencode" / "skills"],
+        )
+        self.assertEqual(
+            mapping["opencode"]["instructions"],
+            [home / ".config" / "opencode" / "AGENTS.md"],
         )
 
     def test_env_file_has_key(self) -> None:
@@ -557,7 +574,7 @@ class InstallCoverageTests(unittest.TestCase):
 
     def test_main_refuses_blocked_agent(self) -> None:
         with self.assertRaises(SystemExit):
-            install.main(["--agents", "windsurf"])
+            install.main(["--agents", "cline"])
 
     def test_write_repo_instructions_dry_run(self) -> None:
         buf = io.StringIO()
@@ -629,6 +646,8 @@ class IdempotentInstallTests(unittest.TestCase):
                 base / ".grok" / "skills" / "jev-consult",
                 base / ".cursor" / "skills" / "jev-consult",
                 base / ".gemini" / "skills" / "jev-consult",
+                base / ".codeium" / "windsurf" / "skills" / "jev-consult",
+                base / ".config" / "opencode" / "skills" / "jev-consult",
             ]
             for d in expected_skill_dirs:
                 self.assertTrue(
@@ -659,6 +678,25 @@ class IdempotentInstallTests(unittest.TestCase):
             )
             entries = gemini_settings["hooks"]["BeforeAgent"]
             self.assertIn("inventory_hook.py", json.dumps(entries))
+            windsurf_rules = (
+                base / ".codeium" / "windsurf" / "memories" / "global_rules.md"
+            )
+            self.assertTrue(windsurf_rules.is_file())
+            self.assertIn(
+                "<!-- jev-consult:start -->",
+                windsurf_rules.read_text(encoding="utf-8"),
+            )
+            oc_agents = base / ".config" / "opencode" / "AGENTS.md"
+            self.assertTrue(oc_agents.is_file())
+            self.assertIn("jev-consult", oc_agents.read_text(encoding="utf-8"))
+            oc_plugin = (
+                base / ".config" / "opencode" / "plugins" / "jev-consult.ts"
+            )
+            self.assertTrue(oc_plugin.is_file())
+            plugin_text = oc_plugin.read_text(encoding="utf-8")
+            self.assertIn("inventory_hook.py", plugin_text)
+            self.assertIn("experimental.chat.messages.transform", plugin_text)
+            self.assertIn("JEV_HOOK_HARNESS", plugin_text)
 
     def test_uninstall_all_six_leaves_tmp_home_clean(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -704,6 +742,19 @@ class IdempotentInstallTests(unittest.TestCase):
                     gemini_settings_path.read_text(encoding="utf-8")
                 )
                 self.assertNotIn("BeforeAgent", gemini_settings.get("hooks") or {})
+            for doc in (
+                base / ".codeium" / "windsurf" / "memories" / "global_rules.md",
+                base / ".config" / "opencode" / "AGENTS.md",
+            ):
+                if doc.is_file():
+                    self.assertNotIn(
+                        "jev-consult", doc.read_text(encoding="utf-8"),
+                        "snippet left in %s" % doc,
+                    )
+            self.assertFalse(
+                (base / ".config" / "opencode" / "plugins" / "jev-consult.ts").exists(),
+                "opencode plugin left behind",
+            )
 
     def test_dry_run_writes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -889,6 +940,55 @@ class CodexTrustNoteTests(unittest.TestCase):
                 with redirect_stdout(buf):
                     install.install_live_hooks(["codex"], dry_run=True)
             self.assertIn("/hooks", buf.getvalue())
+
+
+class OpencodePluginTests(unittest.TestCase):
+    def test_install_live_hooks_writes_and_removes_plugin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            with patch.object(install, "user_home", return_value=home), patch.object(
+                install, "hermes_home", return_value=Path(tmp) / "h"
+            ):
+                with redirect_stdout(io.StringIO()):
+                    install.install_live_hooks(["opencode"], dry_run=False)
+            plugin = home / ".config" / "opencode" / "plugins" / "jev-consult.ts"
+            self.assertTrue(plugin.is_file())
+            text = plugin.read_text(encoding="utf-8")
+            self.assertIn("inventory_hook.py", text)
+            self.assertIn("experimental.chat.messages.transform", text)
+            self.assertIn("JEV_HOOK_HARNESS", text)
+            with patch.object(install, "user_home", return_value=home):
+                with redirect_stdout(io.StringIO()):
+                    install.uninstall_live_hooks(["opencode"], dry_run=False)
+            self.assertFalse(plugin.exists())
+
+    def test_opencode_plugin_dry_run_writes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            with patch.object(install, "user_home", return_value=home), patch.object(
+                install, "hermes_home", return_value=Path(tmp) / "h"
+            ):
+                with redirect_stdout(io.StringIO()):
+                    install.install_live_hooks(["opencode"], dry_run=True)
+            self.assertFalse(
+                (home / ".config" / "opencode" / "plugins" / "jev-consult.ts").exists()
+            )
+
+    def test_windsurf_has_no_prompt_hook(self) -> None:
+        """pre_user_prompt can block but cannot inject context — the
+        installer wires skills/rules and prints a note instead."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            with patch.object(install, "user_home", return_value=home), patch.object(
+                install, "hermes_home", return_value=Path(tmp) / "h"
+            ):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    install.install_live_hooks(["windsurf"], dry_run=False)
+            self.assertIn("pre_user_prompt", buf.getvalue())
+            self.assertFalse(
+                (home / ".codeium" / "windsurf" / "hooks.json").exists()
+            )
 
 
 if __name__ == "__main__":

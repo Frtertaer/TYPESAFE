@@ -2,6 +2,7 @@
 | --- | --- |
 | [ticket/](ticket/) | Support message, refund / intent / frustration |
 | [code-change/](code-change/) | A skill hunk, whether the change needs real code in state |
+| [fan-out/](fan-out/) | One operation Choice plus speculative `*_target` heads |
 
 ```bash
 WORKDIR="${TMPDIR:-/tmp}/codex/typesafeai-cli"

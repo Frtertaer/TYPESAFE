@@ -35,9 +35,11 @@
     "unknown": "which library and which first file to touch",
     "inspected": [
      "no auth module",
-     "requirements.txt has no jwt package"
+     "requirements.txt has no jwt package",
+     "Jev unknown_move picked pyjwt",
+     "PyPI shows pyjwt 2.x actively maintained"
     ],
-    "current_step": "ask Jev unknown_move with real library options",
+    "current_step": "add pyjwt to requirements.txt and open auth.py",
     "called_jev": true,
     "last_pick": "pyjwt"
    }
@@ -56,7 +58,7 @@
    },
    "after": {
     "plan": "Make inventory.py parse Hermes config.yaml MCP names. Do not rewrite the file.",
-    "current_step": "Stop retrying; add a smaller yaml helper for MCP names.",
+    "current_step": "Add a small yaml-name helper inside inventory.py (no rewrite).",
     "attempt_count": 4,
     "last_error": "same AttributeError on Path",
     "called_jev": true,
@@ -76,8 +78,11 @@
    },
    "after": {
     "task": "Continue the JWT work from last session.",
+    "inspected": [
+     ".jev-trace.json: plan 'Add JWT auth with PyJWT', last pick pyjwt, next file auth.py"
+    ],
     "plan": "Add JWT auth with PyJWT; first file auth.py",
-    "current_step": "loaded .jev-trace.json (plan + last_pick pyjwt) and continue auth.py",
+    "current_step": "continue auth.py per recovered plan",
     "called_jev": true,
     "last_pick": "pyjwt"
    }
@@ -85,7 +90,7 @@
   {
    "id": "stalled",
    "defect": "stall",
-   "score": "stuck_move",
+   "score": "on_track",
    "prompt": "Continue the refactor; pick the next file.",
    "before": {
     "task": "Refactor the three auth modules.",
@@ -96,6 +101,7 @@
    "after": {
     "task": "Refactor the three auth modules.",
     "plan": "Refactor login.py, session.py, tokens.py in that order",
+    "progress": "login.py refactor complete",
     "current_step": "Refactor session.py next.",
     "called_jev": true,
     "last_pick": "session.py"

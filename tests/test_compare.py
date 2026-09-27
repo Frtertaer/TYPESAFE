@@ -217,6 +217,37 @@ class RunTest(unittest.TestCase):
         self.assertIn("no jev", result["error"])
         self.assertEqual(len(result["rows"]), 2)
 
+    def test_live_choice_score_fails_fast(self) -> None:
+        """A case whose score names a choice template can never produce a
+        noul — the live run must fail with a config error, not a silent
+        missing-noul gate failure downstream."""
+        bad = dict(CASES)
+        bad["cases"] = [dict(CASES["cases"][0], id="bad_score", score="stuck_move")]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(bad), encoding="utf-8")
+            result = compare.run(live=True, as_json=False, path=path)
+        self.assertIn("noul template", result["error"])
+        self.assertIn("bad_score", result["error"])
+        self.assertIn("choice", result["error"])
+
+    def test_shipped_cases_scores_are_noul(self) -> None:
+        """Every shipped case's score must resolve to a noul-typed policy
+        template — a choice/score qid can never land a live noul."""
+        blob = compare.load_cases()
+        policy = json.loads(
+            (SCRIPTS.parent / "policy.json").read_text(encoding="utf-8")
+        )
+        templates = policy.get("templates") or {}
+        for case in blob["cases"]:
+            qid = case.get("score") or "on_track"
+            self.assertEqual(
+                templates.get(qid, {}).get("type"),
+                "noul",
+                "case %s scores %s (type %s)"
+                % (case.get("id"), qid, templates.get(qid, {}).get("type")),
+            )
+
 
 class CliTest(unittest.TestCase):
     def run_cli(self, *argv: str) -> subprocess.CompletedProcess:

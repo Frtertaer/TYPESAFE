@@ -361,6 +361,141 @@ class CalibrateTest(unittest.TestCase):
         self.assertEqual(g["health_excluded"], 1)
         self.assertTrue(g["degraded_buckets"])
 
+    def _eval_file(self, tmp: str, pairs: list) -> Path:
+        """Write a compare --live --out shaped JSON from (before, after)
+        noul pairs (None = unscored side)."""
+        path = Path(tmp) / "eval-live.json"
+        rows = [
+            {"id": "case%d" % i,
+             "before": {"noul": before},
+             "after": {"noul": after}}
+            for i, (before, after) in enumerate(pairs)
+        ]
+        path.write_text(json.dumps({"rows": rows}), encoding="utf-8")
+        return path
+
+    def test_calibrate_eval_keeps_current_inside_interval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            eval_path = self._eval_file(
+                tmp, [(0.1, 0.9), (0.4, 0.8), (0.2, 0.85)]
+            )
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate",
+                "--eval", str(eval_path), "--json",
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        report = json.loads(proc.stdout)
+        ev = report["eval"]
+        self.assertTrue(ev["separable"])
+        self.assertEqual(ev["neg_max"], 0.4)
+        self.assertEqual(ev["pos_min"], 0.8)
+        self.assertEqual(report["recommended"]["noul_yes"], 0.7)
+        self.assertIn("already separates", ev["note"])
+
+    def test_calibrate_eval_lowers_to_margin_and_counts_flips(self):
+        rows = self._entries()
+        # an escalate whose need sits in the [rec, current) band — it must
+        # be counted as a false-accept flip when noul_yes drops.
+        rows.append({
+            "ts": 1700000400, "harness": "grok", "jev_status": "escalate",
+            "probabilities": {"skill_a": 0.6, "skill_b": 0.2},
+            "need": 0.62, "shortlist": ["skill_a", "skill_b"],
+            "winner": None,
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, rows)
+            # positives bottom at 0.6, negatives top at 0.4 -> interval
+            # (0.4, 0.6]; above noul_unsure=0.5 the grid offers 0.55/0.60
+            # and 0.55 is the max-margin pick.
+            eval_path = self._eval_file(
+                tmp, [(0.4, 0.6), (0.2, 0.75), (0.3, 0.9)]
+            )
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate",
+                "--eval", str(eval_path), "--json",
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["recommended"]["noul_yes"], 0.55)
+        self.assertEqual(report["delta"]["noul_yes"], -0.15)
+        self.assertEqual(report["eval"]["flips"], 1)
+
+    def test_calibrate_eval_overlapping_bands_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            eval_path = self._eval_file(
+                tmp, [(0.5, 0.6), (0.3, 0.4)]  # neg_max 0.5 > pos_min 0.4
+            )
+            out_policy = Path(tmp) / "policy-new.json"
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate",
+                "--eval", str(eval_path),
+                "--apply", str(out_policy), "--json",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            self.assertFalse(report["eval"]["separable"])
+            self.assertIsNone(report["recommended"]["noul_yes"])
+            self.assertNotIn("noul_yes", report["delta"])
+            patched = json.loads(out_policy.read_text(encoding="utf-8"))
+            self.assertEqual(patched["noul_yes"], 0.7)  # untouched
+
+    def test_calibrate_eval_apply_patches_noul_yes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            eval_path = self._eval_file(tmp, [(0.4, 0.6), (0.2, 0.8)])
+            out_policy = Path(tmp) / "policy-new.json"
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate",
+                "--eval", str(eval_path),
+                "--apply", str(out_policy), "--json",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            patched = json.loads(out_policy.read_text(encoding="utf-8"))
+            self.assertEqual(
+                patched["noul_yes"], report["recommended"]["noul_yes"]
+            )
+            import policy_lint
+
+            errors = [
+                f for f in policy_lint.lint_policy(patched)
+                if str(f.get("severity")) == "error"
+            ]
+            self.assertEqual(errors, [])
+
+    def test_calibrate_eval_missing_file_rc1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate",
+                "--eval", str(Path(tmp) / "nope.json"), "--json",
+            )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("--eval", proc.stderr)
+
+    def test_calibrate_eval_stdin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            payload = json.dumps({
+                "rows": [{"before": {"noul": 0.2}, "after": {"noul": 0.9}}]
+            })
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate", "--eval", "-",
+                "--json", stdin_text=payload,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            self.assertEqual(report["eval"]["positives"], 1)
+            self.assertEqual(report["eval"]["negatives"], 1)
+
 
 class CliTest(unittest.TestCase):
     run_cli = staticmethod(run_cli)

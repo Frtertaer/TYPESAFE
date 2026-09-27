@@ -156,3 +156,34 @@ python skills/jev-consult/scripts/progress.py status reliability
 python skills/jev-consult/scripts/progress.py review reliability --reason "Acceptance evidence reviewed" --reviewer "review-reference"
 python skills/jev-consult/scripts/progress.py history reliability
 ```
+
+## Калибровка порогов (`noul_yes` и т.д.)
+
+Пороги живут только в `skills/jev-consult/policy.json`; менять их руками —
+последняя мера. Цикл, прожитый на live-eval:
+
+1. **Прогнать live-eval и сохранить строки**:
+   `python skills/jev-consult/scripts/compare.py --live --strict --out /tmp/eval-live.json`
+   (нужен `TYPESAFE_API_KEY`; `--strict` падает, если кейс не вызвал Jev или
+   `noul < noul_yes`).
+2. **Триаж до калибровки**: если модель классифицирует верно, но метка кейса
+   вручит — править `examples/compare-cases.json`; если шаблон не ловит
+   формулировку — править `templates` в `policy.json`. Калибровка не лечит
+   ни то, ни другое.
+3. **Рекомендация**: `python skills/jev-consult/scripts/decisions.py --calibrate --eval /tmp/eval-live.json`.
+   Скрипт читает noul до/после из eval-строк и предлагает `noul_yes` в
+   интервале разделения. `already separates` = текущее значение уже внутри —
+   не трогать (`flips: 0`). `fix the corpus/templates first` = полосы
+   пересекаются, гейт глушить нельзя.
+4. **Применить**: `--apply` пишет diff, затем обязателен
+   `policy_lint.py --strict` PASS. Никогда не понижать гейт без данных о
+   росте false-accept.
+5. **Проверить**: повторный `compare.py --live --strict --diff eval-baseline.json` —
+   PASS; обновить `eval-baseline.json` (его же диффит `live-eval.yml`).
+6. **Откат**: `git checkout skills/jev-consult/policy.json` — пороги
+   версионируются вместе с кодом; `decisions.py --calibrate` на старом
+   eval-подтвердит возврат.
+
+Когда калибровать: после изменения `templates`, смены модели, или когда
+weekly `live-eval` краснеет на корректных кейсах. Не калибровать по одному
+фейлу — noul гуляет ±0.08 между одинаковыми вызовами.

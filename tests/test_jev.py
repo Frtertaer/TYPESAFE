@@ -417,10 +417,11 @@ class InstallTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             install.parse_agents("all")
 
-    def test_default_six(self) -> None:
+    def test_default_agents(self) -> None:
         self.assertEqual(
             install.parse_agents(None),
-            ["hermes", "claude-code", "codex", "grok", "cursor", "gemini"],
+            ["hermes", "claude-code", "codex", "grok", "cursor", "gemini",
+             "windsurf", "opencode"],
         )
 
     def test_path_map_uses_hermes_home(self) -> None:

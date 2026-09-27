@@ -1,0 +1,102 @@
+{
+  "goal": "Cut stall, invented next step, drift, loop, and forgotten plan. Not IQ.",
+  "live": true,
+  "error": "",
+  "rows": [
+    {
+      "id": "off_track",
+      "defect": "drift",
+      "score": "on_track",
+      "prompt": "Add a unit test for load_api_key in tests/test_jev.py. Do not rename it. Do not edit install.py.",
+      "before": {
+        "called_jev": false,
+        "invented": "the user also wants Cursor",
+        "step": "Rewriting install.py to add Cursor and rename load_api_key.",
+        "noul": 0.02
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "return_to_plan",
+        "step": "Add test_load_api_key in tests/test_jev.py.",
+        "noul": 0.97
+      },
+      "model": "jev-1.13.0"
+    },
+    {
+      "id": "unknown",
+      "defect": "invented_next_step",
+      "score": "grounded_enough",
+      "prompt": "Add JWT auth to this Python API.",
+      "before": {
+        "called_jev": false,
+        "invented": "fastapi-jwt-auth",
+        "step": "pip install fastapi-jwt-auth and rewrite the app without reading requirements.txt",
+        "noul": 0.17
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "pyjwt",
+        "step": "add pyjwt to requirements.txt and open auth.py",
+        "noul": 0.76
+      },
+      "model": "jev-1.13.0"
+    },
+    {
+      "id": "stuck",
+      "defect": "loop",
+      "score": "on_track",
+      "prompt": "Make inventory.py parse Hermes config.yaml MCP names. Do not rewrite the file.",
+      "before": {
+        "called_jev": false,
+        "invented": null,
+        "step": "Retry the same Path patch a fourth time, then rewrite inventory.py from scratch.",
+        "noul": 0.15
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "change_approach",
+        "step": "Add a small yaml-name helper inside inventory.py (no rewrite).",
+        "noul": 0.8
+      },
+      "model": "jev-1.13.0"
+    },
+    {
+      "id": "forget",
+      "defect": "no_memory",
+      "score": "grounded_enough",
+      "prompt": "Continue the JWT work from last session.",
+      "before": {
+        "called_jev": false,
+        "invented": "OAuth",
+        "step": "Guess we were adding OAuth and start a new auth stack.",
+        "noul": 0.12
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "pyjwt",
+        "step": "continue auth.py per recovered plan",
+        "noul": 0.87
+      },
+      "model": "jev-1.13.0"
+    },
+    {
+      "id": "stalled",
+      "defect": "stall",
+      "score": "on_track",
+      "prompt": "Continue the refactor; pick the next file.",
+      "before": {
+        "called_jev": false,
+        "invented": "stop and ask",
+        "step": "No plan entry after login.py; waiting for the user to pick.",
+        "noul": 0.43
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "session.py",
+        "step": "Refactor session.py next.",
+        "noul": 0.97
+      },
+      "model": "jev-1.13.0"
+    }
+  ]
+}

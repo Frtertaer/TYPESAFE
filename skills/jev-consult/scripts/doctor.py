@@ -45,7 +45,7 @@ POLICY_PATH = SKILL_DIR / "policy.json"
 PLUGIN_NAME = "jev-compact"
 COMPACT_MARK = "compact_hook.py"
 TOOLS_MARK = "inventory_hook.py"
-ALLOWED = ("hermes", "claude-code", "codex", "grok", "cursor", "gemini")
+ALLOWED = ("hermes", "claude-code", "codex", "grok", "cursor", "gemini", "windsurf", "opencode")
 
 # Every check name collect() can emit; --schema lists it and tests pin it.
 CHECK_NAMES = (
@@ -73,6 +73,7 @@ CHECK_NAMES = (
     "sidecars",
     "progress_ledger",
     "live_probe",
+    "instructions",
 )
 
 DOCTOR_SCHEMA_ROWS = {
@@ -115,6 +116,7 @@ HINTS = {
     "sidecars": "delete the unparseable .jev-tools*.json sidecar in the cwd; the hook rewrites it",
     "hooks_json": "fix or delete the malformed hooks file; it blocks hook registration",
     "live_probe": "harness CLI did not answer a minimal prompt; use the reported fallback harness until it recovers",
+    "instructions": "run python scripts/install.py --agents <agent>",
 }
 
 
@@ -135,6 +137,9 @@ LIVE_PROBES = {
     "grok": ("grok", ("-p",)),
     "cursor": ("cursor-agent", ("-p",)),
     "gemini": ("gemini", ("-p",)),
+    "opencode": ("opencode", ("run",)),
+    # windsurf has no prompt-bearing headless CLI — its desktop app would
+    # launch instead of answering; it is intentionally absent and skipped.
 }
 LIVE_PROMPT = "ping"
 LIVE_LIMITED_RE = re.compile(
@@ -272,6 +277,8 @@ def _live_checks(agents: list, home: Path, hermes: Path, timeout: float):
     out = []
     probes = {}
     for agent in agents:
+        if agent not in LIVE_PROBES:
+            continue  # no prompt-bearing headless CLI (e.g. windsurf)
         if not _harness_home(agent, home, hermes).exists():
             continue  # absent harnesses stay skipped, not probed
         res = _live_probe(agent, timeout)
@@ -409,6 +416,8 @@ def _harness_home(agent: str, home: Path, hermes: Path) -> Path:
         "grok": home / ".grok",
         "cursor": home / ".cursor",
         "gemini": home / ".gemini",
+        "windsurf": home / ".codeium" / "windsurf",
+        "opencode": home / ".config" / "opencode",
     }[agent]
 
 
@@ -526,6 +535,54 @@ def check_gemini(home: Path) -> list[dict]:
         )
     )
     return out
+
+
+def _file_has_marker(path: Path, marker: str) -> bool:
+    try:
+        return marker in path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+
+def check_windsurf(home: Path) -> list[dict]:
+    """Windsurf (Devin Desktop): skills + the always-on global rules file
+    are the only channels — pre_user_prompt hooks can block but cannot
+    inject context, so there is no prompt-hook check."""
+    rules = home / ".codeium" / "windsurf" / "memories" / "global_rules.md"
+    return [
+        _skill_check("windsurf", [home / ".codeium" / "windsurf" / "skills"]),
+        _check(
+            "windsurf",
+            "instructions",
+            _file_has_marker(rules, "jev-consult"),
+            "jev-consult block in %s" % rules,
+        ),
+    ]
+
+
+def check_opencode(home: Path) -> list[dict]:
+    """opencode: skill + AGENTS.md marker + the generated TS plugin at
+    ~/.config/opencode/plugins/jev-consult.ts (the chat.messages.transform
+    prompt channel)."""
+    plugin = home / ".config" / "opencode" / "plugins" / "jev-consult.ts"
+    return [
+        _skill_check("opencode", [home / ".config" / "opencode" / "skills"]),
+        _check(
+            "opencode",
+            "instructions",
+            _file_has_marker(
+                home / ".config" / "opencode" / "AGENTS.md", "jev-consult"
+            ),
+            "jev-consult block in AGENTS.md",
+        ),
+        _check(
+            "opencode",
+            "inventory_hook",
+            _file_has_marker(plugin, TOOLS_MARK)
+            and _file_has_marker(plugin, "jev-consult"),
+            "plugin at %s" % plugin,
+        ),
+    ]
 
 
 def _env_file_max_bytes() -> int:
@@ -856,6 +913,8 @@ def main(argv: list[str] | None = None) -> int:
             ("codex", lambda: check_codex(home)),
             ("cursor", lambda: check_cursor(home)),
             ("gemini", lambda: check_gemini(home)),
+            ("windsurf", lambda: check_windsurf(home)),
+            ("opencode", lambda: check_opencode(home)),
         ):
             if name not in agents:
                 continue

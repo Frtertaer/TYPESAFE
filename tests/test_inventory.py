@@ -68,6 +68,91 @@ class InventoryTests(unittest.TestCase):
         names = [item["name"] for item in picked]
         self.assertEqual(names, ["implementing-jwt-signing"])
 
+    def test_gemini_extension_manifest_scanned(self) -> None:
+        """~/.gemini/extensions/<name>/gemini-extension.json is a plugin
+        manifest, not plugin.yaml — scan() must surface it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            ext = home / ".gemini" / "extensions" / "genie"
+            ext.mkdir(parents=True)
+            (ext / "gemini-extension.json").write_text(
+                json.dumps({
+                    "name": "genie-ext",
+                    "version": "1.2.3",
+                    "contextFileName": "GENIE.md",
+                    "mcpServers": {"filesystem": {"command": "npx"}},
+                }),
+                encoding="utf-8",
+            )
+            (ext / "GENIE.md").write_text("# genie context\n", encoding="utf-8")
+            items = inv.scan("gemini", home=home)
+        names = {item["name"] for item in items}
+        self.assertIn("genie-ext", names)
+        plug = next(i for i in items if i["name"] == "genie-ext")
+        self.assertEqual(plug["kind"], inv.KIND_PLUGIN)
+        self.assertIn("1 mcp", plug["description"])
+        self.assertIn("context", plug["description"])
+
+    def test_gemini_extension_malformed_manifest_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            ext = home / ".gemini" / "extensions" / "broken"
+            ext.mkdir(parents=True)
+            (ext / "gemini-extension.json").write_text("{not json", encoding="utf-8")
+            empty = home / ".gemini" / "extensions" / "empty"
+            empty.mkdir(parents=True)  # no manifest at all
+            items = inv.scan("gemini", home=home)
+        self.assertEqual(items, [])
+
+    def test_windsurf_opencode_roots_and_detect(self) -> None:
+        home = Path("/home/u")
+        w = inv.roots_for("windsurf", home=home)
+        self.assertEqual(
+            w["skills"], [home / ".codeium" / "windsurf" / "skills"]
+        )
+        self.assertEqual(
+            w["mcp_files"],
+            [home / ".codeium" / "windsurf" / "mcp_config.json"],
+        )
+        o = inv.roots_for("opencode", home=home)
+        self.assertIn(
+            home / ".config" / "opencode" / "skills", o["skills"]
+        )
+        self.assertIn(home / ".agents" / "skills", o["skills"])
+        self.assertEqual(
+            o["mcp_files"],
+            [home / ".config" / "opencode" / "opencode.json"],
+        )
+        self.assertEqual(
+            inv.detect_harness(home / ".codeium" / "windsurf" / "x" / "s.py"),
+            "windsurf",
+        )
+        self.assertEqual(
+            inv.detect_harness(
+                home / ".config" / "opencode" / "skills" / "s" / "s.py"
+            ),
+            "opencode",
+        )
+
+    def test_opencode_scan_finds_skill_and_mcp_key(self) -> None:
+        """opencode.json stores servers under "mcp", not mcpServers."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            skill = home / ".config" / "opencode" / "skills" / "demo"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: demo\ndescription: demo skill\n---\n",
+                encoding="utf-8",
+            )
+            (home / ".config" / "opencode" / "opencode.json").write_text(
+                json.dumps({"mcp": {"context7": {"command": "ctx"}}}),
+                encoding="utf-8",
+            )
+            items = inv.scan("opencode", home=home)
+        names = {item["name"] for item in items}
+        self.assertIn("demo", names)
+        self.assertIn("context7", names)
+
     def test_include_pins_missed_name(self) -> None:
         items = inv.scan("hermes", hermes=FIXTURE)
         picked = inv.shortlist(items, "Add JWT access tokens in Python", 8, ["ascii-art"])

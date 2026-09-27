@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from typesafe_cli.recipes.find import UNTRUSTED
 from typesafe_cli.recipes.thresholds import VERIFY_AUTO_CONFIDENCE
 
 
@@ -14,7 +15,8 @@ def verify_questions(*, claim: str) -> dict[str, Any]:
         "support": {
             "type": "choice",
             "instructions": (
-                "Does `source` support `claim`? "
+                UNTRUSTED
+                + "Does `source` support `claim`? "
                 "supports = the source affirms the claim; "
                 "contradicts = the source denies it; "
                 "says_nothing = the source is silent."

@@ -224,13 +224,13 @@ class CalibrateTest(unittest.TestCase):
                 "need": 0.8, "shortlist": ["skill_a", "skill_b"],
                 "winner": {"kind": "skill", "name": "a"},
             })
-        # low-need prompts that escalated only because their top sat
-        # under the floor — a lower floor routes them to none.
+        # prompts whose top pick is `none` at 0.45 escalate only because
+        # the conf sits under the floor — a lower floor routes them to none.
         for i in range(3):
             rows.append({
                 "ts": 1700000200 + i, "harness": "grok",
                 "jev_status": "escalate",
-                "probabilities": {"skill_a": 0.45, "skill_b": 0.30},
+                "probabilities": {"none": 0.45, "skill_a": 0.30},
                 "need": 0.2, "shortlist": ["skill_a", "skill_b"],
                 "winner": None,
             })
@@ -257,7 +257,7 @@ class CalibrateTest(unittest.TestCase):
         self.assertEqual(report["entries"], 12)
         rec = report["recommended"]
         # strong winners at top 0.70 pin strong_pick at 0.70 (higher would
-        # strand them as weak winners); low-need prompts at top 0.45 pin
+        # strand them as weak winners); none-pick prompts at top 0.45 pin
         # the floor (higher would escalate prompts that deserve none).
         self.assertEqual(rec["strong_pick"], 0.7)
         self.assertEqual(rec["confidence_floor"], 0.45)
@@ -396,8 +396,9 @@ class CalibrateTest(unittest.TestCase):
 
     def test_calibrate_eval_lowers_to_margin_and_counts_flips(self):
         rows = self._entries()
-        # an escalate whose need sits in the [rec, current) band — it must
-        # be counted as a false-accept flip when noul_yes drops.
+        # an escalate whose need sits in the [rec, current) band no longer
+        # flips when noul_yes drops — the need gate is retired, so the
+        # replayed hook outcome ignores noul_yes entirely.
         rows.append({
             "ts": 1700000400, "harness": "grok", "jev_status": "escalate",
             "probabilities": {"skill_a": 0.6, "skill_b": 0.2},
@@ -421,7 +422,7 @@ class CalibrateTest(unittest.TestCase):
         report = json.loads(proc.stdout)
         self.assertEqual(report["recommended"]["noul_yes"], 0.55)
         self.assertEqual(report["delta"]["noul_yes"], -0.15)
-        self.assertEqual(report["eval"]["flips"], 1)
+        self.assertEqual(report["eval"]["flips"], 0)
 
     def test_calibrate_eval_overlapping_bands_refuses(self):
         with tempfile.TemporaryDirectory() as tmp:

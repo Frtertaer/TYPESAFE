@@ -66,7 +66,7 @@ ENTRY_SCHEMA_ROWS = {
     "reason": {"required": True, "type": "string, why this status"},
     "question": {"required": True, "type": "string|null, Jev question asked"},
     "need": {"required": True, "type": "object|null, Jev ask payload"},
-    "need_skill_score": {"required": True, "type": "number|null, raw need_skill noul before the gate"},
+    "need_skill_score": {"required": True, "type": "number|null, raw need_skill noul (telemetry; retired gate)"},
     "probabilities": {"required": True, "type": "object{option: p}, Jev softmax"},
     "pick_confidence": {"required": True, "type": "number|null, Jev confidence on the load_tools pick (the confidence_floor operand)"},
     "escalate_reason": {"required": True, "type": "string|null, confidence_floor|need_gate|model_escalate|no_candidates|none_pick"},
@@ -1359,14 +1359,6 @@ def _probs_of(item: dict) -> dict[str, float] | None:
     return out
 
 
-def _need_of(item: dict) -> float | None:
-    for key in ("need", "need_skill_score"):
-        need = item.get(key)
-        if isinstance(need, (int, float)) and not isinstance(need, bool):
-            return float(need)
-    return None
-
-
 def _pick_confidence(item: dict) -> float | None:
     """The recorded load_tools pick confidence (schema v2). None on v1
     records — those never wrote it, so callers fall back to the top
@@ -1385,10 +1377,10 @@ def _calibrate_eligible(item: dict) -> bool:
         return False
     if str(item.get("jev_status") or "") not in CALIBRATE_REPLAYABLE:
         return False
-    return _probs_of(item) is not None and _need_of(item) is not None
+    return _probs_of(item) is not None
 
 
-def _replay(item: dict, floor: float, strong: float, yes: float, no: float) -> str:
+def _replay(item: dict, floor: float, strong: float) -> str:
     """resolve_picker's rule chain under candidate thresholds; returns
     strong_winner|weak_winner|escalate|none."""
     probs = _probs_of(item) or {}
@@ -1404,11 +1396,6 @@ def _replay(item: dict, floor: float, strong: float, yes: float, no: float) -> s
         return "none"
     if in_shortlist and top >= strong:
         return "strong_winner"
-    need = _need_of(item) or 0.0
-    if need <= no:
-        return "none"
-    if need < yes:
-        return "escalate"
     if not in_shortlist:
         return "none"
     return "weak_winner"
@@ -1512,8 +1499,9 @@ def calibrate(entries: list[dict], policy: dict | None = None,
     candidate closest to the current policy (no-churn bias). With
     eval_pairs ((before, after) nouls from a compare --live payload),
     additionally recommends noul_yes against the eval separation
-    interval and counts log entries whose replayed outcome would flip
-    under it — the false-accept growth signal."""
+    interval. The hook replay no longer consumes a noul gate, so the
+    reported flip count is structurally 0 — kept in the report for
+    schema stability."""
     policy = policy or {}
     cur = _policy_thresholds(policy)
     eligible, skipped, excluded = [], 0, 0
@@ -1536,7 +1524,7 @@ def calibrate(entries: list[dict], policy: dict | None = None,
         counts = {"escalate": 0, "weak_winner": 0, "strong_winner": 0, "none": 0}
         bad = 0
         for item in eligible:
-            outcome = _replay(item, floor, strong, cur["noul_yes"], cur["noul_no"])
+            outcome = _replay(item, floor, strong)
             counts[outcome] += 1
             if outcome in ("escalate", "weak_winner"):
                 bad += 1
@@ -1606,20 +1594,9 @@ def calibrate(entries: list[dict], policy: dict | None = None,
         noul_yes_rec, eval_report = _noul_yes_recommendation(
             eval_pairs, cur["noul_yes"], cur.get("noul_unsure", 0.5)
         )
-        flips = 0
-        if noul_yes_rec is not None and noul_yes_rec != cur["noul_yes"]:
-            for item in eligible:
-                before_out = _replay(
-                    item, cur["confidence_floor"], cur["strong_pick"],
-                    cur["noul_yes"], cur["noul_no"],
-                )
-                after_out = _replay(
-                    item, cur["confidence_floor"], cur["strong_pick"],
-                    noul_yes_rec, cur["noul_no"],
-                )
-                if before_out != after_out:
-                    flips += 1
-        eval_report["flips"] = flips
+        # The replay chain no longer consumes a noul gate (the need_skill
+        # gate is retired), so a noul_yes move cannot flip hook records.
+        eval_report["flips"] = 0
         rec["noul_yes"] = noul_yes_rec
 
     current_cost = score(cur["confidence_floor"], cur["strong_pick"])

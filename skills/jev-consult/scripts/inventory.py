@@ -1428,27 +1428,18 @@ def _policy_float(policy: dict | None, key: str, default: float) -> float:
     return default
 
 
-def _noul_yes_for(policy: dict | None, qid: str) -> float:
-    """noul_yes may be a number or {default, <qid>: ...} per-question map."""
-    raw = policy.get("noul_yes", 0.7) if isinstance(policy, dict) else 0.7
-    if isinstance(raw, dict):
-        picked = raw.get(qid, raw.get("default", 0.7))
-        return _policy_float({"noul_yes": picked}, "noul_yes", 0.7)
-    return _policy_float(policy, "noul_yes", 0.7)
-
-
 def resolve_picker(picked: list[dict], decision: dict | None, policy: dict | None = None) -> dict:
     """Map a Jev decide() payload to {status, winner}. Fail-open statuses: escalate.
 
     Every outcome also sets ``escalate_reason`` — the attribution enum the
     routing log records: ``confidence_floor`` when decide() preempted on the
-    pick's confidence, ``need_gate`` when the need_skill gate suppressed the
-    pick, ``model_escalate`` for Jev's own escalate or an unusable decision,
-    ``none_pick`` when Jev picked ``none`` (or the pick resolved to no item),
-    ``no_candidates`` when the shortlist was empty, and None on a winner or a
-    non-decision outcome the reason enum does not cover."""
-    noul_yes = _noul_yes_for(policy, "need_skill")
-    noul_no = _policy_float(policy, "noul_no", 0.3)
+    pick's confidence, ``need_gate`` (retired — the need_skill gate was
+    removed after it suppressed real picks on both dogfood rounds; the noul
+    is still asked and logged as ``need_skill_score`` for telemetry but no
+    longer routes), ``model_escalate`` for Jev's own escalate or an unusable
+    decision, ``none_pick`` when Jev picked ``none`` (or the pick resolved to
+    no item), ``no_candidates`` when the shortlist was empty, and None on a
+    winner or a non-decision outcome the reason enum does not cover."""
     strong_pick = _policy_float(policy, "strong_pick", 0.85)
     if not isinstance(decision, dict):
         return {"status": "escalate", "winner": None, "escalate_reason": "model_escalate"}
@@ -1467,7 +1458,7 @@ def resolve_picker(picked: list[dict], decision: dict | None, policy: dict | Non
     picks = decision.get("picks") or {}
     load = picks.get("load_tools")
     try:
-        need = float(picks.get("need_skill"))
+        float(picks.get("need_skill"))
     except (TypeError, ValueError):
         return {"status": "escalate", "winner": None, "escalate_reason": "model_escalate"}
     if load in (None, "none"):
@@ -1485,10 +1476,6 @@ def resolve_picker(picked: list[dict], decision: dict | None, policy: dict | Non
             top = 0.0
     if winner is not None and top >= strong_pick:
         return {"status": "winner", "winner": winner, "strong": True, "escalate_reason": None}
-    if need <= noul_no:
-        return {"status": "none", "winner": None, "escalate_reason": "need_gate"}
-    if need < noul_yes:
-        return {"status": "escalate", "winner": None, "escalate_reason": "need_gate"}
     if winner is None:
         return {"status": "none", "winner": None, "escalate_reason": "none_pick"}
     return {"status": "winner", "winner": winner, "escalate_reason": None}

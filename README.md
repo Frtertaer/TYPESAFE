@@ -105,7 +105,7 @@ python skills/jev-consult/scripts/inventory.py --task "<task>" --harness auto --
 python skills/jev-consult/scripts/jev.py ask tools.request.json
 ```
 
-Хук: IDF-шортлист уже установленных, затем **один** вызов Jev (`load_tools` + `need_skill`, 8с, fail-open). Если пользователь сам назвал скилл (`$имя` или точное имя из нескольких слов через дефис), хук берёт его без вызова Jev; Codex-скиллы с `allow_implicit_invocation: false` попадают в шортлист только когда названы явно. Strong pick: p ≥ `strong_pick` (0.85 в `policy.json`) выигрывает даже при неуверенном `need_skill`; все пороги только в `policy.json`. Каждое решение хука дописывается строкой в `~/.cache/jev-consult/decisions.jsonl` (`JEV_CONSULT_LOG=0` выключает; ключ в лог не пишется). Ничего не ставит. Пустой шортлист: агент гоняет `peer_fill.py --from-miss`; если `no_peer` — `catalog_fill.py --from-miss` (один скилл); если `no_catalog` — `apply_fill.py --from-miss` (один Hermes-плагин `--no-enable` или один официальный MCP). npx и `claude plugin install` не ставятся. `--force` нет. Сторожевого процесса нет. Сжатие по умолчанию — только LIVE_FAT текущего жирного результата, не Tamara session-drop. Вырезанная середина сохраняется целиком в `~/.cache/jev-consult/spill/<sha>.txt` — маркер называет файл; каталог owner-only (chmod 700), максимум 200 файлов / 256 МБ, `JEV_CONSULT_SPILL=0` выключает.
+Хук: IDF-шортлист уже установленных, затем **один** вызов Jev (`load_tools` + `need_skill`, 8с, fail-open). Если пользователь сам назвал скилл (`$имя` или точное имя из нескольких слов через дефис), хук берёт его без вызова Jev; Codex-скиллы с `allow_implicit_invocation: false` попадают в шортлист только когда названы явно. Strong pick: p ≥ `strong_pick` (0.85 в `policy.json`) выигрывает с пометкой `strong`; остальные разрешимые пики тоже выигрывают — need-путь снят: маршрутизация = `strong_pick` + `confidence_floor`, `need_skill` пишется только как телеметрия. Все пороги только в `policy.json`. Каждое решение хука дописывается строкой в `~/.cache/jev-consult/decisions.jsonl` (`JEV_CONSULT_LOG=0` выключает; ключ в лог не пишется). Ничего не ставит. Пустой шортлист: агент гоняет `peer_fill.py --from-miss`; если `no_peer` — `catalog_fill.py --from-miss` (один скилл); если `no_catalog` — `apply_fill.py --from-miss` (один Hermes-плагин `--no-enable` или один официальный MCP). npx и `claude plugin install` не ставятся. `--force` нет. Сторожевого процесса нет. Сжатие по умолчанию — только LIVE_FAT текущего жирного результата, не Tamara session-drop. Вырезанная середина сохраняется целиком в `~/.cache/jev-consult/spill/<sha>.txt` — маркер называет файл; каталог owner-only (chmod 700), максимум 200 файлов / 256 МБ, `JEV_CONSULT_SPILL=0` выключает.
 
 Сравнение на одном тестовом запросе (без Jev vs с трассой и Jev):
 
@@ -254,16 +254,18 @@ weekly `live-eval` краснеет на корректных кейсах, и �
 | latency | p50 104 ms, p95 142 ms при бюджете 12 000 ms | то же |
 | false-accept | негативные кейсы (`market_none`, `mechanical`) не роутятся в Jev — проверено реальным hook-routing (shortlist → chooser не вызывается), а не флагом фикстуры | `expect_call: false` + `routing_pool` в корпусе |
 | калибровка | bands overlap → `flips=0`, гейт не трогали (не глушим без данных) | `--calibrate --eval` |
-| dogfood-лог 2026-09-27 | 120 записей (91 routing + 24 feedback + 5 fill), 39 реальных Jev-вызовов: pick_rate 27.5%, applied 92%, override 0%, miss 61.5% (decision-relevant ~22%), strong-pick accuracy 100%, p50/p95 97/138 ms | `decisions.py --acceptance` |
-| калибровка на dogfood-логе | 39 replayable: `confidence_floor` 0.45 (1 flip escalate→none на явном consult-запросе — неверное направление, отклонён), `strong_pick` 0.85 без изменений, `tight_gap` 0.68 (вне replay-цепочки, flips=0 — артефакт), `noul_yes` — eval bands overlap (neg_max 0.93 > pos_min 0.68) → `flips=0`. Per-question `need_skill`: need=0.15–0.39 < 0.7 в 39/39 (расхождение подтверждено), но легальный гейт > `noul_unsure`=0.5 не даёт flips, а подразумеваемый ~0.32 сломал бы порядок полос P004. **policy.json не менялся — insufficient data** | `decisions.py --calibrate --eval` |
+| dogfood-лог раунд 2 (2026-09-27, весь routing — schema v2) | 125 записей (101 routing + 24 feedback): pick 24.8%, applied 96%, override 0%, miss 50.5%, strong-pick accuracy 100%, p50/p95 102/156 ms; escalate_reason = {no_candidates 27, none_pick 23, confidence_floor 21, need_gate 5, model_escalate 0}; IDF: 27/27 alias-bearing decision-промптов попали в шортлист jev-consult (было 0/12 до фикса; граница — парафразы без алиас-токена всё ещё мимо шортлиста) | `decisions.py --acceptance` |
+| калибровка на dogfood-логе r2 | 70 replayable (все с записанным `pick_confidence`): `confidence_floor` 0.55→0.15, `strong_pick` 0.85 без изменений, `tight_gap` 0.73 (артефакт разделителя на малой выборке — вне replay-цепочки). Все flips — на записях без feedback-вердикта (escalate→none на none-пиках, escalate→weak_winner на слабых пиках), поэтому **policy.json не менялся — document-only**, как и в раунде 1 | `decisions.py --calibrate` |
+| need-гейт | **СНЯТ.** `need_skill_score` за оба раунда (~144 реальных Jev-вызова): n=74, mean 0.24, p90 0.33, max 0.48 — ни разу ≥0.7, дискриминации нет (winner 0.27 / none 0.22 / escalate 0.24), а гейт подавил 5 реальных пиков с conf 0.74–0.83 (включая jev_consult на буквальных «consult jev»-запросах). Маршрутизация = `strong_pick` + `confidence_floor`; `need_skill` остаётся вопросом и пишется телеметрией (`need`/`need_skill_score` в логе), но больше не роутит | `resolve_picker`, `decisions._replay` |
 
-Деталь, важная для следующего цикла: 7 из 9 `escalate` в dogfood-логе —
-не need-гейт, а preempt по confidence в `decide()` (need ≤ `noul_no`=0.3
-отдал бы `none`, не `escalate`). Подавляет слабые пики пол confidence_floor,
-а не `noul_yes` — и лог не хранит confidence пика, поэтому атрибуция
-по записи невосстановима. Рычаг для under-pick на явных consult-запросах —
-это `confidence_floor` или обход гейта для `explicit`/consult-литералов,
-а не `noul_yes`.
+Буквальные «consult jev»-запросы по-прежнему escalate в 12/15 (11
+confidence_floor + бывший 1 need_gate): standing-рычаг для under-pick —
+`confidence_floor` или минимальный обход гейта для explicit/consult-литералов
+в `decide()`/`resolve_picker`. В этом раунде не применяли: калибровка двинула
+порог только на записях без вердиктов, а обход — это изменение code-path, а
+не порога. Стоящее правило из #17: перекалибровка после ~1 недели новых
+записей — следующий прогон на свежем логе с feedback-вердиктами решит,
+применять ли floor и/или обход.
 
 A/B-метрика — главный аргумент: каждый кейс прогоняется дважды — состояние
 после пика Jev и то же состояние с baseline-пиком «кодер решил сам» —

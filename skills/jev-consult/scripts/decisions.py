@@ -678,6 +678,330 @@ def status_streaks(entries: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda r: (-r["best_streak"], r["harness"]))
 
 
+def acceptance_report(
+    entries: list[dict], override_window: int = 10
+) -> dict:
+    """Do Jev's picks actually get used? Pairs each routing record that
+    produced a winner with the fill/feedback records that follow it.
+
+    - pick_rate: routing records with a winner / routing records
+    - applied_rate: picks followed by a same-prompt fill entry or an
+      explicit `feedback=accepted` record (jev.py feedback)
+    - miss_rate: routing records whose jev_status is a miss bucket
+    - override_rate: picks countermanded — a later routing record with the
+      same prompt_sha and a different winner, or `feedback=rejected`
+    - strong_pick_proxy: of strong_pick winners, the share not overridden
+      within the next `override_window` records
+    - latency p50/p95 of routing entries against their budget_ms
+
+    Matching is order-aware: a feedback record answers the newest pick
+    carrying its prompt_sha that precedes it (earlier and later picks with
+    the same sha keep their own verdicts), and a fill counts only when it
+    lands after the pick on the same harness + prompt_head prefix — fills
+    logged earlier are stale evidence, not application."""
+    routing = [
+        e
+        for e in entries
+        if str(e.get("jev_status") or "") not in ("fill", "feedback")
+        and e.get("prompt_sha")
+    ]
+    picks = [
+        e
+        for e in routing
+        if isinstance(e.get("winner"), dict) and e["winner"].get("name")
+    ]
+    feedback = [e for e in entries if str(e.get("jev_status") or "") == "feedback"]
+
+    by_sha: dict[str, list[int]] = {}
+    for index, e in enumerate(entries):
+        sha = str(e.get("prompt_sha") or "")
+        if sha:
+            by_sha.setdefault(sha, []).append(index)
+
+    # Order-aware pairing: a feedback record answers the newest pick with
+    # its prompt_sha that precedes it — earlier and later picks sharing the
+    # sha keep their own verdicts.
+    accepted_picks: set[int] = set()
+    rejected_picks: set[int] = set()
+    for fi, f in enumerate(entries):
+        if str(f.get("jev_status") or "") != "feedback":
+            continue
+        sha = str(f.get("prompt_sha") or "")
+        verdict = str(f.get("feedback") or "")
+        if not sha:
+            continue
+        cands = [
+            i
+            for i in by_sha.get(sha, [])
+            if i < fi
+            and str(entries[i].get("jev_status") or "") not in ("fill", "feedback")
+            and isinstance(entries[i].get("winner"), dict)
+            and entries[i]["winner"].get("name")
+        ]
+        if not cands:
+            continue
+        if verdict == "accepted":
+            accepted_picks.add(max(cands))
+        elif verdict == "rejected":
+            rejected_picks.add(max(cands))
+
+    # A fill counts as applied evidence only when it lands after the pick,
+    # on the same harness and prompt-head prefix.
+    fill_rows = [
+        (i, str(f.get("harness") or ""), str(f.get("prompt_head") or "")[:120])
+        for i, f in enumerate(entries)
+        if str(f.get("jev_status") or "") == "fill"
+    ]
+    applied = overridden = strong = strong_ok = 0
+    latencies: list[float] = []
+    over_budget = 0
+    budgets: list[float] = []
+    entry_pos = {id(e): i for i, e in enumerate(entries)}
+    by_category: dict[str, dict[str, int]] = {}
+    for pick in picks:
+        sha = str(pick.get("prompt_sha") or "")
+        harness = str(pick.get("harness") or "")
+        head = str(pick.get("prompt_head") or "")[:120]
+        category = str(pick.get("question") or "routing")
+        bucket = by_category.setdefault(
+            category, {"picks": 0, "applied": 0, "overridden": 0}
+        )
+        bucket["picks"] += 1
+        pos = entry_pos.get(id(pick), -1)
+        # overridden: another routing record for the same prompt picked a
+        # different winner soon after (re-ask after the human ignored us),
+        # or an explicit rejected feedback record names this sha.
+        winner_name = str((pick.get("winner") or {}).get("name") or "")
+        over = pos in rejected_picks
+        for later_idx in by_sha.get(sha, []):
+            if later_idx <= pos or later_idx > pos + override_window:
+                continue
+            later = entries[later_idx]
+            if str(later.get("jev_status") or "") in ("fill", "feedback"):
+                continue
+            later_winner = later.get("winner")
+            if (
+                isinstance(later_winner, dict)
+                and later_winner.get("name")
+                and str(later_winner["name"]) != winner_name
+            ):
+                over = True
+                break
+        if over:
+            overridden += 1
+            bucket["overridden"] += 1
+        if pos in accepted_picks or any(
+            fi > pos and fh == harness and fhead == head
+            for fi, fh, fhead in fill_rows
+        ):
+            applied += 1
+            bucket["applied"] += 1
+        if pick.get("strong_pick"):
+            strong += 1
+            if not over:
+                strong_ok += 1
+        lat = pick.get("latency_ms")
+        if isinstance(lat, (int, float)):
+            latencies.append(float(lat))
+            budget = pick.get("budget_ms")
+            if isinstance(budget, (int, float)) and budget:
+                budgets.append(float(budget))
+                if float(lat) > float(budget):
+                    over_budget += 1
+    n_picks = len(picks)
+    n_routing = len(routing)
+    misses = sum(1 for e in routing if is_miss_entry(e))
+    return {
+        "routing_entries": n_routing,
+        "picks": n_picks,
+        "pick_rate": round(n_picks / n_routing, 4) if n_routing else None,
+        "applied": applied,
+        "applied_rate": round(applied / n_picks, 4) if n_picks else None,
+        "overridden": overridden,
+        "override_rate": round(overridden / n_picks, 4) if n_picks else None,
+        "misses": misses,
+        "miss_rate": round(misses / n_routing, 4) if n_routing else None,
+        "strong_picks": strong,
+        "strong_pick_not_overridden": round(strong_ok / strong, 4)
+        if strong
+        else None,
+        "latency_ms": {
+            "n": len(latencies),
+            "p50": _percentile(latencies, 0.5),
+            "p95": _percentile(latencies, 0.95),
+            "over_budget": over_budget,
+            "over_budget_share": round(over_budget / len(latencies), 4)
+            if latencies
+            else None,
+            "budget_ms": round(budgets[0]) if budgets else None,
+        },
+        "by_question": by_category,
+        "feedback_records": len(feedback),
+        "override_window": override_window,
+    }
+
+
+def format_acceptance(data: dict) -> str:
+    def _pct(v) -> str:
+        return "n/a" if v is None else "%.1f%%" % (v * 100)
+
+    lines = [
+        "acceptance over %d routing entries (%d picks, %d feedback records)"
+        % (
+            data.get("routing_entries") or 0,
+            data.get("picks") or 0,
+            data.get("feedback_records") or 0,
+        ),
+        "pick_rate:    %s" % _pct(data.get("pick_rate")),
+        "applied_rate: %s (%d applied)" % (_pct(data.get("applied_rate")), data.get("applied") or 0),
+        "miss_rate:    %s (%d misses)" % (_pct(data.get("miss_rate")), data.get("misses") or 0),
+        "override_rate:%s (%d overridden)" % (_pct(data.get("override_rate")), data.get("overridden") or 0),
+        "strong_pick accuracy proxy: %s (%d strong picks)"
+        % (_pct(data.get("strong_pick_not_overridden")), data.get("strong_picks") or 0),
+    ]
+    lat = data.get("latency_ms") or {}
+    if lat.get("n"):
+        lines.append(
+            "latency_ms: n=%d p50=%s p95=%s over_budget=%s (budget %s)"
+            % (
+                lat["n"],
+                lat.get("p50"),
+                lat.get("p95"),
+                lat.get("over_budget"),
+                lat.get("budget_ms"),
+            )
+        )
+    by_q = data.get("by_question") or {}
+    if by_q:
+        lines.append("by question:")
+        for qid, row in sorted(by_q.items()):
+            lines.append(
+                "  %-18s picks=%d applied=%d overridden=%d"
+                % (qid, row.get("picks", 0), row.get("applied", 0), row.get("overridden", 0))
+            )
+    return "\n".join(lines)
+
+
+def html_report(entries: list[dict], acceptance: dict) -> str:
+    """One static dependency-free page: status mix, acceptance metrics,
+    latency vs budget, weekly status mix (drift signal)."""
+    import html as _html
+
+    def esc(v) -> str:
+        return _html.escape(str(v if v is not None else ""))
+
+    stats = summarize(entries)
+    # weekly buckets for drift
+    weeks: dict[str, dict[str, int]] = {}
+    for item in entries:
+        ts = _entry_ts(item)
+        if ts is None:
+            continue
+        week = datetime.datetime.fromtimestamp(
+            ts, tz=datetime.timezone.utc
+        ).strftime("%G-W%V")
+        status = str(item.get("jev_status") or "unknown")
+        row = weeks.setdefault(week, {})
+        row[status] = row.get(status, 0) + 1
+
+    def bar_rows(d: dict[str, int]) -> str:
+        total = sum(d.values()) or 1
+        out = []
+        for key, n in sorted(d.items(), key=lambda kv: (-kv[1], kv[0])):
+            pct = round(100 * n / total, 1)
+            out.append(
+                "<tr><td>%s</td><td>%d</td>"
+                '<td><div class="bar"><span style="width:%.1f%%"></span></div></td>'
+                "<td>%.1f%%</td></tr>" % (esc(key), n, pct, pct)
+            )
+        return "".join(out)
+
+    def pct(v) -> str:
+        return "n/a" if v is None else "%.1f%%" % (100 * v)
+
+    lat = acceptance.get("latency_ms") or {}
+    weekly_rows = ""
+    statuses_seen = sorted(
+        {s for w in weeks.values() for s in w}
+    )
+    for week in sorted(weeks):
+        cells = "".join(
+            "<td>%d</td>" % weeks[week].get(s, 0) for s in statuses_seen
+        )
+        weekly_rows += "<tr><td>%s</td>%s</tr>" % (esc(week), cells)
+    by_q = acceptance.get("by_question") or {}
+    by_q_rows = "".join(
+        "<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td></tr>"
+        % (esc(q), r.get("picks", 0), r.get("applied", 0), r.get("overridden", 0))
+        for q, r in sorted(by_q.items())
+    )
+    return """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>jev-consult decisions report</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:960px;margin:2em auto;padding:0 1em;color:#1a1a1a}
+h1{font-size:1.4em}h2{font-size:1.05em;margin-top:1.8em;border-bottom:1px solid #ddd;padding-bottom:.3em}
+table{border-collapse:collapse;width:100%%;font-size:.9em}
+td,th{border:1px solid #ddd;padding:.3em .5em;text-align:left}
+.bar{background:#eee;border-radius:3px;height:.8em;min-width:120px}
+.bar span{display:block;background:#4a7fd4;height:100%%;border-radius:3px}
+.kpis{display:flex;gap:1em;flex-wrap:wrap}
+.kpi{border:1px solid #ddd;border-radius:6px;padding:.7em 1.1em;min-width:130px}
+.kpi b{display:block;font-size:1.5em}
+.small{color:#666;font-size:.8em}
+</style></head><body>
+<h1>jev-consult routing report</h1>
+<p class="small">%(total)d entries, %(first)s &rarr; %(last)s, %(bad)d bad lines</p>
+<h2>Status mix</h2><table><tr><th>status</th><th>n</th><th></th><th>share</th></tr>%(status_rows)s</table>
+<h2>Acceptance</h2>
+<div class="kpis">
+<div class="kpi"><b>%(pick_rate)s</b>pick rate</div>
+<div class="kpi"><b>%(applied_rate)s</b>applied rate</div>
+<div class="kpi"><b>%(override_rate)s</b>override rate</div>
+<div class="kpi"><b>%(miss_rate)s</b>miss rate</div>
+<div class="kpi"><b>%(strong)s</b>strong-pick kept</div>
+</div>
+<p class="small">over %(picks)d picks in %(routing)d routing entries; override window %(window)d records</p>
+%(by_q_table)s
+<h2>Latency vs hook budget</h2>
+<p>n=%(lat_n)d &nbsp; p50=%(p50)s ms &nbsp; p95=%(p95)s ms &nbsp; over budget: %(over)s (%(over_share)s) &nbsp; budget: %(budget)s ms</p>
+<h2>Weekly status mix</h2>
+%(weekly_table)s
+</body></html>
+""" % {
+        "total": stats["total"],
+        "first": stats.get("first_iso") or "?",
+        "last": stats.get("last_iso") or "?",
+        "bad": stats.get("bad_lines") or 0,
+        "status_rows": bar_rows(stats.get("by_status") or {}),
+        "pick_rate": pct(acceptance.get("pick_rate")),
+        "applied_rate": pct(acceptance.get("applied_rate")),
+        "override_rate": pct(acceptance.get("override_rate")),
+        "miss_rate": pct(acceptance.get("miss_rate")),
+        "strong": pct(acceptance.get("strong_pick_not_overridden")),
+        "picks": acceptance.get("picks") or 0,
+        "routing": acceptance.get("routing_entries") or 0,
+        "window": acceptance.get("override_window") or 0,
+        "by_q_table": (
+            "<h2>By question</h2><table><tr><th>question</th><th>picks</th><th>applied</th><th>overridden</th></tr>%s</table>" % by_q_rows
+            if by_q_rows else ""
+        ),
+        "lat_n": lat.get("n") or 0,
+        "p50": lat.get("p50") or "-",
+        "p95": lat.get("p95") or "-",
+        "over": lat.get("over_budget") or 0,
+        "over_share": pct(lat.get("over_budget_share")),
+        "budget": lat.get("budget_ms") or "-",
+        "weekly_table": (
+            "<table><tr><th>week</th>%s</tr>%s</table>"
+            % (
+                "".join("<th>%s</th>" % esc(s) for s in statuses_seen),
+                weekly_rows,
+            )
+            if weekly_rows else "<p class='small'>no timestamped entries</p>"
+        ),
+    }
+
+
 # jev_status values that mean no Jev call happened — dedupe replays a
 # sidecar pick, idf shortlists locally, fill/budget/empty never reach the
 # network; only attempted calls belong in a timeout/error rate denominator.
@@ -789,8 +1113,11 @@ def _policy_path() -> Path:
 
 def _policy_thresholds(policy: dict) -> dict[str, float]:
     def f(key: str, default: float) -> float:
+        val = policy.get(key, default)
+        if isinstance(val, dict):  # per-question map: {default, <qid>: ...}
+            val = val.get("default", default)
         try:
-            return float(policy.get(key, default))
+            return float(val)
         except (TypeError, ValueError):
             return default
     return {
@@ -1726,6 +2053,24 @@ def main(argv: list[str] | None = None) -> int:
         help="Print per-harness per-UTC-hour timeout/error rates (quota signal; --json emits {harness_health: [...]})",
     )
     parser.add_argument(
+        "--acceptance",
+        action="store_true",
+        help="Print pick/applied/miss/override rates + latency vs budget: do Jev picks actually get used (--json emits the acceptance block)",
+    )
+    parser.add_argument(
+        "--override-window",
+        metavar="N",
+        type=int,
+        default=10,
+        help="With --acceptance: a pick counts as overridden when a same-prompt_sha routing record with a different winner appears within the next N records (default 10)",
+    )
+    parser.add_argument(
+        "--html",
+        metavar="PATH",
+        default="",
+        help="Write a static one-page HTML report (status mix, acceptance, latency, weekly buckets) to PATH — no JS, no deps",
+    )
+    parser.add_argument(
         "--calibrate",
         action="store_true",
         help="Replay filtered entries under candidate (confidence_floor, strong_pick) thresholds and recommend the pair minimising escalate+weak-winner share (--json/--md apply); combined with --harness-health it first drops harness x hour buckets whose error+timeout rate is degraded",
@@ -2543,6 +2888,36 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write("wrote evidence to %s\n" % out_path)
             return 0
         sys.stdout.write(rendered)
+        return 0
+    if getattr(args, "acceptance", False):
+        data = acceptance_report(
+            entries, override_window=max(1, int(getattr(args, "override_window", 10) or 10))
+        )
+        rendered = (
+            json.dumps(data, indent=2) + "\n"
+            if args.json
+            else format_acceptance(data) + "\n"
+        )
+        if args.out:
+            try:
+                _atomic_write(Path(args.out), rendered)
+            except OSError as exc:
+                sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
+                return 1
+            sys.stderr.write("wrote acceptance to %s\n" % args.out)
+            return 0
+        sys.stdout.write(rendered)
+        return 0
+    if getattr(args, "html", ""):
+        html = html_report(entries, acceptance_report(
+            entries, override_window=max(1, int(getattr(args, "override_window", 10) or 10))
+        ))
+        try:
+            _atomic_write(Path(args.html), html)
+        except OSError as exc:
+            sys.stderr.write("cannot write %s: %s\n" % (args.html, exc))
+            return 1
+        sys.stderr.write("wrote %s\n" % args.html)
         return 0
     if getattr(args, "gap", None) is not None:
         gaps = quiet_gaps(entries, float(args.gap))

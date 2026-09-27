@@ -4702,5 +4702,200 @@ class VerifyVerdictTests(unittest.TestCase):
             self.assertEqual(data["entries"], 1)
 
 
+class AcceptanceTest(unittest.TestCase):
+    def _log_entries(self):
+        return [
+            # pick applied: a fill record follows with the same prompt_head
+            {
+                "ts": 1700000000, "harness": "claude-code",
+                "jev_status": "winner", "prompt_sha": "s1",
+                "prompt_head": "refactor the parser",
+                "question": "need_skill",
+                "winner": {"kind": "skill", "name": "alpha"},
+                "strong_pick": True, "latency_ms": 120, "budget_ms": 12000,
+            },
+            {
+                "ts": 1700000001, "harness": "claude-code",
+                "jev_status": "fill", "prompt_head": "refactor the parser",
+                "fill": {"name": "alpha"},
+            },
+            # pick overridden: same sha, different winner within window
+            {
+                "ts": 1700000002, "harness": "claude-code",
+                "jev_status": "winner", "prompt_sha": "s2",
+                "prompt_head": "which lib",
+                "question": "library",
+                "winner": {"kind": "skill", "name": "beta"},
+                "latency_ms": 200, "budget_ms": 12000,
+            },
+            {
+                "ts": 1700000003, "harness": "claude-code",
+                "jev_status": "winner", "prompt_sha": "s2",
+                "prompt_head": "which lib",
+                "question": "library",
+                "winner": {"kind": "skill", "name": "gamma"},
+                "latency_ms": 210, "budget_ms": 12000,
+            },
+            # explicit feedback records (feedback answers the newest
+            # preceding pick carrying its prompt_sha)
+            {
+                "ts": 1700000005, "harness": "claude-code",
+                "jev_status": "winner", "prompt_sha": "s3",
+                "prompt_head": "pick a name",
+                "question": "naming",
+                "winner": {"kind": "skill", "name": "delta"},
+                "latency_ms": 90, "budget_ms": 12000,
+            },
+            {
+                "ts": 1700000006, "harness": "manual",
+                "jev_status": "feedback", "feedback": "rejected",
+                "prompt_sha": "s3",
+            },
+            # a miss
+            {
+                "ts": 1700000006, "harness": "hermes",
+                "jev_status": "none", "prompt_sha": "s4",
+                "prompt_head": "nope",
+            },
+        ]
+
+    def test_acceptance_report_counts(self) -> None:
+        data = decisions.acceptance_report(self._log_entries())
+        self.assertEqual(data["routing_entries"], 5)
+        self.assertEqual(data["picks"], 4)
+        self.assertEqual(data["pick_rate"], 0.8)
+        # s1 applied via fill, s3 rejected via feedback (also s2 second
+        # record is itself a pick — overridden counts winners later
+        # re-picked differently; s2-pick#2 has no later different winner)
+        self.assertEqual(data["applied"], 1)
+        self.assertEqual(data["overridden"], 2)  # s2 first pick + s3
+        self.assertEqual(data["misses"], 1)
+        self.assertEqual(data["strong_picks"], 1)
+        self.assertEqual(data["strong_pick_not_overridden"], 1.0)
+        self.assertEqual(data["latency_ms"]["n"], 4)
+        self.assertEqual(data["latency_ms"]["p50"], 200.0)
+        self.assertEqual(data["latency_ms"]["over_budget"], 0)
+        self.assertEqual(
+            data["by_question"]["library"]["overridden"], 1
+        )
+
+    def test_acceptance_empty_log_is_safe(self) -> None:
+        data = decisions.acceptance_report([])
+        self.assertEqual(data["picks"], 0)
+        self.assertIsNone(data["pick_rate"])
+        self.assertIsNone(data["applied_rate"])
+
+    def test_acceptance_cli_text_and_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._log_entries())
+            proc = run_cli("--file", str(log), "--acceptance")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("pick_rate:", proc.stdout)
+            self.assertIn("80.0%", proc.stdout)  # 4/5 routing records produced winners
+            proc = run_cli("--file", str(log), "--acceptance", "--json")
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["picks"], 4)
+
+    def test_acceptance_cli_override_window_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._log_entries())
+            proc = run_cli(
+                "--file", str(log), "--acceptance", "--override-window", "3",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("override", proc.stdout)
+
+    def test_acceptance_override_window(self) -> None:
+        entries = [
+            {"ts": 1, "jev_status": "winner", "prompt_sha": "x",
+             "winner": {"name": "a"}},
+            {"ts": 1.5, "jev_status": "fill", "prompt_head": "noise"},
+        ] + [
+            # push the re-pick past the window
+            {"ts": 2 + i, "jev_status": "skip", "prompt_sha": "pad%d" % i}
+            for i in range(12)
+        ] + [
+            {"ts": 20, "jev_status": "winner", "prompt_sha": "x",
+             "winner": {"name": "b"}},
+        ]
+        wide = decisions.acceptance_report(entries, override_window=20)
+        narrow = decisions.acceptance_report(entries, override_window=3)
+        self.assertEqual(wide["overridden"], 1)
+        self.assertEqual(narrow["overridden"], 0)
+
+    def test_acceptance_feedback_pairs_to_preceding_pick_only(self) -> None:
+        # A rejected record must override the newest pick BEFORE it — not
+        # a pick logged earlier for a different sha, and not the same-sha's
+        # first pick when a re-pick landed in between.
+        entries = [
+            {"ts": 1, "jev_status": "winner", "prompt_sha": "s",
+             "winner": {"name": "a"}},
+            {"ts": 2, "jev_status": "winner", "prompt_sha": "s",
+             "winner": {"name": "a"}},
+            {"ts": 3, "jev_status": "feedback", "feedback": "rejected",
+             "prompt_sha": "s"},
+        ]
+        data = decisions.acceptance_report(entries)
+        # pick#1 overridden by the same-winner re-pick? no — same winner
+        # name 'a' is not an override; pick#2 overridden by the feedback
+        self.assertEqual(data["overridden"], 1)
+        self.assertEqual(data["applied"], 0)
+
+    def test_acceptance_fill_before_pick_does_not_apply(self) -> None:
+        # A fill logged before the pick is stale evidence, not application.
+        entries = [
+            {"ts": 1, "harness": "h", "jev_status": "fill",
+             "prompt_head": "task"},
+            {"ts": 2, "harness": "h", "jev_status": "winner",
+             "prompt_sha": "s", "prompt_head": "task",
+             "winner": {"name": "a"}},
+        ]
+        data = decisions.acceptance_report(entries)
+        self.assertEqual(data["applied"], 0)
+        # fill after the pick does apply
+        entries.append(
+            {"ts": 3, "harness": "h", "jev_status": "fill",
+             "prompt_head": "task"}
+        )
+        data = decisions.acceptance_report(entries)
+        self.assertEqual(data["applied"], 1)
+
+
+class HtmlReportTest(unittest.TestCase):
+    def test_html_report_writes_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(
+                log,
+                [
+                    {
+                        "ts": 1700000000, "harness": "claude-code",
+                        "jev_status": "winner", "prompt_sha": "s1",
+                        "winner": {"kind": "skill", "name": "alpha"},
+                        "latency_ms": 120,
+                    },
+                ],
+            )
+            out = Path(tmp) / "report.html"
+            proc = run_cli("--file", str(log), "--html", str(out))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("<html", text)
+            self.assertIn("Status mix", text)
+            self.assertIn("Weekly status mix", text)
+            self.assertIn("pick rate", text)
+
+    def test_html_report_empty_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            log.write_text("", encoding="utf-8")
+            out = Path(tmp) / "r.html"
+            proc = run_cli("--file", str(log), "--html", str(out))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("no timestamped entries", out.read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

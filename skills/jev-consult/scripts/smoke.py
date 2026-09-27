@@ -4716,7 +4716,9 @@ def step_compare(tmp: Path) -> dict:
         except (ValueError, AttributeError, TypeError):
             ok = False
     if ok:
-        # --only runs a single case id
+        # --only runs a single case id; the remaining flag-parity
+        # invocations reuse it so they price one case instead of the
+        # whole corpus
         case_id = payload["rows"][0].get("id", "")
         rc, out = _run(
             [str(SCRIPTS / "compare.py"), "--json", "--only", case_id]
@@ -4732,6 +4734,8 @@ def step_compare(tmp: Path) -> dict:
             [
                 str(SCRIPTS / "compare.py"),
                 "--md",
+                "--only",
+                case_id,
                 "--verdict",
                 str(verdict),
             ]
@@ -4743,7 +4747,7 @@ def step_compare(tmp: Path) -> dict:
             ok = False
     if ok:
         # a bad --jq key exits 2
-        rc, out = _run([str(SCRIPTS / "compare.py"), "--json", "--jq", "nope"])
+        rc, out = _run([str(SCRIPTS / "compare.py"), "--json", "--only", case_id, "--jq", "nope"])
         ok = rc == 2
     if ok:
         # --out writes the result JSON to PATH; --report writes markdown
@@ -4753,6 +4757,8 @@ def step_compare(tmp: Path) -> dict:
             [
                 str(SCRIPTS / "compare.py"),
                 "--json",
+                "--only",
+                case_id,
                 "--out",
                 str(out_file),
                 "--report",
@@ -4780,6 +4786,8 @@ def step_compare(tmp: Path) -> dict:
                 "--max-ticks",
                 "2",
                 "--quiet",
+                "--only",
+                case_id,
             ]
         )
         stdout_ticks = [ln for ln in out.splitlines() if '"failures"' in ln]
@@ -6238,6 +6246,8 @@ def step_ask_verdict(tmp: Path) -> dict:
             # never listening)
             bad_policy = tmp / "policy-down.json"
             policy["endpoint"] = "http://127.0.0.1:1/v1/systemone"
+            policy.pop("fallback_endpoint", None)
+            policy.pop("fallback_model", None)
             bad_policy.write_text(json.dumps(policy), encoding="utf-8")
             env["JEV_POLICY"] = str(bad_policy)
             rc, out = _run(

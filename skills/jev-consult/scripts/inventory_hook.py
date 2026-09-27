@@ -251,6 +251,8 @@ def pick_with_jev(
         return {"status": status, "winner": None, "attempted": attempted}
     picker = resolve_picker(picked, decision, policy)
     picker["attempted"] = attempted
+    if result.get("note"):
+        picker["note"] = result["note"]
     try:
         need = float((decision.get("picks") or {}).get("need_skill"))
     except (TypeError, ValueError, AttributeError):
@@ -460,6 +462,8 @@ def handle(
         extra["stale_sidecar"] = True
     if note_tag:
         extra["note"] = note_tag
+    elif picker.get("note"):
+        extra["note"] = str(picker["note"])
     if explicit_winner is not None:
         extra["explicit"] = True
     if picker.get("strong"):
@@ -502,6 +506,8 @@ def handle(
     }
     if note_tag:
         LAST_DECISION["note"] = note_tag
+    elif picker.get("note"):
+        LAST_DECISION["note"] = str(picker["note"])
     append_decision(LAST_DECISION)
     if note:
         extra["note_sha"] = hashlib.sha256(note.encode("utf-8")).hexdigest()[:12]

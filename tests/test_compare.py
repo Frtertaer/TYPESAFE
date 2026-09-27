@@ -1107,5 +1107,270 @@ class DiffStdinTests(unittest.TestCase):
             self.assertIn("stdin", proc.stderr)
 
 
+class PerCaseGateTest(unittest.TestCase):
+    def test_case_gate_prefers_min_noul(self) -> None:
+        row = {"id": "x", "min_noul": 0.6}
+        self.assertEqual(compare.case_gate(row, {"noul_yes": 0.9}), 0.6)
+        self.assertEqual(compare.case_gate({"id": "x"}, {"noul_yes": 0.9}), 0.9)
+        self.assertEqual(compare.case_gate({"id": "x"}, None), 0.7)
+        # per-question policy dict resolves through the case's score id
+        row2 = {"id": "x", "score": "unknown"}
+        policy = {"noul_yes": {"default": 0.7, "unknown": 0.6}}
+        self.assertEqual(compare.case_gate(row2, policy), 0.6)
+
+    def test_strict_failures_min_noul(self) -> None:
+        rows = [
+            {
+                "id": "loose", "min_noul": 0.6,
+                "after": {"called_jev": True, "noul": 0.65},
+            },
+        ]
+        self.assertEqual(compare.strict_failures(rows, True), [])
+        rows[0]["after"]["noul"] = 0.5
+        failures = compare.strict_failures(rows, True)
+        self.assertIn("0.60", failures[0])
+
+    def test_strict_failures_max_noul_false_accept(self) -> None:
+        rows = [
+            {
+                "id": "neg", "max_noul": 0.5, "expect_call": True,
+                "after": {"called_jev": True, "noul": 0.9},
+            },
+        ]
+        failures = compare.strict_failures(rows, True)
+        self.assertIn("false-accept", failures[0])
+
+    def test_strict_failures_expect_call_false(self) -> None:
+        # negative case: calling Jev at all is a false-accept
+        rows = [
+            {
+                "id": "neg", "expect_call": False,
+                "after": {"called_jev": True, "noul": 0.9},
+            },
+        ]
+        failures = compare.strict_failures(rows, True)
+        self.assertIn("false-accept", failures[0])
+        rows[0]["after"]["called_jev"] = False
+        self.assertEqual(compare.strict_failures(rows, True), [])
+
+    def test_strict_failures_observed_call_overrides_fixture(self) -> None:
+        # the gate fires on the hook's real routing decision even when the
+        # fixture's declared flag says no call happened
+        rows = [
+            {
+                "id": "neg", "expect_call": False, "observed_call": True,
+                "after": {"called_jev": False},
+            },
+        ]
+        failures = compare.strict_failures(rows, True)
+        self.assertIn("false-accept", failures[0])
+        rows[0]["observed_call"] = False
+        self.assertEqual(compare.strict_failures(rows, True), [])
+
+    def test_observed_consult_routes_matching_prompt(self) -> None:
+        # a prompt matching the pool reaches the chooser -> would consult
+        self.assertTrue(
+            compare.observed_consult(
+                {"id": "x", "prompt": "audit and upgrade the project dependencies"},
+                compare.DEFAULT_ROUTING_POOL,
+            )
+        )
+
+    def test_observed_consult_quiet_on_mechanical_prompt(self) -> None:
+        self.assertFalse(
+            compare.observed_consult(
+                {"id": "x", "prompt": "Fix the typo in the README badge URL."},
+                compare.DEFAULT_ROUTING_POOL,
+            )
+        )
+
+    def test_observed_consult_without_prompt_is_none(self) -> None:
+        self.assertIsNone(
+            compare.observed_consult({"id": "x"}, compare.DEFAULT_ROUTING_POOL)
+        )
+
+    def test_load_cases_rejects_nonbool_expect_call(self) -> None:
+        bad = {
+            "cases": [
+                {"id": "c", "prompt": "p", "expect_call": "false",
+                 "before": {}, "after": {}}
+            ]
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "cases.json"
+            f.write_text(json.dumps(bad), encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                compare.load_cases(f)
+
+
+class AbBlockTest(unittest.TestCase):
+    def test_ab_block_computes_deltas(self) -> None:
+        rows = [
+            {
+                "id": "c1",
+                "after": {"last_pick": "a", "noul": 0.9},
+                "baseline": {"pick": "b", "noul": 0.5},
+            },
+            {
+                "id": "c2",
+                "after": {"last_pick": "a", "noul": 0.8},
+                "baseline": {"pick": "c", "noul": 0.85},
+            },
+            {"id": "c3", "after": {"last_pick": "a", "noul": 0.7}},
+        ]
+        ab = compare.ab_block(rows)
+        self.assertEqual(ab["summary"]["scored"], 2)
+        self.assertAlmostEqual(ab["summary"]["mean_delta"], 0.175, places=3)
+        self.assertEqual(ab["summary"]["wins"], 1)
+        self.assertEqual(ab["summary"]["losses"], 1)
+        self.assertIsNone(ab["cases"][2]["delta"])
+
+    def test_ab_block_empty(self) -> None:
+        ab = compare.ab_block([])
+        self.assertEqual(ab["summary"]["scored"], 0)
+        self.assertIsNone(ab["summary"]["mean_delta"])
+
+    def test_format_ab_md(self) -> None:
+        md = compare.format_ab_md(compare.ab_block([
+            {
+                "id": "c1",
+                "after": {"last_pick": "a", "noul": 0.9},
+                "baseline": {"pick": "b", "noul": 0.5},
+            },
+        ]))
+        self.assertIn("| case | jev_pick | baseline_pick |", md)
+        self.assertIn("+0.40", md)
+        self.assertIn("mean delta", md)
+
+    def test_run_live_ab_scores_baseline_arm(self) -> None:
+        cases = {
+            "goal": "g",
+            "cases": [
+                {
+                    "id": "ab1",
+                    "score": "on_track",
+                    "prompt": "p",
+                    "before": {"current_step": "s"},
+                    "after": {"current_step": "s2", "called_jev": True,
+                              "last_pick": "return_to_plan"},
+                    "ab": {"baseline_pick": "keep_detour",
+                           "baseline_step": "keep detouring"},
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(cases), encoding="utf-8")
+
+            class FakeAbJev:
+                def __init__(self):
+                    self.states = []
+
+                def post_systemone(self, state, questions, policy, **kwargs):
+                    self.states.append(dict(state))
+                    noul = 0.3 if "detouring" in str(state) else 0.9
+                    return {"answers": {"on_track": {"noul": noul, "type": "noul"}},
+                            "model": "fake"}
+
+                @staticmethod
+                def decide(answers, policy, irreversible=False):
+                    return {"action": "proceed", "picks": {}}
+
+                @staticmethod
+                def load_policy():
+                    return {"templates": {"on_track": {"type": "noul", "instructions": "on track?"}}}
+
+            fake = FakeAbJev()
+            from unittest.mock import patch
+            with patch.object(compare, "load_jev", return_value=fake):
+                result = compare.run(live=True, as_json=False, path=path, ab=True)
+            row = result["rows"][0]
+            self.assertEqual(row["after"]["noul"], 0.9)
+            self.assertEqual(row["baseline"]["pick"], "keep_detour")
+            self.assertEqual(row["baseline"]["noul"], 0.3)
+            # the baseline arm substitutes current_step (last_pick is
+            # stripped from the judge's view by side_state)
+            self.assertEqual(fake.states[-1]["current_step"], "keep detouring")
+
+    def test_run_live_without_ab_flag_skips_baseline(self) -> None:
+        cases = {
+            "cases": [
+                {
+                    "id": "ab1", "score": "on_track", "prompt": "p",
+                    "before": {}, "after": {},
+                    "ab": {"baseline_pick": "x", "baseline_step": "y"},
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.json"
+            path.write_text(json.dumps(cases), encoding="utf-8")
+
+            class F:
+                calls = 0
+
+                def post_systemone(self, state, questions, policy, **kwargs):
+                    self.calls += 1
+                    return {"answers": {"on_track": {"noul": 0.9, "type": "noul"}}}
+
+                @staticmethod
+                def decide(answers, policy, irreversible=False):
+                    return {"action": "proceed", "picks": {}}
+
+                @staticmethod
+                def load_policy():
+                    return {"templates": {"on_track": {"type": "noul", "instructions": "?"}}}
+
+            fake = F()
+            from unittest.mock import patch
+            with patch.object(compare, "load_jev", return_value=fake):
+                result = compare.run(live=True, as_json=False, path=path, ab=False)
+            self.assertNotIn("baseline", result["rows"][0])
+            self.assertEqual(fake.calls, 2)  # before + after only
+
+
+class AbCliTest(unittest.TestCase):
+    def run_cli(self, *argv: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(COMPARE), *argv],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_ab_flag_emits_delta_block_offline(self) -> None:
+        # offline --ab runs: baseline arms have no noul (not scored), the
+        # ab block + summary still emit
+        proc = self.run_cli("--ab", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertIn("ab", payload)
+        self.assertIn("summary", payload["ab"])
+
+
+class StreakTestNew(unittest.TestCase):
+    def test_update_streaks_counts_below_gate(self) -> None:
+        rows = [
+            {"id": "a", "after": {"noul": 0.5}},
+            {"id": "b", "after": {"noul": 0.9}},
+        ]
+        out = compare.update_streaks({}, rows, True, {"noul_yes": 0.7})
+        self.assertEqual(out["streaks"], {"a": 1, "b": 0})
+        out2 = compare.update_streaks({"a": 2}, rows, True, {"noul_yes": 0.7})
+        self.assertEqual(out2["streaks"]["a"], 3)
+        self.assertIn("case a ниже гейта 3 прогонов подряд", out2["flags"])
+        self.assertEqual(out2["streaks"]["b"], 0)
+        self.assertFalse(any("case b " in f for f in out2["flags"]))
+
+    def test_update_streaks_per_case_gate(self) -> None:
+        rows = [{"id": "x", "min_noul": 0.4, "after": {"noul": 0.5}}]
+        out = compare.update_streaks({}, rows, True, {"noul_yes": 0.7})
+        self.assertEqual(out["streaks"]["x"], 0)
+
+    def test_update_streaks_offline_never_flags(self) -> None:
+        rows = [{"id": "a", "after": {}}]
+        out = compare.update_streaks({"a": 5}, rows, False)
+        self.assertEqual(out["streaks"]["a"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

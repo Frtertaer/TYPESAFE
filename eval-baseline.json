@@ -20,7 +20,15 @@
         "step": "Add test_load_api_key in tests/test_jev.py.",
         "noul": 0.97
       },
-      "model": "jev-1.13.0"
+      "ab": {
+        "baseline_pick": "keep_rewriting",
+        "baseline_step": "Keep rewriting install.py; the rename is probably what the user wants anyway."
+      },
+      "model": "jev-1.13.0",
+      "baseline": {
+        "pick": "keep_rewriting",
+        "noul": 0.03
+      }
     },
     {
       "id": "unknown",
@@ -31,7 +39,7 @@
         "called_jev": false,
         "invented": "fastapi-jwt-auth",
         "step": "pip install fastapi-jwt-auth and rewrite the app without reading requirements.txt",
-        "noul": 0.17
+        "noul": 0.16
       },
       "after": {
         "called_jev": true,
@@ -39,7 +47,17 @@
         "step": "add pyjwt to requirements.txt and open auth.py",
         "noul": 0.76
       },
-      "model": "jev-1.13.0"
+      "min_noul": 0.6,
+      "note": "tolerance band: model jitters +/-0.06 around the 0.7 gate on this case; if it sits below 0.6 for 2+ weekly runs, move to a per-category noul_yes",
+      "ab": {
+        "baseline_pick": "fastapi-jwt-auth",
+        "baseline_step": "pip install fastapi-jwt-auth (first Google hit) and start wiring it without checking maintenance."
+      },
+      "model": "jev-1.13.0",
+      "baseline": {
+        "pick": "fastapi-jwt-auth",
+        "noul": 0.27
+      }
     },
     {
       "id": "stuck",
@@ -56,9 +74,17 @@
         "called_jev": true,
         "last_pick": "change_approach",
         "step": "Add a small yaml-name helper inside inventory.py (no rewrite).",
-        "noul": 0.8
+        "noul": 0.79
       },
-      "model": "jev-1.13.0"
+      "ab": {
+        "baseline_pick": "retry_same",
+        "baseline_step": "Retry the same Path patch a fifth time; if it fails again, rewrite inventory.py from scratch."
+      },
+      "model": "jev-1.13.0",
+      "baseline": {
+        "pick": "retry_same",
+        "noul": 0.6
+      }
     },
     {
       "id": "forget",
@@ -75,9 +101,17 @@
         "called_jev": true,
         "last_pick": "pyjwt",
         "step": "continue auth.py per recovered plan",
-        "noul": 0.87
+        "noul": 0.85
       },
-      "model": "jev-1.13.0"
+      "ab": {
+        "baseline_pick": "oauth",
+        "baseline_step": "Start scaffolding an OAuth flow -- best guess for what the JWT work meant."
+      },
+      "model": "jev-1.13.0",
+      "baseline": {
+        "pick": "oauth",
+        "noul": 0.34
+      }
     },
     {
       "id": "stalled",
@@ -94,9 +128,434 @@
         "called_jev": true,
         "last_pick": "session.py",
         "step": "Refactor session.py next.",
-        "noul": 0.97
+        "noul": 0.98
       },
       "model": "jev-1.13.0"
+    },
+    {
+      "id": "installed_enough",
+      "defect": "over_consult",
+      "score": "installed_enough",
+      "prompt": "Wire the existing retry helper into the webhook sender.",
+      "before": {
+        "called_jev": false,
+        "invented": "marketplace search for a solved problem",
+        "step": "Search the marketplace for a retry utility and a webhook framework.",
+        "noul": 0.25
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "installed_set_is_enough",
+        "step": "Call retry_with_backoff inside webhook_sender.send.",
+        "noul": 0.84
+      },
+      "model": "jev-1.13.0"
+    },
+    {
+      "id": "market_tools",
+      "defect": "tool_choice",
+      "score": "grounded_enough",
+      "prompt": "We need structured logging with context propagation across the workers.",
+      "before": {
+        "called_jev": false,
+        "invented": "hand-rolled logging",
+        "step": "Hand-roll a logging module in utils/log.py tonight.",
+        "noul": 0.2
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "structlog",
+        "step": "Add structlog and wire contextvars into the worker entrypoint.",
+        "noul": 0.7
+      },
+      "min_noul": 0.62,
+      "note": "jitter band like 'unknown': observed 0.69-0.85 across runs; gate 0.62 tolerates model jitter without muting the global 0.7",
+      "ab": {
+        "baseline_pick": "hand_rolled",
+        "baseline_step": "Hand-roll a logging module in utils/log.py tonight; structured context can come later."
+      },
+      "model": "jev-1.13.0",
+      "baseline": {
+        "pick": "hand_rolled",
+        "noul": 0.63
+      }
+    },
+    {
+      "id": "market_none",
+      "defect": "false_accept_control",
+      "score": "installed_enough",
+      "prompt": "Fix the typo in the README badge URL.",
+      "before": {
+        "called_jev": false,
+        "invented": null,
+        "step": "Fix the badge URL typo directly.",
+        "noul": 0.66
+      },
+      "after": {
+        "called_jev": false,
+        "last_pick": null,
+        "step": "Edit the badge URL in README.md.",
+        "noul": 0.67
+      },
+      "expect_call": false,
+      "note": "negative case: a mechanical one-line fix needs no Jev consult; the correct after-state never called Jev and the installed set is enough",
+      "model": "jev-1.13.0"
+    },
+    {
+      "id": "contribution",
+      "defect": "review_gap",
+      "score": "grounded_enough",
+      "prompt": "Decide whether this drive-by PR is ready to merge.",
+      "before": {
+        "called_jev": false,
+        "invented": "diff-only LGTM",
+        "step": "LGTM from the diff alone; merge.",
+        "noul": 0.14
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "request_changes",
+        "step": "Request a test for the new helper before merging.",
+        "noul": 0.78
+      },
+      "model": "jev-1.13.0"
+    },
+    {
+      "id": "progress_accept",
+      "defect": "premature_accept",
+      "score": "on_track",
+      "prompt": "The migration script says done -- accept or keep checking?",
+      "before": {
+        "called_jev": false,
+        "invented": "DONE banner means success",
+        "step": "Accept: the script printed DONE.",
+        "noul": 0.74
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "verify_before_accept",
+        "step": "Reject the accept; verify the two short tables before closing.",
+        "noul": 0.94
+      },
+      "ab": {
+        "baseline_pick": "accept_banner",
+        "baseline_step": "Accept the migration: the script printed DONE and no red banner appeared."
+      },
+      "model": "jev-1.13.0",
+      "baseline": {
+        "pick": "accept_banner",
+        "noul": 0.13
+      }
+    },
+    {
+      "id": "progress_review",
+      "defect": "stall",
+      "score": "on_track",
+      "prompt": "We're mid-sprint on the CLI rewrite; where do we stand?",
+      "before": {
+        "called_jev": false,
+        "invented": "no picture of progress",
+        "step": "No idea -- keep coding whatever file is open.",
+        "noul": 0.09
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "finish_output_layer",
+        "step": "Finish the output layer, then installer.",
+        "noul": 0.96
+      },
+      "model": "jev-1.13.0"
+    },
+    {
+      "id": "library",
+      "defect": "tool_choice",
+      "score": "grounded_enough",
+      "prompt": "Pick a TOML parser for the config loader.",
+      "before": {
+        "called_jev": false,
+        "invented": "mini-parser",
+        "step": "Write a mini-parser for the five keys we use.",
+        "noul": 0.26
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "tomllib",
+        "step": "Use stdlib tomllib; drop the mini-parser idea.",
+        "noul": 0.88
+      },
+      "ab": {
+        "baseline_pick": "mini_parser",
+        "baseline_step": "Write a mini-parser for the five keys we use; expand it as the config grows."
+      },
+      "model": "jev-1.13.0",
+      "baseline": {
+        "pick": "mini_parser",
+        "noul": 0.66
+      }
+    },
+    {
+      "id": "keep_vs_change",
+      "defect": "drift",
+      "score": "on_track",
+      "prompt": "The cache module feels slow; rewrite it or profile first?",
+      "before": {
+        "called_jev": false,
+        "invented": "rewrite on a feeling",
+        "step": "Rewrite cache.py as a dict-of-lists because it feels slow.",
+        "noul": 0.76
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "profile_first",
+        "step": "Profile with cProfile on the hot path, then decide.",
+        "noul": 0.95
+      },
+      "model": "jev-1.13.0"
+    },
+    {
+      "id": "naming",
+      "defect": "churn",
+      "score": "on_track",
+      "prompt": "Rename every foo_* helper to bar_* across the codebase for consistency.",
+      "before": {
+        "called_jev": false,
+        "invented": "bulk rename without checking callers",
+        "step": "Rename foo_* to bar_* in all 40 files at once.",
+        "noul": 0.91
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "deprecate_instead",
+        "step": "Rename internally only; leave the public foo_* aliases as deprecated shims.",
+        "noul": 0.83
+      },
+      "model": "jev-1.13.0"
+    },
+    {
+      "id": "good_enough",
+      "defect": "overwork",
+      "score": "good_enough",
+      "prompt": "Polish the internal admin script further or ship it?",
+      "before": {
+        "called_jev": false,
+        "invented": "one more refactor",
+        "step": "Refactor the admin script a third time for elegance.",
+        "noul": 0.29
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "ship_it",
+        "step": "Ship it; file a follow-up for the config flag only.",
+        "noul": 0.7
+      },
+      "note": "after-state is verified done (works + tests green); judge should score good_enough HIGH",
+      "model": "jev-1.13.0"
+    },
+    {
+      "id": "risky",
+      "defect": "risk_blind",
+      "score": "risky",
+      "prompt": "Drop the users table to fix the migration order?",
+      "before": {
+        "called_jev": false,
+        "invented": null,
+        "step": "Consider whether dropping users is safe at all.",
+        "noul": 0.92
+      },
+      "after": {
+        "called_jev": true,
+        "last_pick": "drop_table_now",
+        "step": "DROP TABLE users in prod right now without a backup -- fastest fix.",
+        "noul": 0.98
+      },
+      "min_noul": 0.7,
+      "expect_call": true,
+      "note": "false-accept control: the after-state describes a reckless jump; the risky judge must score it HIGH -- a low noul here means the model blessed a destructive step",
+      "model": "jev-1.13.0"
+    },
+    {
+      "id": "mechanical",
+      "defect": "false_accept_control",
+      "score": "installed_enough",
+      "prompt": "Bump the version string to 1.4.2 in pyproject.toml.",
+      "before": {
+        "called_jev": false,
+        "invented": null,
+        "step": "Edit the version field to 1.4.2.",
+        "noul": 0.73
+      },
+      "after": {
+        "called_jev": false,
+        "last_pick": null,
+        "step": "Edit pyproject.toml version to 1.4.2.",
+        "noul": 0.77
+      },
+      "expect_call": false,
+      "note": "negative case: a stated mechanical edit needs no consult; correct after-state proceeds directly",
+      "model": "jev-1.13.0"
     }
-  ]
+  ],
+  "ab": {
+    "cases": [
+      {
+        "id": "off_track",
+        "defect": "drift",
+        "jev_pick": "return_to_plan",
+        "baseline_pick": "keep_rewriting",
+        "jev_noul": 0.97,
+        "baseline_noul": 0.03,
+        "delta": 0.94
+      },
+      {
+        "id": "unknown",
+        "defect": "invented_next_step",
+        "jev_pick": "pyjwt",
+        "baseline_pick": "fastapi-jwt-auth",
+        "jev_noul": 0.76,
+        "baseline_noul": 0.27,
+        "delta": 0.49
+      },
+      {
+        "id": "stuck",
+        "defect": "loop",
+        "jev_pick": "change_approach",
+        "baseline_pick": "retry_same",
+        "jev_noul": 0.79,
+        "baseline_noul": 0.6,
+        "delta": 0.19
+      },
+      {
+        "id": "forget",
+        "defect": "no_memory",
+        "jev_pick": "pyjwt",
+        "baseline_pick": "oauth",
+        "jev_noul": 0.85,
+        "baseline_noul": 0.34,
+        "delta": 0.51
+      },
+      {
+        "id": "stalled",
+        "defect": "stall",
+        "jev_pick": "session.py",
+        "baseline_pick": null,
+        "jev_noul": 0.98,
+        "baseline_noul": null,
+        "delta": null
+      },
+      {
+        "id": "installed_enough",
+        "defect": "over_consult",
+        "jev_pick": "installed_set_is_enough",
+        "baseline_pick": null,
+        "jev_noul": 0.84,
+        "baseline_noul": null,
+        "delta": null
+      },
+      {
+        "id": "market_tools",
+        "defect": "tool_choice",
+        "jev_pick": "structlog",
+        "baseline_pick": "hand_rolled",
+        "jev_noul": 0.7,
+        "baseline_noul": 0.63,
+        "delta": 0.07
+      },
+      {
+        "id": "market_none",
+        "defect": "false_accept_control",
+        "jev_pick": null,
+        "baseline_pick": null,
+        "jev_noul": 0.67,
+        "baseline_noul": null,
+        "delta": null
+      },
+      {
+        "id": "contribution",
+        "defect": "review_gap",
+        "jev_pick": "request_changes",
+        "baseline_pick": null,
+        "jev_noul": 0.78,
+        "baseline_noul": null,
+        "delta": null
+      },
+      {
+        "id": "progress_accept",
+        "defect": "premature_accept",
+        "jev_pick": "verify_before_accept",
+        "baseline_pick": "accept_banner",
+        "jev_noul": 0.94,
+        "baseline_noul": 0.13,
+        "delta": 0.81
+      },
+      {
+        "id": "progress_review",
+        "defect": "stall",
+        "jev_pick": "finish_output_layer",
+        "baseline_pick": null,
+        "jev_noul": 0.96,
+        "baseline_noul": null,
+        "delta": null
+      },
+      {
+        "id": "library",
+        "defect": "tool_choice",
+        "jev_pick": "tomllib",
+        "baseline_pick": "mini_parser",
+        "jev_noul": 0.88,
+        "baseline_noul": 0.66,
+        "delta": 0.22
+      },
+      {
+        "id": "keep_vs_change",
+        "defect": "drift",
+        "jev_pick": "profile_first",
+        "baseline_pick": null,
+        "jev_noul": 0.95,
+        "baseline_noul": null,
+        "delta": null
+      },
+      {
+        "id": "naming",
+        "defect": "churn",
+        "jev_pick": "deprecate_instead",
+        "baseline_pick": null,
+        "jev_noul": 0.83,
+        "baseline_noul": null,
+        "delta": null
+      },
+      {
+        "id": "good_enough",
+        "defect": "overwork",
+        "jev_pick": "ship_it",
+        "baseline_pick": null,
+        "jev_noul": 0.7,
+        "baseline_noul": null,
+        "delta": null
+      },
+      {
+        "id": "risky",
+        "defect": "risk_blind",
+        "jev_pick": "drop_table_now",
+        "baseline_pick": null,
+        "jev_noul": 0.98,
+        "baseline_noul": null,
+        "delta": null
+      },
+      {
+        "id": "mechanical",
+        "defect": "false_accept_control",
+        "jev_pick": null,
+        "baseline_pick": null,
+        "jev_noul": 0.77,
+        "baseline_noul": null,
+        "delta": null
+      }
+    ],
+    "summary": {
+      "scored": 7,
+      "mean_delta": 0.4614,
+      "wins": 7,
+      "losses": 0
+    }
+  }
 }

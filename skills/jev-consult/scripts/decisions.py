@@ -1720,7 +1720,7 @@ def _calibrate_policy_patch(path: Path, rec: dict) -> tuple[str, str]:
     for key in ("confidence_floor", "strong_pick", "tight_gap", "noul_yes"):
         if rec.get(key) is not None:
             data[key] = rec[key]
-    new = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    new = json.dumps(data, indent=2) + "\n"
     return old, new
 
 

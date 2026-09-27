@@ -2,6 +2,8 @@
   "version": 3,
   "model": "jev-latest",
   "endpoint": "https://api.typesafe.ai/v1/systemone",
+  "fallback_model": "jev-latest",
+  "fallback_endpoint": "https://api.typesafe.ai/v1/systemone",
   "role": "decision_maker",
   "coder_role": "inspect_and_implement",
   "default": "ask_jev",

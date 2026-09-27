@@ -2,25 +2,30 @@ name: release-exe
 
 # Builds jev-setup-windows-amd64.exe (+ the pyz/cmd fallbacks) with
 # PyInstaller. Windows-only by nature: PyInstaller cannot cross-compile.
-# Manual trigger (workflow_dispatch) and version tags; attach the
-# artifacts to a GitHub Release or grab them from the run's artifacts.
+# Manual trigger (workflow_dispatch) publishes to the rolling `nightly`
+# release; version-tag pushes publish to a release for that tag. Either
+# way the newest run's release is marked "latest" so the README
+# releases/latest/download/... links keep resolving.
 
 on:
   workflow_dispatch:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: write
+
 jobs:
   build-exe:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: python -m pip install --disable-pip-version-check "pyinstaller==6.21.0"
       - run: python scripts/package_release.py --exe
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: jev-setup
           path: |
@@ -28,3 +33,23 @@ jobs:
             dist/jev-setup.pyz
             dist/jev-setup.cmd
           if-no-files-found: error
+      - name: publish assets to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF#refs/tags/}"
+          else
+            tag="nightly"
+          fi
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title "$tag" --notes "jev-setup bundle" --latest=false
+          fi
+          gh release upload "$tag" \
+            dist/jev-setup-windows-amd64.exe \
+            dist/jev-setup.pyz \
+            dist/jev-setup.cmd \
+            --clobber
+          gh release edit "$tag" --latest

@@ -107,7 +107,9 @@ class EmptyStdinTests(unittest.TestCase):
                 input="",
                 capture_output=True,
                 text=True,
-                timeout=60,
+                # smoke.py runs the whole pack; its bound scales with the
+                # suite, not with a one-shot script
+                timeout=120 if script.name == "smoke.py" else 60,
             )
             with self.subTest(script=script.name):
                 self.assertNotIn(

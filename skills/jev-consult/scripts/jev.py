@@ -9,10 +9,12 @@ import json
 import math
 import os
 import re
+import socket
 import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -296,6 +298,19 @@ def env_timeout() -> float | None:
     return value if value > 0 else None
 
 
+def resolve_noul_yes(policy: dict[str, Any], qid: str | None = None) -> float:
+    """noul_yes may be a number (all questions) or {default, <qid>: ...}
+    for per-category gates. Unknown/blank qids fall back to `default`,
+    then to the literal default."""
+    raw = policy_get(policy, "noul_yes", ("noul", "yes_above"), default=0.7)
+    if isinstance(raw, dict):
+        picked = raw.get(qid) if qid else None
+        if picked is None:
+            picked = raw.get("default")
+        return _pfloat(picked, _pfloat(raw.get("default"), 0.7))
+    return _pfloat(raw, 0.7)
+
+
 def post_systemone(
     state: Any,
     questions: dict[str, Any],
@@ -304,18 +319,85 @@ def post_systemone(
     timeout: float = 60,
     retries: int = 1,
 ) -> dict[str, Any]:
+    primary_model = model or policy.get("model") or "jev-latest"
+    try:
+        result = _post_once(
+            state,
+            questions,
+            policy,
+            endpoint=policy.get("endpoint") or ENDPOINT_DEFAULT,
+            model=primary_model,
+            timeout=timeout,
+            retries=retries,
+        )
+    except _RetryableFailure as err:
+        # Primary exhausted its 5xx/timeout retries (or the endpoint is
+        # dead outright) — one shot on the fallback pair when policy
+        # defines it. Records the hop so decisions.jsonl marks the
+        # entry note=model_fallback.
+        fb_endpoint = policy.get("fallback_endpoint")
+        fb_model = policy.get("fallback_model") or primary_model
+        primary_endpoint = policy.get("endpoint") or ENDPOINT_DEFAULT
+        if not fb_endpoint or fb_endpoint == primary_endpoint:
+            raise err.original from None
+        try:
+            result = _post_once(
+                state,
+                questions,
+                policy,
+                endpoint=fb_endpoint,
+                model=fb_model,
+                timeout=timeout,
+                retries=0,
+            )
+        except _RetryableFailure as fb_err:
+            # unwrap: callers expect SystemExit, not the wrapper
+            raise fb_err.original from None
+        result["model"] = result.get("model") or fb_model
+        result["note"] = "model_fallback"
+    return result
+
+
+class _RetryableFailure(Exception):
+    """5xx/timeout/dead-endpoint after all retries — try the fallback.
+
+    `original` is the SystemExit the caller would have raised, kept so
+    a missing fallback surfaces the same error text as before."""
+
+    def __init__(self, original):
+        super().__init__(str(original))
+        self.original = original
+
+
+def _post_once(
+    state: Any,
+    questions: dict[str, Any],
+    policy: dict[str, Any],
+    endpoint: str,
+    model: str,
+    timeout: float,
+    retries: int,
+) -> dict[str, Any]:
     key = load_api_key()
     payload = {
         "state": state,
-        "model": model or policy.get("model") or "jev-latest",
+        "model": model,
         "questions": questions,
     }
     text = json.dumps(payload, ensure_ascii=False)
     if SECRET_RE.search(text) or (key and key in text):
         raise SystemExit("Jev request blocked: suspected credential in state/questions")
     data = text.encode("utf-8")
+    host = urllib.parse.urlparse(endpoint).hostname or ""
+    scheme = urllib.parse.urlparse(endpoint).scheme.lower()
+    loopback = host == "localhost" or host.startswith("127.") or host == "::1"
+    if scheme == "http" and not loopback:
+        raise SystemExit(
+            "Jev endpoint refused: plain http would send the API key "
+            "unencrypted (loopback stubs are allowed)"
+        )
     request = urllib.request.Request(
-        policy.get("endpoint") or ENDPOINT_DEFAULT,
+        endpoint,
         data=data,
         method="POST",
         headers={
@@ -335,14 +417,25 @@ def post_systemone(
         except urllib.error.HTTPError as err:
             if 300 <= err.code < 400:
                 raise SystemExit("Jev redirect blocked (HTTP %d)" % err.code) from None
-            if (err.code == 429 or err.code >= 500) and attempts < retries:
-                attempts += 1
-                time.sleep(2)
-                continue
+            if err.code == 429 or err.code >= 500:
+                if attempts < retries:
+                    attempts += 1
+                    time.sleep(2)
+                    continue
+                if err.code >= 500:
+                    raise _RetryableFailure(
+                        SystemExit("Jev HTTP %s (retries exhausted)" % err.code)
+                    ) from None
             raw = err.read().decode("utf-8", errors="replace")
             raise SystemExit("Jev HTTP %s: %s" % (err.code, redact(raw)[:500])) from None
         except urllib.error.URLError as err:
-            raise SystemExit("Jev network error: %s" % err.reason) from None
+            raise _RetryableFailure(
+                SystemExit("Jev network error: %s" % err.reason)
+            ) from None
+        except (TimeoutError, socket.timeout):
+            raise _RetryableFailure(
+                SystemExit("Jev network error: timed out")
+            ) from None
     try:
         parsed = json.loads(body)
     except ValueError as exc:
@@ -396,7 +489,6 @@ def decide(
         ),
         0.15,
     )
-    yes_above = _pfloat(policy_get(policy, "noul_yes", ("noul", "yes_above"), default=0.7), 0.7)
     no_below = _pfloat(policy_get(policy, "noul_no", ("noul", "no_below"), default=0.3), 0.3)
     score_floor = _pfloat(
         policy_get(
@@ -469,6 +561,7 @@ def decide(
                 action = "escalate"
                 continue
             picks[qid] = probability
+            yes_above = resolve_noul_yes(policy, qid)
             if probability >= yes_above:
                 notes.append("%s: yes (%.3f)" % (qid, probability))
             elif probability <= no_below:
@@ -1137,6 +1230,79 @@ def cmd_self_test(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def cmd_feedback(args: argparse.Namespace) -> int:
+    """Append an override outcome record so decisions.py --acceptance can
+    pair it with the routing entry it answers to (same prompt_sha, or the
+    newest routing entry when --sha is omitted)."""
+    override = (getattr(args, "file", "") or "").strip()
+    inventory = None
+    try:
+        import inventory  # same-dir script (sys.path primed above)
+    except ImportError:
+        pass
+    if override:
+        path: Path | None = Path(override)
+    elif inventory is not None:
+        path = inventory.decisions_log_path()
+    else:
+        env = os.environ.get("JEV_CONSULT_LOG", "").strip()
+        if env == "0":
+            path = None
+        elif env:
+            path = Path(env)
+        else:
+            home = Path(
+                os.environ.get("USERPROFILE") or os.environ.get("HOME") or Path.home()
+            )
+            path = home / ".cache" / "jev-consult" / "decisions.jsonl"
+    if path is None:
+        emit(
+            {
+                "feedback": args.verdict,
+                "prompt_sha": None,
+                "written": False,
+                "note": "decisions log disabled (JEV_CONSULT_LOG=0)",
+            }
+        )
+        return 0
+    target_sha = (getattr(args, "sha", "") or "").strip()
+    if not target_sha and path.is_file():
+        try:
+            for raw in reversed(path.read_text(encoding="utf-8", errors="replace").splitlines()):
+                try:
+                    row = json.loads(raw)
+                except ValueError:
+                    continue
+                if isinstance(row, dict) and row.get("prompt_sha") and str(row.get("jev_status") or "") not in ("fill", "feedback"):
+                    target_sha = str(row["prompt_sha"])
+                    break
+        except OSError:
+            pass
+    harness = (getattr(args, "harness", "") or "").strip()
+    entry = {
+        "ts": int(time.time()),
+        "harness": harness or "manual",
+        "jev_status": "feedback",
+        "feedback": args.verdict,
+        "prompt_sha": target_sha or None,
+        "winner": (getattr(args, "winner", "") or "").strip() or None,
+    }
+    if inventory is not None:
+        if not inventory.append_decision(entry, path):
+            sys.stderr.write("feedback: cannot append %s\n" % path)
+            return 1
+    else:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError as exc:
+            sys.stderr.write("feedback: cannot append %s: %s\n" % (path, exc))
+            return 1
+    emit({"feedback": args.verdict, "prompt_sha": entry["prompt_sha"], "file": str(path)})
+    return 0
+
+
 def cmd_scaffold(args: argparse.Namespace) -> int:
     policy = load_policy(args.policy)
     if getattr(args, "list", False):
@@ -1411,6 +1577,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Validate options + lint without writing --out; prints {dry_run, out, request} JSON",
     )
     scaffold.set_defaults(func=cmd_scaffold)
+    fb = sub.add_parser(
+        "feedback",
+        help="Append a human override record to decisions.jsonl: --feedback accepted|rejected",
+    )
+    fb.add_argument(
+        "verdict",
+        choices=["accepted", "rejected"],
+        help="accepted: Jev's pick was used; rejected: the human/coder overrode it",
+    )
+    fb.add_argument("--sha", default="", help="prompt_sha of the routing record this overrides (default: newest entry)")
+    fb.add_argument("--harness", default="", help="harness tag (default: auto or 'manual')")
+    fb.add_argument("--winner", default="", help="what was actually used instead (rejected only)")
+    fb.add_argument("--file", default="", help="decisions.jsonl path override (default: JEV_CONSULT_LOG or ~/.cache/jev-consult/decisions.jsonl)")
+    fb.set_defaults(func=cmd_feedback)
     selftest = sub.add_parser(
         "self-test",
         help="Offline scaffold+lint round-trip in a temp dir; exit 1 on failure",

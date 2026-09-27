@@ -105,6 +105,34 @@ def observed_consult(case: dict[str, Any], pool: list[dict]) -> bool | None:
         return None
 
 
+def observed_route(case: dict[str, Any], pool: list[dict]) -> str | None:
+    """The hook's route label for the case's prompt — the same branch order
+    inventory_hook.handle() applies: 'explicit' (a single named item wins
+    without a Jev call), 'explicit_consult' (a policy.json
+    explicit_consult_tokens phrase matched — the consult bypass), 'idf'
+    (shortlist only) or 'none' (nothing shortlisted). Returns None when
+    inventory cannot load here."""
+    prompt = str(case.get("prompt") or "").strip()
+    if not prompt:
+        return None
+    try:
+        inv = load_inventory()
+        hits = inv.explicit_mentions(prompt, pool)
+        if len(hits) == 1:
+            return "explicit"
+        if inv.explicit_consult(prompt):
+            return "explicit_consult"
+        picked = inv.shortlist(
+            pool,
+            prompt,
+            inv.hook_limit(),
+            [str(h.get("name") or "") for h in hits],
+        )
+        return "idf" if picked else "none"
+    except Exception:
+        return None
+
+
 def cases_path() -> Path:
     return HERE.parent / "examples" / "compare-cases.json"
 
@@ -128,6 +156,12 @@ def load_cases(path: Path | str | None = None) -> dict[str, Any]:
             raise SystemExit(
                 "case %r: expect_call must be a JSON boolean — a truthy string "
                 "silently reads as 'call expected'" % case.get("id")
+            )
+        if "explicit_consult" in case and not isinstance(case["explicit_consult"], bool):
+            raise SystemExit(
+                "case %r: explicit_consult must be a JSON boolean — the case "
+                "marks whether the prompt takes the explicit_consult route"
+                % case.get("id")
             )
     return data
 
@@ -250,7 +284,7 @@ def row_offline(case: dict[str, Any]) -> dict[str, Any]:
             "step": after.get("current_step"),
         },
     }
-    for key in ("min_noul", "max_noul", "expect_call", "note", "ab"):
+    for key in ("min_noul", "max_noul", "expect_call", "explicit_consult", "note", "ab"):
         if key in case:
             row[key] = case[key]
     return row
@@ -394,6 +428,26 @@ def strict_failures(
     for row in rows:
         cid = str(row.get("id") or "?")
         after = row.get("after") or {}
+        want_consult = row.get("explicit_consult")
+        if want_consult is not None:
+            # Consult-route gate: the prompt's observed route must match the
+            # declared flag — a consult-mention prompt that fires the bypass
+            # is a false-accept, an explicit ask that misses it a bypass bug.
+            observed_route = row.get("observed_route")
+            if want_consult is False and observed_route == "explicit_consult":
+                failures.append(
+                    "%s: consult-mention prompt took the explicit_consult "
+                    "route (false-accept)" % cid
+                )
+            elif (
+                want_consult is True
+                and observed_route is not None
+                and observed_route != "explicit_consult"
+            ):
+                failures.append(
+                    "%s: explicit-consult ask routed %s, expected "
+                    "explicit_consult (missed bypass)" % (cid, observed_route)
+                )
         expect_call = bool(row.get("expect_call", True))
         if expect_call and not after.get("called_jev"):
             failures.append("%s: guarded side did not call Jev" % cid)
@@ -462,6 +516,8 @@ def run(
     for index, case in enumerate(cases):
         if case.get("expect_call") is False:
             rows[index]["observed_call"] = observed_consult(case, routing_pool)
+        if "explicit_consult" in case:
+            rows[index]["observed_route"] = observed_route(case, routing_pool)
     live_error = ""
     if live:
         try:
@@ -901,6 +957,8 @@ def main(argv: list[str] | None = None) -> int:
             "case.before": {"required": True, "type": "object, unguarded outcome fields"},
             "case.after": {"required": True, "type": "object, guarded outcome fields"},
             "case.score": {"required": False, "type": "number, hand-tuned weight"},
+            "case.expect_call": {"required": False, "type": "bool, whether the prompt should spend a Jev call"},
+            "case.explicit_consult": {"required": False, "type": "bool, whether the prompt should take the explicit_consult route"},
         }
         if args.as_json:
             sys.stdout.write(json.dumps(rows, indent=2) + "\n")

@@ -4896,6 +4896,184 @@ class HtmlReportTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("no timestamped entries", out.read_text())
 
+    def test_html_report_history_section(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(
+                log,
+                [{"ts": 1700000000, "harness": "live-eval",
+                  "jev_status": "winner",
+                  "winner": {"kind": "skill", "name": "alpha"}}],
+            )
+            hist = Path(tmp) / "eval-history.jsonl"
+            write_log(
+                hist,
+                [
+                    {"ts": 1700000000, "run_url": "https://ci/run/1",
+                     "verdict": "PASS", "worst_noul": 0.91,
+                     "ab_mean_delta": 0.46, "streaks": {}},
+                    {"ts": 1700100000, "run_url": None,
+                     "verdict": "FAIL", "worst_noul": 0.52,
+                     "ab_mean_delta": -0.1, "streaks": {"a": 2}},
+                    "{bad json",
+                ],
+            )
+            out = Path(tmp) / "r.html"
+            proc = run_cli(
+                "--file", str(log), "--html", str(out),
+                "--history", str(hist),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("Run history", text)
+            self.assertIn("https://ci/run/1", text)
+            self.assertIn("FAIL", text)
+
+    def test_html_report_missing_history_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, [{"ts": 1700000000, "jev_status": "winner",
+                             "winner": {"kind": "skill", "name": "a"}}])
+            out = Path(tmp) / "r.html"
+            proc = run_cli(
+                "--file", str(log), "--html", str(out),
+                "--history", str(Path(tmp) / "absent.jsonl"),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertNotIn("Run history", out.read_text(encoding="utf-8"))
+
+
+class SummarizeByNoteTest(unittest.TestCase):
+    def test_by_note_counts_note_values(self) -> None:
+        stats = decisions.summarize(
+            [
+                {"jev_status": "winner", "note": "model_fallback",
+                 "winner": {"kind": "skill", "name": "a"}},
+                {"jev_status": "winner", "note": "model_fallback",
+                 "winner": {"kind": "skill", "name": "b"}},
+                {"jev_status": "winner",
+                 "winner": {"kind": "skill", "name": "c"}},
+                {"jev_status": "none", "note": "timeout"},
+            ]
+        )
+        self.assertEqual(
+            stats["by_note"], {"model_fallback": 2, "timeout": 1}
+        )
+
+    def test_by_note_report_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(
+                log,
+                [{"jev_status": "winner", "note": "model_fallback",
+                  "winner": {"kind": "skill", "name": "a"}}],
+            )
+            out = Path(tmp) / "r.md"
+            proc = run_cli("--file", str(log), "--report", str(out))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("by note", text)
+            self.assertIn("model_fallback", text)
+
+    def test_no_notes_means_no_by_note(self) -> None:
+        stats = decisions.summarize([{"jev_status": "none"}])
+        self.assertEqual(stats["by_note"], {})
+
+
+class AcceptanceGateTest(unittest.TestCase):
+    def _breaching_entries(self):
+        return [
+            {"ts": 1700000000, "jev_status": "winner",
+             "prompt_sha": "s1",
+             "winner": {"kind": "skill", "name": "a"},
+             "latency_ms": 50},
+            {"ts": 1700000001, "jev_status": "winner",
+             "prompt_sha": "s1",
+             "winner": {"kind": "skill", "name": "b"},
+             "latency_ms": 60},
+            {"ts": 1700000002, "jev_status": "feedback",
+             "feedback": "rejected", "prompt_sha": "s1"},
+            {"ts": 1700000003, "jev_status": "none",
+             "prompt_sha": "s2"},
+            {"ts": 1700000004, "jev_status": "none",
+             "prompt_sha": "s3"},
+        ]
+
+    def _clean_entries(self):
+        return [
+            {"ts": 1700000000, "jev_status": "winner",
+             "prompt_sha": "s1",
+             "winner": {"kind": "skill", "name": "a"},
+             "latency_ms": 50},
+            {"ts": 1700000001, "jev_status": "none",
+             "prompt_sha": "s2"},
+            {"ts": 1700000002, "jev_status": "winner",
+             "prompt_sha": "s3",
+             "winner": {"kind": "skill", "name": "c"},
+             "latency_ms": 60},
+        ]
+
+    def test_gate_missing_log_skips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_cli(
+                "--acceptance-gate",
+                "--file", str(Path(tmp) / "none.jsonl"),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("skipped", proc.stdout)
+
+    def test_gate_empty_log_skips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "empty.jsonl"
+            log.write_text("", encoding="utf-8")
+            proc = run_cli("--acceptance-gate", "--file", str(log))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("skipped", proc.stdout)
+
+    def test_gate_breach_exits_1(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "d.jsonl"
+            write_log(log, self._breaching_entries())
+            proc = run_cli("--acceptance-gate", "--file", str(log))
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("alert:", proc.stdout)
+            self.assertIn("override_rate", proc.stdout)
+
+    def test_gate_clean_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "d.jsonl"
+            write_log(log, self._clean_entries())
+            proc = run_cli("--acceptance-gate", "--file", str(log))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("acceptance-gate: ok", proc.stdout)
+
+    def test_gate_json_verdict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "d.jsonl"
+            write_log(log, self._breaching_entries())
+            proc = run_cli("--acceptance-gate", "--file", str(log), "--json")
+            self.assertEqual(proc.returncode, 1)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["verdict"], "FAIL")
+            self.assertTrue(data["alerts"])
+            self.assertIn("miss_rate_max", data["limits"])
+
+    def test_gate_policy_override_relaxed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "d.jsonl"
+            write_log(log, self._breaching_entries())
+            policy = Path(tmp) / "policy.json"
+            policy.write_text(
+                json.dumps({"miss_rate_max": 1.0,
+                            "override_rate_max": 1.0}),
+                encoding="utf-8",
+            )
+            proc = run_cli(
+                "--acceptance-gate", "--file", str(log),
+                env={"JEV_POLICY": str(policy)},
+            )
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

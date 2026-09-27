@@ -201,6 +201,7 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
     shortlists: list[float] = []
     prompts: dict[str, int] = {}
     stamps: list[float] = []
+    notes: dict[str, int] = {}
     explicit = strong = 0
     for item in entries:
         status = str(item.get("jev_status") or "unknown")
@@ -230,6 +231,9 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
         ts = item.get("ts")
         if isinstance(ts, (int, float)) and not isinstance(ts, bool):
             stamps.append(float(ts))
+        note = str(item.get("note") or "").strip()
+        if note:
+            notes[note] = notes.get(note, 0) + 1
     return {
         "total": len(entries),
         "bad_lines": bad,
@@ -239,6 +243,9 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
         "last_iso": _iso(max(stamps)) if stamps else None,
         "by_status": by_status,
         "by_harness": by_harness,
+        "by_note": dict(
+            sorted(notes.items(), key=lambda kv: (-kv[1], kv[0]))
+        ),
         "explicit": explicit,
         "strong_pick": strong,
         "need_skill": {
@@ -280,6 +287,13 @@ def format_stats(stats: dict) -> str:
         ),
         "explicit: %d  strong_pick: %d" % (stats["explicit"], stats["strong_pick"]),
     ]
+    if stats.get("by_note"):
+        lines.append(
+            "note: "
+            + ", ".join(
+                "%s=%d" % (k, v) for k, v in stats["by_note"].items()
+            )
+        )
     if stats.get("first_ts") is not None:
         duration = max(0.0, stats["last_ts"] - stats["first_ts"])
         days = duration / 86400
@@ -882,9 +896,34 @@ def format_acceptance(data: dict) -> str:
     return "\n".join(lines)
 
 
-def html_report(entries: list[dict], acceptance: dict) -> str:
+def load_history(path: Path) -> list[dict]:
+    """Read an eval-history.jsonl written by compare.py --history.
+    Unparseable or non-object lines are skipped; a missing file is an
+    empty history — the section then just does not render."""
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError:
+        return []
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(item, dict):
+            out.append(item)
+    return out
+
+
+def html_report(
+    entries: list[dict], acceptance: dict, history: list[dict] | None = None
+) -> str:
     """One static dependency-free page: status mix, acceptance metrics,
-    latency vs budget, weekly status mix (drift signal)."""
+    latency vs budget, weekly status mix (drift signal), and — when given
+    — the eval run-history trend."""
     import html as _html
 
     def esc(v) -> str:
@@ -935,6 +974,54 @@ def html_report(entries: list[dict], acceptance: dict) -> str:
         % (esc(q), r.get("picks", 0), r.get("applied", 0), r.get("overridden", 0))
         for q, r in sorted(by_q.items())
     )
+    history = history or []
+    deltas = [
+        abs(float(r["ab_mean_delta"]))
+        for r in history
+        if isinstance(r.get("ab_mean_delta"), (int, float))
+        and not isinstance(r.get("ab_mean_delta"), bool)
+    ]
+    max_delta = max(deltas) if deltas else 0.0
+
+    def _delta_bar(v) -> str:
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            return "-"
+        width = round(100 * abs(v) / max_delta, 1) if max_delta else 0.0
+        cls = "bar neg" if v < 0 else "bar"
+        return (
+            '<div class="%s"><span style="width:%.1f%%"></span></div>'
+            % (cls, width)
+        )
+
+    def _noul_bar(v) -> str:
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            return "-"
+        return (
+            '<div class="bar"><span style="width:%.1f%%"></span></div>'
+            % (round(100 * max(0.0, min(1.0, v)), 1))
+        )
+
+    def _num(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    hist_rows = "".join(
+        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+        % (
+            esc(_iso_full(r.get("ts")) or "?"),
+            (
+                '<a href="%s">run</a>' % esc(r["run_url"])
+                if isinstance(r.get("run_url"), str) and r["run_url"].startswith("http")
+                else "-"
+            ),
+            esc(str(r.get("verdict") or "?")),
+            "%.2f" % float(r["worst_noul"]) if _num(r.get("worst_noul")) else "-",
+            _noul_bar(r.get("worst_noul")),
+            "%+.3f" % float(r["ab_mean_delta"]) if _num(r.get("ab_mean_delta")) else "-",
+            _delta_bar(r.get("ab_mean_delta")),
+        )
+        for r in history
+        if isinstance(r, dict)
+    )
     return """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>jev-consult decisions report</title>
 <style>
@@ -944,6 +1031,7 @@ table{border-collapse:collapse;width:100%%;font-size:.9em}
 td,th{border:1px solid #ddd;padding:.3em .5em;text-align:left}
 .bar{background:#eee;border-radius:3px;height:.8em;min-width:120px}
 .bar span{display:block;background:#4a7fd4;height:100%%;border-radius:3px}
+.bar.neg span{background:#d44a4a}
 .kpis{display:flex;gap:1em;flex-wrap:wrap}
 .kpi{border:1px solid #ddd;border-radius:6px;padding:.7em 1.1em;min-width:130px}
 .kpi b{display:block;font-size:1.5em}
@@ -966,6 +1054,7 @@ td,th{border:1px solid #ddd;padding:.3em .5em;text-align:left}
 <p>n=%(lat_n)d &nbsp; p50=%(p50)s ms &nbsp; p95=%(p95)s ms &nbsp; over budget: %(over)s (%(over_share)s) &nbsp; budget: %(budget)s ms</p>
 <h2>Weekly status mix</h2>
 %(weekly_table)s
+%(history_section)s
 </body></html>
 """ % {
         "total": stats["total"],
@@ -998,6 +1087,13 @@ td,th{border:1px solid #ddd;padding:.3em .5em;text-align:left}
                 weekly_rows,
             )
             if weekly_rows else "<p class='small'>no timestamped entries</p>"
+        ),
+        "history_section": (
+            "<h2>Run history</h2>"
+            "<table><tr><th>run ts</th><th>run</th><th>verdict</th>"
+            "<th>worst noul</th><th></th><th>ab mean &Delta;</th><th></th></tr>"
+            "%s</table>" % hist_rows
+            if hist_rows else ""
         ),
     }
 
@@ -1109,6 +1205,17 @@ def _policy_path() -> Path:
     if env_path:
         return Path(env_path)
     return Path(__file__).resolve().parent.parent / "policy.json"
+
+
+def _policy_float(policy: dict, key: str, default: float | None) -> float | None:
+    """One numeric policy knob; a malformed value falls back to default."""
+    val = policy.get(key, default)
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
 
 
 def _policy_thresholds(policy: dict) -> dict[str, float]:
@@ -2071,6 +2178,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Write a static one-page HTML report (status mix, acceptance, latency, weekly buckets) to PATH — no JS, no deps",
     )
     parser.add_argument(
+        "--history",
+        metavar="PATH",
+        default="",
+        help="With --html: also render a 'run history' section from this eval-history.jsonl (compare.py --history output) — per-run verdict/worst_noul/ab_mean_delta rows with inline bars",
+    )
+    parser.add_argument(
+        "--acceptance-gate",
+        dest="acceptance_gate",
+        action="store_true",
+        help="Gate miss_rate/override_rate against policy.json miss_rate_max/override_rate_max (defaults 0.5/0.3): prints `alert:` lines and exits 1 on breach; a missing or empty decisions log skips cleanly (fail-open)",
+    )
+    parser.add_argument(
         "--calibrate",
         action="store_true",
         help="Replay filtered entries under candidate (confidence_floor, strong_pick) thresholds and recommend the pair minimising escalate+weak-winner share (--json/--md apply); combined with --harness-health it first drops harness x hour buckets whose error+timeout rate is degraded",
@@ -2406,6 +2525,66 @@ def main(argv: list[str] | None = None) -> int:
             except OSError as exc:
                 sys.stderr.write("cannot write %s: %s\n" % (args.out, exc))
         return 0
+    if getattr(args, "acceptance_gate", False):
+        # Fail-open gate: a disabled/missing/empty log skips cleanly —
+        # CI eval runs without a log artifact must not alert.
+        if path is None or (str(path) != "-" and not path.is_file()):
+            sys.stdout.write("acceptance-gate: skipped (no decisions log)\n")
+            return 0
+        gate_entries, _ = load_entries(path)
+        if not gate_entries:
+            sys.stdout.write("acceptance-gate: skipped (empty log)\n")
+            return 0
+        data = acceptance_report(
+            gate_entries,
+            override_window=max(1, int(getattr(args, "override_window", 10) or 10)),
+        )
+        policy = inventory._policy_dict()
+        miss_max = _policy_float(policy, "miss_rate_max", 0.5)
+        over_max = _policy_float(policy, "override_rate_max", 0.3)
+        alerts = []
+        miss = data.get("miss_rate")
+        over = data.get("override_rate")
+        if isinstance(miss, (int, float)) and miss_max is not None and miss > miss_max:
+            alerts.append(
+                "miss_rate %.3f > miss_rate_max %.3f (%d misses of %d routing entries)"
+                % (miss, miss_max, data.get("misses") or 0, data.get("routing_entries") or 0)
+            )
+        if isinstance(over, (int, float)) and over_max is not None and over > over_max:
+            alerts.append(
+                "override_rate %.3f > override_rate_max %.3f (%d of %d picks overridden)"
+                % (over, over_max, data.get("overridden") or 0, data.get("picks") or 0)
+            )
+        if args.json:
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "verdict": "FAIL" if alerts else "PASS",
+                        "alerts": alerts,
+                        "limits": {
+                            "miss_rate_max": miss_max,
+                            "override_rate_max": over_max,
+                        },
+                        "acceptance": data,
+                    },
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            sys.stdout.write(format_acceptance(data) + "\n")
+            sys.stdout.write(
+                "gate: miss_rate_max=%s override_rate_max=%s\n"
+                % (
+                    "%.2f" % miss_max if miss_max is not None else "off",
+                    "%.2f" % over_max if over_max is not None else "off",
+                )
+            )
+            for alert in alerts:
+                sys.stdout.write("alert: %s\n" % alert)
+            if not alerts:
+                sys.stdout.write("acceptance-gate: ok\n")
+        return 1 if alerts else 0
     if path is None:
         sys.stderr.write("decisions log disabled (JEV_CONSULT_LOG=0)\n")
         return 2
@@ -2909,9 +3088,19 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(rendered)
         return 0
     if getattr(args, "html", ""):
-        html = html_report(entries, acceptance_report(
-            entries, override_window=max(1, int(getattr(args, "override_window", 10) or 10))
-        ))
+        history = (
+            load_history(Path(getattr(args, "history", "")))
+            if getattr(args, "history", "")
+            else None
+        )
+        html = html_report(
+            entries,
+            acceptance_report(
+                entries,
+                override_window=max(1, int(getattr(args, "override_window", 10) or 10)),
+            ),
+            history=history,
+        )
         try:
             _atomic_write(Path(args.html), html)
         except OSError as exc:
@@ -3773,6 +3962,9 @@ def main(argv: list[str] | None = None) -> int:
         rep += ["| %s | %d |" % (k, v) for k, v in sorted(stats["by_status"].items())]
         rep += ["", "## by harness", "", "| harness | count |", "| --- | --- |"]
         rep += ["| %s | %d |" % (k, v) for k, v in sorted(stats["by_harness"].items())]
+        if stats.get("by_note"):
+            rep += ["", "## by note", "", "| note | count |", "| --- | --- |"]
+            rep += ["| %s | %d |" % (k, v) for k, v in stats["by_note"].items()]
         if stats["top_winners"]:
             rep += ["", "## top winners", "", "| winner | count |", "| --- | --- |"]
             rep += ["| %s | %d |" % (k, v) for k, v in stats["top_winners"].items()]

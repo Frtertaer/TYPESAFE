@@ -204,6 +204,42 @@ weekly `live-eval` краснеет на корректных кейсах, и �
   «повторный вопрос по тому же промпту с другим winner» дают
   override-rate в `decisions.py --acceptance`.
 
+## Эксплуатация: weekly drift-мониторинг
+
+`live-eval.yml` (понедельник 06:00 UTC + dispatch) прогоняет корпус против
+живого Jev и сам сигналит о дрейфе:
+
+- **baseline + streaks**: `eval-baseline.json` и `eval-history.jsonl`
+  кешируются между прогонами (`live-eval-baseline-*`). Streak — счётчик
+  подряд-прогонов кейса ниже гейта, лежит внутри baseline: ≥
+  `streak_warn_weeks` (2) — drift-флаг в отчёте, ≥ `streak_fail_weeks`
+  (3) — strict-фейл и FAIL-вердикт.
+- **drift-issue**: при FAIL, ошибке скоринга, streak-флаге или алерте
+  miss/override job открывает или комментирует один закреплённый issue
+  `live-eval drift watch` (label `drift`) — новые прогоны идут
+  комментариями, не новыми issue. Тело: ссылка на прогон, фейлы, per-case
+  noul, diff-вывод, собирается `.github/scripts/drift_issue.py`.
+- **miss/override-алерт**: `decisions.py --acceptance-gate` сверяет
+  miss_rate/override_rate eval-лога с `miss_rate_max`/`override_rate_max`
+  (0.5/0.3) из policy.json; лога нет → шаг пропускается, не падает
+  (fail-open).
+- **отчёты**: `eval-live.md` в job summary (acceptance + harness-health),
+  `eval-report.html` — одностраничный отчёт с секцией run history
+  (`decisions.py --html` + `--history eval-history.jsonl`). Артефакты —
+  в `compare-live` upload-artifact (`eval-*` файлы).
+
+Что делать на drift-issue:
+
+1. Открыть прогон по ссылке из issue — в `eval-live.md` видно, какие кейсы
+   упали, с каким noul, и строки `drift:`/`streak:`/`alert:`.
+2. Разовый провал (первый прогон, noul у гейта) — ждать следующий:
+   streak сбрасывается сам при возврате выше гейта.
+3. Хронический провал (streak-fail) или alert по miss/override — лечить
+   как в «Калибровка порогов»: сначала корпус/`templates`, порог — только
+   по данным `--calibrate`.
+4. Откат порога: `git checkout skills/jev-consult/policy.json` на нужный
+   коммит + `policy_lint.py --strict` — все гейты версионируются.
+
 ## Evidence
 
 Измерено на live-eval и накопленном `decisions.jsonl` (нояб. 2025+):

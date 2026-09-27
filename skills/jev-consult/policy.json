@@ -289,5 +289,9 @@
   "catalog_cache_max_queries": 50,
   "env_file_max_bytes": 65536,
   "sidecar_task_max_chars": 500,
-  "smoke_selftest_timeout_seconds": 60
+  "smoke_selftest_timeout_seconds": 60,
+  "streak_warn_weeks": 2,
+  "streak_fail_weeks": 3,
+  "miss_rate_max": 0.5,
+  "override_rate_max": 0.3
 }

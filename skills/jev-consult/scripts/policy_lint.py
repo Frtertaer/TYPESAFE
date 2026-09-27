@@ -61,7 +61,16 @@ REQUIRED_KEYS = (
 )
 
 # probability-like fields: finite numbers inside [0, 1]
-PROB_FIELDS = ("confidence_floor", "noul_yes", "noul_no", "noul_unsure", "strong_pick", "tight_gap")
+PROB_FIELDS = (
+    "confidence_floor",
+    "miss_rate_max",
+    "noul_yes",
+    "noul_no",
+    "noul_unsure",
+    "override_rate_max",
+    "strong_pick",
+    "tight_gap",
+)
 ESCALATE_PROB_FIELDS = ("confidence_below", "noul_near", "choice_gap_below")
 POSITIVE_INT_FIELDS = (
     "version",
@@ -72,6 +81,8 @@ POSITIVE_INT_FIELDS = (
     "catalog_cache_max_queries",
     "env_file_max_bytes",
     "sidecar_task_max_chars",
+    "streak_fail_weeks",
+    "streak_warn_weeks",
 )
 NONNEG_NUM_FIELDS = (
     "catalog_cache_seconds",
@@ -111,6 +122,8 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "hook_jev_timeout_seconds",
     "hook_max_prompt_chars",
     "hook_payload_max_bytes",
+    "miss_rate_max",
+    "override_rate_max",
     "progress",
     "scan_cache_seconds",
     "sidecar_task_max_chars",
@@ -119,6 +132,8 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "spill_max_bytes",
     "spill_max_files",
     "stop_words",
+    "streak_fail_weeks",
+    "streak_warn_weeks",
 )
 
 # --init prints this minimal lint-clean policy: every required key, the
@@ -426,6 +441,18 @@ def lint_policy(policy) -> list[dict]:
     hard = policy.get("question_hard_max")
     if _num(soft) and _num(hard) and not 0 < soft <= hard:
         add("P004", "error", "question_soft_max", "need 0 < soft_max <= hard_max (%r, %r)" % (soft, hard), "the soft cap warns above it; it must sit under the hard cap")
+    warn_weeks = policy.get("streak_warn_weeks")
+    fail_weeks = policy.get("streak_fail_weeks")
+    if _num(warn_weeks) and _num(fail_weeks) and not warn_weeks <= fail_weeks:
+        add(
+            "P004",
+            "error",
+            "streak_fail_weeks",
+            "need streak_warn_weeks <= streak_fail_weeks (%r !<= %r)"
+            % (warn_weeks, fail_weeks),
+            "a case cannot hit its fail streak before it warns",
+        )
+
     if isinstance(escalate, dict):
         near = escalate.get("noul_near")
         if _num(near) and _num(no_below) and _num(yes_above) and not no_below <= near <= yes_above:

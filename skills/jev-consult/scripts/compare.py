@@ -604,13 +604,30 @@ def format_ab_md(ab: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _week_threshold(policy: dict[str, Any], key: str, default: int) -> int:
+    try:
+        value = int(policy.get(key) or default)
+    except (TypeError, ValueError):
+        value = default
+    return value if value >= 0 else default
+
+
 def update_streaks(
     prior: dict[str, int], rows: list[dict[str, Any]], live: bool,
     policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Per-case consecutive-below-gate counter, carried across weekly runs
     inside the cached eval-baseline.json payload. A case at or above its
-    gate (or a negative case under max_noul) resets to 0."""
+    gate (or a negative case under max_noul) resets to 0.
+
+    policy.json thresholds: streak_warn_weeks (default 2) marks a case in
+    `flags` once it sits below its gate that many runs in a row;
+    streak_fail_weeks (default 0 = off) marks it in `fails` — the strict
+    gate and verdict treat those as failures."""
+    if not isinstance(policy, dict):
+        policy = {}
+    warn_weeks = max(1, _week_threshold(policy, "streak_warn_weeks", 2))
+    fail_weeks = _week_threshold(policy, "streak_fail_weeks", 0)
     streaks = dict(prior) if isinstance(prior, dict) else {}
     out = {}
     for row in rows:
@@ -636,9 +653,63 @@ def update_streaks(
         "flags": sorted(
             "case %s ниже гейта %d прогонов подряд" % (cid, n)
             for cid, n in out.items()
-            if n >= 2
+            if n >= warn_weeks
         ),
+        "fails": sorted(
+            "case %s ниже гейта %d прогонов подряд" % (cid, n)
+            for cid, n in out.items()
+            if fail_weeks and n >= fail_weeks
+        ),
+        "warn_weeks": warn_weeks,
+        "fail_weeks": fail_weeks,
     }
+
+
+def run_failures(result: dict[str, Any], live: bool) -> list[str]:
+    """The full eval gate: strict failures + baseline regressions + streak
+    fails. This is the list --strict exits on and --verdict mirrors."""
+    failures = strict_failures(
+        result["rows"], live, result.get("error") or ""
+    )
+    for entry in (result.get("diff") or {}).get("regressions", []):
+        failures.append(
+            "%s: regressed vs baseline (%s)" % (entry["id"], entry["why"])
+        )
+    for flag in (result.get("drift") or {}).get("fails") or []:
+        failures.append("streak: %s" % flag)
+    return failures
+
+
+def history_record(
+    result: dict[str, Any], failures: list[str], run_url: str
+) -> dict[str, Any]:
+    """One eval-history.jsonl record: {ts, run_url, verdict, worst_noul,
+    ab_mean_delta, streaks}. worst_noul is the lowest after-side noul
+    among floor-gated cases (negative cases excluded — a low score there
+    is the expected outcome)."""
+    nouls = [
+        float((row.get("after") or {}).get("noul"))
+        for row in result.get("rows") or []
+        if row.get("expect_call", True)
+        and isinstance((row.get("after") or {}).get("noul"), (int, float))
+        and not isinstance((row.get("after") or {}).get("noul"), bool)
+    ]
+    summary = (result.get("ab") or {}).get("summary") or {}
+    return {
+        "ts": int(time.time()),
+        "run_url": run_url or None,
+        "verdict": "PASS" if not failures else "FAIL",
+        "worst_noul": round(min(nouls), 4) if nouls else None,
+        "ab_mean_delta": summary.get("mean_delta"),
+        "streaks": (result.get("drift") or {}).get("streaks") or {},
+    }
+
+
+def append_history(path: Path, record: dict[str, Any]) -> None:
+    """Append one JSONL record; creates parent dirs. Raises OSError."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def _row_map(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -805,6 +876,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Score an extra arm per case: the guarded state with the case's baseline_pick substituted — the \"Jev vs without Jev\" delta table (needs --live; cases without an ab block are skipped).",
     )
     parser.add_argument("--baseline", metavar="PATH", default="", help="Write the current rows to PATH as a baseline file for a later --diff")
+    parser.add_argument("--history", metavar="PATH", default="", help="Append one JSONL run record ({ts, run_url, verdict, worst_noul, ab_mean_delta, streaks}) to PATH after scoring; skipped when the run errored or under --watch")
+    parser.add_argument("--run-url", metavar="URL", default="", help="Recorded as run_url on --history records (e.g. the CI run link)")
     parser.add_argument("--diff", metavar="PATH", default="", help="Load a --baseline file and add a diff block (regressions/improved/changed/added/removed) to the result payload; regressions also join the --strict failure list ('-' reads the baseline JSON from stdin; needs a file --cases, no --watch)")
     parser.add_argument("--trend", metavar="DIR", default="", help="Diff the current rows against every *.json baseline in DIR; adds a trend list ({file,ts,regressions,improved,changed,added,removed,unchanged} sorted by ts) to the payload and one stderr line per baseline")
     parser.add_argument(
@@ -1026,6 +1099,8 @@ def main(argv: list[str] | None = None) -> int:
         result["drift"] = update_streaks(prior_streaks, result["rows"], args.live, policy)
         for flag in result["drift"]["flags"]:
             sys.stderr.write("drift: %s\n" % flag)
+        for fail in result["drift"]["fails"]:
+            sys.stderr.write("drift-fail: %s\n" % fail)
         for entry in result["diff"]["regressions"]:
             sys.stderr.write(
                 "regression: %s (%s)\n" % (entry["id"], entry["why"])
@@ -1072,6 +1147,24 @@ def main(argv: list[str] | None = None) -> int:
                     row["removed"],
                 )
             )
+    if getattr(args, "history", ""):
+        # append before --failing narrows the rows: the record tracks the
+        # full run; an errored run (no scores) writes nothing, same rule
+        # as the baseline-save gate.
+        if not result.get("error"):
+            try:
+                append_history(
+                    Path(args.history),
+                    history_record(
+                        result, run_failures(result, args.live), args.run_url
+                    ),
+                )
+                sys.stderr.write("history: appended to %s\n" % args.history)
+            except OSError as exc:
+                sys.stderr.write("cannot append %s: %s\n" % (args.history, exc))
+                return 1
+        else:
+            sys.stderr.write("history: skipped (run errored)\n")
     if args.failing:
         failing_ids = {
             f.split(":", 1)[0]
@@ -1096,13 +1189,11 @@ def main(argv: list[str] | None = None) -> int:
             args.verdict,
             {
                 "cases": len(result["rows"]),
-                "failures": strict_failures(
-                    result["rows"], args.live, result.get("error") or ""
-                ),
+                "failures": run_failures(result, args.live),
             },
         )
     if args.report:
-        failures = strict_failures(result["rows"], args.live, result.get("error") or "")
+        failures = run_failures(result, args.live)
         # --report is the human-readable artifact: JSON goes there only when
         # the path itself asks for it (.json); '--json --report eval.md'
         # keeps the markdown table, with the payload going to --out/stdout.
@@ -1128,6 +1219,10 @@ def main(argv: list[str] | None = None) -> int:
                 + "".join(
                     "\n**drift flag**: %s\n" % flag
                     for flag in (result.get("drift") or {}).get("flags") or []
+                )
+                + "".join(
+                    "\n**drift fail**: %s\n" % flag
+                    for flag in (result.get("drift") or {}).get("fails") or []
                 )
                 + (
                     "\n## Jev vs baseline (ab)\n\n" + format_ab_md(result["ab"])
@@ -1216,11 +1311,7 @@ def main(argv: list[str] | None = None) -> int:
     if result.get("error"):
         sys.stderr.write("live scoring failed: %s\n" % result["error"])
     if args.strict:
-        failures = strict_failures(result["rows"], args.live, result.get("error") or "")
-        for entry in (result.get("diff") or {}).get("regressions", []):
-            failures.append(
-                "%s: regressed vs baseline (%s)" % (entry["id"], entry["why"])
-            )
+        failures = run_failures(result, args.live)
         for failure in failures:
             sys.stderr.write("strict: %s\n" % failure)
         return 1 if failures else 0

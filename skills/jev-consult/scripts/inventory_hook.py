@@ -31,6 +31,7 @@ from inventory import (  # noqa: E402
     SIDECAR_NAME,
     append_decision,
     clear_miss,
+    core_skill_tokens,
     detect_harness,
     explicit_mentions,
     format_miss_note,
@@ -100,7 +101,8 @@ def _avg_score(items: list[dict], pool: list[dict], text: str) -> float | None:
         return None
     try:
         df = name_df(pool or items, query)
-        vals = [score_item(item, query, df) for item in items]
+        core = core_skill_tokens()
+        vals = [score_item(item, query, df, core) for item in items]
     except Exception:
         return None
     if not vals:

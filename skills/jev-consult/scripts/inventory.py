@@ -681,10 +681,15 @@ def token_weight(token: str, df: dict[str, int]) -> int:
     return 0
 
 
-def score_item(item: dict, query: set[str], df: dict[str, int] | None = None) -> int:
+def score_item(
+    item: dict,
+    query: set[str],
+    df: dict[str, int] | None = None,
+    core: dict | None = None,
+) -> int:
     if not query:
         return 0
-    name_words = _name_tokens(item)
+    name_words = _name_tokens(item, core)
     desc_words = tokens(item.get("description") or "")
     score = 0
     for token in query:
@@ -780,8 +785,9 @@ def explain_item(item: dict, task: str, items: list[dict]) -> dict:
 def shortlist(items: list[dict], task: str, limit: int, extra: list[str]) -> list[dict]:
     query = tokens(task)
     df = name_df(items, query) if query else {}
+    core = core_skill_tokens()
     ranked = sorted(
-        ((score_item(item, query, df), item) for item in items),
+        ((score_item(item, query, df, core), item) for item in items),
         key=lambda row: (-row[0], row[1]["name"]),
     )
     rare = any(0 < df.get(token, 0) <= 8 for token in query)
@@ -2056,8 +2062,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.scores:
         query = tokens(args.task)
         df = name_df(items, query) if query else {}
+        core = core_skill_tokens()
         payload["shortlist"] = [
-            {**item, "score": score_item(item, query, df)} for item in picked
+            {**item, "score": score_item(item, query, df, core)} for item in picked
         ]
     if getattr(args, "explain", False):
         query = tokens(args.task)

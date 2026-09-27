@@ -229,6 +229,7 @@ Every threshold lives in `policy.json` (override with `JEV_POLICY=PATH`). The to
 | `require_hatch` | `true` | new questions must pass `question_lint` hatch criteria before use |
 | `escalate_if` | `{confidence_below, noul_near, choice_gap_below, irreversible}` | conditions that flip an answer to `escalate` |
 | `stop_words` | `[all, and, any, ...]` | tokens ignored by the IDF tokenizer |
+| `core_skill_tokens` | `{jev-consult: [decision, ...]}` | extra tokens scored like the skill/plugin name in the IDF shortlist |
 | `model` | `jev-latest` | model name sent on Jev API calls |
 | `version` | `3` | policy schema version (printed by `--version`) |
 | `catalogs` | `[skills.sh, ...]` | marketplace catalog list `inventory.py` reads |

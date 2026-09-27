@@ -466,6 +466,10 @@ def decide(
     irreversible: bool = False,
 ) -> dict[str, Any]:
     notes: list[str] = []
+    # reasons: machine-readable codes for what fired, in order. Readers map
+    # them onto routing outcomes (e.g. low_confidence -> confidence_floor
+    # preempt); notes stay the human-readable twin.
+    reasons: list[str] = []
     picks: dict[str, Any] = {}
     all_probs: dict[str, Any] = {}
     action = "proceed"
@@ -510,6 +514,7 @@ def decide(
     for qid, answer in answers.items():
         if not isinstance(answer, dict):
             notes.append("%s: malformed answer" % qid)
+            reasons.append("malformed_answer")
             action = "escalate"
             continue
         qtype = answer.get("type")
@@ -517,6 +522,7 @@ def decide(
             picked = answer.get("choice")
             if not isinstance(picked, str) or not picked:
                 notes.append("%s: malformed choice" % qid)
+                reasons.append("malformed_choice")
                 action = "escalate"
                 continue
             picks[qid] = picked
@@ -541,12 +547,14 @@ def decide(
             gap = top_two_gap(clean_probs)
             if confidence < conf_floor:
                 notes.append("%s: low confidence %.3f" % (qid, confidence))
+                reasons.append("low_confidence")
                 action = "escalate"
             elif gap < gap_floor:
                 notes.append(
                     "%s: top-two gap %.3f; using max probability (%s)"
                     % (qid, gap, picked)
                 )
+                reasons.append("tight_gap")
                 if irreversible and escalate_irrev:
                     action = "escalate"
             else:
@@ -558,6 +566,7 @@ def decide(
                 probability = math.nan
             if not _finite(probability, 0, 1):
                 notes.append("%s: malformed noul" % qid)
+                reasons.append("malformed_noul")
                 action = "escalate"
                 continue
             picks[qid] = probability
@@ -571,6 +580,7 @@ def decide(
                     "%s: uncertain noul=%.3f (0.5 means equally yes/no, not medium)"
                     % (qid, probability)
                 )
+                reasons.append("uncertain_noul")
                 if irreversible and noul_escalate and escalate_irrev:
                     action = "escalate"
         elif qtype == "score":
@@ -580,6 +590,7 @@ def decide(
                 score_value = math.nan
             if not math.isfinite(score_value):
                 notes.append("%s: malformed score" % qid)
+                reasons.append("malformed_score")
                 action = "escalate"
                 continue
             picks[qid] = score_value
@@ -591,17 +602,20 @@ def decide(
                 confidence = 0.0
             if confidence < score_floor:
                 notes.append("%s: low score confidence %.3f" % (qid, confidence))
+                reasons.append("low_score_confidence")
                 action = "escalate"
             else:
                 notes.append("%s: score=%s" % (qid, score_value))
         else:
             notes.append("%s: unknown answer type %s" % (qid, qtype))
+            reasons.append("unknown_type")
             action = "escalate"
     return {
         "action": action,
         "picks": picks,
         "probabilities": all_probs,
         "notes": notes,
+        "reasons": reasons,
         "irreversible": irreversible,
     }
 

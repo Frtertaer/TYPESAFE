@@ -50,6 +50,7 @@ def _parse_jsonl(text: str) -> tuple[list[dict], int]:
 # (required|optional)` text rows, or the object with --json.
 ENTRY_SCHEMA_ROWS = {
     "ts": {"required": True, "type": "number, epoch seconds"},
+    "schema": {"required": True, "type": "int, routing record schema version (2 since schema v2)"},
     "harness": {"required": True, "type": "string, emitting harness"},
     "prompt_sha": {"required": True, "type": "string, 12-hex sha256 prefix of the prompt"},
     "prompt_head": {"required": True, "type": "string, first 160 redacted chars"},
@@ -65,7 +66,10 @@ ENTRY_SCHEMA_ROWS = {
     "reason": {"required": True, "type": "string, why this status"},
     "question": {"required": True, "type": "string|null, Jev question asked"},
     "need": {"required": True, "type": "object|null, Jev ask payload"},
+    "need_skill_score": {"required": True, "type": "number|null, raw need_skill noul before the gate"},
     "probabilities": {"required": True, "type": "object{option: p}, Jev softmax"},
+    "pick_confidence": {"required": True, "type": "number|null, Jev confidence on the load_tools pick (the confidence_floor operand)"},
+    "escalate_reason": {"required": True, "type": "string|null, confidence_floor|need_gate|model_escalate|no_candidates|none_pick"},
     "shortlist_score_avg": {"required": True, "type": "number, mean IDF score of picks"},
     "winner": {"required": True, "type": "{kind, name}|null, applied pick"},
     "strong_pick": {"required": True, "type": "bool"},
@@ -75,9 +79,30 @@ ENTRY_SCHEMA_ROWS = {
     "stale_sidecar": {"required": True, "type": "bool, a stale sidecar was auto-pruned"},
     "sidecar_age_s": {"required": True, "type": "int|null, age of the pruned sidecar"},
     "note": {"required": False, "type": "string, extra note tag (written only when set)"},
+    "dedupe": {"required": False, "type": "bool, outcome reused from a fresh sidecar"},
     "fill": {"required": False, "type": "string, fill writer (apply|catalog|peer) — fill entries only"},
     "outcome": {"required": False, "type": "string, first word of the fill result — fill entries only"},
 }
+
+# Keys a schema-v2 routing record adds over v1. A routing entry that has none
+# of them is a v1 record: readers keep working and report it as schema_v1
+# rather than failing it on keys it could never have had.
+V2_ENTRY_KEYS = frozenset(
+    {"schema", "pick_confidence", "need_skill_score", "escalate_reason"}
+)
+
+
+def record_schema(item: dict) -> int:
+    """Routing-record schema version: 2 when the record marks itself or
+    carries any v2 field, else 1."""
+    try:
+        if int(item.get("schema")) >= 2:
+            return 2
+    except (TypeError, ValueError):
+        pass
+    if any(key in item for key in V2_ENTRY_KEYS if key != "schema"):
+        return 2
+    return 1
 
 
 _STDIN_TEXT: str | None = None
@@ -135,6 +160,7 @@ def verify_log(path: Path) -> dict:
                 "problems": [{"line": 0, "issue": "unreadable"}]}
     lines = text.splitlines()
     bad = 0
+    schema_v1 = 0
     prev_ts: float | None = None
     for lineno, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -163,7 +189,17 @@ def verify_log(path: Path) -> dict:
         if item.get("jev_status") == "fill":
             want = inventory.FILL_SCHEMA_ROWS
         elif "prompt_sha" in item or "shortlist" in item:
-            want = ENTRY_SCHEMA_ROWS
+            if record_schema(item) < 2:
+                # schema_v1 records predate the v2 fields; they owe the v1
+                # required set only and are reported, not failed.
+                schema_v1 += 1
+                want = {
+                    key: meta
+                    for key, meta in ENTRY_SCHEMA_ROWS.items()
+                    if key not in V2_ENTRY_KEYS
+                }
+            else:
+                want = ENTRY_SCHEMA_ROWS
         else:
             # minimal entry (tests, hand-written): ts/jev_status checks only
             want = {}
@@ -180,6 +216,7 @@ def verify_log(path: Path) -> dict:
         "ok": not problems,
         "entries": len(entries),
         "bad_lines": bad,
+        "schema_v1": schema_v1,
         "problems": problems,
     }
 
@@ -195,6 +232,8 @@ def _percentile(values: list[float], q: float) -> float | None:
 def summarize(entries: list[dict], bad: int = 0) -> dict:
     by_status: dict[str, int] = {}
     by_harness: dict[str, int] = {}
+    by_schema: dict[str, int] = {}
+    by_reason: dict[str, int] = {}
     winners: dict[str, int] = {}
     needs: list[float] = []
     latencies: list[float] = []
@@ -206,6 +245,12 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
     for item in entries:
         status = str(item.get("jev_status") or "unknown")
         by_status[status] = by_status.get(status, 0) + 1
+        if "prompt_sha" in item or "shortlist" in item:
+            schema_key = "schema_v%d" % record_schema(item)
+            by_schema[schema_key] = by_schema.get(schema_key, 0) + 1
+        reason = item.get("escalate_reason")
+        if isinstance(reason, str) and reason:
+            by_reason[reason] = by_reason.get(reason, 0) + 1
         harness = str(item.get("harness") or "unknown")
         by_harness[harness] = by_harness.get(harness, 0) + 1
         if item.get("explicit"):
@@ -243,6 +288,10 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
         "last_iso": _iso(max(stamps)) if stamps else None,
         "by_status": by_status,
         "by_harness": by_harness,
+        "by_schema": dict(sorted(by_schema.items())),
+        "by_escalate_reason": dict(
+            sorted(by_reason.items(), key=lambda kv: (-kv[1], kv[0]))
+        ),
         "by_note": dict(
             sorted(notes.items(), key=lambda kv: (-kv[1], kv[0]))
         ),
@@ -287,6 +336,21 @@ def format_stats(stats: dict) -> str:
         ),
         "explicit: %d  strong_pick: %d" % (stats["explicit"], stats["strong_pick"]),
     ]
+    if stats.get("by_schema"):
+        lines.append(
+            "schema: "
+            + ", ".join(
+                "%s=%d" % (k, v) for k, v in sorted(stats["by_schema"].items())
+            )
+        )
+    if stats.get("by_escalate_reason"):
+        lines.append(
+            "escalate_reason: "
+            + ", ".join(
+                "%s=%d" % (k, v)
+                for k, v in stats["by_escalate_reason"].items()
+            )
+        )
     if stats.get("by_note"):
         lines.append(
             "note: "
@@ -825,9 +889,17 @@ def acceptance_report(
     n_picks = len(picks)
     n_routing = len(routing)
     misses = sum(1 for e in routing if is_miss_entry(e))
+    escalate_reasons: dict[str, int] = {}
+    for e in routing:
+        reason = e.get("escalate_reason")
+        if isinstance(reason, str) and reason:
+            escalate_reasons[reason] = escalate_reasons.get(reason, 0) + 1
     return {
         "routing_entries": n_routing,
         "picks": n_picks,
+        "escalate_reasons": dict(
+            sorted(escalate_reasons.items(), key=lambda kv: (-kv[1], kv[0]))
+        ),
         "pick_rate": round(n_picks / n_routing, 4) if n_routing else None,
         "applied": applied,
         "applied_rate": round(applied / n_picks, 4) if n_picks else None,
@@ -873,6 +945,12 @@ def format_acceptance(data: dict) -> str:
         "strong_pick accuracy proxy: %s (%d strong picks)"
         % (_pct(data.get("strong_pick_not_overridden")), data.get("strong_picks") or 0),
     ]
+    reasons = data.get("escalate_reasons") or {}
+    if reasons:
+        lines.append(
+            "escalate_reason: "
+            + ", ".join("%s=%d" % (k, v) for k, v in reasons.items())
+        )
     lat = data.get("latency_ms") or {}
     if lat.get("n"):
         lines.append(
@@ -1152,6 +1230,11 @@ def harness_health(entries: list[dict]) -> list[dict]:
         )
         row["entries"] += 1
         status = str(item.get("jev_status") or "")
+        reason = item.get("escalate_reason")
+        if isinstance(reason, str) and reason:
+            row.setdefault("escalate_reasons", {})[reason] = (
+                row.setdefault("escalate_reasons", {}).get(reason, 0) + 1
+            )
         if _attempted_call(item, status):
             row["attempted"] += 1
             # errors/timeouts count only against calls that left the
@@ -1163,13 +1246,15 @@ def harness_health(entries: list[dict]) -> list[dict]:
     rows = []
     for r in buckets.values():
         n = r["attempted"]
-        rows.append(
-            dict(
-                r,
-                error_rate=round(r["errors"] / n, 4) if n else 0.0,
-                timeout_rate=round(r["timeouts"] / n, 4) if n else 0.0,
-            )
+        reasons = r.pop("escalate_reasons", None)
+        out = dict(
+            r,
+            error_rate=round(r["errors"] / n, 4) if n else 0.0,
+            timeout_rate=round(r["timeouts"] / n, 4) if n else 0.0,
         )
+        if reasons:
+            out["escalate_reasons"] = dict(sorted(reasons.items()))
+        rows.append(out)
     return sorted(rows, key=lambda r: (r["harness"], r["window"]))
 
 
@@ -1275,10 +1360,22 @@ def _probs_of(item: dict) -> dict[str, float] | None:
 
 
 def _need_of(item: dict) -> float | None:
-    need = item.get("need")
-    if not isinstance(need, (int, float)) or isinstance(need, bool):
+    for key in ("need", "need_skill_score"):
+        need = item.get(key)
+        if isinstance(need, (int, float)) and not isinstance(need, bool):
+            return float(need)
+    return None
+
+
+def _pick_confidence(item: dict) -> float | None:
+    """The recorded load_tools pick confidence (schema v2). None on v1
+    records — those never wrote it, so callers fall back to the top
+    probability as the floor operand."""
+    conf = item.get("pick_confidence")
+    if not isinstance(conf, (int, float)) or isinstance(conf, bool):
         return None
-    return float(need)
+    conf = float(conf)
+    return conf if conf == conf else None
 
 
 def _calibrate_eligible(item: dict) -> bool:
@@ -1298,7 +1395,10 @@ def _replay(item: dict, floor: float, strong: float, yes: float, no: float) -> s
     top = max(probs.values())
     load = max(probs.items(), key=lambda kv: kv[1])[0]
     in_shortlist = load in {str(x) for x in item.get("shortlist") or []}
-    if top < floor:
+    conf = _pick_confidence(item)
+    if conf is None:
+        conf = top  # v1 record: top probability approximates pick confidence
+    if conf < floor:
         return "escalate"  # jev.decide conf_floor preempts the picker
     if load in ("none", ""):
         return "none"
@@ -1535,6 +1635,11 @@ def calibrate(entries: list[dict], policy: dict | None = None,
         "entries": len(eligible),
         "skipped": skipped,
         "health_excluded": excluded,
+        # schema-v2 records carry the real pick confidence the floor saw;
+        # replay uses it instead of the top-probability approximation.
+        "pick_confidence_records": sum(
+            1 for e in eligible if _pick_confidence(e) is not None
+        ),
         "degraded_buckets": [
             {"harness": h, "window": w} for h, w in sorted(degraded)
         ] if degraded else [],
@@ -1634,6 +1739,11 @@ def format_calibrate(report: dict) -> str:
             report["cost"]["recommended"],
         )
     )
+    if report.get("pick_confidence_records"):
+        lines.append(
+            "pick_confidence recorded on %d/%d entries — confidence_floor replayed against the real operand"
+            % (report["pick_confidence_records"], report["entries"])
+        )
     if report.get("at_boundary"):
         lines.append("warning: hit grid boundary for %s" % ", ".join(report["at_boundary"]))
     return "\n".join(lines)
@@ -1677,6 +1787,7 @@ def format_health(rows: list[dict]) -> str:
     lines = [
         "harness     window               entries  attempted  errors  timeouts  error_rate  timeout_rate"
     ]
+    reasons: dict[str, int] = {}
     for r in rows:
         lines.append(
             "%-11s %-20s %-8d %-9d %-7d %-9d %-11g %g"
@@ -1690,6 +1801,13 @@ def format_health(rows: list[dict]) -> str:
                 r["error_rate"],
                 r["timeout_rate"],
             )
+        )
+        for key, n in (r.get("escalate_reasons") or {}).items():
+            reasons[key] = reasons.get(key, 0) + n
+    if reasons:
+        lines.append(
+            "escalate_reason: "
+            + ", ".join("%s=%d" % kv for kv in sorted(reasons.items()))
         )
     return "\n".join(lines)
 
@@ -2701,12 +2819,13 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")
         else:
             sys.stdout.write(
-                "verify: %s entries=%d bad_lines=%d problems=%d\n"
+                "verify: %s entries=%d bad_lines=%d problems=%d schema_v1=%d\n"
                 % (
                     "ok" if report["ok"] else "FAIL",
                     report["entries"],
                     report["bad_lines"],
                     len(report["problems"]),
+                    report.get("schema_v1", 0),
                 )
             )
             cap = max(1, getattr(args, "top", 0) or 20)
@@ -3960,6 +4079,21 @@ def main(argv: list[str] | None = None) -> int:
             "| --- | --- |",
         ]
         rep += ["| %s | %d |" % (k, v) for k, v in sorted(stats["by_status"].items())]
+        if stats.get("by_schema"):
+            rep += ["", "## by schema", "", "| schema | count |", "| --- | --- |"]
+            rep += ["| %s | %d |" % (k, v) for k, v in sorted(stats["by_schema"].items())]
+        if stats.get("by_escalate_reason"):
+            rep += [
+                "",
+                "## escalate reasons",
+                "",
+                "| escalate_reason | count |",
+                "| --- | --- |",
+            ]
+            rep += [
+                "| %s | %d |" % (k, v)
+                for k, v in stats["by_escalate_reason"].items()
+            ]
         rep += ["", "## by harness", "", "| harness | count |", "| --- | --- |"]
         rep += ["| %s | %d |" % (k, v) for k, v in sorted(stats["by_harness"].items())]
         if stats.get("by_note"):

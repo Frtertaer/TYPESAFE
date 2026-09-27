@@ -385,6 +385,94 @@
       }
     },
     {
+      "id": "consult_info",
+      "defect": "false_accept_control",
+      "score": "installed_enough",
+      "expect_call": false,
+      "explicit_consult": false,
+      "prompt": "Explain how the consult routing works in this repo.",
+      "note": "negative case: a consult-mention prompt that asks for an explanation, not a decision; must not take the explicit_consult route",
+      "before": {
+        "task": "Explain how the consult routing works in this repo.",
+        "current_step": "Read the routing code and summarize it.",
+        "called_jev": false
+      },
+      "after": {
+        "task": "Explain how the consult routing works in this repo.",
+        "inspected": [
+          "inventory_hook.py routing flow"
+        ],
+        "current_step": "Write the routing explanation.",
+        "called_jev": false
+      }
+    },
+    {
+      "id": "consult_skill_info",
+      "defect": "false_accept_control",
+      "score": "installed_enough",
+      "expect_call": false,
+      "explicit_consult": false,
+      "prompt": "What does the jev-consult skill do?",
+      "note": "negative case: the skill name inside an informational question is not a consult ask; no explicit_consult route",
+      "before": {
+        "task": "What does the jev-consult skill do?",
+        "current_step": "Read the skill's SKILL.md.",
+        "called_jev": false
+      },
+      "after": {
+        "task": "What does the jev-consult skill do?",
+        "inspected": [
+          "skills/jev-consult/SKILL.md"
+        ],
+        "current_step": "Summarize the skill's purpose.",
+        "called_jev": false
+      }
+    },
+    {
+      "id": "consult_past",
+      "defect": "false_accept_control",
+      "score": "installed_enough",
+      "expect_call": false,
+      "explicit_consult": false,
+      "prompt": "The reviewer recommended we keep the cache as is; update the doc to say so.",
+      "note": "negative case: third-person 'recommended' prose is not an ask; the explicit_consult phrase matcher must not fire",
+      "before": {
+        "task": "The reviewer recommended we keep the cache as is; update the doc to say so.",
+        "current_step": "Edit the doc.",
+        "called_jev": false
+      },
+      "after": {
+        "task": "The reviewer recommended we keep the cache as is; update the doc to say so.",
+        "inspected": [
+          "docs/cache.md"
+        ],
+        "current_step": "Write the keep-the-cache note.",
+        "called_jev": false
+      }
+    },
+    {
+      "id": "consult_docs",
+      "defect": "false_accept_control",
+      "score": "installed_enough",
+      "expect_call": false,
+      "explicit_consult": false,
+      "prompt": "Let me consult the migration docs before deciding; meanwhile run the linter.",
+      "note": "negative case: 'consult the docs' / 'deciding' are ordinary prose, not a consult request to the router",
+      "before": {
+        "task": "Let me consult the migration docs before deciding; meanwhile run the linter.",
+        "current_step": "Run the linter.",
+        "called_jev": false
+      },
+      "after": {
+        "task": "Let me consult the migration docs before deciding; meanwhile run the linter.",
+        "inspected": [
+          "linter output"
+        ],
+        "current_step": "Report the lint results.",
+        "called_jev": false
+      }
+    },
+    {
       "id": "mechanical",
       "defect": "false_accept_control",
       "score": "installed_enough",

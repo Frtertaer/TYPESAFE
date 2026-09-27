@@ -113,6 +113,7 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "core_skill_tokens",
     "dedupe_ttl_seconds",
     "env_file_max_bytes",
+    "explicit_consult_tokens",
     "fallback_endpoint",
     "fallback_model",
     "fill_timeout_seconds",
@@ -232,6 +233,7 @@ def schema_rows() -> dict:
     rows["require_hatch"]["type"] = "boolean"
     rows["catalogs"]["type"] = "list[{name,url}]"
     rows["stop_words"]["type"] = "list[str]"
+    rows["explicit_consult_tokens"]["type"] = "object{lang: list[str]}"
     rows["hallucination"]["type"] = "object{claim}"
     rows["progress"]["type"] = "object{points,review_points,max_*}"
     rows["choice"]["type"] = "object{hatch_ids?: list[str]}"
@@ -299,6 +301,33 @@ def lint_policy(policy) -> list[dict]:
                     key,
                     "%r must be a number in [0, 1], got %r" % (key, value),
                     "probability thresholds only make sense inside [0, 1]",
+                )
+    consult_tokens = policy.get("explicit_consult_tokens")
+    if consult_tokens is not None:
+        if not isinstance(consult_tokens, dict) or not all(
+            isinstance(lang, str) and lang.strip() for lang in consult_tokens
+        ):
+            add(
+                "P003",
+                "error",
+                "explicit_consult_tokens",
+                "explicit_consult_tokens must be an object keyed by language, got %r" % (consult_tokens,),
+                "shape: {\"en\": [\"should i\", ...], \"ru\": [...]}",
+            )
+        else:
+            bad = {
+                lang: phrases
+                for lang, phrases in consult_tokens.items()
+                if not isinstance(phrases, list)
+                or not all(isinstance(p, str) and p.strip() for p in phrases)
+            }
+            if bad:
+                add(
+                    "P003",
+                    "error",
+                    "explicit_consult_tokens",
+                    "explicit_consult_tokens values must be lists of non-empty phrases, got %r" % (bad,),
+                    "shape: {\"en\": [\"should i\", ...], \"ru\": [...]}",
                 )
     escalate = policy.get("escalate_if")
     if escalate is not None and not isinstance(escalate, dict):

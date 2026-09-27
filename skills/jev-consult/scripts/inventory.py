@@ -332,6 +332,63 @@ def explicit_mentions(task: str, items: list[dict]) -> list[dict]:
     return out
 
 
+def explicit_consult_tokens() -> dict[str, frozenset]:
+    """policy.json explicit_consult_tokens: {lang: [phrase, ...]}.
+
+    Whole-prompt phrases meaning the user asked for a consult outright
+    ("should i", "ask jev", "посоветуй") — the bypass around the IDF
+    shortlist + confidence floor. Multi-word phrases on purpose: single
+    ambiguous words false-fire ("the docs recommend", "решить баг").
+    A missing/invalid key means no consult detection — fails open."""
+    raw = _policy_dict().get("explicit_consult_tokens")
+    out: dict[str, frozenset] = {}
+    if isinstance(raw, dict):
+        for lang, phrases in raw.items():
+            if not isinstance(lang, str) or not isinstance(phrases, list):
+                continue
+            kept = {
+                " ".join(str(phrase).split()).lower()
+                for phrase in phrases
+                if isinstance(phrase, str) and phrase.strip()
+            }
+            kept.discard("")
+            if kept:
+                out[lang] = frozenset(kept)
+    return out
+
+
+def explicit_consult(text: str) -> str | None:
+    """The first matching explicit_consult_tokens phrase in `text`, else None.
+
+    Phrase match on the lowercased, whitespace-collapsed prompt with the
+    same word boundaries tokens() uses ([^\\W_] is a word char), so a phrase
+    cannot match inside a longer word. The match is intent, not routing —
+    inventory_hook decides what the catalog offers."""
+    norm = " ".join(str(text or "").lower().split())
+    if not norm:
+        return None
+    phrases = explicit_consult_tokens()
+    for lang in sorted(phrases):
+        for phrase in sorted(phrases[lang]):
+            if re.search(r"(?<![^\W_])" + re.escape(phrase) + r"(?![^\W_])", norm):
+                return phrase
+    return None
+
+
+def consult_item(items: list[dict]) -> dict | None:
+    """The installed jev-consult item (the bypass's route target), or None."""
+    for item in items:
+        if str(item.get("name") or "").lower() == "jev-consult":
+            return item
+        if str(item.get("id") or "").lower() in {
+            "skill_jev_consult",
+            "plugin_jev_consult",
+            "mcp_jev_consult",
+        }:
+            return item
+    return None
+
+
 def walk_named(root: Path, filename: str):
     if not root.is_dir():
         return
@@ -1428,7 +1485,12 @@ def _policy_float(policy: dict | None, key: str, default: float) -> float:
     return default
 
 
-def resolve_picker(picked: list[dict], decision: dict | None, policy: dict | None = None) -> dict:
+def resolve_picker(
+    picked: list[dict],
+    decision: dict | None,
+    policy: dict | None = None,
+    consult: bool = False,
+) -> dict:
     """Map a Jev decide() payload to {status, winner}. Fail-open statuses: escalate.
 
     Every outcome also sets ``escalate_reason`` — the attribution enum the
@@ -1439,7 +1501,14 @@ def resolve_picker(picked: list[dict], decision: dict | None, policy: dict | Non
     longer routes), ``model_escalate`` for Jev's own escalate or an unusable
     decision, ``none_pick`` when Jev picked ``none`` (or the pick resolved to
     no item), ``no_candidates`` when the shortlist was empty, and None on a
-    winner or a non-decision outcome the reason enum does not cover."""
+    winner or a non-decision outcome the reason enum does not cover.
+
+    With ``consult`` (the prompt matched explicit_consult_tokens — the user
+    asked for a consult outright) an escalate raised only on the confidence
+    floor surfaces the suppressed pick: decide() still returns it in
+    ``picks.load_tools``, so the floor preempt resolves to a winner (or to
+    ``none`` when the suppressed pick was none/unresolvable). Any other
+    escalate reason keeps failing open."""
     strong_pick = _policy_float(policy, "strong_pick", 0.85)
     if not isinstance(decision, dict):
         return {"status": "escalate", "winner": None, "escalate_reason": "model_escalate"}
@@ -1447,6 +1516,27 @@ def resolve_picker(picked: list[dict], decision: dict | None, policy: dict | Non
         reasons = decision.get("reasons")
         if not isinstance(reasons, list):
             reasons = []
+        floor_only = bool(reasons) and all(
+            r in ("low_confidence", "low_score_confidence") for r in reasons
+        )
+        if consult and floor_only:
+            load = (decision.get("picks") or {}).get("load_tools")
+            winner = None
+            if isinstance(load, str) and load not in ("", "none"):
+                winner = {item["id"]: item for item in picked}.get(load)
+            if winner is None:
+                return {"status": "none", "winner": None, "escalate_reason": "none_pick"}
+            probabilities = decision.get("probabilities") or {}
+            top = 0.0
+            if isinstance(probabilities, dict):
+                try:
+                    top = float((probabilities.get("load_tools") or {}).get(load, 0.0))
+                except (TypeError, ValueError, AttributeError):
+                    top = 0.0
+            out = {"status": "winner", "winner": winner, "escalate_reason": None}
+            if top >= strong_pick:
+                out["strong"] = True
+            return out
         if any(
             r in ("low_confidence", "low_score_confidence")
             for r in reasons

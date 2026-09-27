@@ -80,6 +80,7 @@ ENTRY_SCHEMA_ROWS = {
     "sidecar_age_s": {"required": True, "type": "int|null, age of the pruned sidecar"},
     "note": {"required": False, "type": "string, extra note tag (written only when set)"},
     "dedupe": {"required": False, "type": "bool, outcome reused from a fresh sidecar"},
+    "route": {"required": False, "type": "string|null, routing branch that produced the record ('explicit_consult'); null on normal IDF routing"},
     "fill": {"required": False, "type": "string, fill writer (apply|catalog|peer) — fill entries only"},
     "outcome": {"required": False, "type": "string, first word of the fill result — fill entries only"},
 }
@@ -242,9 +243,13 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
     stamps: list[float] = []
     notes: dict[str, int] = {}
     explicit = strong = 0
+    by_route: dict[str, int] = {}
     for item in entries:
         status = str(item.get("jev_status") or "unknown")
         by_status[status] = by_status.get(status, 0) + 1
+        route = item.get("route")
+        if isinstance(route, str) and route:
+            by_route[route] = by_route.get(route, 0) + 1
         if "prompt_sha" in item or "shortlist" in item:
             schema_key = "schema_v%d" % record_schema(item)
             by_schema[schema_key] = by_schema.get(schema_key, 0) + 1
@@ -294,6 +299,9 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
         ),
         "by_note": dict(
             sorted(notes.items(), key=lambda kv: (-kv[1], kv[0]))
+        ),
+        "by_route": dict(
+            sorted(by_route.items(), key=lambda kv: (-kv[1], kv[0]))
         ),
         "explicit": explicit,
         "strong_pick": strong,
@@ -349,6 +357,13 @@ def format_stats(stats: dict) -> str:
             + ", ".join(
                 "%s=%d" % (k, v)
                 for k, v in stats["by_escalate_reason"].items()
+            )
+        )
+    if stats.get("by_route"):
+        lines.append(
+            "route: "
+            + ", ".join(
+                "%s=%d" % (k, v) for k, v in stats["by_route"].items()
             )
         )
     if stats.get("by_note"):
@@ -517,6 +532,10 @@ def is_miss_entry(item: dict) -> bool:
     if str(item.get("jev_status") or "") not in MISS_STATUSES:
         return False
     if item.get("jev_pick") or item.get("winner"):
+        return False
+    if str(item.get("route") or "") == "explicit_consult":
+        # explicit-consult asks route through the bypass; a miss-looking
+        # outcome there is a consult gap, not an installable tool miss.
         return False
     return True
 
@@ -777,11 +796,29 @@ def acceptance_report(
     the same sha keep their own verdicts), and a fill counts only when it
     lands after the pick on the same harness + prompt_head prefix — fills
     logged earlier are stale evidence, not application."""
-    routing = [
+    # Explicit-consult records are the bypass's own traffic: the user asked
+    # for a consult outright, so every outcome — winners, none picks, even
+    # fail-open statuses — is the consult route answering, not the IDF
+    # router. They are excluded from the routing/pick pools (pick_rate would
+    # otherwise spike on bypassed asks) and reported under their own key.
+    routing_all = [
         e
         for e in entries
         if str(e.get("jev_status") or "") not in ("fill", "feedback")
         and e.get("prompt_sha")
+    ]
+    consult = [
+        e
+        for e in routing_all
+        if str(e.get("route") or "") == "explicit_consult"
+    ]
+    routing = [
+        e for e in routing_all if str(e.get("route") or "") != "explicit_consult"
+    ]
+    consult_picks = [
+        e
+        for e in consult
+        if isinstance(e.get("winner"), dict) and e["winner"].get("name")
     ]
     picks = [
         e
@@ -922,6 +959,10 @@ def acceptance_report(
             "budget_ms": round(budgets[0]) if budgets else None,
         },
         "by_question": by_category,
+        "explicit_consult": {
+            "entries": len(consult),
+            "picks": len(consult_picks),
+        },
         "feedback_records": len(feedback),
         "override_window": override_window,
     }
@@ -950,6 +991,12 @@ def format_acceptance(data: dict) -> str:
         lines.append(
             "escalate_reason: "
             + ", ".join("%s=%d" % (k, v) for k, v in reasons.items())
+        )
+    consult = data.get("explicit_consult") or {}
+    if consult.get("entries"):
+        lines.append(
+            "explicit_consult: %d routed (%d picks) - excluded from the rates above"
+            % (consult.get("entries") or 0, consult.get("picks") or 0)
         )
     lat = data.get("latency_ms") or {}
     if lat.get("n"):
@@ -1126,8 +1173,9 @@ td,th{border:1px solid #ddd;padding:.3em .5em;text-align:left}
 <div class="kpi"><b>%(miss_rate)s</b>miss rate</div>
 <div class="kpi"><b>%(strong)s</b>strong-pick kept</div>
 </div>
-<p class="small">over %(picks)d picks in %(routing)d routing entries; override window %(window)d records</p>
+<p class="small">over %(picks)d picks in %(routing)d routing entries; override window %(window)d records%(consult_note)s</p>
 %(by_q_table)s
+%(route_table)s
 <h2>Latency vs hook budget</h2>
 <p>n=%(lat_n)d &nbsp; p50=%(p50)s ms &nbsp; p95=%(p95)s ms &nbsp; over budget: %(over)s (%(over_share)s) &nbsp; budget: %(budget)s ms</p>
 <h2>Weekly status mix</h2>
@@ -1148,6 +1196,17 @@ td,th{border:1px solid #ddd;padding:.3em .5em;text-align:left}
         "picks": acceptance.get("picks") or 0,
         "routing": acceptance.get("routing_entries") or 0,
         "window": acceptance.get("override_window") or 0,
+        "consult_note": (
+            "; explicit_consult route: %d (excluded from the rates)"
+            % (acceptance.get("explicit_consult") or {}).get("entries", 0)
+            if (acceptance.get("explicit_consult") or {}).get("entries")
+            else ""
+        ),
+        "route_table": (
+            "<h2>Route mix</h2><table><tr><th>route</th><th>n</th><th></th><th>share</th></tr>%s</table>"
+            % bar_rows(stats.get("by_route") or {})
+            if stats.get("by_route") else ""
+        ),
         "by_q_table": (
             "<h2>By question</h2><table><tr><th>question</th><th>picks</th><th>applied</th><th>overridden</th></tr>%s</table>" % by_q_rows
             if by_q_rows else ""
@@ -1374,6 +1433,10 @@ def _calibrate_eligible(item: dict) -> bool:
     if not isinstance(item, dict):
         return False
     if item.get("explicit") is True or item.get("dedupe") is True:
+        return False
+    if str(item.get("route") or "") == "explicit_consult":
+        # bypassed records: their winner ignores the floor, so replaying
+        # them under candidate thresholds would count phantom escalates
         return False
     if str(item.get("jev_status") or "") not in CALIBRATE_REPLAYABLE:
         return False
@@ -1657,7 +1720,7 @@ def _calibrate_policy_patch(path: Path, rec: dict) -> tuple[str, str]:
     for key in ("confidence_floor", "strong_pick", "tight_gap", "noul_yes"):
         if rec.get(key) is not None:
             data[key] = rec[key]
-    new = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    new = json.dumps(data, indent=2) + "\n"
     return old, new
 
 
@@ -4070,6 +4133,11 @@ def main(argv: list[str] | None = None) -> int:
             rep += [
                 "| %s | %d |" % (k, v)
                 for k, v in stats["by_escalate_reason"].items()
+            ]
+        if stats.get("by_route"):
+            rep += ["", "## by route", "", "| route | count |", "| --- | --- |"]
+            rep += [
+                "| %s | %d |" % (k, v) for k, v in stats["by_route"].items()
             ]
         rep += ["", "## by harness", "", "| harness | count |", "| --- | --- |"]
         rep += ["| %s | %d |" % (k, v) for k, v in sorted(stats["by_harness"].items())]

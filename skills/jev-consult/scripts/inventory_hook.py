@@ -31,8 +31,10 @@ from inventory import (  # noqa: E402
     SIDECAR_NAME,
     append_decision,
     clear_miss,
+    consult_item,
     core_skill_tokens,
     detect_harness,
+    explicit_consult,
     explicit_mentions,
     format_miss_note,
     format_note,
@@ -211,8 +213,13 @@ def pick_with_jev(
     harness: str,
     picked: list[dict],
     timeout: float | None = None,
+    consult: bool = False,
 ) -> dict:
-    """One Jev call. Never prints keys. Fail-open on missing key, timeout, or errors."""
+    """One Jev call. Never prints keys. Fail-open on missing key, timeout, or errors.
+
+    ``consult`` marks an explicit-consult prompt (explicit_consult_tokens
+    matched): the picker dict gets ``route: 'explicit_consult'`` and a pick
+    suppressed only by the confidence floor still routes to a winner."""
     if timeout is None:
         timeout = hook_jev_timeout_seconds()
     if not picked:
@@ -253,7 +260,9 @@ def pick_with_jev(
     except Exception as err:
         status = "timeout" if isinstance(err, (TimeoutError, socket.timeout)) else "error"
         return {"status": status, "winner": None, "attempted": attempted}
-    picker = resolve_picker(picked, decision, policy)
+    picker = resolve_picker(picked, decision, policy, consult=consult)
+    if consult:
+        picker["route"] = "explicit_consult"
     picker["attempted"] = attempted
     if result.get("note"):
         picker["note"] = result["note"]
@@ -396,6 +405,8 @@ def handle(
             "dedupe": True,
             "jev_attempted": False,
         }
+        if deduped.get("route"):
+            extra["route"] = str(deduped["route"])
         winner_out = winner if isinstance(winner, dict) else None
         if extra["jev_status"] == "winner" and winner_out and winner_out.get("name"):
             extra["jev_pick"] = {"kind": winner_out.get("kind"), "name": winner_out.get("name")}
@@ -432,6 +443,7 @@ def handle(
             "probabilities": prior_probs if isinstance(prior_probs, dict) else {},
             "pick_confidence": deduped.get("pick_confidence"),
             "escalate_reason": deduped.get("escalate_reason"),
+            "route": deduped.get("route"),
             "shortlist_score_avg": _avg_score(picked, items or picked, prompt),
             "winner": {"kind": winner_out.get("kind"), "name": winner_out.get("name")}
             if winner_out
@@ -477,6 +489,7 @@ def handle(
             hits = forced[:1]
     explicit_winner = hits[0] if len(hits) == 1 else None
     picker = {"status": "idf", "winner": None}
+    consult = None
     if explicit_winner is not None:
         picked = [explicit_winner]
         picker = {
@@ -486,12 +499,27 @@ def handle(
         }
     else:
         picked = shortlist(catalog, prompt, hook_limit(), [hit["name"] for hit in hits])
+        # Explicit-consult asks ("should i", "посоветуй", ...) bypass the
+        # shortlist: the consult item joins the candidates even when IDF
+        # scored nothing, so Jev still gets a real pick to arbitrate. When
+        # jev-consult is not installed at all the IDF shortlist stands as-is.
+        consult = explicit_consult(prompt)
+        if consult:
+            target = consult_item(catalog)
+            if target is not None and target["id"] not in {
+                str(item.get("id")) for item in picked
+            }:
+                picked = [target] + picked[: max(hook_limit() - 1, 0)]
         if picked and time.monotonic() - t0 >= hook_budget_seconds():
             picker = {"status": "budget", "winner": None}
         elif picked:
-            chooser = pick_fn if pick_fn is not None else pick_with_jev
             try:
-                got = chooser(prompt, harness, picked)
+                # A foreign pick_fn keeps its (task, harness, picked)
+                # signature; the consult flag reaches only pick_with_jev.
+                if pick_fn is not None:
+                    got = pick_fn(prompt, harness, picked)
+                else:
+                    got = pick_with_jev(prompt, harness, picked, consult=bool(consult))
                 if isinstance(got, dict):
                     picker = got
             except Exception:
@@ -500,6 +528,9 @@ def handle(
         "jev_status": str(picker.get("status") or "idf"),
         "jev_attempted": bool(picker.get("attempted")),
     }
+    if consult:
+        extra["route"] = "explicit_consult"
+        picker["route"] = "explicit_consult"
     if stale_match:
         extra["stale_sidecar"] = True
     if note_tag:
@@ -550,6 +581,7 @@ def handle(
         "shortlist_n": len(picked),
         "shortlist": [item.get("id") for item in picked],
         "explicit": explicit_winner is not None,
+        "route": "explicit_consult" if consult else None,
         "jev_attempted": bool(extra.get("jev_attempted")),
         "jev_status": extra["jev_status"],
         "reason": _status_reason(extra["jev_status"], (winner or {}).get("name"), str(picker.get("question") or "")),
@@ -1167,6 +1199,7 @@ def main(argv: list[str] | None = None) -> int:
             "winner": (LAST_DECISION.get("winner") or {}).get("name"),
             "question": LAST_DECISION.get("question"),
             "dedupe": LAST_DECISION.get("dedupe"),
+            "route": LAST_DECISION.get("route"),
             "shortlist": len(LAST_DECISION.get("shortlist") or []),
             "latency_ms": LAST_DECISION.get("latency_ms"),
             "over_budget": LAST_DECISION.get("over_budget"),

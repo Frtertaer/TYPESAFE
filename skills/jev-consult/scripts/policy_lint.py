@@ -110,6 +110,7 @@ KNOWN_TOP_KEYS = REQUIRED_KEYS + (
     "catalog_search_limit",
     "catalogs",
     "choice",
+    "core_skill_tokens",
     "dedupe_ttl_seconds",
     "env_file_max_bytes",
     "fallback_endpoint",

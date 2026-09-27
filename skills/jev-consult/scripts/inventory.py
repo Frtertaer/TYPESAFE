@@ -626,10 +626,46 @@ def _keys_or_exit(args) -> list | None:
     return keys
 
 
+def core_skill_tokens() -> dict[str, frozenset]:
+    """policy.json core_skill_tokens: {item name or id: [extra match tokens]}.
+
+    Meta-vocabulary that scores like name tokens, so a skill can surface for
+    its own domain words when the prompt never spells its name (decision-type
+    prompts -> jev-consult). Tokens pass through tokens(), so stop-words and
+    short words are inert, and a missing/invalid key means no aliases — the
+    IDF path fails open either way."""
+    raw = _policy_dict().get("core_skill_tokens")
+    out: dict[str, frozenset] = {}
+    if isinstance(raw, dict):
+        for name, vals in raw.items():
+            if not isinstance(name, str) or not isinstance(vals, list):
+                continue
+            extra: set[str] = set()
+            for val in vals:
+                if isinstance(val, str):
+                    extra |= tokens(val)
+            if extra:
+                out[name.strip().lower()] = frozenset(extra)
+    return out
+
+
+def _name_tokens(item: dict, core: dict | None = None) -> set[str]:
+    """Item's name tokens plus any policy-level alias tokens for it."""
+    words = set(tokens(item.get("name") or ""))
+    core = core_skill_tokens() if core is None else core
+    extra = core.get(str(item.get("name") or "").lower()) or core.get(
+        str(item.get("id") or "").lower()
+    )
+    if extra:
+        words |= set(extra)
+    return words
+
+
 def name_df(items: list[dict], query: set[str]) -> dict[str, int]:
     df = {token: 0 for token in query}
+    core = core_skill_tokens()
     for item in items:
-        words = tokens(item.get("name") or "")
+        words = _name_tokens(item, core)
         for token in query:
             if token in words:
                 df[token] += 1
@@ -645,10 +681,15 @@ def token_weight(token: str, df: dict[str, int]) -> int:
     return 0
 
 
-def score_item(item: dict, query: set[str], df: dict[str, int] | None = None) -> int:
+def score_item(
+    item: dict,
+    query: set[str],
+    df: dict[str, int] | None = None,
+    core: dict | None = None,
+) -> int:
     if not query:
         return 0
-    name_words = tokens(item.get("name") or "")
+    name_words = _name_tokens(item, core)
     desc_words = tokens(item.get("description") or "")
     score = 0
     for token in query:
@@ -711,7 +752,7 @@ def explain_item(item: dict, task: str, items: list[dict]) -> dict:
     """Per-token score decomposition for one item against a task."""
     query = sorted(tokens(task))
     df = name_df(items, set(query)) if query else {}
-    name_words = tokens(item.get("name") or "")
+    name_words = _name_tokens(item)
     desc_words = tokens(item.get("description") or "")
     terms: dict[str, dict] = {}
     score = 0
@@ -744,8 +785,9 @@ def explain_item(item: dict, task: str, items: list[dict]) -> dict:
 def shortlist(items: list[dict], task: str, limit: int, extra: list[str]) -> list[dict]:
     query = tokens(task)
     df = name_df(items, query) if query else {}
+    core = core_skill_tokens()
     ranked = sorted(
-        ((score_item(item, query, df), item) for item in items),
+        ((score_item(item, query, df, core), item) for item in items),
         key=lambda row: (-row[0], row[1]["name"]),
     )
     rare = any(0 < df.get(token, 0) <= 8 for token in query)
@@ -863,6 +905,13 @@ def clear_miss(path: Path) -> None:
 
 def clear_scan_cache() -> None:
     _SCAN_CACHE.clear()
+
+
+# Routing-record schema version written into each decisions.jsonl entry.
+# v2 adds pick_confidence, need_skill_score and escalate_reason (recorded at
+# the point the outcome is decided); decisions.py reads v1 records without
+# them and reports them as schema_v1.
+ENTRY_SCHEMA_VERSION = 2
 
 
 def decisions_log_path() -> Path | None:
@@ -1389,24 +1438,42 @@ def _noul_yes_for(policy: dict | None, qid: str) -> float:
 
 
 def resolve_picker(picked: list[dict], decision: dict | None, policy: dict | None = None) -> dict:
-    """Map a Jev decide() payload to {status, winner}. Fail-open statuses: escalate."""
+    """Map a Jev decide() payload to {status, winner}. Fail-open statuses: escalate.
+
+    Every outcome also sets ``escalate_reason`` — the attribution enum the
+    routing log records: ``confidence_floor`` when decide() preempted on the
+    pick's confidence, ``need_gate`` when the need_skill gate suppressed the
+    pick, ``model_escalate`` for Jev's own escalate or an unusable decision,
+    ``none_pick`` when Jev picked ``none`` (or the pick resolved to no item),
+    ``no_candidates`` when the shortlist was empty, and None on a winner or a
+    non-decision outcome the reason enum does not cover."""
     noul_yes = _noul_yes_for(policy, "need_skill")
     noul_no = _policy_float(policy, "noul_no", 0.3)
     strong_pick = _policy_float(policy, "strong_pick", 0.85)
     if not isinstance(decision, dict):
-        return {"status": "escalate", "winner": None}
+        return {"status": "escalate", "winner": None, "escalate_reason": "model_escalate"}
     if decision.get("action") == "escalate":
-        return {"status": "escalate", "winner": None}
+        reasons = decision.get("reasons")
+        if not isinstance(reasons, list):
+            reasons = []
+        if any(
+            r in ("low_confidence", "low_score_confidence")
+            for r in reasons
+        ):
+            reason = "confidence_floor"
+        else:
+            reason = "model_escalate"
+        return {"status": "escalate", "winner": None, "escalate_reason": reason}
     picks = decision.get("picks") or {}
     load = picks.get("load_tools")
     try:
         need = float(picks.get("need_skill"))
     except (TypeError, ValueError):
-        return {"status": "escalate", "winner": None}
+        return {"status": "escalate", "winner": None, "escalate_reason": "model_escalate"}
     if load in (None, "none"):
-        return {"status": "none", "winner": None}
+        return {"status": "none", "winner": None, "escalate_reason": "none_pick"}
     if not isinstance(load, str):
-        return {"status": "escalate", "winner": None}
+        return {"status": "escalate", "winner": None, "escalate_reason": "model_escalate"}
     by_id = {item["id"]: item for item in picked}
     winner = by_id.get(load)
     probabilities = decision.get("probabilities") or {}
@@ -1417,14 +1484,14 @@ def resolve_picker(picked: list[dict], decision: dict | None, policy: dict | Non
         except (TypeError, ValueError, AttributeError):
             top = 0.0
     if winner is not None and top >= strong_pick:
-        return {"status": "winner", "winner": winner, "strong": True}
+        return {"status": "winner", "winner": winner, "strong": True, "escalate_reason": None}
     if need <= noul_no:
-        return {"status": "none", "winner": None}
+        return {"status": "none", "winner": None, "escalate_reason": "need_gate"}
     if need < noul_yes:
-        return {"status": "escalate", "winner": None}
+        return {"status": "escalate", "winner": None, "escalate_reason": "need_gate"}
     if winner is None:
-        return {"status": "none", "winner": None}
-    return {"status": "winner", "winner": winner}
+        return {"status": "none", "winner": None, "escalate_reason": "none_pick"}
+    return {"status": "winner", "winner": winner, "escalate_reason": None}
 
 
 def write_ask(path: Path, task: str, harness: str, picked: list[dict]) -> None:
@@ -1995,8 +2062,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.scores:
         query = tokens(args.task)
         df = name_df(items, query) if query else {}
+        core = core_skill_tokens()
         payload["shortlist"] = [
-            {**item, "score": score_item(item, query, df)} for item in picked
+            {**item, "score": score_item(item, query, df, core)} for item in picked
         ]
     if getattr(args, "explain", False):
         query = tokens(args.task)

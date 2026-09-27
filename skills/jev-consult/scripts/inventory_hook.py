@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import socket
 import sys
@@ -24,11 +25,13 @@ if str(_SCRIPTS) not in sys.path:
 import _watch  # noqa: E402
 from inventory import (  # noqa: E402
     atomic_write_text,
+    ENTRY_SCHEMA_VERSION,
     hook_limit,
     MISS_NAME,
     SIDECAR_NAME,
     append_decision,
     clear_miss,
+    core_skill_tokens,
     detect_harness,
     explicit_mentions,
     format_miss_note,
@@ -98,7 +101,8 @@ def _avg_score(items: list[dict], pool: list[dict], text: str) -> float | None:
         return None
     try:
         df = name_df(pool or items, query)
-        vals = [score_item(item, query, df) for item in items]
+        core = core_skill_tokens()
+        vals = [score_item(item, query, df, core) for item in items]
     except Exception:
         return None
     if not vals:
@@ -258,6 +262,16 @@ def pick_with_jev(
     except (TypeError, ValueError, AttributeError):
         need = None
     picker["need"] = need
+    # need_skill_score is the same raw noul under the schema-v2 name; the log
+    # keeps `need` for v1 readers and both record the pre-gate value.
+    picker["need_skill_score"] = need
+    try:
+        conf = float((answers.get("load_tools") or {}).get("confidence"))
+        if not math.isfinite(conf):
+            conf = None
+    except (TypeError, ValueError, AttributeError):
+        conf = None
+    picker["pick_confidence"] = conf
     picker["probabilities"] = (decision.get("probabilities") or {}).get("load_tools") or {}
     picker["latency_ms"] = latency_ms
     picker["question"] = "load_tools"
@@ -386,12 +400,26 @@ def handle(
         if extra["jev_status"] == "winner" and winner_out and winner_out.get("name"):
             extra["jev_pick"] = {"kind": winner_out.get("kind"), "name": winner_out.get("name")}
         note = _note_for_picker(picked, picker)
+        # A dedupe entry is a full routing record too: the outcome fields are
+        # inherited from the sidecar written by the first pass, and the rest
+        # is recomputed from the prompt.
+        budget_ms = int(hook_budget_seconds() * 1000)
+        prior_latency = deduped.get("latency_ms")
+        prior_probs = deduped.get("probabilities")
+        prior_need = deduped.get("need_skill_score")
+        if not isinstance(prior_need, (int, float)) or isinstance(prior_need, bool):
+            prior_need = deduped.get("need")
         LAST_DECISION = {
             "ts": time.time(),
+            "schema": ENTRY_SCHEMA_VERSION,
             "harness": harness,
             "prompt_sha": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12],
             "prompt_head": _redact_prompt(prompt[:240])[:160],
+            "prompt_tail": _redact_prompt(prompt[-80:]),
+            "prompt_len": len(prompt),
+            "prompt_truncated": prompt_truncated,
             "n_catalog": 0,
+            "shortlist_n": len(picked),
             "shortlist": [item.get("id") for item in picked],
             "explicit": False,
             "dedupe": True,
@@ -399,11 +427,25 @@ def handle(
             "jev_status": extra["jev_status"],
             "reason": _status_reason(extra["jev_status"], (winner_out or {}).get("name"), "dedupe"),
             "question": "dedupe",
+            "need": prior_need,
+            "need_skill_score": prior_need,
+            "probabilities": prior_probs if isinstance(prior_probs, dict) else {},
+            "pick_confidence": deduped.get("pick_confidence"),
+            "escalate_reason": deduped.get("escalate_reason"),
+            "shortlist_score_avg": _avg_score(picked, items or picked, prompt),
             "winner": {"kind": winner_out.get("kind"), "name": winner_out.get("name")}
             if winner_out
             else None,
+            "strong_pick": bool(deduped.get("strong_pick")),
+            "latency_ms": prior_latency
+            if isinstance(prior_latency, (int, float)) and not isinstance(prior_latency, bool)
+            else None,
+            "budget_ms": budget_ms,
+            "over_budget": isinstance(prior_latency, (int, float))
+            and not isinstance(prior_latency, bool)
+            and prior_latency > budget_ms,
+            "stale_sidecar": False,
             "sidecar_age_s": sidecar_age_s,
-            "shortlist_score_avg": _avg_score(picked, items or picked, prompt),
         }
         if note_tag:
             LAST_DECISION["note"] = note_tag
@@ -471,9 +513,33 @@ def handle(
     winner = picker.get("winner") if isinstance(picker.get("winner"), dict) else None
     if extra["jev_status"] == "winner" and winner and winner.get("name"):
         extra["jev_pick"] = {"kind": winner.get("kind"), "name": winner.get("name")}
+    # The schema-v2 outcome fields land in the sidecar so a dedupe pass can
+    # re-emit them without a Jev call. resolve_picker sets escalate_reason
+    # itself; a foreign pick_fn that does not still gets a status-derived one.
+    escalate_reason = picker.get("escalate_reason")
+    if escalate_reason is None:
+        _status = str(picker.get("status") or "")
+        if not picked or _status == "empty":
+            escalate_reason = "no_candidates"
+        elif _status == "none":
+            escalate_reason = "none_pick"
+        elif _status == "escalate":
+            escalate_reason = "model_escalate"
+    need_skill_score = picker.get("need_skill_score")
+    if need_skill_score is None:
+        need_skill_score = picker.get("need")
+    for _key in ("need", "probabilities", "pick_confidence", "need_skill_score", "escalate_reason", "latency_ms"):
+        _val = picker.get(_key)
+        if _val is None and _key == "escalate_reason":
+            _val = escalate_reason
+        elif _val is None and _key == "need_skill_score":
+            _val = need_skill_score
+        if _val is not None and _val != {}:
+            extra[_key] = _val
     note = _note_for_picker(picked, picker)
     LAST_DECISION = {
         "ts": time.time(),
+        "schema": ENTRY_SCHEMA_VERSION,
         "harness": harness,
         "prompt_sha": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12],
         "prompt_head": _redact_prompt(prompt[:240])[:160],
@@ -489,7 +555,10 @@ def handle(
         "reason": _status_reason(extra["jev_status"], (winner or {}).get("name"), str(picker.get("question") or "")),
         "question": picker.get("question"),
         "need": picker.get("need"),
+        "need_skill_score": need_skill_score,
         "probabilities": picker.get("probabilities") or {},
+        "pick_confidence": picker.get("pick_confidence"),
+        "escalate_reason": escalate_reason,
         "shortlist_score_avg": _avg_score(picked, catalog, prompt),
         "winner": {"kind": winner.get("kind"), "name": winner.get("name")}
         if winner

@@ -293,5 +293,31 @@
   "streak_warn_weeks": 2,
   "streak_fail_weeks": 3,
   "miss_rate_max": 0.5,
-  "override_rate_max": 0.3
+  "override_rate_max": 0.3,
+  "core_skill_tokens": {
+    "jev-consult": [
+      "decision",
+      "decide",
+      "consult",
+      "should-i",
+      "approach",
+      "choose",
+      "library",
+      "arch",
+      "architecture",
+      "keep",
+      "rewrite",
+      "refactor",
+      "risky",
+      "good-enough",
+      "which",
+      "worth",
+      "versus",
+      "rename",
+      "delete",
+      "naming",
+      "stuck",
+      "looping"
+    ]
+  }
 }

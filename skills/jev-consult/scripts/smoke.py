@@ -3930,6 +3930,18 @@ def step_apply_fill(tmp: Path) -> dict:
             'exit /b 0\r\n',
             encoding="utf-8",
         )
+        # POSIX twin of the .bat — `which("hermes")` never finds a .bat on
+        # Linux/macOS, so without it the step fails as no_hermes off-Windows.
+        shim = bin_dir / "hermes"
+        shim.write_text(
+            '#!/bin/sh\n'
+            'if [ "$1" = "plugins" ] && [ "$2" = "search" ]; then\n'
+            '  echo \'[{"name":"smoke-thing","description":"smoke thing"}]\'\n'
+            'fi\n'
+            'exit 0\n',
+            encoding="utf-8",
+        )
+        shim.chmod(0o755)
         fill_cwd = tmp / "apply-fill-cwd"
         fill_cwd.mkdir(parents=True, exist_ok=True)
         env2 = dict(env)  # skillscan:allow
@@ -6599,6 +6611,18 @@ def step_catalog_fill(tmp: Path) -> dict:
         'exit /b 0\r\n',
         encoding="utf-8",
     )
+    # POSIX twin of the .bat — `which("hermes")` never finds a .bat on
+    # Linux/macOS, so without it the step fails as no_hermes off-Windows.
+    shim = bin_dir / "hermes"
+    shim.write_text(
+        '#!/bin/sh\n'
+        'if [ "$1" = "skills" ] && [ "$2" = "search" ]; then\n'
+        '  echo \'[{"id":"smoke-thing","identifier":"acme/smoke-thing","name":"smoke-thing","description":"smoke hit"}]\'\n'
+        'fi\n'
+        'exit 0\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
     env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
     env["USERPROFILE"] = str(home)
     env["HOME"] = str(home)

@@ -7,6 +7,7 @@ from typing import Any
 import typer
 from typesafe_sdk import TypeSafeError
 
+from typesafe_cli.answers import AnswerError
 from typesafe_cli.client import system_one
 from typesafe_cli.config import load_config
 from typesafe_cli.io import emit_success, fail
@@ -38,6 +39,8 @@ def ask(
 
     try:
         data = system_one(config=config, state=resolved_state, questions=questions, model=model)
+    except AnswerError as exc:
+        fail(code="invalid_answer", message=str(exc), exit_code=1)
     except TypeSafeError as exc:
         fail(code="request", message=str(exc), exit_code=1)
     except Exception as exc:  # noqa: BLE001 — surface SDK/network failures as exit 1
@@ -83,6 +86,8 @@ def run_evaluation(
         fail(code="auth", message="missing TYPESAFE_API_KEY (or --key / --creds)", exit_code=1)
     try:
         data = system_one(config=config, state=state, questions=questions, model=model)
+    except AnswerError as exc:
+        fail(code="invalid_answer", message=str(exc), exit_code=1)
     except TypeSafeError as exc:
         fail(code="request", message=str(exc), exit_code=1)
     except Exception as exc:  # noqa: BLE001

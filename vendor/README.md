@@ -9,9 +9,9 @@ maps vendored files to the runtime scripts they were ported into.
 | Path | Upstream | Snapshot commit | Why it is here |
 | --- | --- | --- | --- |
 | `fast-jev-compaction` | [tamaratran/fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction) MIT | `e3f262a` | Already ported to `compact.py --history` |
-| `awesome-jev` | [AppitStudio/awesome-jev](https://github.com/AppitStudio/awesome-jev) CC0 list + MIT examples | `e96ed33` | Catalog/docs for Jev patterns |
-| `typesafeai-cli` | [maddygoround/typesafeai-cli](https://github.com/maddygoround/typesafeai-cli) MIT | `ca87ffd` | Python CLI (`ask` / `decide` / `screen` / `verify`). Our live client stays `jev.py` (no extra SDK). |
-| `awesome-llm-apps-skill-evals` | [Shubhamsaboo/awesome-llm-apps](https://github.com/Shubhamsaboo/awesome-llm-apps) Apache-2.0 | `9e86095` | Skill evals tools only (`skill_lint`, `skill_scanner`, `run_trigger_evals`). Runtime scanner is `skills/jev-consult/scripts/skill_scanner.py`. |
+| `awesome-jev` | [AppitStudio/awesome-jev](https://github.com/AppitStudio/awesome-jev) CC0 list + MIT examples | `4371678` | Catalog/docs for Jev patterns |
+| `typesafeai-cli` | [maddygoround/typesafeai-cli](https://github.com/maddygoround/typesafeai-cli) MIT | `34be241` | Python CLI (`ask` / `decide` / `screen` / `verify`). Our live client stays `jev.py` (no extra SDK). |
+| `awesome-llm-apps-skill-evals` | [Shubhamsaboo/awesome-llm-apps](https://github.com/Shubhamsaboo/awesome-llm-apps) Apache-2.0 | `dc67696` | Skill evals tools only (`skill_lint`, `skill_scanner`, `run_trigger_evals`). Runtime scanner is `skills/jev-consult/scripts/skill_scanner.py`. |
 | `jev-skill-suggester` | [win4r/jev-skill-suggester](https://github.com/win4r/jev-skill-suggester) MIT | `05fbd7c` | Two-stage skill suggestion; ported pieces: response validation, no-redirect+retry, secret guard, untrusted-metadata rule, block-scalar frontmatter, explicit-only, explicit mention. We do not run their CLI. |
 | `jevcal` | [abhixhek/jevcal](https://github.com/abhixhek/jevcal) MIT | `ae8f314` | Jev question lint rules J001–J021; ported to `question_lint.py` (J010 sharpened). We do not run their CLI. |
 | `skill-router` | [lomeshdutta/skill-router](https://github.com/lomeshdutta/skill-router) MIT | `4c538d8` | Per-session skill routing; ported pieces: `decide` probabilities, `strong_pick` threshold, decisions.jsonl log. |

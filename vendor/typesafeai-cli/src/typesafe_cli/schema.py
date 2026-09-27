@@ -48,7 +48,7 @@ def command_schema(*, compact: bool = False) -> dict[str, Any]:
         "output": {
             "stdout": "{status, data, metadata}",
             "stderr": "{status, error: {code, message}}",
-            "exit_codes": {"0": "answered", "1": "request failed", "2": "usage / invalid questions"},
+            "exit_codes": {"0": "answered", "1": "request failed or invalid answer", "2": "usage / invalid questions"},
         },
         "anti_patterns": [
             "Do not chat with Jev or ask it what to do next.",
@@ -66,7 +66,7 @@ def command_schema(*, compact: bool = False) -> dict[str, Any]:
                     "Write questions first. Instructions must backtick the state paths they need. That list is the collection contract — do not catalog every agent job.",
                     "Fill only those paths in ${TMPDIR:-/tmp}/codex/<project>/state.json. If a path is code, include the hunk body. Redact secrets. If you cannot, do not call TypeSafe.",
                     "typesafe ask --state-file $WORKDIR/state.json --questions-file $WORKDIR/questions.json",
-                    "Apply thresholds locally. Noul ~0.5 is unsure. Low confidence: abstain. You pick the next action.",
+                    "typesafe decide on the envelope. Invalid answers already failed closed. Unused speculative heads are ignored. If action is abstain, do not automate. If action is act, verify independently — a Choice is not proof.",
                     "Compose: one ask per document (do not loop noul). Local prefilter then Jev (regex, quote match). Use find/rank/extract/verify/screen/suggest-skill/decide when those flags fit. Second HTTP only to shrink options or fetch evidence.",
                 ],
             }

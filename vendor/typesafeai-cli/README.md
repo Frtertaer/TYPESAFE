@@ -2,7 +2,7 @@
 
 CLI for [TypeSafe](https://typesafe.ai) Jev. Run it from a shell, or let an agent run it.
 
-Jev answers `noul`, `choice`, and `score` questions over JSON `state`. It does not chat, and it only sees what you send.
+Jev answers `noul`, `choice`, and `score` questions over JSON `state`. It does not chat, and it only sees what you send. Invalid answers fail closed. Unused speculative heads cannot act. Ranked `find` lines are not evidence when the document has no answer.
 
 ## Install
 
@@ -51,14 +51,15 @@ export TYPESAFE_API_KEY=apikey_…
 }
 ```
 
-[`examples/ticket`](examples/ticket) and [`examples/code-change`](examples/code-change) are full copies.
+[`examples/ticket`](examples/ticket), [`examples/code-change`](examples/code-change), and [`examples/fan-out`](examples/fan-out) are full copies.
 
 ```bash
 typesafe ask --state-file state.json --questions-file questions.json
 typesafe noul "Does this request a refund?" --state "I was charged twice."
+typesafe decide --answers-file last.json
 ```
 
-Keep those JSON files under `${TMPDIR:-/tmp}/codex/<project>/`. `typesafe skills install` copies the typesafe-cli skill. `typesafe auth status` reports `has_key` and nothing else.
+Keep those JSON files under `${TMPDIR:-/tmp}/codex/<project>/`. `typesafe skills install` matches `npx skills add`: `--project` (default) or `--global` / `-g`. A TTY asks which. Global also writes a pointer into the user agent file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, or `~/.grok/rules/typesafe-cli.md`) so investigations load `typesafe`. `typesafe auth status` reports `has_key` and nothing else.
 
 ## Commands
 
@@ -77,6 +78,6 @@ Keep those JSON files under `${TMPDIR:-/tmp}/codex/<project>/`. `typesafe skills
 | `smoke` | Live docs quickstart |
 | `auth status` | Whether a key is loaded |
 | `agent schema` | JSON command tree |
-| `skills install` | Official TypeSafe skill + typesafe-cli |
+| `skills install` | Official TypeSafe skill + typesafe-cli (`-g` for all projects) |
 
-Exit `0` answered, `1` request failed, `2` bad flags or questions.
+Exit `0` answered, `1` request failed or invalid answer, `2` bad flags or questions.

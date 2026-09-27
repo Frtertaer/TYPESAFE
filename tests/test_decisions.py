@@ -197,6 +197,306 @@ def run_cli(
     )
 
 
+
+
+class CalibrateTest(unittest.TestCase):
+    run_cli = staticmethod(run_cli)
+
+    def _entries(self):
+        rows = []
+        # picks Jev backed strongly at top ~0.70 — plausible only when the
+        # log was written under a lower strong_pick, so a higher candidate
+        # must not strand them as weak winners.
+        for i in range(4):
+            rows.append({
+                "ts": 1700000000 + i, "harness": "claude-code",
+                "jev_status": "winner", "strong_pick": True,
+                "probabilities": {"skill_a": 0.70, "skill_b": 0.05},
+                "need": 0.8, "shortlist": ["skill_a", "skill_b"],
+                "winner": {"kind": "skill", "name": "a"},
+            })
+        # admitted picks Jev itself did not back (strong_pick false)
+        for i in range(3):
+            rows.append({
+                "ts": 1700000100 + i, "harness": "claude-code",
+                "jev_status": "winner", "strong_pick": False,
+                "probabilities": {"skill_a": 0.55, "skill_b": 0.50},
+                "need": 0.8, "shortlist": ["skill_a", "skill_b"],
+                "winner": {"kind": "skill", "name": "a"},
+            })
+        # low-need prompts that escalated only because their top sat
+        # under the floor — a lower floor routes them to none.
+        for i in range(3):
+            rows.append({
+                "ts": 1700000200 + i, "harness": "grok",
+                "jev_status": "escalate",
+                "probabilities": {"skill_a": 0.45, "skill_b": 0.30},
+                "need": 0.2, "shortlist": ["skill_a", "skill_b"],
+                "winner": None,
+            })
+        # genuine low-confidence escalations at top 0.40
+        for i in range(2):
+            rows.append({
+                "ts": 1700000300 + i, "harness": "grok",
+                "jev_status": "escalate",
+                "probabilities": {"skill_a": 0.40, "skill_b": 0.35},
+                "need": 0.6, "shortlist": ["skill_a", "skill_b"],
+                "winner": None,
+            })
+        return rows
+
+    def test_calibrate_deterministic_recommendation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            a = self.run_cli("--file", str(log), "--calibrate", "--json")
+            b = self.run_cli("--file", str(log), "--calibrate", "--json")
+        self.assertEqual(a.returncode, 0)
+        self.assertEqual(a.stdout, b.stdout)
+        report = json.loads(a.stdout)
+        self.assertEqual(report["entries"], 12)
+        rec = report["recommended"]
+        # strong winners at top 0.70 pin strong_pick at 0.70 (higher would
+        # strand them as weak winners); low-need prompts at top 0.45 pin
+        # the floor (higher would escalate prompts that deserve none).
+        self.assertEqual(rec["strong_pick"], 0.7)
+        self.assertEqual(rec["confidence_floor"], 0.45)
+        self.assertLess(
+            report["cost"]["recommended"], report["cost"]["current"]
+        )
+        self.assertLess(
+            rec["confidence_floor"], rec["strong_pick"]
+        )  # policy_lint P004 holds
+
+    def test_calibrate_empty_and_broken_log_safe_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, ["not-json", "{\"x\": 1}", ""])
+            proc = self.run_cli("--file", str(log), "--calibrate", "--json")
+            self.assertEqual(proc.returncode, 0)
+            report = json.loads(proc.stdout)
+            self.assertEqual(report["entries"], 0)
+            # nothing replayable -> keep the shipped policy values
+            policy = json.loads(
+                (SCRIPTS.parent / "policy.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                report["recommended"]["strong_pick"], policy["strong_pick"]
+            )
+            self.assertEqual(
+                report["recommended"]["confidence_floor"],
+                policy["confidence_floor"],
+            )
+
+    def test_calibrate_apply_writes_valid_patched_copy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            out_policy = Path(tmp) / "policy-new.json"
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate",
+                "--apply", str(out_policy), "--json",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            self.assertEqual(report["applied_to"], str(out_policy))
+            patched = json.loads(out_policy.read_text(encoding="utf-8"))
+            self.assertEqual(
+                patched["strong_pick"], report["recommended"]["strong_pick"]
+            )
+            # untouched keys survive the patch
+            self.assertEqual(patched["noul_yes"], 0.7)
+            # patched copy passes the shipped linter
+            import policy_lint
+
+            findings = policy_lint.lint_policy(patched)
+            errors = [
+                f for f in findings if str(f.get("severity")) == "error"
+            ]
+            self.assertEqual(errors, [])
+
+    def test_calibrate_apply_bare_prints_diff_never_rewrites(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            before = (SCRIPTS.parent / "policy.json").read_bytes()
+            proc = self.run_cli("--file", str(log), "--calibrate", "--apply")
+            after = (SCRIPTS.parent / "policy.json").read_bytes()
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(before, after)  # never rewritten in place
+            self.assertIn("@@", proc.stdout)
+            self.assertIn('"strong_pick"', proc.stdout)
+
+    def test_calibrate_health_excludes_degraded_buckets(self):
+        rows = self._entries()
+        # a fully erroring harness+hour whose records must be dropped
+        for i in range(3):
+            rows.append({
+                "ts": 1700000300 + i, "harness": "cursor",
+                "jev_status": "error", "jev_attempted": True,
+                "probabilities": {"skill_a": 0.99}, "need": 0.9,
+                "shortlist": ["skill_a"], "winner": None,
+            })
+        # eligible winner in the same degraded cursor hour
+        rows.append({
+            "ts": 1700000300, "harness": "cursor", "jev_status": "winner",
+            "strong_pick": True, "jev_attempted": True,
+            "probabilities": {"skill_a": 0.99}, "need": 0.9,
+            "shortlist": ["skill_a"],
+            "winner": {"kind": "skill", "name": "a"},
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, rows)
+            plain = self.run_cli("--file", str(log), "--calibrate", "--json")
+            guarded = self.run_cli(
+                "--file", str(log), "--calibrate", "--harness-health", "--json"
+            )
+        self.assertEqual(plain.returncode, 0)
+        self.assertEqual(guarded.returncode, 0)
+        p = json.loads(plain.stdout)
+        g = json.loads(guarded.stdout)
+        self.assertEqual(p["entries"], 13)
+        self.assertEqual(g["entries"], 12)
+        self.assertEqual(g["health_excluded"], 1)
+        self.assertTrue(g["degraded_buckets"])
+
+    def _eval_file(self, tmp: str, pairs: list) -> Path:
+        """Write a compare --live --out shaped JSON from (before, after)
+        noul pairs (None = unscored side)."""
+        path = Path(tmp) / "eval-live.json"
+        rows = [
+            {"id": "case%d" % i,
+             "before": {"noul": before},
+             "after": {"noul": after}}
+            for i, (before, after) in enumerate(pairs)
+        ]
+        path.write_text(json.dumps({"rows": rows}), encoding="utf-8")
+        return path
+
+    def test_calibrate_eval_keeps_current_inside_interval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            eval_path = self._eval_file(
+                tmp, [(0.1, 0.9), (0.4, 0.8), (0.2, 0.85)]
+            )
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate",
+                "--eval", str(eval_path), "--json",
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        report = json.loads(proc.stdout)
+        ev = report["eval"]
+        self.assertTrue(ev["separable"])
+        self.assertEqual(ev["neg_max"], 0.4)
+        self.assertEqual(ev["pos_min"], 0.8)
+        self.assertEqual(report["recommended"]["noul_yes"], 0.7)
+        self.assertIn("already separates", ev["note"])
+
+    def test_calibrate_eval_lowers_to_margin_and_counts_flips(self):
+        rows = self._entries()
+        # an escalate whose need sits in the [rec, current) band — it must
+        # be counted as a false-accept flip when noul_yes drops.
+        rows.append({
+            "ts": 1700000400, "harness": "grok", "jev_status": "escalate",
+            "probabilities": {"skill_a": 0.6, "skill_b": 0.2},
+            "need": 0.62, "shortlist": ["skill_a", "skill_b"],
+            "winner": None,
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, rows)
+            # positives bottom at 0.6, negatives top at 0.4 -> interval
+            # (0.4, 0.6]; above noul_unsure=0.5 the grid offers 0.55/0.60
+            # and 0.55 is the max-margin pick.
+            eval_path = self._eval_file(
+                tmp, [(0.4, 0.6), (0.2, 0.75), (0.3, 0.9)]
+            )
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate",
+                "--eval", str(eval_path), "--json",
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["recommended"]["noul_yes"], 0.55)
+        self.assertEqual(report["delta"]["noul_yes"], -0.15)
+        self.assertEqual(report["eval"]["flips"], 1)
+
+    def test_calibrate_eval_overlapping_bands_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            eval_path = self._eval_file(
+                tmp, [(0.5, 0.6), (0.3, 0.4)]  # neg_max 0.5 > pos_min 0.4
+            )
+            out_policy = Path(tmp) / "policy-new.json"
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate",
+                "--eval", str(eval_path),
+                "--apply", str(out_policy), "--json",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            self.assertFalse(report["eval"]["separable"])
+            self.assertIsNone(report["recommended"]["noul_yes"])
+            self.assertNotIn("noul_yes", report["delta"])
+            patched = json.loads(out_policy.read_text(encoding="utf-8"))
+            self.assertEqual(patched["noul_yes"], 0.7)  # untouched
+
+    def test_calibrate_eval_apply_patches_noul_yes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            eval_path = self._eval_file(tmp, [(0.4, 0.6), (0.2, 0.8)])
+            out_policy = Path(tmp) / "policy-new.json"
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate",
+                "--eval", str(eval_path),
+                "--apply", str(out_policy), "--json",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            patched = json.loads(out_policy.read_text(encoding="utf-8"))
+            self.assertEqual(
+                patched["noul_yes"], report["recommended"]["noul_yes"]
+            )
+            import policy_lint
+
+            errors = [
+                f for f in policy_lint.lint_policy(patched)
+                if str(f.get("severity")) == "error"
+            ]
+            self.assertEqual(errors, [])
+
+    def test_calibrate_eval_missing_file_rc1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate",
+                "--eval", str(Path(tmp) / "nope.json"), "--json",
+            )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("--eval", proc.stderr)
+
+    def test_calibrate_eval_stdin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "decisions.jsonl"
+            write_log(log, self._entries())
+            payload = json.dumps({
+                "rows": [{"before": {"noul": 0.2}, "after": {"noul": 0.9}}]
+            })
+            proc = self.run_cli(
+                "--file", str(log), "--calibrate", "--eval", "-",
+                "--json", stdin_text=payload,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = json.loads(proc.stdout)
+            self.assertEqual(report["eval"]["positives"], 1)
+            self.assertEqual(report["eval"]["negatives"], 1)
+
+
 class CliTest(unittest.TestCase):
     run_cli = staticmethod(run_cli)
 

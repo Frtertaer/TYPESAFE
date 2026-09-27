@@ -1,0 +1,28 @@
+{
+  "operation": {
+    "type": "choice",
+    "instructions": "Given `task` and `files[0].hunk`, what should the agent do next?",
+    "criteria": {
+      "EDIT": "Change the skill text so agents attach real code slices",
+      "ASK": "Ask the human before changing anything",
+      "SKIP": "Do nothing; the skill is already clear",
+      "abstain": "Not enough in state to decide"
+    }
+  },
+  "edit_target": {
+    "type": "choice",
+    "instructions": "If the next operation is EDIT, which observed hunk should be changed? This question chooses only a target; another question chooses the operation.",
+    "criteria": {
+      "files[0]": "The skill hunk already in `files[0].hunk`",
+      "none": "No offered hunk should be edited"
+    }
+  },
+  "ask_target": {
+    "type": "choice",
+    "instructions": "If the next operation is ASK, what should we ask the human? This question chooses only a target; another question chooses the operation.",
+    "criteria": {
+      "scope": "Ask whether the skill should stay questions-first",
+      "none": "Do not ask"
+    }
+  }
+}

@@ -98,7 +98,7 @@ make test-jev                             # один test-файл по суфф
 
 Jev не помнит прошлые вызовы. В `state` — факты, план, шаг, счётчик попыток, шортлист. Если кодер не помнит план — читает `.jev-trace.json` и зовёт `ask --trace`. Не спрашивать то, что проверяется инструментом.
 
-Jev **не** убивает галлюцинации «по максимуму» и не факт-чекер. Он режет выдуманные *решения*: кодер не выбирает курс сам. Срыв плана / тупик / «не знаю» / «не помню» / зависание в ответе → `ask` с `on_track` / `next_move` / `stuck_move` / `unknown_move`. Пользователь инструменты не выбирает: хук сам подставляет уже установленные skills/plugins/MCP по тексту промпта (Claude `UserPromptSubmit`, Hermes `pre_llm_call`, Codex `UserPromptSubmit` в `~/.codex/hooks.json` — пока не trusted в `/hooks`, хук не бежит). Grok пишет `.jev-tools.json`. Если sidecar есть, грузить его, иначе fallback:
+Jev **не** убивает галлюцинации «по максимуму» и не факт-чекер. Он режет выдуманные *решения*: кодер не выбирает курс сам. Срыв плана / тупик / «не знаю» / «не помню» / зависание в ответе → `ask` с `on_track` / `next_move` / `stuck_move` / `unknown_move`. Пользователь инструменты не выбирает: хук сам подставляет уже установленные skills/plugins/MCP по тексту промпта (Claude `UserPromptSubmit`, Hermes `pre_llm_call`, Codex `UserPromptSubmit` в `~/.codex/hooks.json` — пока не trusted в `/hooks`, хук не бежит, Cursor `beforeSubmitPrompt` в `~/.cursor/hooks.json`, Gemini `BeforeAgent` в `~/.gemini/settings.json`). Grok пишет `.jev-tools.json`. Если sidecar есть, грузить его, иначе fallback:
 
 ```text
 python skills/jev-consult/scripts/inventory.py --task "<task>" --harness auto --write-ask tools.request.json
@@ -156,3 +156,34 @@ python skills/jev-consult/scripts/progress.py status reliability
 python skills/jev-consult/scripts/progress.py review reliability --reason "Acceptance evidence reviewed" --reviewer "review-reference"
 python skills/jev-consult/scripts/progress.py history reliability
 ```
+
+## Калибровка порогов (`noul_yes` и т.д.)
+
+Пороги живут только в `skills/jev-consult/policy.json`; менять их руками —
+последняя мера. Цикл, прожитый на live-eval:
+
+1. **Прогнать live-eval и сохранить строки**:
+   `python skills/jev-consult/scripts/compare.py --live --strict --out /tmp/eval-live.json`
+   (нужен `TYPESAFE_API_KEY`; `--strict` падает, если кейс не вызвал Jev или
+   `noul < noul_yes`).
+2. **Триаж до калибровки**: если модель классифицирует верно, но метка кейса
+   вручит — править `examples/compare-cases.json`; если шаблон не ловит
+   формулировку — править `templates` в `policy.json`. Калибровка не лечит
+   ни то, ни другое.
+3. **Рекомендация**: `python skills/jev-consult/scripts/decisions.py --calibrate --eval /tmp/eval-live.json`.
+   Скрипт читает noul до/после из eval-строк и предлагает `noul_yes` в
+   интервале разделения. `already separates` = текущее значение уже внутри —
+   не трогать (`flips: 0`). `fix the corpus/templates first` = полосы
+   пересекаются, гейт глушить нельзя.
+4. **Применить**: `--apply` пишет diff, затем обязателен
+   `policy_lint.py --strict` PASS. Никогда не понижать гейт без данных о
+   росте false-accept.
+5. **Проверить**: повторный `compare.py --live --strict --diff eval-baseline.json` —
+   PASS; обновить `eval-baseline.json` (его же диффит `live-eval.yml`).
+6. **Откат**: `git checkout skills/jev-consult/policy.json` — пороги
+   версионируются вместе с кодом; `decisions.py --calibrate` на старом
+   eval-подтвердит возврат.
+
+Когда калибровать: после изменения `templates`, смены модели, или когда
+weekly `live-eval` краснеет на корректных кейсах. Не калибровать по одному
+фейлу — noul гуляет ±0.08 между одинаковыми вызовами.

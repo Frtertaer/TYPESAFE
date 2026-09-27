@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from typesafe_cli.questions import QuestionError
+from typesafe_cli.recipes.find import UNTRUSTED
 
 PATTERN_NAMES = ("email", "phone", "money")
 
@@ -34,7 +35,8 @@ def extract_questions(spans: list[str], question: str) -> dict[str, Any]:
         "value": {
             "type": "choice",
             "instructions": (
-                f"{question} Pick the verbatim candidate span. "
+                UNTRUSTED
+                + f"{question} Pick the verbatim candidate span. "
                 "If none of the candidates is correct, choose none."
             ),
             "criteria": criteria,

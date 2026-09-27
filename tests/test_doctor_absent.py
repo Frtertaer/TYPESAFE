@@ -97,13 +97,18 @@ class AbsentHarnessTests(unittest.TestCase):
             rc, out, _ = run_main(
                 ["--home", str(home), "--hermes-home", str(hermes)]
             )
-        for agent in ("claude-code", "codex", "grok", "hermes"):
+        for agent in (
+            "claude-code", "codex", "cursor", "gemini", "grok", "hermes",
+            "opencode", "windsurf",
+        ):
             presence = presence_of(out, agent)
             self.assertIsNotNone(presence, agent)
             self.assertTrue(presence["skipped"], agent)
             self.assertEqual(agent_checks(out, agent), [presence], agent)
         self.assertEqual(
-            out["absent"], ["claude-code", "codex", "grok", "hermes"]
+            out["absent"],
+            ["claude-code", "codex", "cursor", "gemini", "grok", "hermes",
+             "opencode", "windsurf"],
         )
         # still a failure overall: the shared api_key check fails
         self.assertEqual(rc, 1)

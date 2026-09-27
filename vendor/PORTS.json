@@ -3,16 +3,16 @@
     {
       "dir": "awesome-jev",
       "upstream": "AppitStudio/awesome-jev",
-      "commit": "e96ed33d96ff355e3cfefa6efa104e1eee95f4f0",
+      "commit": "437167821e1de28893a28e83d220c5640060ffdf",
       "note": "Catalog/docs only; README/LICENSE trimmed locally. No ported files.",
       "ported": []
     },
     {
       "dir": "awesome-llm-apps-skill-evals",
       "upstream": "Shubhamsaboo/awesome-llm-apps",
-      "commit": "9e860951aaf5c82801779e43e748dcf92042879a",
+      "commit": "dc676965bc39bcd4fbe164bc3ea31bb75091e0c1",
       "upstream_path": "agent_skills/evals/tools",
-      "note": "Subset vendored; run_trigger_evals.py is locally adapted.",
+      "note": "Subset vendored; run_trigger_evals.py is locally adapted. registry_lint.py + test vendored for reference (upstream registry-membership linter for its own layout - not ported).",
       "ported": [
         {"vendor": "skill_scanner.py", "ours": "skills/jev-consult/scripts/skill_scanner.py"},
         {"vendor": "skill_lint.py", "ours": "skills/jev-consult/scripts/skill_lint.py"},
@@ -66,7 +66,7 @@
     {
       "dir": "typesafeai-cli",
       "upstream": "maddygoround/typesafeai-cli",
-      "commit": "ca87ffdebb13415d3d582efea243e77b8ce92387",
+      "commit": "34be2419528e893ae1ab63d392d74eb15f051a7b",
       "note": "Inspect-only; live client stays jev.py. No ported files.",
       "ported": []
     }

@@ -45,6 +45,7 @@ def find(
             "file": str(file),
             "verdict": merged["verdict"],
             "exists": merged["exists"],
+            "usable": merged["usable"],
             "lines": merged["query_lines"][:20],
             "model": merged["model"],
             "usage": merged["usage"],

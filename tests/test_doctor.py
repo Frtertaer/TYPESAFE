@@ -162,7 +162,7 @@ class DoctorTests(unittest.TestCase):
                 cwd=tmp,
             )
             self.assertEqual(rc, 1)
-            self.assertIn("| check | hermes | claude-code | codex | grok | -- |", text)
+            self.assertIn("| check | hermes | claude-code | codex | grok | cursor | gemini | windsurf | opencode | -- |", text)
             self.assertIn("| api_key |", text)
             self.assertIn("| skill |", text)
             # wildcard-only checks must mark harness cells '-'
@@ -374,6 +374,162 @@ class DoctorTests(unittest.TestCase):
         self.assertTrue(check_of(out, "jev-compact.json", "grok")["ok"])
         self.assertFalse(check_of(out, "jev-tools.json", "grok")["ok"])
 
+    def test_cursor_absent_skips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            rc, out, _ = run_main(
+                ["--agents", "cursor", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+        self.assertEqual(rc, 0)
+        presence = check_of(out, "presence", "cursor")
+        self.assertTrue(presence["skipped"])
+        self.assertTrue(presence["ok"])
+
+    def test_cursor_missing_inventory_hook(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            make_skill(home / ".cursor" / "skills")
+            hooks = home / ".cursor" / "hooks.json"
+            hooks.parent.mkdir(parents=True, exist_ok=True)
+            hooks.write_text(json.dumps({"version": 1, "hooks": {}}), encoding="utf-8")
+            rc, out, _ = run_main(
+                ["--agents", "cursor", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+            self.assertEqual(rc, 1)
+            self.assertTrue(check_of(out, "skill", "cursor")["ok"])
+            self.assertFalse(check_of(out, "inventory_hook", "cursor")["ok"])
+            hooks.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "hooks": {
+                            "beforeSubmitPrompt": [
+                                {"command": "python ~/.cursor/skills/jev-consult/scripts/inventory_hook.py"}
+                            ]
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            rc, out, _ = run_main(
+                ["--agents", "cursor", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+            self.assertEqual(rc, 0)
+            self.assertTrue(check_of(out, "inventory_hook", "cursor")["ok"])
+
+    def test_gemini_absent_and_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            rc, out, _ = run_main(
+                ["--agents", "gemini", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+            self.assertEqual(rc, 0)
+            self.assertTrue(check_of(out, "presence", "gemini")["skipped"])
+            make_skill(home / ".gemini" / "skills")
+            settings = home / ".gemini" / "settings.json"
+            settings.parent.mkdir(parents=True, exist_ok=True)
+            settings.write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+            rc, out, _ = run_main(
+                ["--agents", "gemini", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+            self.assertEqual(rc, 1)
+            self.assertFalse(check_of(out, "inventory_hook", "gemini")["ok"])
+            settings.write_text(
+                json.dumps(
+                    {
+                        "hooks": {
+                            "BeforeAgent": [
+                                {
+                                    "matcher": "*",
+                                    "hooks": [
+                                        {
+                                            "name": "jev-consult-inventory",
+                                            "type": "command",
+                                            "command": "python ~/.gemini/skills/jev-consult/scripts/inventory_hook.py",
+                                        }
+                                    ],
+                                }
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            rc, out, _ = run_main(
+                ["--agents", "gemini", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+            self.assertEqual(rc, 0)
+            self.assertTrue(check_of(out, "inventory_hook", "gemini")["ok"])
+
+    def test_windsurf_skill_and_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            rc, out, _ = run_main(
+                ["--agents", "windsurf", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+        self.assertEqual(rc, 0)
+        self.assertTrue(check_of(out, "presence", "windsurf")["skipped"])
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            make_skill(home / ".codeium" / "windsurf" / "skills")
+            rc, out, _ = run_main(
+                ["--agents", "windsurf", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+            self.assertEqual(rc, 1)
+            self.assertTrue(check_of(out, "skill", "windsurf")["ok"])
+            self.assertFalse(check_of(out, "instructions", "windsurf")["ok"])
+            rules = home / ".codeium" / "windsurf" / "memories" / "global_rules.md"
+            rules.parent.mkdir(parents=True, exist_ok=True)
+            rules.write_text(
+                "# rules\n<!-- jev-consult:start -->\nx\n<!-- jev-consult:end -->\n",
+                encoding="utf-8",
+            )
+            rc, out, _ = run_main(
+                ["--agents", "windsurf", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+            self.assertEqual(rc, 0)
+            self.assertTrue(check_of(out, "instructions", "windsurf")["ok"])
+
+    def test_opencode_skill_instructions_and_plugin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            make_skill(home / ".config" / "opencode" / "skills")
+            rc, out, _ = run_main(
+                ["--agents", "opencode", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+            self.assertEqual(rc, 1)
+            self.assertTrue(check_of(out, "skill", "opencode")["ok"])
+            self.assertFalse(check_of(out, "instructions", "opencode")["ok"])
+            self.assertFalse(check_of(out, "inventory_hook", "opencode")["ok"])
+            agents_md = home / ".config" / "opencode" / "AGENTS.md"
+            agents_md.write_text(
+                "<!-- jev-consult:start -->\nx\n<!-- jev-consult:end -->\n",
+                encoding="utf-8",
+            )
+            plugin = home / ".config" / "opencode" / "plugins" / "jev-consult.ts"
+            plugin.parent.mkdir(parents=True, exist_ok=True)
+            plugin.write_text(
+                "// jev-consult\nconst s = 'inventory_hook.py'\n",
+                encoding="utf-8",
+            )
+            rc, out, _ = run_main(
+                ["--agents", "opencode", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+            self.assertEqual(rc, 0)
+            self.assertTrue(check_of(out, "instructions", "opencode")["ok"])
+            self.assertTrue(check_of(out, "inventory_hook", "opencode")["ok"])
+
     def test_policy_check_real_file(self) -> None:
         # doctor.py resolves policy.json next to itself in the repo skill dir
         rc, out, _ = run_main(["--agents", "hermes", "--home", "x", "--hermes-home", "y"])
@@ -539,9 +695,9 @@ class DoctorTests(unittest.TestCase):
     def test_unknown_agent_rc2(self) -> None:
         buf = io.StringIO()
         with patch.object(sys, "stderr", buf), patch.object(sys, "stdout", io.StringIO()):
-            rc = DOC.main(["--agents", "cursor"])
+            rc = DOC.main(["--agents", "copilot"])
         self.assertEqual(rc, 2)
-        self.assertIn("cursor", buf.getvalue())
+        self.assertIn("copilot", buf.getvalue())
 
     def test_out_writes_result_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from typesafe_cli.client import answers_to_dict, to_sdk_questions
+import pytest
+
+from typesafe_cli.answers import AnswerError
+from typesafe_cli.client import answers_to_dict, system_one, to_sdk_questions
+from typesafe_cli.config import Config
 from typesafe_sdk import Choice, Noul, Score
 
 
@@ -57,3 +61,33 @@ def test_to_sdk_questions():
     assert isinstance(sdk["urgency"], Noul)
     assert isinstance(sdk["dept"], Choice)
     assert isinstance(sdk["sev"], Score)
+
+
+def test_system_one_rejects_invented_choice(monkeypatch):
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def system_one(self, **_kwargs):
+            return SimpleNamespace(
+                model="jev-1.13.0",
+                answers={
+                    "op": SimpleNamespace(
+                        choice="invented",
+                        probabilities={"a": 1.0, "b": 0.0},
+                        confidence=1.0,
+                    )
+                },
+                usage=SimpleNamespace(input_tokens=1, output_tokens=1),
+            )
+
+    monkeypatch.setattr("typesafe_cli.client.TypeSafeClient", lambda **_k: FakeClient())
+    with pytest.raises(AnswerError, match="Invalid TypeSafe"):
+        system_one(
+            config=Config(api_key="k", base_url="https://api.typesafe.ai", model="jev-latest"),
+            state="x",
+            questions={"op": {"type": "choice", "instructions": "pick", "criteria": {"a": None, "b": None}}},
+        )

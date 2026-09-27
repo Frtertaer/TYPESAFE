@@ -1,0 +1,10 @@
+{
+  "task": "A coding agent is about to edit a skill. Decide the next operation, then which hunk to touch if the operation is EDIT.",
+  "files": [
+    {
+      "path": "src/typesafe_cli/data/typesafe-cli/SKILL.md",
+      "line_range": "50-74",
+      "hunk": "If a path is code (`files[0].hunk`), the value must be the slice (path + line range + body), not a filename and not \"see the PR.\""
+    }
+  ]
+}

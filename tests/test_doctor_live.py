@@ -399,6 +399,24 @@ class LiveProbeTests(unittest.TestCase):
             sorted(out["live"]["probes"]), ["codex"]
         )
 
+    def test_windsurf_home_present_but_never_probed(self) -> None:
+        """Windsurf has no prompt-bearing headless CLI — its binary opens
+        the IDE, so --live must skip it even when the home dir exists."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / ".codeium" / "windsurf").mkdir(parents=True)
+            rc, out, _ = run_main(
+                [
+                    "--agents", "windsurf",
+                    "--home", str(home),
+                    "--hermes-home", str(Path(tmp) / "h"),
+                    "--live", "--live-timeout", "5",
+                ],
+                cwd=tmp,
+            )
+        self.assertIsNone(live_checks(out, "windsurf"))
+        self.assertNotIn("windsurf", out["live"]["probes"])
+
     def test_only_live_probe_runs_probes_alone(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"

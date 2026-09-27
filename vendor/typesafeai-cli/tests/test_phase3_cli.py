@@ -45,6 +45,8 @@ def test_decide_command_from_envelope(tmp_path: Path):
     assert body["metadata"]["command"] == "decide"
     assert body["data"]["decisions"]["urgent"]["decision"] == "uncertain"
     assert body["data"]["decisions"]["team"]["decision"] == "uncertain"
+    assert body["data"]["action"] == "abstain"
+    assert body["data"]["needs_verify"] is False
 
 
 def test_extract_returns_verbatim_span(tmp_path: Path, monkeypatch):

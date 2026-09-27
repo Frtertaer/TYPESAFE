@@ -314,15 +314,20 @@ class HookE2ETests(unittest.TestCase):
         self.assertIn("ts", verdict)
 
     def test_verdict_bad_path_still_emits(self) -> None:
-        proc = self._run_full(
-            "",
-            argv=[
-                "--simulate",
-                "tiny",
-                "--verdict",
-                "N:\\no\\such\\dir\\v.json",
-            ],
-        )
+        # A verdict path under an existing file fails on every OS — a
+        # Windows-only path like N:\no\such\dir is a legal POSIX filename.
+        with tempfile.TemporaryDirectory() as tmp:
+            blocker = Path(tmp) / "blocker"
+            blocker.write_text("x", encoding="utf-8")
+            proc = self._run_full(
+                "",
+                argv=[
+                    "--simulate",
+                    "tiny",
+                    "--verdict",
+                    str(blocker / "v.json"),
+                ],
+            )
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(json.loads(proc.stdout.strip()), {})
         self.assertIn("--verdict failed", proc.stderr)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import urllib.error
 import urllib.request
 from importlib.resources import files
@@ -7,6 +8,7 @@ from pathlib import Path
 
 import typer
 
+from typesafe_cli.agent_files import upsert_global_agent_files
 from typesafe_cli.detect import detect_agent_info, resolve_agent
 from typesafe_cli.io import emit_success, fail
 
@@ -25,16 +27,19 @@ SKILL_DIR_BY_AGENT = {
     "generic-agent": ".agents/skills",
 }
 
-USER_SKILL_DIR_BY_AGENT = {
-    "claude-code": Path.home() / ".claude" / "skills",
-    "cursor": Path.home() / ".cursor" / "skills",
-    "windsurf": Path.home() / ".windsurf" / "skills",
-    "gemini-code": Path.home() / ".gemini" / "skills",
-    "codex": Path.home() / ".agents" / "skills",
-    "opencode": Path.home() / ".agents" / "skills",
-    "grok": Path.home() / ".agents" / "skills",
-    "generic-agent": Path.home() / ".agents" / "skills",
-}
+def _user_skill_dir(agent: str, *, home: Path | None = None) -> Path:
+    root = home or Path.home()
+    mapping = {
+        "claude-code": root / ".claude" / "skills",
+        "cursor": root / ".cursor" / "skills",
+        "windsurf": root / ".windsurf" / "skills",
+        "gemini-code": root / ".gemini" / "skills",
+        "codex": root / ".codex" / "skills",
+        "opencode": root / ".agents" / "skills",
+        "grok": root / ".agents" / "skills",
+        "generic-agent": root / ".agents" / "skills",
+    }
+    return mapping.get(agent, root / ".agents" / "skills")
 
 EXISTING_PROJECT_DIRS = (
     ".agents/skills",
@@ -48,7 +53,11 @@ EXISTING_PROJECT_DIRS = (
 def install(
     target: str = typer.Option("auto", "--target", help="claude, cursor, codex, grok, or auto"),
     directory: Path | None = typer.Option(None, "--dir", help="Explicit skills directory"),
-    project: bool = typer.Option(True, "--project/--global", help="Install into the current project (default)"),
+    global_install: bool = typer.Option(
+        False, "--global", "-g", help="Install for this user, all projects (same as npx skills add -g)"
+    ),
+    project: bool = typer.Option(False, "--project", help="Install into the current project only"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask global vs project"),
     offline: bool = typer.Option(False, "--offline", help="Use the vendored official skill, skip GitHub"),
 ) -> None:
     try:
@@ -59,7 +68,8 @@ def install(
         fail(code="request", message=f"could not load skills: {exc}", exit_code=1)
 
     agent = resolve_agent(target=target)
-    dest_root = directory if directory is not None else _skills_root(agent=agent, project=project)
+    scope = _resolve_scope(global_install=global_install, project=project, yes=yes)
+    dest_root = directory if directory is not None else _skills_root(agent=agent, project=scope == "project")
     written: list[str] = []
     try:
         pairs = [
@@ -71,15 +81,19 @@ def install(
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(body, encoding="utf-8")
             written.append(str(path))
+        if scope == "global" and directory is None:
+            for path in upsert_global_agent_files(home=Path.home(), agent=agent):
+                written.append(str(path))
     except OSError as exc:
         fail(code="request", message=str(exc), exit_code=1)
 
     emit_success(
         data={
             "agent": agent,
+            "scope": scope,
             "written": written,
             "source": "offline-vendored" if offline else "github-or-vendored",
-            "note": "Installed typesafe-ai (design) and typesafe-cli (collect state, then typesafe ask). Agents cannot access TYPESAFE_* env vars.",
+            "note": "Installed typesafe-ai (design) and typesafe-cli (collect state, then typesafe ask). Global installs also write a TypeSafe pointer into the user agent file (CLAUDE.md / AGENTS.md / ~/.grok/rules). Agents cannot access TYPESAFE_* env vars.",
         },
         command="skills install",
     )
@@ -135,4 +149,18 @@ def _skills_root(*, agent: str, project: bool) -> Path:
                 return candidate
         rel = SKILL_DIR_BY_AGENT.get(agent, ".agents/skills")
         return cwd / rel
-    return USER_SKILL_DIR_BY_AGENT.get(agent, Path.home() / ".agents" / "skills")
+    return _user_skill_dir(agent)
+
+
+def _resolve_scope(*, global_install: bool, project: bool, yes: bool) -> str:
+    if global_install and project:
+        fail(code="usage", message="use only one of --global or --project", exit_code=2)
+    if global_install:
+        return "global"
+    if project:
+        return "project"
+    if yes or not sys.stdin.isatty():
+        return "project"
+    if typer.confirm("Install globally for all projects on this machine?", default=False):
+        return "global"
+    return "project"

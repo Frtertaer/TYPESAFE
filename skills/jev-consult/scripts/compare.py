@@ -272,6 +272,25 @@ def run(
         try:
             jev = load_jev()
             policy = jev.load_policy()
+            templates = policy.get("templates") or {}
+            bad_scores = [
+                "%s (score %s is %s)" % (
+                    case.get("id") or "?",
+                    case.get("score") or "on_track",
+                    (
+                        "missing"
+                        if not isinstance(templates.get(str(case.get("score") or "on_track")), dict)
+                        else "type %r" % templates[str(case.get("score") or "on_track")].get("type")
+                    ),
+                )
+                for case in cases
+                if (templates.get(str(case.get("score") or "on_track")) or {}).get("type") != "noul"
+            ]
+            if bad_scores:
+                raise SystemExit(
+                    "case score must name a noul template: %s"
+                    % ", ".join(bad_scores)
+                )
             for index, case in enumerate(cases):
                 before = score_live(jev, policy, case, case.get("before") or {})
                 after = score_live(jev, policy, case, case.get("after") or {})

@@ -7,7 +7,7 @@ import typer
 
 from typesafe_cli.io import emit_success, fail
 from typesafe_cli.questions import QuestionError
-from typesafe_cli.recipes.decide import apply_decide, extract_answers, parse_noul_band
+from typesafe_cli.recipes.decide import apply_decide, decide_action, extract_answers, parse_noul_band
 from typesafe_cli.recipes.thresholds import CHOICE_MIN_TOP_P, NOUL_UNCERTAIN_HIGH, NOUL_UNCERTAIN_LOW
 
 
@@ -34,9 +34,14 @@ def decide(
         decisions = apply_decide(answers, noul_low=low, noul_high=high, choice_min_p=choice_min_p)
     except (OSError, json.JSONDecodeError, QuestionError) as exc:
         fail(code="usage", message=str(exc), exit_code=2)
+    gate = decide_action(decisions)
     emit_success(
         data={
             "decisions": decisions,
+            "active": gate["active"],
+            "ignored": gate["ignored"],
+            "action": gate["action"],
+            "needs_verify": gate["needs_verify"],
             "policy": {"noul_band": [low, high], "choice_min_p": choice_min_p},
         },
         command="decide",

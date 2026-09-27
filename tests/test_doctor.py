@@ -162,7 +162,7 @@ class DoctorTests(unittest.TestCase):
                 cwd=tmp,
             )
             self.assertEqual(rc, 1)
-            self.assertIn("| check | hermes | claude-code | codex | grok | cursor | gemini | -- |", text)
+            self.assertIn("| check | hermes | claude-code | codex | grok | cursor | gemini | windsurf | opencode | -- |", text)
             self.assertIn("| api_key |", text)
             self.assertIn("| skill |", text)
             # wildcard-only checks must mark harness cells '-'
@@ -466,6 +466,69 @@ class DoctorTests(unittest.TestCase):
             )
             self.assertEqual(rc, 0)
             self.assertTrue(check_of(out, "inventory_hook", "gemini")["ok"])
+
+    def test_windsurf_skill_and_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            rc, out, _ = run_main(
+                ["--agents", "windsurf", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+        self.assertEqual(rc, 0)
+        self.assertTrue(check_of(out, "presence", "windsurf")["skipped"])
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            make_skill(home / ".codeium" / "windsurf" / "skills")
+            rc, out, _ = run_main(
+                ["--agents", "windsurf", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+            self.assertEqual(rc, 1)
+            self.assertTrue(check_of(out, "skill", "windsurf")["ok"])
+            self.assertFalse(check_of(out, "instructions", "windsurf")["ok"])
+            rules = home / ".codeium" / "windsurf" / "memories" / "global_rules.md"
+            rules.parent.mkdir(parents=True, exist_ok=True)
+            rules.write_text(
+                "# rules\n<!-- jev-consult:start -->\nx\n<!-- jev-consult:end -->\n",
+                encoding="utf-8",
+            )
+            rc, out, _ = run_main(
+                ["--agents", "windsurf", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+            self.assertEqual(rc, 0)
+            self.assertTrue(check_of(out, "instructions", "windsurf")["ok"])
+
+    def test_opencode_skill_instructions_and_plugin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            make_skill(home / ".config" / "opencode" / "skills")
+            rc, out, _ = run_main(
+                ["--agents", "opencode", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+            self.assertEqual(rc, 1)
+            self.assertTrue(check_of(out, "skill", "opencode")["ok"])
+            self.assertFalse(check_of(out, "instructions", "opencode")["ok"])
+            self.assertFalse(check_of(out, "inventory_hook", "opencode")["ok"])
+            agents_md = home / ".config" / "opencode" / "AGENTS.md"
+            agents_md.write_text(
+                "<!-- jev-consult:start -->\nx\n<!-- jev-consult:end -->\n",
+                encoding="utf-8",
+            )
+            plugin = home / ".config" / "opencode" / "plugins" / "jev-consult.ts"
+            plugin.parent.mkdir(parents=True, exist_ok=True)
+            plugin.write_text(
+                "// jev-consult\nconst s = 'inventory_hook.py'\n",
+                encoding="utf-8",
+            )
+            rc, out, _ = run_main(
+                ["--agents", "opencode", "--home", str(home), "--hermes-home", str(Path(tmp) / "h")],
+                env_extra={"TYPESAFE_API_KEY": "apikey_x"},
+            )
+            self.assertEqual(rc, 0)
+            self.assertTrue(check_of(out, "instructions", "opencode")["ok"])
+            self.assertTrue(check_of(out, "inventory_hook", "opencode")["ok"])
 
     def test_policy_check_real_file(self) -> None:
         # doctor.py resolves policy.json next to itself in the repo skill dir

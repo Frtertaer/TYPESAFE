@@ -799,6 +799,7 @@ def _policy_thresholds(policy: dict) -> dict[str, float]:
         "tight_gap": f("tight_gap", 0.08),
         "noul_yes": f("noul_yes", 0.7),
         "noul_no": f("noul_no", 0.3),
+        "noul_unsure": f("noul_unsure", 0.5),
     }
 
 
@@ -894,12 +895,91 @@ def _grid(lo: float, hi: float, current: float) -> list[float]:
     return sorted(v for v in values if lo <= v <= hi)
 
 
+def _eval_noul_pairs(rows: list) -> list[tuple]:
+    """(before, after) noul pairs from a compare --live result payload
+    (eval-live.json rows). None entries stay so the caller can report
+    unscored rows."""
+    def _f(value) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    pairs = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        before = (row.get("before") or {})
+        after = (row.get("after") or {})
+        pairs.append((_f(before.get("noul")), _f(after.get("noul"))))
+    return pairs
+
+
+def _noul_yes_recommendation(
+    pairs: list[tuple], cur_yes: float, unsure_below: float
+) -> tuple[float | None, dict]:
+    """Pick noul_yes from eval rows: after-nouls are positives, before-nouls
+    negatives. Keeps the current value when it already sits inside the
+    separation interval (no-churn); otherwise returns the max-margin grid
+    point. Refuses when the bands overlap or no grid point clears
+    noul_unsure — an overlapping corpus is a case/template problem, not a
+    threshold problem."""
+    info = {
+        "positives": 0,
+        "negatives": 0,
+        "unscored": 0,
+        "pos_min": None,
+        "neg_max": None,
+        "separable": False,
+        "note": "",
+    }
+    pos = [a for _, a in pairs if a is not None]
+    neg = [b for b, _ in pairs if b is not None]
+    info["positives"] = len(pos)
+    info["negatives"] = len(neg)
+    info["unscored"] = len(pairs) - sum(
+        1 for b, a in pairs if a is not None and b is not None
+    )
+    if not pos or not neg:
+        info["note"] = "no usable eval nouls"
+        return None, info
+    lo = max(neg)
+    hi = min(pos)
+    info["neg_max"] = round(lo, 4)
+    info["pos_min"] = round(hi, 4)
+    info["separable"] = lo < hi
+    if not info["separable"]:
+        info["note"] = "bands overlap — fix the corpus/templates before touching the gate"
+        return None, info
+    if lo < cur_yes <= hi:
+        info["note"] = "current noul_yes already separates eval bands"
+        return cur_yes, info
+    cands = [
+        v
+        for v in _grid(0.05, 0.99, cur_yes)
+        if lo < v <= hi and v > unsure_below
+    ]
+    if not cands:
+        info["note"] = (
+            "no grid point inside (%.2f, %.2f] above noul_unsure %.2f"
+            % (lo, hi, unsure_below)
+        )
+        return None, info
+    rec = max(cands, key=lambda v: (min(v - lo, hi - v), -abs(v - cur_yes)))
+    info["note"] = "max-margin point inside (%.4f, %.4f]" % (lo, hi)
+    return rec, info
+
+
 def calibrate(entries: list[dict], policy: dict | None = None,
-              health_filter: bool = False) -> dict:
+              health_filter: bool = False,
+              eval_pairs: list[tuple] | None = None) -> dict:
     """Grid-search (confidence_floor, strong_pick) minimising
     escalate+weak-winner share; also a tight_gap separator for
     strong-vs-nonstrong winners. Deterministic: ties resolve to the
-    candidate closest to the current policy (no-churn bias)."""
+    candidate closest to the current policy (no-churn bias). With
+    eval_pairs ((before, after) nouls from a compare --live payload),
+    additionally recommends noul_yes against the eval separation
+    interval and counts log entries whose replayed outcome would flip
+    under it — the false-accept growth signal."""
     policy = policy or {}
     cur = _policy_thresholds(policy)
     eligible, skipped, excluded = [], 0, 0
@@ -986,6 +1066,28 @@ def calibrate(entries: list[dict], policy: dict | None = None,
         tight_rec = cur["tight_gap"]
     rec["tight_gap"] = tight_rec
 
+    eval_report = None
+    noul_yes_rec = None
+    if eval_pairs is not None:
+        noul_yes_rec, eval_report = _noul_yes_recommendation(
+            eval_pairs, cur["noul_yes"], cur.get("noul_unsure", 0.5)
+        )
+        flips = 0
+        if noul_yes_rec is not None and noul_yes_rec != cur["noul_yes"]:
+            for item in eligible:
+                before_out = _replay(
+                    item, cur["confidence_floor"], cur["strong_pick"],
+                    cur["noul_yes"], cur["noul_no"],
+                )
+                after_out = _replay(
+                    item, cur["confidence_floor"], cur["strong_pick"],
+                    noul_yes_rec, cur["noul_no"],
+                )
+                if before_out != after_out:
+                    flips += 1
+        eval_report["flips"] = flips
+        rec["noul_yes"] = noul_yes_rec
+
     current_cost = score(cur["confidence_floor"], cur["strong_pick"])
     at_boundary = [
         name
@@ -1004,9 +1106,11 @@ def calibrate(entries: list[dict], policy: dict | None = None,
         ] if degraded else [],
         "current": cur,
         "recommended": rec,
+        "eval": eval_report,
         "delta": {
             key: round((rec.get(key) if rec.get(key) is not None else cur[key]) - cur[key], 4)
-            for key in ("confidence_floor", "strong_pick", "tight_gap")
+            for key in ("confidence_floor", "strong_pick", "tight_gap", "noul_yes")
+            if key != "noul_yes" or rec.get("noul_yes") is not None
         },
         "cost": {
             "current": current_cost["cost"],
@@ -1034,7 +1138,7 @@ def _calibrate_policy_patch(path: Path, rec: dict) -> tuple[str, str]:
         data = {}
     if not isinstance(data, dict):
         data = {}
-    for key in ("confidence_floor", "strong_pick", "tight_gap"):
+    for key in ("confidence_floor", "strong_pick", "tight_gap", "noul_yes"):
         if rec.get(key) is not None:
             data[key] = rec[key]
     new = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
@@ -1054,11 +1158,31 @@ def format_calibrate(report: dict) -> str:
         ),
         "%-18s %8s %12s %8s" % ("threshold", "current", "recommended", "delta"),
     ]
-    for key in ("confidence_floor", "strong_pick", "tight_gap"):
+    keys = ["confidence_floor", "strong_pick", "tight_gap"]
+    if report.get("eval") is not None:
+        keys.append("noul_yes")
+    for key in keys:
+        shown = rec.get(key)
         lines.append(
-            "%-18s %8.4f %12.4f %+8.4f"
-            % (key, cur[key], rec[key], report["delta"][key])
+            "%-18s %8.4f %12s %+8.4f"
+            % (key, cur[key], "%.4f" % shown if shown is not None else "n/a", report["delta"].get(key, 0.0))
         )
+    eval_info = report.get("eval")
+    if eval_info is not None:
+        lines.append(
+            "eval noul_yes: positives=%d negatives=%d unscored=%d neg_max=%s pos_min=%s separable=%s flips=%d"
+            % (
+                eval_info.get("positives", 0),
+                eval_info.get("negatives", 0),
+                eval_info.get("unscored", 0),
+                eval_info.get("neg_max"),
+                eval_info.get("pos_min"),
+                eval_info.get("separable"),
+                eval_info.get("flips", 0),
+            )
+        )
+        if eval_info.get("note"):
+            lines.append("eval note: %s" % eval_info["note"])
     rates = report.get("rates") or {}
     lines.append(
         "rates under recommended: escalate=%g weak_winner=%g strong_winner=%g none=%g"
@@ -1085,9 +1209,30 @@ def _calibrate_md(report: dict) -> str:
     cur = report["current"]
     rec = report["recommended"]
     rows = ["| threshold | current | recommended | delta |", "| --- | --- | --- | --- |"]
-    for key in ("confidence_floor", "strong_pick", "tight_gap"):
+    keys = ["confidence_floor", "strong_pick", "tight_gap"]
+    if report.get("eval") is not None:
+        keys.append("noul_yes")
+    for key in keys:
+        shown = rec.get(key)
         rows.append(
-            "| %s | %.4f | %.4f | %+.4f |" % (key, cur[key], rec[key], report["delta"][key])
+            "| %s | %.4f | %s | %+.4f |"
+            % (key, cur[key], "%.4f" % shown if shown is not None else "n/a", report["delta"].get(key, 0.0))
+        )
+    eval_info = report.get("eval")
+    if eval_info is not None:
+        rows.append("")
+        rows.append(
+            "eval noul_yes: positives=%d negatives=%d unscored=%d neg_max=%s pos_min=%s separable=%s flips=%d%s"
+            % (
+                eval_info.get("positives", 0),
+                eval_info.get("negatives", 0),
+                eval_info.get("unscored", 0),
+                eval_info.get("neg_max"),
+                eval_info.get("pos_min"),
+                eval_info.get("separable"),
+                eval_info.get("flips", 0),
+                (" — " + str(eval_info.get("note"))) if eval_info.get("note") else "",
+            )
         )
     return "\n".join(rows)
 
@@ -1592,6 +1737,13 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         metavar="PATH",
         help="With --calibrate: bare flag prints a unified diff of the resolved policy.json; PATH writes a patched copy there instead (policy.json itself is never rewritten)",
+    )
+    parser.add_argument(
+        "--eval",
+        dest="eval_path",
+        metavar="PATH",
+        default="",
+        help="With --calibrate: also recommend noul_yes from a compare --live result JSON (eval-live.json; '-' reads from stdin) — after-nouls are positives, before-nouls negatives; reports the separation interval and how many replayable entries would flip outcome under the recommendation",
     )
     parser.add_argument(
         "--silent-since",
@@ -2314,10 +2466,25 @@ def main(argv: list[str] | None = None) -> int:
         return items
     entries = _filtered(all_entries)
     if getattr(args, "calibrate", False):
+        eval_pairs = None
+        eval_path = getattr(args, "eval_path", "") or ""
+        if eval_path:
+            try:
+                raw = sys.stdin.read() if eval_path == "-" else Path(eval_path).read_text(encoding="utf-8")
+                eval_data = json.loads(raw)
+            except (OSError, ValueError) as exc:
+                sys.stderr.write("--eval: cannot read eval JSON from %s: %s\n" % (eval_path, exc))
+                return 1
+            eval_rows = eval_data.get("rows") if isinstance(eval_data, dict) else None
+            if not isinstance(eval_rows, list):
+                sys.stderr.write("--eval: %s has no rows list (expected a compare --live --out JSON)\n" % eval_path)
+                return 1
+            eval_pairs = _eval_noul_pairs(eval_rows)
         report = calibrate(
             entries,
             policy=inventory._policy_dict(),
             health_filter=getattr(args, "harness_health", False),
+            eval_pairs=eval_pairs,
         )
         apply_arg = getattr(args, "apply", "") or ""
         if apply_arg == "-":

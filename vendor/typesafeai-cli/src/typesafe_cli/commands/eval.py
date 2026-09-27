@@ -5,6 +5,7 @@ from typing import Any
 
 from typesafe_sdk import TypeSafeError
 
+from typesafe_cli.answers import AnswerError
 from typesafe_cli.client import system_one
 from typesafe_cli.config import load_config
 from typesafe_cli.io import fail
@@ -31,6 +32,8 @@ def call_system_one(
     config = ready_config(key=key, creds=creds, model=model)
     try:
         return system_one(config=config, state=state, questions=questions, model=model)
+    except AnswerError as exc:
+        fail(code="invalid_answer", message=str(exc), exit_code=1)
     except TypeSafeError as exc:
         fail(code="request", message=str(exc), exit_code=1)
     except Exception as exc:  # noqa: BLE001

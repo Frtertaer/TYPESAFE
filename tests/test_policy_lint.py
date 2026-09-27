@@ -500,8 +500,8 @@ class PolicyLintTests(unittest.TestCase):
 
 class UsageScanTests(unittest.TestCase):
     def test_helper_flags_dead_known_key(self) -> None:
-        findings = policy_lint.usage_findings({"noul_unsure": 0.5})
-        self.assertEqual([f["path"] for f in findings], ["noul_unsure"])
+        findings = policy_lint.usage_findings({"hallucination": {}})
+        self.assertEqual([f["path"] for f in findings], ["hallucination"])
         self.assertEqual(findings[0]["rule"], "P015")
         self.assertEqual(findings[0]["severity"], "info")
 
@@ -526,7 +526,9 @@ class UsageScanTests(unittest.TestCase):
         self.assertEqual(rc, 0)  # info findings never fail the run
         payload = json.loads(buf.getvalue())
         dead = {f["path"] for f in payload["findings"] if f["rule"] == "P015"}
-        self.assertEqual(dead, {"coder_role", "hallucination", "never_ask", "noul_unsure"})
+        # noul_unsure is live: decisions.py --calibrate --eval reads it
+        # as the lower bound for the noul_yes recommendation.
+        self.assertEqual(dead, {"coder_role", "hallucination", "never_ask"})
 
     def test_cli_without_usage_has_no_p015(self) -> None:
         buf = io.StringIO()

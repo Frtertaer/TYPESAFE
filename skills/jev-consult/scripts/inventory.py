@@ -82,7 +82,7 @@ HOOK_LIMIT = 6
 HOOK_LIMIT_KEY = "hook_limit"
 SIDECAR_NAME = ".jev-tools.json"
 MISS_NAME = ".jev-tools-miss.json"
-HARNESSES = ("hermes", "claude-code", "codex", "grok", "cursor", "gemini")
+HARNESSES = ("hermes", "claude-code", "codex", "grok", "cursor", "gemini", "windsurf", "opencode")
 CACHE_TTL = 45.0  # shipped default; policy.json scan_cache_seconds wins
 SIDECAR_TTL_KEY = "sidecar_ttl_seconds"
 DEFAULT_SIDECAR_TTL_SECONDS = 14400.0
@@ -90,7 +90,7 @@ _SCAN_CACHE: dict[str, tuple[float, list[dict]]] = {}
 
 # Scan payload + shortlist item contract (--schema).
 SCAN_SCHEMA_ROWS = {
-    "harness": {"required": True, "type": "string, detected harness (hermes|claude-code|codex|grok|cursor|gemini)"},
+    "harness": {"required": True, "type": "string, detected harness (hermes|claude-code|codex|grok|cursor|gemini|windsurf|opencode)"},
     "task": {"required": True, "type": "string, the --task query text"},
     "counts": {"required": True, "type": "object{kind: int} totals across all scanned items"},
     "shortlist": {"required": True, "type": "list[item] IDF-ranked picks for --task"},
@@ -146,6 +146,10 @@ def detect_harness(script_path: Path) -> str:
         return "cursor"
     if "/.gemini/" in blob or blob.endswith("/.gemini"):
         return "gemini"
+    if "/.codeium/windsurf/" in blob or blob.endswith("/.codeium/windsurf"):
+        return "windsurf"
+    if "/.config/opencode/" in blob or "/.opencode/" in blob:
+        return "opencode"
     if "hermes" in blob:
         return "hermes"
     if os.environ.get("HERMES_HOME", "").strip():
@@ -191,6 +195,26 @@ def roots_for(harness: str, home: Path | None = None, hermes: Path | None = None
             "skills": [home / ".gemini" / "skills"],
             "plugins": [home / ".gemini" / "extensions"],
             "mcp_files": [home / ".gemini" / "settings.json"],
+        }
+    if harness == "windsurf":
+        # Devin Desktop (Windsurf): global skills/rules/MCP live under
+        # ~/.codeium/windsurf. No plugin manifest format.
+        return {
+            "skills": [home / ".codeium" / "windsurf" / "skills"],
+            "plugins": [],
+            "mcp_files": [home / ".codeium" / "windsurf" / "mcp_config.json"],
+        }
+    if harness == "opencode":
+        # Global skills under ~/.config/opencode/skills (plus the shared
+        # ~/.agents/skills compat path); plugins are .ts files (no manifest
+        # to scan); MCP servers live under "mcp" in opencode.json.
+        return {
+            "skills": [
+                home / ".config" / "opencode" / "skills",
+                home / ".agents" / "skills",
+            ],
+            "plugins": [],
+            "mcp_files": [home / ".config" / "opencode" / "opencode.json"],
         }
     raise ValueError("unknown harness %s" % harness)
 
@@ -435,6 +459,58 @@ def iter_plugin_yaml(plugin_dirs: list[Path]) -> list[dict]:
     return items
 
 
+def iter_gemini_extensions(plugin_dirs: list[Path]) -> list[dict]:
+    """Gemini extensions: ~/.gemini/extensions/<name>/gemini-extension.json —
+    a manifest keyed 'name'/'version' that can carry mcpServers, a context
+    file (GEMINI.md), and commands. Not a plugin.yaml layout, so it needs
+    its own iterator."""
+    items: list[dict] = []
+    seen: set[str] = set()
+    for root in plugin_dirs:
+        if not root.is_dir():
+            continue
+        try:
+            children = list(root.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            manifest = child / "gemini-extension.json"
+            try:
+                if not child.is_dir() or not manifest.is_file():
+                    continue
+                data = json.loads(manifest.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            name = str(data.get("name") or child.name)
+            key = name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            extras = []
+            if isinstance(data.get("mcpServers"), dict) and data["mcpServers"]:
+                extras.append("%d mcp" % len(data["mcpServers"]))
+            if data.get("contextFileName"):
+                extras.append("context")
+            version = str(data.get("version") or "").strip()
+            description = "installed gemini extension"
+            if version:
+                description += " " + version
+            if extras:
+                description += " (%s)" % ", ".join(extras)
+            items.append(
+                {
+                    "kind": KIND_PLUGIN,
+                    "name": name,
+                    "description": description,
+                    "id": slug(KIND_PLUGIN, name),
+                    "explicit_only": False,
+                }
+            )
+    return items
+
+
 def mcp_names_from_yaml(text: str) -> list[str]:
     names: list[str] = []
     in_block = False
@@ -465,7 +541,12 @@ def mcp_names_from_json(text: str) -> list[str]:
         return []
     if not isinstance(data, dict):
         return []
-    block = data.get("mcpServers") or data.get("mcp_servers") or {}
+    block = (
+        data.get("mcpServers")
+        or data.get("mcp_servers")
+        or data.get("mcp")  # opencode.json key
+        or {}
+    )
     if isinstance(block, dict):
         return [str(key) for key in block]
     return []
@@ -696,6 +777,7 @@ def scan(harness: str, home: Path | None = None, hermes: Path | None = None) -> 
     items = iter_skills(roots["skills"])
     items.extend(iter_claude_plugins(roots["plugins"]))
     items.extend(iter_plugin_yaml(roots["plugins"]))
+    items.extend(iter_gemini_extensions(roots["plugins"]))
     items.extend(iter_mcp(roots["mcp_files"]))
     return uniquify(items)
 

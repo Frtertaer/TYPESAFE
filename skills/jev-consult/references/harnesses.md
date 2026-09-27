@@ -13,7 +13,7 @@ Repo-local (committed; clone/open needs no copy):
 
 - `AGENTS.md` / `CLAUDE.md` / `.hermes.md` at the root: **Jev decides**; the coder inspects and implements
 - CLI: `python skills/jev-consult/scripts/jev.py`
-- Inventory (harness-scoped): `python skills/jev-consult/scripts/inventory.py --task "<task>" --harness hermes|claude-code|codex|grok`
+- Inventory (harness-scoped): `python skills/jev-consult/scripts/inventory.py --task "<task>" --harness hermes|claude-code|codex|grok|cursor|gemini|windsurf|opencode`
 - One command after clone: `python scripts/install.py` (`install.cmd` / `install.sh`)
 
 Grok also reads `AGENTS.md` and `CLAUDE.md`. Codex user skills are documented as `%USERPROFILE%\.agents\skills`; some builds also scan `%USERPROFILE%\.codex\skills`. The installer writes both.

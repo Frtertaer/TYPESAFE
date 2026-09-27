@@ -158,7 +158,7 @@
     },
     "grounded_enough": {
       "type": "noul",
-      "instructions": "Does state contain enough inspected evidence that the next fact and the next step are grounded rather than invented?"
+      "instructions": "Does state contain enough inspected evidence or a recovered plan/trace that the next fact and the next step are grounded rather than invented?"
     },
     "contribution": {
       "type": "choice",

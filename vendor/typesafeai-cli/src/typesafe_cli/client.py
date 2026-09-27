@@ -4,6 +4,7 @@ from typing import Any
 
 from typesafe_sdk import Choice, Noul, Score, TypeSafeClient
 
+from typesafe_cli.answers import validate_answers
 from typesafe_cli.config import Config
 
 
@@ -87,7 +88,9 @@ def system_one(
             questions=to_sdk_questions(questions),
             model=resolved_model,
         )
-    return answers_to_dict(response)
+    data = answers_to_dict(response)
+    validate_answers(data["answers"], questions=questions)
+    return data
 
 
 def list_models(*, config: Config) -> dict[str, Any]:

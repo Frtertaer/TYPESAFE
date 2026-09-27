@@ -25,7 +25,7 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
     pretty_exceptions_enable=False,
-    help="Agent CLI for TypeSafe System One (Jev). Typed judgments, not chat. Agents must not read TYPESAFE_* env vars or key files; use typesafe auth status.",
+    help="Agent CLI for TypeSafe System One (Jev). Typed judgments, not chat. Invalid answers fail closed. Agents must not read TYPESAFE_* env vars or key files; use typesafe auth status.",
 )
 
 

@@ -74,6 +74,26 @@ class PolicyLintTests(unittest.TestCase):
         policy["require_hatch"] = 1
         self.assertIn("P002", rule_ids(policy_lint.lint_policy(policy)))
 
+    def test_consult_tokens_must_be_lang_keyed_lists(self) -> None:
+        policy = base_policy()
+        policy["explicit_consult_tokens"] = ["should i"]
+        self.assertIn("P003", rule_ids(policy_lint.lint_policy(policy)))
+        policy = base_policy()
+        policy["explicit_consult_tokens"] = {"en": "should i"}
+        self.assertIn("P003", rule_ids(policy_lint.lint_policy(policy)))
+        policy = base_policy()
+        policy["explicit_consult_tokens"] = {"en": ["should i", "  "]}
+        self.assertIn("P003", rule_ids(policy_lint.lint_policy(policy)))
+        policy = base_policy()
+        policy["explicit_consult_tokens"] = {"en": ["should i"], "de": []}
+        self.assertNotIn("P003", rule_ids(policy_lint.lint_policy(policy)))
+
+    def test_consult_tokens_locales_present(self) -> None:
+        tokens = base_policy()["explicit_consult_tokens"]
+        for lang in ("en", "ru", "de", "es", "fr"):
+            self.assertIn(lang, tokens)
+            self.assertTrue(all(isinstance(p, str) and p.strip() for p in tokens[lang]))
+
     def test_unknown_escalate_key_warns(self) -> None:
         policy = base_policy()
         policy["escalate_if"]["confidene_below"] = 0.4

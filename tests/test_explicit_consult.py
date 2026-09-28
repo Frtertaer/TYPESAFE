@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 """Explicit-consult bypass: detection dictionary, route marker, floor bypass.
 
-When the prompt matches policy.json `explicit_consult_tokens` (en/ru phrase
-list — "should i", "посоветуй"), inventory_hook routes to Jev even with an
+When the prompt matches policy.json `explicit_consult_tokens` (per-locale
+phrase lists — "should i", "посоветуй", "soll ich", "est-ce que je
+devrais"), inventory_hook routes to Jev even with an
 empty IDF shortlist (the jev-consult item joins the candidates) and a pick
 suppressed only by the confidence floor surfaces as the winner instead of
 escalating. Records carry `route: "explicit_consult"` so the bypass stays
@@ -75,14 +76,17 @@ def floor_escalate(load="skill:alpha", top=0.4, need=0.9):
 
 
 class DetectConsultTests(unittest.TestCase):
-    """explicit_consult matches policy phrases, en + ru, whole-prompt only."""
+    """explicit_consult matches policy phrases, en/ru/de/es/fr, whole-prompt only."""
 
     def test_policy_dict_shape(self):
         tokens = inventory.explicit_consult_tokens()
-        self.assertIn("en", tokens)
-        self.assertIn("ru", tokens)
+        for lang in ("en", "ru", "de", "es", "fr"):
+            self.assertIn(lang, tokens)
         self.assertIn("should i", tokens["en"])
         self.assertIn("посоветуй", tokens["ru"])
+        self.assertIn("soll ich", tokens["de"])
+        self.assertIn("qué me recomiendas", tokens["es"])
+        self.assertIn("est-ce que je devrais", tokens["fr"])
 
     def test_en_phrases(self):
         for prompt in (
@@ -114,6 +118,49 @@ class DetectConsultTests(unittest.TestCase):
                 inventory.explicit_consult(prompt), prompt
             )
 
+    def test_de_phrases(self):
+        for prompt in (
+            "soll ich den cache behalten",
+            "was hältst du von diesem ansatz",
+            "lohnt es sich das umzuschreiben",
+            "welche variante passt hier besser",
+            "hilf mir entscheiden zwischen den beiden",
+            "behalten oder ändern wir das modul",
+            "eine zweite meinung wäre hilfreich",
+        ):
+            self.assertIsNotNone(
+                inventory.explicit_consult(prompt), prompt
+            )
+
+    def test_es_phrases(self):
+        for prompt in (
+            "debería cambiar esta función",
+            "lo dejo o lo borro",
+            "qué me recomiendas aquí",
+            "vale la pena migrar ahora",
+            "ayúdame a decidir entre estas dos",
+            "cuál es mejor para este caso",
+            "que harias con este modulo",  # unaccented variant
+        ):
+            self.assertIsNotNone(
+                inventory.explicit_consult(prompt), prompt
+            )
+
+    def test_fr_phrases(self):
+        for prompt in (
+            "est-ce que je devrais garder ce cache",
+            "devrais-je le réécrire",
+            "tu me conseilles quoi ici",
+            "qu'en penses-tu pour cette approche",
+            "lequel choisir pour le cache",
+            "ça vaut le coup de migrer",
+            "un deuxième avis serait utile",
+            "aide moi a decider entre les deux",  # unaccented variant
+        ):
+            self.assertIsNotNone(
+                inventory.explicit_consult(prompt), prompt
+            )
+
     def test_returns_matched_phrase(self):
         self.assertEqual(
             inventory.explicit_consult("hmm, should I keep it"), "should i"
@@ -132,6 +179,21 @@ class DetectConsultTests(unittest.TestCase):
             "решить конфликт в ветке",  # 'решить' is deliberately unlisted
             "advise the user to restart",  # 'advise me' only
             "pick the first line item",  # 'pick one'/'pick between' only
+            "ich soll das dokument noch lesen",  # de: 'ich soll' is not 'soll ich'
+            "das sollte klappen",  # de: 'sollte ich'/'sollten wir' only
+            "wir entscheiden das morgen",  # de: 'hilf mir entscheiden' only
+            "behalte die änderungen im branch",  # de: 'behalten oder ändern' only
+            "dejé el archivo abierto",  # es: 'lo dejo o' only
+            "él debería revisarlo mañana",  # es: 'debería cambiar' only
+            "ella me aconsejó esperar",  # es: 'me aconsejas' only
+            "vale, la pena ya pasó",  # es: comma breaks 'vale la pena'
+            "me lo recomendó el equipo",  # es: 'me recomiendas' only
+            "je devrais finir cette partie",  # fr: 'est-ce que je devrais'/'devrais-je' only
+            "il m'a conseillé d'attendre",  # fr: 'tu me conseilles' only
+            "la deuxième option gagne",  # fr: 'deuxième avis' only
+            "vous choisirez la couleur",  # fr: 'lequel choisir' only
+            "ça vaut mieux ainsi",  # fr: 'ça vaut le coup' only
+            "garde le fichier pour moi",  # fr: 'je garde ou' only
         ):
             self.assertIsNone(
                 inventory.explicit_consult(prompt), prompt

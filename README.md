@@ -77,7 +77,7 @@ make test-jev                             # один test-файл по суфф
 | `skills/jev-consult/scripts/trigger_lint.py` | Линт триггер-кейсов T001–T011 (`--fix` чинит id-ы и дедуп) |
 | `skills/jev-consult/scripts/trigger_eval.py` | Офлайн-оценка покрытия триггеров (`--coverage`, `--uncovered`, `--fail`) |
 | `skills/jev-consult/scripts/smoke.py` | Офлайн e2e-прогон без API (`--only`, `--list`, `--junit`, `--verdict`, `--watch`; `--env` печатает resolved config JSON: steps/only/repeat/jobs/timeout/watch_*/policy; `--jq KEY`/`--out PATH`) |
-| `skills/jev-consult/scripts/progress.py` | Леджер вклада по этапам: `init` / `lint` / `status` / `history` / `evidence` / `assess` / `invalidate` / `restore` / `review` / `report` (`--all` — сводка по всем этапам с суммами по категориям рубрики) / `calibrate` (золотые кейсы `examples/progress-cases.json`; `--live` зовёт реальную модель) / `self-test`; очки только за проверенный чеками diff; `env` подкоманда печатает резолвнутый конфиг |
+| `skills/jev-consult/scripts/progress.py` | Леджер вклада по этапам: `init` / `lint` / `status` / `history` / `evidence` / `assess` / `invalidate` / `restore` / `review` / `report` (`--all` — сводка по всем этапам с суммами по категориям рубрики и по репозиториям) / `calibrate` (золотые кейсы `examples/progress-cases.json`; `--live` зовёт реальную модель) / `self-test`; очки только за проверенный чеками diff; `env` подкоманда печатает резолвнутый конфиг |
 | `skills/jev-consult/scripts/_watch.py` | Общий импорт-хелпер watch-режимов (`dig`/`emit_or_jq`/`cap`/`deadline`/`write_verdict`), без CLI-команд |
 | `skills/jev-consult/scripts/progress_core.py` | Движок леджера для `progress.py` и `policy_lint.py` (SQLite + GitEvidence); импортируется, отдельных команд нет |
 | `~/.cache/jev-consult/decisions.jsonl` | Журнал решений хука, по строке на промпт (`JEV_CONSULT_LOG=0` выключает, `JEV_CONSULT_LOG=PATH` переадресует) |
@@ -116,6 +116,14 @@ python skills/jev-consult/scripts/compare.py --live
 
 Политика: высокий confidence / однозначный Choice → делать. Noul `0.5` = «да и нет одинаково», не «средне». На необратимом шаге при низкой уверенности — спросить человека. «Лучший вариант» = max probability.
 
+## Локали consult-байпаса
+
+`explicit_consult_tokens` в `policy.json` — объект `{lang: [фразы]}`; сейчас en/ru/de/es/fr. Матч идёт по целой фразе: регистр и повторные пробелы нормализуются, границы — не-словесные символы. Это не поиск подстроки и не по одному слову.
+
+Как добавить язык: новый ключ с кодом локали и списком многословных фраз, которыми носитель реально просит совет («should I / advise me» — «soll ich», «qué me recomiendas», «est-ce que je devrais»). Однословные фразы не добавлять — они дают ложные срабатывания; регистр и акценты нормализация не стирает, поэтому варианты без акцентов («que me recomiendas») перечисляются отдельно. Форму проверяет `python skills/jev-consult/scripts/policy_lint.py --strict` (P003: объект `{lang: [непустые строки]}`).
+
+Правило: каждая новая локаль обязана получить негативный тест на ложное срабатывание. В `tests/test_explicit_consult.py` (`test_false_positive_negatives`) добавляются близкие фразы локали, которые НЕ должны матчиться: другой порядок слов, другое спряжение, знак препинания, разрывающий фразу.
+
 ## После установки
 
 ```text
@@ -147,7 +155,7 @@ Jev — не демон. Он не стартует сам. Новая сесс�
 
 ## Ревью вклада (opt-in)
 
-`progress.py` — отдельный CLI с локальным SQLite-журналом (`.devin/progress.sqlite3`), не демон и не управление облачной сессией. Включается только на явно согласованный этап: план проверяется и коммитится до `init`, оценка идёт по чистому закоммиченному дереву Git. Шкала zero/small/material/major = 0/1/2/3, контрольная точка — 12 кредитов; пороги и промпты берутся только из `policy.json` и замораживаются внутри этапа. Неизвестное/неуверенное/недоступное/слишком большое — «не оценено», это не ноль. Чекпоинт вызывает ревью, а не завершение проекта: финиш требует свежих проверок и явного `--approve-finish`. Пример плана — `skills/jev-consult/examples/progress-plan.json`, правила — секция «Opt-in contribution review» в `skills/jev-consult/SKILL.md`.
+`progress.py` — отдельный CLI с локальным SQLite-журналом (`.devin/progress.sqlite3`), не демон и не управление облачной сессией. Включается только на явно согласованный этап: план проверяется и коммитится до `init`, оценка идёт по чистому закоммиченному дереву Git. Необязательный `repos:` в плане перечисляет абсолютные пути репозиториев, которым разрешён этап (канонизируются через resolve, дедуп по normcase; запуск из пути вне списка — `REPO_MISMATCH`, как раньше для одного пути); события несут `repo` записавшего корня, `report --all` агрегирует по этапам и по репозиториям. Шкала zero/small/material/major = 0/1/2/3, контрольная точка — 12 кредитов; пороги и промпты берутся только из `policy.json` и замораживаются внутри этапа. Неизвестное/неуверенное/недоступное/слишком большое — «не оценено», это не ноль. Чекпоинт вызывает ревью, а не завершение проекта: финиш требует свежих проверок и явного `--approve-finish`. Пример плана — `skills/jev-consult/examples/progress-plan.json`, правила — секция «Opt-in contribution review» в `skills/jev-consult/SKILL.md`.
 
 ```text
 python skills/jev-consult/scripts/progress.py init skills/jev-consult/examples/progress-plan.json

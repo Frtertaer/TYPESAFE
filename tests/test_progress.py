@@ -1456,5 +1456,140 @@ class StdinPlanTests(unittest.TestCase):
         self.assertEqual(json.loads(out.getvalue())["error"]["code"], "INVALID_JSON")
 
 
+class MultiRepoTests(unittest.TestCase):
+    """plan.repos allow-list: member repo roots operate the stage, foreign
+    paths still fail REPO_MISMATCH; events stamp the operating root and
+    report --all aggregates across repos."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.db = self.root / "progress.sqlite3"
+        self.repo_a = (self.root / "repo_a").resolve()
+        self.repo_b = (self.root / "repo_b").resolve()
+        self.foreign = (self.root / "foreign").resolve()
+        for path in (self.repo_a, self.repo_b, self.foreign):
+            path.mkdir()
+        self.policy = policy()
+        spec = plan(count=2)
+        spec["repos"] = [str(self.repo_a), str(self.repo_b)]
+        self.ledger_a = progress.Ledger(self.db, self.repo_a, evidence=FakeEvidence())
+        self.ledger_a.initialize(spec, self.policy)
+
+    def _main(self, args):
+        out, err = StringIO(), StringIO()
+        with patch("sys.stdout", out), patch("sys.stderr", err):
+            rc = progress_cli.main(
+                ["--repo", str(self.repo_a), "--db", str(self.db)] + args
+            )
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_two_repo_stage_accepted(self):
+        ledger_b = progress.Ledger(self.db, self.repo_b, evidence=FakeEvidence())
+        state = ledger_b.status("reliability")
+        self.assertEqual(state["action"], "continue")
+        ledger_b.assess(
+            "reliability", "item_1", "Verified outcome", asker=picker("small")
+        )
+        self.assertEqual(ledger_b.status("reliability")["assessment_count"], 1)
+
+    def test_foreign_repo_rejected(self):
+        ledger_f = progress.Ledger(self.db, self.foreign, evidence=FakeEvidence())
+        for call in (ledger_f.status, ledger_f.history):
+            with self.assertRaises(progress.ProgressError) as cm:
+                call("reliability")
+            self.assertEqual(cm.exception.code, "REPO_MISMATCH")
+        with self.assertRaises(progress.ProgressError) as cm:
+            ledger_f.assess(
+                "reliability", "item_0", "Verified", asker=picker("material")
+            )
+        self.assertEqual(cm.exception.code, "REPO_MISMATCH")
+
+    def test_init_outside_allowed_list_rejected(self):
+        spec = plan()
+        spec["id"] = "other"
+        spec["repos"] = [str(self.repo_a)]
+        ledger_f = progress.Ledger(
+            self.root / "other.sqlite3", self.foreign, evidence=FakeEvidence()
+        )
+        with self.assertRaises(progress.ProgressError) as cm:
+            ledger_f.initialize(spec, self.policy)
+        self.assertEqual(cm.exception.code, "REPO_MISMATCH")
+
+    def test_single_repo_binding_unchanged(self):
+        spec = plan()
+        spec["id"] = "legacy"
+        self.ledger_a.initialize(spec, self.policy)
+        ledger_b = progress.Ledger(self.db, self.repo_b, evidence=FakeEvidence())
+        with self.assertRaises(progress.ProgressError) as cm:
+            ledger_b.status("legacy")
+        self.assertEqual(cm.exception.code, "REPO_MISMATCH")
+
+    def test_events_carry_repo(self):
+        self.ledger_a.assess(
+            "reliability", "item_0", "Verified outcome", asker=picker("material")
+        )
+        event = self.ledger_a.history("reliability")["events"][-1]
+        self.assertEqual(event["data"]["repo"], str(self.repo_a))
+        ledger_b = progress.Ledger(self.db, self.repo_b, evidence=FakeEvidence())
+        ledger_b.assess(
+            "reliability", "item_1", "Verified outcome", asker=picker("small")
+        )
+        event = ledger_b.history("reliability")["events"][-1]
+        self.assertEqual(event["data"]["repo"], str(self.repo_b))
+
+    def test_report_all_aggregates_across_repos(self):
+        self.ledger_a.assess(
+            "reliability", "item_0", "Verified outcome", asker=picker("material")
+        )
+        ledger_b = progress.Ledger(self.db, self.repo_b, evidence=FakeEvidence())
+        ledger_b.assess(
+            "reliability", "item_1", "Verified outcome", asker=picker("small")
+        )
+        rc, out, _err = self._main(["report", "--all", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["totals"]["points"], 3)
+        bucket_a = payload["repos"][str(self.repo_a)]
+        bucket_b = payload["repos"][str(self.repo_b)]
+        self.assertEqual(bucket_a["points"], 2)
+        self.assertEqual(bucket_a["assessments"], 1)
+        self.assertEqual(bucket_a["stages"], 1)
+        self.assertEqual(bucket_b["points"], 1)
+        self.assertEqual(bucket_b["assessments"], 1)
+        self.assertEqual(bucket_b["stages"], 0)
+        rows = {row["stage"]: row for row in payload["stages"]}
+        self.assertEqual(rows["reliability"]["repo"], str(self.repo_a))
+
+    def test_report_all_reads_foreign_bound_stage(self):
+        spec = plan()
+        spec["id"] = "remote"
+        spec["repos"] = [str(self.repo_b)]
+        ledger_b = progress.Ledger(self.db, self.repo_b, evidence=FakeEvidence())
+        ledger_b.initialize(spec, self.policy)
+        payload = progress_cli._report_all(self.ledger_a)
+        self.assertEqual(
+            {row["stage"] for row in payload["stages"]}, {"reliability", "remote"}
+        )
+        # operating on the foreign-bound stage still mismatches
+        with self.assertRaises(progress.ProgressError) as cm:
+            self.ledger_a.status("remote")
+        self.assertEqual(cm.exception.code, "REPO_MISMATCH")
+
+    def test_plan_repos_validation(self):
+        for bad in ("not-a-list", [], ["relative/path"], [42]):
+            spec = plan()
+            spec["repos"] = bad
+            with self.assertRaises(progress.ProgressError, msg="%r accepted" % (bad,)) as cm:
+                progress.validate_plan(spec, self.policy)
+            self.assertEqual(cm.exception.code, "INVALID_PLAN")
+        spec = plan()
+        spec["repos"] = [str(self.repo_a), str(self.repo_a) + os.sep + "."]
+        with self.assertRaises(progress.ProgressError) as cm:
+            progress.validate_plan(spec, self.policy)
+        self.assertEqual(cm.exception.code, "INVALID_PLAN")
+
+
 if __name__ == "__main__":
     unittest.main()

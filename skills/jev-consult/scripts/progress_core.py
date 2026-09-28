@@ -198,9 +198,18 @@ def lint_progress(policy: dict) -> list[dict]:
     return []
 
 
+def _repo_root(entry) -> str:
+    if not isinstance(entry, str) or not entry.strip() or "\x00" in entry:
+        raise ProgressError("INVALID_PLAN", "Repository roots must be path strings")
+    root = Path(entry).expanduser()
+    if not root.is_absolute():
+        raise ProgressError("INVALID_PLAN", "Repository roots must be absolute paths")
+    return str(root.resolve())
+
+
 def validate_plan(plan: dict, policy: dict) -> dict:
     validate_progress_policy(policy)
-    _fields(plan, ("id", "goal", "checks", "required_checks", "items"), ("directions", "platform"))
+    _fields(plan, ("id", "goal", "checks", "required_checks", "items"), ("directions", "platform", "repos"))
     normalized = copy.deepcopy(plan)
     normalized["id"] = _identifier(plan["id"], "stage id")
     normalized["goal"] = _text(plan["goal"], "goal")
@@ -250,6 +259,13 @@ def validate_plan(plan: dict, policy: dict) -> dict:
     if platform not in ("any", "win32", "linux", "darwin"):
         raise ProgressError("INVALID_PLAN", "Unsupported platform requirement")
     normalized["platform"] = platform
+    repos = plan.get("repos")
+    if repos is not None:
+        if not isinstance(repos, list) or not 1 <= len(repos) <= settings["max_items"]:
+            raise ProgressError("INVALID_PLAN", "A bounded list of repository roots is required")
+        normalized["repos"] = [_repo_root(entry) for entry in repos]
+        if len({os.path.normcase(entry) for entry in normalized["repos"]}) != len(normalized["repos"]):
+            raise ProgressError("INVALID_PLAN", "Repository roots must be distinct")
     if _sensitive(normalized):
         raise ProgressError("SENSITIVE_INPUT", "Stage plans must not contain credentials")
     return normalized
@@ -1070,6 +1086,17 @@ def _credit_ok(credit) -> bool:
     return lines_ok and norms_ok and sections_ok
 
 
+def _allowed_repos(stage: dict) -> frozenset:
+    """Canonical repository roots the stored stage may be operated from."""
+    repos = stage["plan"].get("repos")
+    if repos is None:
+        repos = [stage["repo"]]
+    if not isinstance(repos, list) or not repos or not all(
+            isinstance(entry, str) and entry for entry in repos):
+        raise ProgressError("STORE_INVALID", "Stored stage carries an inconsistent repository list")
+    return frozenset(os.path.normcase(entry) for entry in repos)
+
+
 def _validate_event(stage, event):
     try:
         kind, data = event["kind"], event["data"]
@@ -1079,6 +1106,10 @@ def _validate_event(stage, event):
         if kind != "review" and data["item_id"] not in items:
             raise ValueError()
         if type(data.get("called_jev", False)) is not bool:
+            raise ValueError()
+        if "repo" in data and (
+                not isinstance(data["repo"], str)
+                or os.path.normcase(data["repo"]) not in _allowed_repos(stage)):
             raise ValueError()
         usage = data.get("usage")
         if usage is not None and (
@@ -1435,7 +1466,7 @@ class Ledger:
                 pass
             raise ProgressError("STORE_ERROR", "The progress chain anchor could not be written") from exc
 
-    def _load(self, db, stage_id):
+    def _load(self, db, stage_id, *, member=True):
         row = db.execute("SELECT document FROM stages WHERE id = ?", (stage_id,)).fetchone()
         if row is None:
             raise ProgressError("STAGE_MISSING", "Unknown progress stage")
@@ -1444,7 +1475,9 @@ class Ledger:
             validate_progress_policy(stage["policy"])
             if stage["policy_hash"] != fingerprint(stage["policy"]) or stage["plan_hash"] != fingerprint(stage["plan"]):
                 raise ProgressError("STORE_INVALID", "Frozen stage data no longer matches its fingerprint")
-            if os.path.normcase(stage["repo"]) != os.path.normcase(str(self.repo)):
+            allowed = _allowed_repos(stage)
+            if os.path.normcase(stage["repo"]) not in allowed or (
+                    member and os.path.normcase(str(self.repo)) not in allowed):
                 raise ProgressError("REPO_MISMATCH", "This ledger stage belongs to another repository path")
         except (KeyError, TypeError) as exc:
             raise ProgressError("STORE_INVALID", "Invalid stored stage") from exc
@@ -1486,7 +1519,7 @@ class Ledger:
         return result
 
     def _append(self, db, stage_id, kind, data, dedupe=None):
-        payload = dict(data, recorded_at=time.time())
+        payload = dict(data, repo=str(self.repo), recorded_at=time.time())
         row = db.execute("SELECT seal FROM events WHERE stage_id = ? ORDER BY sequence DESC LIMIT 1", (stage_id,)).fetchone()
         sequence = db.execute("SELECT COALESCE(MAX(sequence), 0) + 1 FROM events").fetchone()[0]
         seal = fingerprint({"previous": row["seal"] if row else None, "stage_id": stage_id, "kind": kind,
@@ -1588,6 +1621,9 @@ class Ledger:
 
     def initialize(self, plan: dict, policy: dict):
         normalized = validate_plan(plan, policy)
+        allowed = normalized.get("repos") or [str(self.repo)]
+        if os.path.normcase(str(self.repo)) not in {os.path.normcase(entry) for entry in allowed}:
+            raise ProgressError("REPO_MISMATCH", "This ledger stage belongs to another repository path")
         stage = {"plan": normalized, "policy": copy.deepcopy(policy), "repo": str(self.repo), "created_at": time.time()}
         stage["policy_hash"] = fingerprint(stage["policy"])
         stage["plan_hash"] = fingerprint(normalized)
@@ -1609,16 +1645,16 @@ class Ledger:
             db.execute("BEGIN")
             return sorted(row["id"] for row in db.execute("SELECT id FROM stages"))
 
-    def status(self, stage_id):
+    def status(self, stage_id, *, member=True):
         with self._database() as db:
             db.execute("BEGIN")
-            stage = self._load(db, stage_id)
+            stage = self._load(db, stage_id, member=member)
             return _summarize(stage, self._events(db, stage))
 
-    def history(self, stage_id):
+    def history(self, stage_id, *, member=True):
         with self._database() as db:
             db.execute("BEGIN")
-            stage = self._load(db, stage_id)
+            stage = self._load(db, stage_id, member=member)
             events = self._events(db, stage)
             _summarize(stage, events)
             return {"stage": stage, "events": events}

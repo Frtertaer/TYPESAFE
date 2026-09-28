@@ -339,14 +339,14 @@ class ReportAllTests(unittest.TestCase):
     def _ledger(self):
         ledger = Mock()
         ledger.stage_ids.return_value = ["alpha", "beta"]
-        ledger.status.side_effect = lambda stage: {
+        ledger.status.side_effect = lambda stage, **kw: {
             "stage_id": stage, "action": "continue", "reason": "ok",
             "points": 3 if stage == "alpha" else -1,
             "review_at": 12, "assessment_count": 1, "model_attempts": 1,
             "tokens_used": 100, "awarded_items": ["i0"] if stage == "alpha" else [],
             "blocked_items": ["i1"] if stage == "beta" else [],
         }
-        ledger.history.side_effect = lambda stage: {
+        ledger.history.side_effect = lambda stage, **kw: {
             "stage": {"plan": {"goal": "g"}},
             "events": [{"kind": "assessment", "sequence": 1,
                         "data": {"item_id": "i0", "level": "major" if stage == "alpha" else "harmful",

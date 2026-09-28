@@ -125,6 +125,7 @@ def _report_md(summary: dict, hist: dict) -> str:
         "# Progress: %s" % summary["stage_id"],
         "",
         "- Goal: %s" % plan.get("goal", ""),
+        "- Repo: `%s`" % hist["stage"].get("repo", ""),
         "- Action: `%s` (%s)" % (summary["action"], summary["reason"]),
         "- Points: %s / %s" % (summary["points"], summary["review_at"]),
         "- Assessments: %s / %s; Jev calls: %s / %s" % (
@@ -132,6 +133,10 @@ def _report_md(summary: dict, hist: dict) -> str:
             summary["model_attempts"], summary["model_attempt_limit"],
         ),
     ]
+    if plan.get("repos"):
+        lines.append(
+            "- Allowed repos: %s" % ", ".join("`%s`" % entry for entry in plan["repos"])
+        )
     if summary.get("next_direction"):
         lines.append("- Next direction: `%s`" % summary["next_direction"])
     if summary.get("failed_checks"):
@@ -152,16 +157,27 @@ def _report_md(summary: dict, hist: dict) -> str:
 
 
 def _report_all(ledger) -> dict:
-    """Aggregate every stage: per-stage rows, totals, per-rubric-category sums."""
+    """Aggregate every stage: per-stage rows, totals, per-rubric-category and
+    per-repository sums. Aggregation reads stages bound to foreign repo paths
+    too — operating membership is only enforced on single-stage commands."""
     rows = []
     totals = {"stages": 0, "points": 0, "awarded": 0, "blocked": 0,
               "assessments": 0, "model_attempts": 0, "tokens_used": 0}
     categories = {}
+    repos = {}
+
+    def bucket(path):
+        return repos.setdefault(
+            path, {"stages": 0, "points": 0, "awarded": 0, "blocked": 0,
+                   "events": 0, "assessments": 0})
+
     for sid in ledger.stage_ids():
-        summary = ledger.status(sid)
-        hist = ledger.history(sid)
+        summary = ledger.status(sid, member=False)
+        hist = ledger.history(sid, member=False)
+        stage_repo = hist["stage"].get("repo") or ""
         row = {
-            "stage": sid, "action": summary["action"], "reason": summary["reason"],
+            "stage": sid, "repo": stage_repo, "action": summary["action"],
+            "reason": summary["reason"],
             "points": summary["points"], "review_at": summary["review_at"],
             "assessments": summary["assessment_count"],
             "model_attempts": summary["model_attempts"],
@@ -178,30 +194,41 @@ def _report_all(ledger) -> dict:
         totals["assessments"] += summary["assessment_count"]
         totals["model_attempts"] += summary["model_attempts"]
         totals["tokens_used"] += summary.get("tokens_used") or 0
+        home = bucket(stage_repo)
+        home["stages"] += 1
+        home["awarded"] += row["awarded"]
+        home["blocked"] += row["blocked"]
         for event in hist["events"]:
+            event_repo = event["data"].get("repo") or stage_repo
+            pocket = bucket(event_repo)
+            pocket["events"] += 1
             if event["kind"] != "assessment":
                 continue
+            pocket["assessments"] += 1
+            pocket["points"] += event["data"].get("points") or 0
             level = event["data"].get("level") or "unscored"
-            bucket = categories.setdefault(level, {"count": 0, "points": 0})
-            bucket["count"] += 1
-            bucket["points"] += event["data"].get("points") or 0
-    return {"stages": rows, "totals": totals, "categories": categories}
+            level_bucket = categories.setdefault(level, {"count": 0, "points": 0})
+            level_bucket["count"] += 1
+            level_bucket["points"] += event["data"].get("points") or 0
+    return {"stages": rows, "totals": totals, "categories": categories,
+            "repos": repos}
 
 
 def _report_all_md(payload: dict) -> str:
-    """Markdown document for --all: stage table + rubric-category totals."""
+    """Markdown document for --all: stage table + rubric-category and per-repo
+    totals."""
     lines = [
         "# Progress report: all stages",
         "",
-        "| stage | action | points | assessments | jev calls | tokens | awarded | blocked |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| stage | repo | action | points | assessments | jev calls | tokens | awarded | blocked |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in payload["stages"]:
         lines.append(
-            "| `%s` | %s (%s) | %s | %s | %s | %s | %s | %s |"
-            % (row["stage"], row["action"], row["reason"], row["points"],
-               row["assessments"], row["model_attempts"], row["tokens_used"],
-               row["awarded"], row["blocked"])
+            "| `%s` | `%s` | %s (%s) | %s | %s | %s | %s | %s | %s |"
+            % (row["stage"], row.get("repo", ""), row["action"], row["reason"],
+               row["points"], row["assessments"], row["model_attempts"],
+               row["tokens_used"], row["awarded"], row["blocked"])
         )
     totals = payload["totals"]
     lines += [
@@ -216,6 +243,19 @@ def _report_all_md(payload: dict) -> str:
     ]
     for level, bucket in sorted(payload["categories"].items()):
         lines.append("| %s | %s | %s |" % (level, bucket["count"], bucket["points"]))
+    if payload.get("repos"):
+        lines += [
+            "",
+            "| repo | stages | events | assessments | points | awarded | blocked |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for repo, bucket in sorted(payload["repos"].items()):
+            lines.append(
+                "| `%s` | %s | %s | %s | %s | %s | %s |"
+                % (repo, bucket["stages"], bucket["events"],
+                   bucket["assessments"], bucket["points"],
+                   bucket["awarded"], bucket["blocked"])
+            )
     return "\n".join(lines)
 
 
@@ -558,6 +598,7 @@ PLAN_SCHEMA_ROWS = {
     "items": {"required": True, "type": "list[item], bounded by progress.max_items"},
     "directions": {"required": False, "type": "object{id: label}, preauthorized pivots"},
     "platform": {"required": False, "type": "any|win32|linux|darwin, default any"},
+    "repos": {"required": False, "type": "list[str] absolute repo roots allowed on the stage, default: the init repo"},
     "item.id": {"required": True, "type": "string identifier, unique within items"},
     "item.description": {"required": True, "type": "string, agreed outcome"},
     "item.checks": {"required": True, "type": "list[check name] referencing plan.checks"},
@@ -785,6 +826,8 @@ def main(argv=None):
                 if getattr(args, "json", False):
                     result = {
                         "stage": summary["stage_id"],
+                        "repo": hist["stage"].get("repo"),
+                        "repos": hist["stage"].get("plan", {}).get("repos"),
                         "goal": hist["stage"].get("plan", {}).get("goal", ""),
                         "action": summary["action"],
                         "reason": summary["reason"],

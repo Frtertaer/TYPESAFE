@@ -29,6 +29,7 @@ EXPECTED_PREFIXES = {
     "compact": "COMPACT",
     "compare": "COMPARE",
     "decisions": "DECISIONS",
+    "dashboard": "DASHBOARD",
     "doctor": "DOCTOR",
     "smoke": "SMOKE",
     "jev": "PING",

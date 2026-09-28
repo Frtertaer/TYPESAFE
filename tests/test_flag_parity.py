@@ -85,6 +85,7 @@ class FlagParityTest(unittest.TestCase):
     # subcommand so the flag set is pinned where the flag actually lives.
     WATCH_HELP = {
         "compact.py": [["--help"]],
+        "dashboard.py": [["--help"]],
         "decisions.py": [["--help"]],
         "inventory.py": [["--help"]],
         "compare.py": [["--help"]],

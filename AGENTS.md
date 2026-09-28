@@ -16,7 +16,7 @@ python skills/jev-consult/scripts/compact.py transcript.json --history --trace
 
 Thresholds live only in `skills/jev-consult/policy.json`. Hook never auto-installs. Never `--force`. Never npx. Never `claude plugin install`. Never print `TYPESAFE_API_KEY`.
 
-After clone, one command wires user-scope Hermes / Claude Code / Codex / Grok Build:
+After clone, one command wires user-scope Hermes / Claude Code / Codex / Grok Build / Cursor / Gemini / Windsurf / opencode:
 
 ```text
 python scripts/install.py

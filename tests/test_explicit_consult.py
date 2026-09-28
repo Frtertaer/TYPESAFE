@@ -538,5 +538,283 @@ class CompareConsultGateTests(unittest.TestCase):
             compare.load_cases(fh.name)
 
 
+def none_argmax(jev_prob=None, need=0.4):
+    """decide() payload: 'none' wins argmax while jev-consult sits below it —
+    the defect promotion exists to catch."""
+    probs = {"none": 0.6, "skill:alpha": 0.3}
+    if jev_prob is not None:
+        probs["skill_jev_consult"] = jev_prob
+    return {
+        "action": "proceed",
+        "picks": {"load_tools": "none", "need_skill": need},
+        "probabilities": {"load_tools": probs},
+    }
+
+
+PROMOTION_POLICY = {
+    "confidence_floor": 0.3,
+    "consult_min_conf": 0.08,
+    "strong_pick": 0.85,
+}
+
+
+class ConsultPromotionTests(unittest.TestCase):
+    """On the consult route a 'none' argmax is overruled when the jev-consult
+    candidate's own probability clears consult_min_conf. Below it the none
+    stands honestly — and promotion never marks the winner strong."""
+
+    def test_promotion_fires_over_floor(self):
+        out = inventory.resolve_picker(
+            [CONSULT, *PICKED], none_argmax(jev_prob=0.2),
+            PROMOTION_POLICY, consult=True,
+        )
+        self.assertEqual(out["status"], "winner")
+        self.assertEqual(out["winner"]["id"], "skill_jev_consult")
+        self.assertTrue(out["promoted"])
+        self.assertIsNone(out["escalate_reason"])
+
+    def test_promotion_never_strong(self):
+        # even far above consult_min_conf the winner is a rescue, not a pick
+        out = inventory.resolve_picker(
+            [CONSULT, *PICKED], none_argmax(jev_prob=0.9),
+            PROMOTION_POLICY, consult=True,
+        )
+        self.assertEqual(out["status"], "winner")
+        self.assertTrue(out["promoted"])
+        self.assertFalse(out.get("strong", False))
+
+    def test_promotion_at_exact_floor(self):
+        out = inventory.resolve_picker(
+            [CONSULT], none_argmax(jev_prob=0.08), PROMOTION_POLICY, consult=True
+        )
+        self.assertEqual(out["status"], "winner")
+        self.assertTrue(out["promoted"])
+
+    def test_below_floor_stays_none(self):
+        out = inventory.resolve_picker(
+            [CONSULT, *PICKED], none_argmax(jev_prob=0.07),
+            PROMOTION_POLICY, consult=True,
+        )
+        self.assertEqual(out["status"], "none")
+        self.assertEqual(out["escalate_reason"], "none_pick")
+        self.assertFalse(out.get("promoted", False))
+
+    def test_promotion_needs_consult_route(self):
+        out = inventory.resolve_picker(
+            [CONSULT, *PICKED], none_argmax(jev_prob=0.5), PROMOTION_POLICY
+        )
+        self.assertEqual(out["status"], "none")
+        self.assertFalse(out.get("promoted", False))
+
+    def test_floor_escalate_none_pick_promotes(self):
+        # decide() preempted on the confidence floor AND its pick was none:
+        # the consult_min_conf check runs before the honest-none return.
+        decision = floor_escalate("none", top=0.7)
+        decision["probabilities"]["load_tools"]["skill_jev_consult"] = 0.3
+        out = inventory.resolve_picker(
+            [CONSULT, *PICKED], decision, PROMOTION_POLICY, consult=True
+        )
+        self.assertEqual(out["status"], "winner")
+        self.assertTrue(out["promoted"])
+
+    def test_floor_escalate_none_below_floor_stays_none(self):
+        decision = floor_escalate("none", top=0.7)
+        decision["probabilities"]["load_tools"]["skill_jev_consult"] = 0.02
+        out = inventory.resolve_picker(
+            [CONSULT, *PICKED], decision, PROMOTION_POLICY, consult=True
+        )
+        self.assertEqual(out["status"], "none")
+        self.assertFalse(out.get("promoted", False))
+
+    def test_jev_consult_absent_from_picked(self):
+        out = inventory.resolve_picker(
+            PICKED, none_argmax(jev_prob=0.9), PROMOTION_POLICY, consult=True
+        )
+        self.assertEqual(out["status"], "none")
+        self.assertFalse(out.get("promoted", False))
+
+    def test_jev_consult_absent_from_probabilities(self):
+        out = inventory.resolve_picker(
+            [CONSULT], none_argmax(), PROMOTION_POLICY, consult=True
+        )
+        self.assertEqual(out["status"], "none")
+        self.assertFalse(out.get("promoted", False))
+
+    def test_non_str_top_pick_not_promoted(self):
+        # promotion is strictly a none-argmax rescue: an unresolvable pick
+        # keeps the honest-none verdict
+        decision = {
+            "action": "proceed",
+            "picks": {"load_tools": 42, "need_skill": 0.4},
+            "probabilities": {"load_tools": {"skill_jev_consult": 0.4}},
+        }
+        out = inventory.resolve_picker(
+            [CONSULT], decision, PROMOTION_POLICY, consult=True
+        )
+        self.assertEqual(out["status"], "escalate")
+        self.assertFalse(out.get("promoted", False))
+
+
+class HandlePromotionTests(unittest.TestCase):
+    """End-to-end: consult prompt + 'none' argmax + jev-consult prob >=
+    consult_min_conf -> promoted winner; the record carries promoted and
+    model_top through LAST_DECISION, the appended entry, and dedupe replay."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.log_path = Path(self._tmp.name) / "decisions.jsonl"
+        self._env = patch.dict(
+            os.environ, {"JEV_CONSULT_LOG": str(self.log_path)}
+        )
+        self._env.start()
+        self.addCleanup(self._env.stop)
+        self._had_jev = sys.modules.get("jev", _MISSING)
+        self.addCleanup(self._restore_jev)
+
+    def _restore_jev(self):
+        if self._had_jev is _MISSING:
+            sys.modules.pop("jev", None)
+        else:
+            sys.modules["jev"] = self._had_jev
+
+    def _handle(self, prompt="should i keep this"):
+        return inventory_hook.handle(
+            {
+                "hook_event_name": "pre_llm_call",
+                "prompt": prompt,
+                "cwd": self._tmp.name,
+            },
+            items=[CONSULT],
+            harness="hermes",
+        )
+
+    def _stub_jev(self, jev_prob):
+        sys.modules["jev"] = fake_jev(
+            answers={
+                "load_tools": {"confidence": 0.5},
+                "need_skill": {"noul": 0.4},
+            },
+            decide_ret=none_argmax(jev_prob=jev_prob),
+        )
+
+    def test_promoted_record_fields(self):
+        self._stub_jev(0.25)
+        self._handle()
+        rec = inventory_hook.LAST_DECISION
+        self.assertEqual(rec["route"], "explicit_consult")
+        self.assertEqual(rec["jev_status"], "winner")
+        self.assertEqual(rec["winner"], {"kind": "skill", "name": "jev-consult"})
+        self.assertTrue(rec["promoted"])
+        self.assertEqual(rec["model_top"], "none")
+        # a promotion is a sub-floor rescue, never a strong pick
+        self.assertFalse(rec["strong_pick"])
+        entries, bad = decisions.load_entries(self.log_path)
+        self.assertEqual(bad, 0)
+        self.assertTrue(entries[0]["promoted"])
+        self.assertEqual(entries[0]["model_top"], "none")
+
+    def test_promoted_survives_dedupe_replay(self):
+        self._stub_jev(0.25)
+        self._handle()
+        sidecar = json.loads(
+            (Path(self._tmp.name) / ".jev-tools.json").read_text(encoding="utf-8")
+        )
+        self.assertTrue(sidecar.get("promoted"))
+        self.assertEqual(sidecar.get("model_top"), "none")
+        self._handle()
+        rec = inventory_hook.LAST_DECISION
+        self.assertTrue(rec["dedupe"])
+        self.assertEqual(rec["route"], "explicit_consult")
+        self.assertTrue(rec["promoted"])
+        self.assertEqual(rec["model_top"], "none")
+
+    def test_below_floor_honest_none(self):
+        self._stub_jev(0.02)
+        self._handle()
+        rec = inventory_hook.LAST_DECISION
+        self.assertEqual(rec["jev_status"], "none")
+        self.assertEqual(rec["escalate_reason"], "none_pick")
+        self.assertFalse(rec["promoted"])
+        self.assertEqual(rec["model_top"], "none")
+        self.assertIsNone(rec["winner"])
+
+    def test_non_consult_record_carries_no_fields(self):
+        self._stub_jev(0.25)
+        self._handle(prompt="alpha task", )
+        rec = inventory_hook.LAST_DECISION
+        self.assertIsNone(rec["route"])
+        self.assertNotIn("promoted", rec)
+        self.assertNotIn("model_top", rec)
+
+
+class DecisionsPromotionReportTests(unittest.TestCase):
+    """Promoted consult records get their own bucket/line — never merged
+    into pick_rate, strong_pick, or the calibrate replay pool."""
+
+    def _promoted(self, **kw):
+        rec = {
+            "ts": 1001.0,
+            "schema": 2,
+            "harness": "hermes",
+            "prompt_sha": "bb22cc33dd44",
+            "prompt_head": "should i keep this",
+            "jev_status": "winner",
+            "question": "load_tools",
+            "route": "explicit_consult",
+            "promoted": True,
+            "model_top": "none",
+            "winner": {"kind": "skill", "name": "jev-consult"},
+            "probabilities": {"none": 0.7, "skill_jev_consult": 0.2},
+            "shortlist": ["skill_jev_consult"],
+        }
+        rec.update(kw)
+        return rec
+
+    def test_acceptance_promotions_own_bucket(self):
+        acc = decisions.acceptance_report([self._promoted()])
+        self.assertEqual(acc["consult_promotions"], 1)
+        self.assertEqual(acc["explicit_consult"], {"entries": 1, "picks": 1})
+        # the consult route stays out of the routing pool and strong picks
+        self.assertEqual(acc["routing_entries"], 0)
+        self.assertEqual(acc.get("strong_picks") or 0, 0)
+        out = decisions.format_acceptance(acc)
+        self.assertIn("explicit_consult: 1 routed (1 picks)", out)
+        self.assertIn("consult_promotions: 1", out)
+
+    def test_unpromoted_consult_not_counted(self):
+        acc = decisions.acceptance_report([self._promoted(promoted=False)])
+        self.assertEqual(acc["consult_promotions"], 0)
+        out = decisions.format_acceptance(acc)
+        self.assertNotIn("consult_promotions:", out)
+
+    def test_summarize_and_stats_line(self):
+        stats = decisions.summarize([self._promoted()])
+        self.assertEqual(stats["consult_promotions"], 1)
+        self.assertEqual(stats["strong_pick"], 0)
+        self.assertEqual(stats["by_route"], {"explicit_consult": 1})
+        out = decisions.format_stats(stats)
+        self.assertIn("consult_promotions: 1", out)
+
+    def test_v1_records_unaffected(self):
+        rec = {"ts": 1.0, "jev_status": "idf", "prompt_sha": "x"}
+        acc = decisions.acceptance_report([rec])
+        self.assertEqual(acc["consult_promotions"], 0)
+        stats = decisions.summarize([rec])
+        self.assertEqual(stats["consult_promotions"], 0)
+        self.assertNotIn("consult_promotions", decisions.format_stats(stats))
+
+    def test_promoted_not_calibrate_eligible(self):
+        self.assertFalse(decisions._calibrate_eligible(self._promoted()))
+        report = decisions.calibrate([self._promoted()])
+        self.assertEqual(report["entries"], 0)
+        self.assertEqual(report["skipped"], 1)
+
+    def test_schema_rows_declared(self):
+        for key in ("promoted", "model_top"):
+            self.assertIn(key, decisions.ENTRY_SCHEMA_ROWS)
+            self.assertFalse(decisions.ENTRY_SCHEMA_ROWS[key]["required"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
@@ -1485,6 +1486,36 @@ def _policy_float(policy: dict | None, key: str, default: float) -> float:
     return default
 
 
+def _consult_promotion(
+    picked: list[dict], probabilities: dict | None, policy: dict | None
+) -> dict | None:
+    """Winner promotion for the explicit_consult route: the model's top
+    answer was ``none``, but if the jev-consult candidate's own probability
+    clears policy ``consult_min_conf`` it becomes the winner anyway — the
+    protective layer over a none-argmax. Below the floor (or absent from
+    ``probabilities``) the ``none`` is honest and None is returned.
+    ``consult_min_conf`` sits under ``confidence_floor`` (policy_lint P004)
+    so promotion stays a sub-floor rescue, never a strong pick."""
+    target = consult_item(picked)
+    if target is None:
+        return None
+    probs = probabilities.get("load_tools") if isinstance(probabilities, dict) else None
+    if not isinstance(probs, dict):
+        return None
+    try:
+        prob = float(probs.get(target.get("id")))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(prob) or prob < _policy_float(policy, "consult_min_conf", 0.08):
+        return None
+    return {
+        "status": "winner",
+        "winner": target,
+        "escalate_reason": None,
+        "promoted": True,
+    }
+
+
 def resolve_picker(
     picked: list[dict],
     decision: dict | None,
@@ -1508,7 +1539,14 @@ def resolve_picker(
     floor surfaces the suppressed pick: decide() still returns it in
     ``picks.load_tools``, so the floor preempt resolves to a winner (or to
     ``none`` when the suppressed pick was none/unresolvable). Any other
-    escalate reason keeps failing open."""
+    escalate reason keeps failing open.
+
+    Also on the consult route, winner promotion: when the model's top answer
+    is ``none`` yet the jev-consult candidate's own probability reaches
+    policy ``consult_min_conf``, it is promoted to winner (``promoted``
+    marked on the returned picker). Below that floor the ``none`` stands
+    honestly — the consult ask was outside what the model could arbitrate.
+    Promotion never sets ``strong``."""
     strong_pick = _policy_float(policy, "strong_pick", 0.85)
     if not isinstance(decision, dict):
         return {"status": "escalate", "winner": None, "escalate_reason": "model_escalate"}
@@ -1525,6 +1563,12 @@ def resolve_picker(
             if isinstance(load, str) and load not in ("", "none"):
                 winner = {item["id"]: item for item in picked}.get(load)
             if winner is None:
+                if load == "none":
+                    promoted = _consult_promotion(
+                        picked, decision.get("probabilities"), policy
+                    )
+                    if promoted is not None:
+                        return promoted
                 return {"status": "none", "winner": None, "escalate_reason": "none_pick"}
             probabilities = decision.get("probabilities") or {}
             top = 0.0
@@ -1552,6 +1596,12 @@ def resolve_picker(
     except (TypeError, ValueError):
         return {"status": "escalate", "winner": None, "escalate_reason": "model_escalate"}
     if load in (None, "none"):
+        if consult and load == "none":
+            promoted = _consult_promotion(
+                picked, decision.get("probabilities"), policy
+            )
+            if promoted is not None:
+                return promoted
         return {"status": "none", "winner": None, "escalate_reason": "none_pick"}
     if not isinstance(load, str):
         return {"status": "escalate", "winner": None, "escalate_reason": "model_escalate"}

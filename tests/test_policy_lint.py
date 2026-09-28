@@ -117,6 +117,29 @@ class PolicyLintTests(unittest.TestCase):
         policy["strong_pick"] = 0.2
         self.assertIn("P004", rule_ids(policy_lint.lint_policy(policy)))
 
+    def test_consult_min_conf_required(self) -> None:
+        policy = base_policy()
+        del policy["consult_min_conf"]
+        self.assertIn("P001", rule_ids(policy_lint.lint_policy(policy)))
+
+    def test_consult_min_conf_numeric(self) -> None:
+        policy = base_policy()
+        policy["consult_min_conf"] = 1.5
+        self.assertIn("P002", rule_ids(policy_lint.lint_policy(policy)))
+        policy = base_policy()
+        policy["consult_min_conf"] = "low"
+        self.assertIn("P002", rule_ids(policy_lint.lint_policy(policy)))
+
+    def test_consult_min_conf_under_floor_ordering(self) -> None:
+        # promotion is a sub-floor rescue: at/above confidence_floor it
+        # rescues nothing, so the ordering is strict
+        policy = base_policy()
+        policy["consult_min_conf"] = 0.9
+        self.assertIn("P004", rule_ids(policy_lint.lint_policy(policy)))
+        policy = base_policy()
+        policy["consult_min_conf"] = policy["confidence_floor"]
+        self.assertIn("P004", rule_ids(policy_lint.lint_policy(policy)))
+
     def test_soft_hard_ordering(self) -> None:
         policy = base_policy()
         policy["question_soft_max"] = 64

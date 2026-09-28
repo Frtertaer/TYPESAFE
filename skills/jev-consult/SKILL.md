@@ -221,6 +221,7 @@ Every threshold lives in `policy.json` (override with `JEV_POLICY=PATH`). The to
 | `question_hard_max` | `32` | hard cap — requests over it are refused |
 | `choice_option_hard_max` | `255` | hard cap on options per choice question |
 | `confidence_floor` | `0.55` | minimum answer confidence to accept a pick |
+| `consult_min_conf` | `0.08` | explicit_consult route only: minimum `jev-consult` probability to promote it over a `none` argmax (must stay below `confidence_floor`) |
 | `noul_yes` | `0.7` | noul score treated as "yes" (used by `compare --strict` guarded checks) |
 | `noul_no` | `0.3` | noul score treated as "no" |
 | `noul_unsure` | `0.5` | noul score near this is "unsure" (escalation input) |

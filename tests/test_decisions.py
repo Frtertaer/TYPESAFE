@@ -257,10 +257,12 @@ class CalibrateTest(unittest.TestCase):
         self.assertEqual(report["entries"], 12)
         rec = report["recommended"]
         # strong winners at top 0.70 pin strong_pick at 0.70 (higher would
-        # strand them as weak winners); none-pick prompts at top 0.45 pin
-        # the floor (higher would escalate prompts that deserve none).
+        # strand them as weak winners); every floor <=0.45 ties on cost
+        # (none-picks at 0.45 surface, the 0.40 escalates are bad either
+        # way) and the no-churn tie-break resolves to the value closest
+        # to the shipped floor — 0.30.
         self.assertEqual(rec["strong_pick"], 0.7)
-        self.assertEqual(rec["confidence_floor"], 0.45)
+        self.assertEqual(rec["confidence_floor"], 0.3)
         self.assertLess(
             report["cost"]["recommended"], report["cost"]["current"]
         )

@@ -114,7 +114,7 @@ class PolicyLintTests(unittest.TestCase):
 
     def test_strong_pick_must_clear_floor(self) -> None:
         policy = base_policy()
-        policy["strong_pick"] = 0.4
+        policy["strong_pick"] = 0.2
         self.assertIn("P004", rule_ids(policy_lint.lint_policy(policy)))
 
     def test_soft_hard_ordering(self) -> None:
@@ -604,7 +604,7 @@ class DiffFlagTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("- brand_new = 1", out)
         self.assertIn("+ model =", out)
-        self.assertIn("~ confidence_floor: 0.99 -> 0.55", out)
+        self.assertIn("~ confidence_floor: 0.99 -> 0.3", out)
 
     def test_diff_bad_file_rc2(self) -> None:
         buf = io.StringIO()

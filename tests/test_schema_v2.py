@@ -678,6 +678,35 @@ class CoreSkillTokensTests(unittest.TestCase):
         self.assertNotIn("jev-consult", names)
         self.assertIn("readme-fixer", names)
 
+    def test_observed_miss_phrases_surface(self):
+        # Verbatim dogfood r2/r3 prompts that missed the jev-consult
+        # shortlist (idf with empty shortlist, or a non-jev shortlist).
+        for prompt in (
+            # r2
+            "I'm torn between keeping the log append-only and moving it into a real database.",
+            "Two paths on the table: patch the migration runner or start fresh.",
+            "Debating whether the Windows installer stays batch or becomes Python.",
+            "Torn on the sidecar TTL: long at four hours or short at fifteen minutes?",
+            "Can't settle on pinned or floating dependency ranges.",
+            "On the fence about dropping Python 3.8 support this cycle.",
+            # r3
+            "torn between storing session state in redis or postgres",
+            "on the fence about moving the scheduled jobs into a separate process",
+            "hold or fold the custom auth middleware?",
+            "debating if the scheduler belongs inside the api process",
+        ):
+            self.assertIn("jev-consult", self._names(prompt), prompt)
+
+    def test_overbroad_constituents_stay_quiet(self):
+        # "can" and "table" appear inside observed misses but were left
+        # un-aliased: alone they would surface jev-consult on mechanical
+        # prompts.
+        for prompt in (
+            "Can you run the unittest suite and paste the failures.",
+            "Query the postgres table for duplicate emails.",
+        ):
+            self.assertNotIn("jev-consult", self._names(prompt), prompt)
+
     def test_policy_override_without_key_fails_open(self):
         with tempfile.TemporaryDirectory() as tmp:
             policy = Path(tmp) / "policy.json"

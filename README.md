@@ -242,30 +242,92 @@ weekly `live-eval` краснеет на корректных кейсах, и �
 
 ## Evidence
 
-Измерено на live-eval и накопленном `decisions.jsonl` (нояб. 2025+):
+Измерено на live-eval и накопленном `decisions.jsonl` — 3 раунда dogfood,
+433 записи кумулятивно (301 routing + 5 fill + 127 feedback):
 
 | Метрика | Значение | Где |
 |---|---|---|
-| live-eval корпус | **17/17 PASS** против гейта | `compare.py --live --strict` |
+| live-eval корпус | **21/21 PASS** против гейта, diff против `eval-baseline.json` без регрессий | `compare.py --live --strict --diff` |
 | **Jev vs без Jev (A/B)** | mean delta **+0.46 noul**, 7 побед / 0 поражений на 7 scored-arms | `compare.py --ab` |
 | A/B по кейсам | off_track +0.94 · progress_accept +0.81 · forget +0.51 · unknown +0.49 · library +0.22 · stuck +0.19 · market_tools +0.07 | eval-live.json |
-| pick-rate | 26.9% (64 пика / 238 routing-записей) | `decisions.py --acceptance` |
-| override-rate | 0% — ни одного переопределённого пика в логе | то же |
-| latency | p50 104 ms, p95 142 ms при бюджете 12 000 ms | то же |
+| кумулятивный лог (r1+r2+r3) | 268 non-consult routing: pick 25.4%, applied 94.1%, override 1.5%, miss 56.7%, strong-pick accuracy 100% (55 пиков); escalate_reason = {no_candidates 55, none_pick 43, confidence_floor 31, need_gate 5}; p50/p95 100/143 ms | `decisions.py --acceptance` |
+| раунд 3 (с bypass, schema v2) | 76 non-consult routing (18 пиков, 79 вердиктов — 100% покрытие verdict-eligible): pick 23.7%, applied 94.4%, override 5.6%, miss 59.2%, strong-pick 100% (12); escalate_reason = {no_candidates 28, none_pick 20, confidence_floor 10}; p50/p95 100/132 ms | то же |
+| `route: explicit_consult` (считается отдельно, в pick-rate не входит) | 33/33 consult-запросов отроучены, jev-consult в шортлисте у всех 33, **0% false-trigger** на 10 негативах. Но **0 пиков**: Jev ответил `none` на 30/33 (none p=0.51–0.92 против jev-consult 0.08–0.34), 2 escalate по floor, 1 dedupe — floor-rescue не срабатывает, т.к. argmax выигрывает `none` | acceptance-ключ `explicit_consult` |
 | false-accept | негативные кейсы (`market_none`, `mechanical`) не роутятся в Jev — проверено реальным hook-routing (shortlist → chooser не вызывается), а не флагом фикстуры | `expect_call: false` + `routing_pool` в корпусе |
-| калибровка | bands overlap → `flips=0`, гейт не трогали (не глушим без данных) | `--calibrate --eval` |
-| dogfood-лог раунд 2 (2026-09-27, весь routing — schema v2) | 125 записей (101 routing + 24 feedback): pick 24.8%, applied 96%, override 0%, miss 50.5%, strong-pick accuracy 100%, p50/p95 102/156 ms; escalate_reason = {no_candidates 27, none_pick 23, confidence_floor 21, need_gate 5, model_escalate 0}; IDF: 27/27 alias-bearing decision-промптов попали в шортлист jev-consult (было 0/12 до фикса; граница — парафразы без алиас-токена всё ещё мимо шортлиста) | `decisions.py --acceptance` |
-| калибровка на dogfood-логе r2 | 70 replayable (все с записанным `pick_confidence`): `confidence_floor` 0.55→0.15, `strong_pick` 0.85 без изменений, `tight_gap` 0.73 (артефакт разделителя на малой выборке — вне replay-цепочки). Все flips — на записях без feedback-вердикта (escalate→none на none-пиках, escalate→weak_winner на слабых пиках), поэтому **policy.json не менялся — document-only**, как и в раунде 1 | `decisions.py --calibrate` |
-| need-гейт | **СНЯТ.** `need_skill_score` за оба раунда (~144 реальных Jev-вызова): n=74, mean 0.24, p90 0.33, max 0.48 — ни разу ≥0.7, дискриминации нет (winner 0.27 / none 0.22 / escalate 0.24), а гейт подавил 5 реальных пиков с conf 0.74–0.83 (включая jev_consult на буквальных «consult jev»-запросах). Маршрутизация = `strong_pick` + `confidence_floor`; `need_skill` остаётся вопросом и пишется телеметрией (`need`/`need_skill_score` в логе), но больше не роутит | `resolve_picker`, `decisions._replay` |
+| need-гейт | **СНЯТ** (с r2). `need_skill` остаётся вопросом и пишется телеметрией, но не роутит; маршрутизация = `strong_pick` + `confidence_floor` | `resolve_picker`, `decisions._replay` |
 
-Буквальные «consult jev»-запросы по-прежнему escalate в 12/15 (11
-confidence_floor + бывший 1 need_gate): standing-рычаг для under-pick —
-`confidence_floor` или минимальный обход гейта для explicit/consult-литералов
-в `decide()`/`resolve_picker`. В этом раунде не применяли: калибровка двинула
-порог только на записях без вердиктов, а обход — это изменение code-path, а
-не порога. Стоящее правило из #17: перекалибровка после ~1 недели новых
-записей — следующий прогон на свежем логе с feedback-вердиктами решит,
-применять ли floor и/или обход.
+### Калибровка `confidence_floor` — раунд 3, применена
+
+Верbatim `--calibrate` на кумулятивном логе (433 записи, политика до правки):
+
+```text
+calibrate: 154 replayable entries (279 skipped, 0 health-excluded)
+threshold           current  recommended    delta
+confidence_floor     0.5500       0.1500  -0.4000
+strong_pick          0.8500       0.8500  +0.0000
+tight_gap            0.0800       0.7250  +0.6450
+rates under recommended: escalate=0.026 weak_winner=0.1818 strong_winner=0.3506 none=0.4416
+cost: current=0.2922 recommended=0.2078
+pick_confidence recorded on 115/154 entries — confidence_floor replayed against the real operand
+```
+
+Рекомендация инструмента (0.15) **отклонена**: cost-функция verdict-blind —
+минимизирует долю escalate+weak_winner и не различает, был ли подавленный
+пик нужен. При 0.15 всплыл бы verdicted-**rejected** пик `mcp_sqlite` на
+conf 0.23 («keep JSONL or move to sqlite?» — хотели jev-consult, не sqlite).
+По вердиктам 12 floor-suppressed записей r3 распадаются на два класса:
+
+- **item-suppressed (5)** — argmax был реальным скиллом/тулом: accepted
+  0.38 / 0.43 / 0.44 (jev-consult ×2, changelog-writer), rejected
+  0.07 / 0.23 (mcp_sqlite ×2). Вердикт-чистое окно — **(0.23, 0.38]**:
+  взяли **0.30** (max-margin), `escalate_if.confidence_below` синхронно
+  (правило P005).
+- **none-suppressed (7)** — argmax был `none` (низкоуверенный abstain):
+  1 accepted / 6 rejected. Пол корректно блокирует слабые abstains; то, что
+  на consult/decision-промптах сам abstain был неверным ответом — это
+  проблема стороны модели, не порога.
+
+Flips при 0.30 по кумулятивному логу: 23 записи — из них 11 всплывают
+item-пиками (3 verdicted-accepted + 8 unverdicted r2: jev-consult ×6,
+release-notes, mcp-jira) и 12 остаются `none` (argmax не меняется —
+прикладного пика не добавляют). Оба verdicted-rejected пика (0.07, 0.23)
+остаются под полом. `--acceptance` читает записанные статусы, поэтому
+после-правки цифры те же — дельта видна в replay-калибровке выше, а не в
+пересчёте старого лога.
+
+### Bypass: reach есть, pick нет — открытый вопрос
+
+Плумбинг `route: explicit_consult` работает механически идеально: все 33
+consult-запроса отроучены и дошли до Jev с jev-consult в шортлисте, негативы
+не триггерятся. Но **pick не гарантирован**: `none` выигрывает argmax
+(0.51–0.92 против 0.08–0.34 у jev-consult). Если дизайн-интент — «consult
+ask → jev-consult surfaces», нужен либо (a) winner-promotion на уровне
+роутинга для consult-route, либо (b) принятие `none` как честного ответа.
+**Намеренно не реализовано в этом PR** — зафиксировано как открытое
+решение; см. также 2 consult-escalate выше, где подавленный пик был
+jev-consult при p=0.30/0.38.
+
+### IDF-покрытие после расширения алиасов
+
+В `core_skill_tokens.jev-consult` добавлены только наблюдавшиеся промахи
+r2/r3: «torn between», «on the fence», «settle on», «debating whether»,
+«two paths», «hold or fold». Все 10 вербатим-промптов промахов теперь
+попадают в шортлист (parity-тест `test_observed_miss_phrases_surface`).
+Сознательно **не** алиасились «can» и «table» — поодиночке они тащили бы
+jev-consult в механические промпты (guard-тест
+`test_overbroad_constituents_stay_quiet`). По корпусу: из 100 записанных
+empty-shortlist записей 26 теперь резолвятся в jev-consult (часть — через
+старые алиасы: r1-лог предшествует alias-словарю); остаток —
+преимущественно механические промпты (корректное поведение) плюс хвост из
+~13 decision-ask формулировок без алиаса («make up my mind», «mixed
+feelings», «wondering if», «can't tell if», «unclear if», «do X belong in
+Y», «better to X than Y») — кандидаты на следующий раунд расширения;
+словарь растёт только по наблюдаемым промахам.
+
+Стоящее правило из #17 — перекалибровка после ~1 недели новых записей:
+следующий прогон `--calibrate` на свежем логе с feedback-вердиктами
+проверяет и floor, и рекомендацию инструмента по вердиктам, а не только
+по cost.
 
 A/B-метрика — главный аргумент: каждый кейс прогоняется дважды — состояние
 после пика Jev и то же состояние с baseline-пиком «кодер решил сам» —

@@ -10,7 +10,7 @@
   "question_soft_max": 8,
   "question_hard_max": 32,
   "choice_option_hard_max": 255,
-  "confidence_floor": 0.55,
+  "confidence_floor": 0.3,
   "noul_yes": 0.7,
   "strong_pick": 0.85,
   "noul_no": 0.3,
@@ -47,7 +47,7 @@
   ],
   "require_hatch": true,
   "escalate_if": {
-    "confidence_below": 0.55,
+    "confidence_below": 0.3,
     "noul_near": 0.5,
     "choice_gap_below": 0.08,
     "irreversible": true
@@ -317,7 +317,13 @@
       "delete",
       "naming",
       "stuck",
-      "looping"
+      "looping",
+      "torn between",
+      "on the fence",
+      "settle on",
+      "debating whether",
+      "two paths",
+      "hold or fold"
     ]
   },
   "explicit_consult_tokens": {

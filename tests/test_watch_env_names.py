@@ -27,6 +27,7 @@ EXPECTED = {
     "inventory_hook": "JEV_HOOK",
     "inventory": "JEV_INV",
     "decisions": "JEV_DECISIONS",
+    "dashboard": "JEV_DASHBOARD",
     "doctor": "JEV_DOCTOR",
     "jev": "JEV_PING",
     "progress": "JEV_PROGRESS",

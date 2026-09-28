@@ -12,6 +12,11 @@ name: live-eval
 # When the eval fails or a streak/alert fires, .github/scripts/drift_issue.py
 # composes an issue body and the job opens-or-comments on the single pinned
 # "live-eval drift watch" issue (label: drift).
+# A case stuck >= streak_fail_weeks additionally runs
+# skills/jev-consult/scripts/drift_calibrate.py, which composes a
+# `calibration` PR (patched policy.json + flips report) -- or a comment on
+# the drift issue when the eval log is too thin. Never applies directly.
+# dashboard.py renders the artifact bundle into dashboard.html.
 
 on:
   workflow_dispatch:
@@ -19,8 +24,9 @@ on:
     - cron: "0 6 * * 1"
 
 permissions:
-  contents: read
+  contents: write
   issues: write
+  pull-requests: write
 
 jobs:
   compare-live:
@@ -100,6 +106,76 @@ jobs:
           python skills/jev-consult/scripts/decisions.py \
             --html eval-report.html $HIST \
             --file eval-decisions.jsonl || true
+      - name: dashboard.html (self-contained, ASCII-safe)
+        if: always()
+        env:
+          JEV_CONSULT_LOG: ${{ github.workspace }}/eval-decisions.jsonl
+        run: |
+          HIST=""
+          [ -f eval-history.jsonl ] && HIST="--history eval-history.jsonl"
+          EVAL=""
+          [ -f eval-live.json ] && EVAL="--eval eval-live.json"
+          python skills/jev-consult/scripts/dashboard.py \
+            --out dashboard.html $HIST $EVAL || true
+      - name: calibration plan (drift streak -> PR artifacts or comment)
+        if: always()
+        id: calibrate
+        env:
+          JEV_CONSULT_LOG: ${{ github.workspace }}/eval-decisions.jsonl
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          HIST=""
+          [ -f eval-history.jsonl ] && HIST="--history eval-history.jsonl"
+          EVAL=""
+          [ -f eval-live.json ] && EVAL="--eval eval-live.json"
+          OPEN_PRS=""
+          if command -v gh >/dev/null; then
+            gh pr list --label calibration --state open \
+              --json number,title,url > cal-open-prs.json 2>/dev/null || true
+            [ -f cal-open-prs.json ] && OPEN_PRS="--open-prs cal-open-prs.json"
+          fi
+          python skills/jev-consult/scripts/drift_calibrate.py \
+            $EVAL $HIST --out-dir calibration --run-url "$RUN_URL" \
+            --policy skills/jev-consult/policy.json $OPEN_PRS || true
+          if [ -f calibration/plan.json ]; then
+            echo "action=$(python -c "import json; print(json.load(open('calibration/plan.json'))['action'])")" >> "$GITHUB_OUTPUT"
+          else
+            echo "action=skip" >> "$GITHUB_OUTPUT"
+          fi
+      - name: open the calibration PR (never applies directly)
+        if: always() && steps.calibrate.outputs.action == 'open_pr'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          BRANCH="$(python -c "import json; print(json.load(open('calibration/plan.json'))['pr']['branch'])")"
+          LABEL="$(python -c "import json; print(json.load(open('calibration/plan.json'))['pr']['label'])")"
+          TITLE="$(python -c "import json; print(json.load(open('calibration/plan.json'))['pr']['title'])")"
+          cp calibration/policy.json skills/jev-consult/policy.json
+          git config user.name "devin-live-eval[bot]"
+          git config user.email "devin-live-eval[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add skills/jev-consult/policy.json
+          git commit -m "calibration: drift-backed policy thresholds"
+          git push -u origin "$BRANCH"
+          gh label create "$LABEL" \
+            --description "drift-backed jev policy calibration" \
+            --color 1D76DB 2>/dev/null || true
+          gh pr create --title "$TITLE" --body-file calibration/pr-body.md \
+            --label "$LABEL"
+      - name: comment the drift issue when the calibration plan is thin
+        if: always() && steps.calibrate.outputs.action == 'comment' && hashFiles('calibration/comment.md') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ISSUE="$(gh issue list --label drift --state open \
+            --json number --jq '.[0].number' 2>/dev/null || true)"
+          if [ -n "$ISSUE" ]; then
+            gh issue comment "$ISSUE" --body-file calibration/comment.md
+          else
+            echo "no open drift issue -- nothing to comment on"
+          fi
       - name: save eval baseline + history for next run
         if: always() && hashFiles('eval-baseline.json') != ''
         uses: actions/cache/save@v6
@@ -151,4 +227,6 @@ jobs:
             eval-alerts.txt
             eval-report.html
             drift-issue.md
+            dashboard.html
+            calibration/
           if-no-files-found: warn

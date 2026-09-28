@@ -43,6 +43,8 @@ python skills/jev-consult/scripts/progress.py review reliability --reason "Accep
 python skills/jev-consult/scripts/progress.py history reliability
 python skills/jev-consult/scripts/progress.py evidence reliability 1     # rebuild the recorded Jev input for event 1
 python skills/jev-consult/scripts/compare.py --live
+python skills/jev-consult/scripts/dashboard.py --file decisions.jsonl --history eval-history.jsonl --out dashboard.html   # one self-contained ASCII page; --watch bounded by --max-ticks
+python skills/jev-consult/scripts/drift_calibrate.py --eval eval-live.json --out-dir calibration --dry-run   # drift streak -> calibration PR plan; never applies policy.json
 python skills/jev-consult/scripts/compact.py transcript.json --history --fake   # --dir DIR for batch, --prune-spill S, --list-spill
 python skills/jev-consult/scripts/trace.py show --key plan                      # single field from .jev-trace.json (--out PATH writes JSON to a file)
 python skills/jev-consult/scripts/trace.py stats                                # counts, last_pick, file age (--out PATH writes JSON to a file)

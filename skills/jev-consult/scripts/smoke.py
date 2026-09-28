@@ -6911,6 +6911,8 @@ STEPS = (
     ("progress", "step_progress"),
     ("schemas", "step_schemas"),
     ("perf", "step_perf"),
+    ("dashboard", "step_dashboard"),
+    ("drift_calibrate", "step_drift_calibrate"),
     ("self_test", "step_self_test"),
     ("coverage", "step_coverage"),
 )
@@ -7024,6 +7026,22 @@ def step_progress(tmp: Path) -> dict:
         detail = "calibrate drift: %s" % ",".join(misses) if misses else out2.strip()[:120]
         return _step("progress", ok, detail)
     return _step("progress", ok, out.strip()[:120] or "rc=%d" % rc)
+
+
+def step_dashboard(tmp: Path) -> dict:
+    """Run `dashboard.py --self-test`; fails when the render checks break."""
+    rc, out = _run([str(SCRIPTS / "dashboard.py"), "--self-test"], cwd=tmp)
+    ok = rc == 0 and "self-test: ok" in out
+    return _step("dashboard", ok, out.strip()[:160] or "rc=%d" % rc)
+
+
+def step_drift_calibrate(tmp: Path) -> dict:
+    """Run `drift_calibrate.py --self-test`; fails when the plan checks break."""
+    rc, out = _run(
+        [str(SCRIPTS / "drift_calibrate.py"), "--self-test"], cwd=tmp
+    )
+    ok = rc == 0 and "self-test: ok" in out
+    return _step("drift_calibrate", ok, out.strip()[:160] or "rc=%d" % rc)
 
 
 def step_self_test(tmp: Path) -> dict:

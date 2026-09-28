@@ -292,6 +292,8 @@
   "smoke_selftest_timeout_seconds": 60,
   "streak_warn_weeks": 2,
   "streak_fail_weeks": 3,
+  "calibrate_min_entries": 10,
+  "calibrate_min_flips": 1,
   "miss_rate_max": 0.5,
   "override_rate_max": 0.3,
   "core_skill_tokens": {

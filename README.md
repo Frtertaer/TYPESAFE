@@ -1,8 +1,13 @@
 # jev-consult
 
-Режим: ты даёшь только задачу/план. ИИ-кодер сам смотрит проект. **Jev принимает решения** (TypeSafe System One): подход, keep vs change, библиотека, архитектура, good-enough. Jev не пишет «сделай вот это» текстом — только Choice / Noul / Score. Кодер переводит ответ в действие или эскалирует тебе.
+[![tests](https://github.com/Frtertaer/TYPESAFE/actions/workflows/tests.yml/badge.svg)](https://github.com/Frtertaer/TYPESAFE/actions/workflows/tests.yml)
+[![live-eval](https://github.com/Frtertaer/TYPESAFE/actions/workflows/live-eval.yml/badge.svg)](https://github.com/Frtertaer/TYPESAFE/actions/workflows/live-eval.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+![python](https://img.shields.io/badge/python-3.10%2B-blue)
 
-После clone **одна команда** подключает режим в любой сессии **Hermes**, **Claude Code (desktop)**, **Codex**, **Grok Build**. В Cursor / Gemini / прочие установщик не ставит.
+Режим: ты даёшь только задачу/план. ИИ-кодер сам смотрит проект. **Jev принимает решения** (TypeSafe System One): подход, keep vs change, библиотека, архитектура, good-enough. Jev не пишет «сделай вот это» текстом — только Choice / Noul / Score. Кодер переводит ответ в действие или эскалирует тебе. Промпт-хук IDF-шортлистит уже установленные skills/plugins/MCP и пишет каждое решение в `decisions.jsonl`; `progress.py` ведёт opt-in леджер ревью вклада.
+
+После clone **одна команда** подключает режим в **Hermes**, **Claude Code (desktop)**, **Codex**, **Grok Build**, **Cursor**, **Gemini**, **Windsurf**, **opencode** (список — `ALLOWED` в `scripts/install.py`):
 
 ```text
 python scripts/install.py
@@ -36,20 +41,43 @@ https://github.com/Frtertaer/TYPESAFE/releases/latest/download/jev-setup.pyz
 https://github.com/Frtertaer/TYPESAFE/releases/latest/download/jev-setup.cmd
 ```
 
-Exe, pyz и cmd несут одинаковый payload: скилл, `install.py` и `doctor.py` — git clone не нужен. Откроется меню: **1) Install 2) Uninstall 3) Check (doctor) 4) Exit**. Меню само находит уже стоящие харнессы, подсказывает, где взять `TYPESAFE_API_KEY` (переопределяется env `JEV_KEY_HELP_URL`), спрашивает ключ скрыто (getpass) и пишет его в `.env` харнесса, бандла и `~/.env` (файлы — chmod 600; на Windows — ACL только для владельца через `icacls`), в конце прогоняет doctor и печатает сводку вида `PASS (2 harnesses ok, 2 not installed)` — отсутствующий харнесс — не ошибка. Payload распаковывается в `~/.jev-consult/bundle/` — метки `.jev-consult-source` и хуки указывают на стабильный путь, а не на временный каталог. Дополнительно exe копирует себя в `~/.jev-consult/jev-runtime.exe` и записывает его в хуки (`JEV_HOOK_PYTHON`) — хуки работают и после удаления скачанного exe, без Python.
+Exe, pyz и cmd несут одинаковый payload: скилл, `install.py` и `doctor.py` — git clone не нужен. Откроется меню: **1) Install 2) Uninstall 3) Check (doctor) 4) Exit**. Меню находит уже стоящие харнессы, спрашивает ключ скрыто (getpass) и пишет его в `.env` харнесса, бандла и `~/.env` (chmod 600; на Windows — ACL владельца через `icacls`), в конце прогоняет doctor и печатает сводку вида `PASS (2 harnesses ok, 2 not installed)` — отсутствующий харнесс — не ошибка. Payload лежит в `~/.jev-consult/bundle/`; exe дополнительно остаётся в `~/.jev-consult/jev-runtime.exe`, так что хуки работают без Python.
 
 Путь разработчика — clone:
 
 ```text
 git clone <repo-url> && cd TYPESAFE
-python scripts/install.py                 # ставит скилл в 4 харнесса (голый запуск в TTY открывает меню)
+python scripts/install.py                 # ставит скилл в 8 харнессов (голый запуск в TTY открывает меню)
 # TYPESAFE_API_KEY=... в .env или env харнесса (значение не печатать)
 python skills/jev-consult/scripts/doctor.py        # rc 0 = установка ок
 python -m unittest discover -s tests      # прогон всей suite
 make test-jev                             # один test-файл по суффиксу (или python -m unittest tests.test_jev)
 ```
 
-Собрать артефакты из clone: `python scripts/package_release.py` или `make package` (zipapp в `dist/` + `jev-setup.cmd` рядом). `python scripts/package_release.py --exe` дополнительно собирает exe: на Windows-хосте с PyInstaller — готовый `dist/jev-setup-windows-amd64.exe`, иначе — дерево `dist/exe/` (entry, payload, `jev-setup.spec`, `build-exe.cmd`), которое достраивает `build-exe.cmd` на Windows или CI-джоба `release-exe.yml` на `windows-latest`. PyInstaller не кросс-компилирует — Windows exe собирается только на Windows; в этом репозитории CI-раннер сейчас не подхватывает джобы, поэтому exe артефакт появится в релизе, когда Actions починят (или после ручного прогона `dist/exe/build-exe.cmd`).
+Собрать артефакты из clone: `python scripts/package_release.py` или `make package` (zipapp в `dist/` + `jev-setup.cmd` рядом). `python scripts/package_release.py --exe` дополнительно собирает exe: на Windows-хосте с PyInstaller — готовый `dist/jev-setup-windows-amd64.exe`, иначе — дерево `dist/exe/` для достройки `build-exe.cmd`. PyInstaller не кросс-компилирует — exe собирает CI-джоба `release-exe.yml` на `windows-latest`, которая пересобирает `nightly`-релиз на каждый push в master.
+
+## Как это выглядит
+
+Меню установки (TTY) — обнаружение харнессов, выбор действия, скрытый ввод ключа:
+
+![install menu](docs/assets/install-menu.png)
+![hidden key prompt](docs/assets/install-key-prompt.png)
+
+`doctor.py --live` — проверка установки по харнессам с пробником CLI (available/limited/missing):
+
+![doctor --live](docs/assets/doctor-live.png)
+
+`jev.py ask request.json --trace` — один вызов Jev: Choice + Score + Noul, на этом запросе решение — `escalate` по `low_score_confidence`:
+
+![jev ask](docs/assets/jev-ask.png)
+
+`decisions.py --acceptance` — прод-метрики по накопленному `decisions.jsonl` (pick/applied/override/miss, `route: explicit_consult` отдельно, `consult_promotions` отдельно):
+
+![acceptance](docs/assets/acceptance.png)
+
+`dashboard.py` — один self-contained `dashboard.html` из лога и eval-history (KPI, escalate_reasons, weekly-тренд, streak/drift); также складывается артефактом в `live-eval.yml`:
+
+![dashboard](docs/assets/dashboard.png)
 
 ## Что в репозитории
 
@@ -84,7 +112,7 @@ make test-jev                             # один test-файл по суфф
 | `skills/jev-consult/scripts/progress_core.py` | Движок леджера для `progress.py` и `policy_lint.py` (SQLite + GitEvidence); импортируется, отдельных команд нет |
 | `~/.cache/jev-consult/decisions.jsonl` | Журнал решений хука, по строке на промпт (`JEV_CONSULT_LOG=0` выключает, `JEV_CONSULT_LOG=PATH` переадресует) |
 | `~/.cache/jev-consult/spill/` | Полные выводы, вырезанные compact (`<sha>.txt`, owner-only каталог, максимум 200 файлов / 256 МБ; `JEV_CONSULT_SPILL=0` выключает, `JEV_CONSULT_SPILL=PATH` переадресует) |
-| `scripts/install.py` | Копия скилла только в 4 харнесса (`--env` печатает resolved config JSON: agents/home/hermes_home/source/targets/existing/policy/key_set; `--jq KEY`/`--out PATH`); `--source DIR` — установка из распакованного бандла, `--setup` — интерактивное меню, `--live` — после install/check гонит doctor `--live` и помечает rate-limited харнессы с fallback-подсказкой |
+| `scripts/install.py` | Копия скилла в 8 харнессов из `ALLOWED` (`--env` печатает resolved config JSON: agents/home/hermes_home/source/targets/existing/policy/key_set; `--jq KEY`/`--out PATH`); `--source DIR` — установка из распакованного бандла, `--setup` — интерактивное меню, `--live` — после install/check гонит doctor `--live` и помечает rate-limited харнессы с fallback-подсказкой |
 | `scripts/package_release.py` | Сборка `dist/jev-setup.pyz` — однофайлового zipapp-инсталлятора (скилл + инсталлятор + doctor) и `dist/jev-setup.cmd` для Windows; `--exe` — PyInstaller-дерево/exe `jev-setup-windows-amd64.exe` в `dist/`; работает без git clone |
 | `scripts/exe_entry.py` | Entry point exe: распаковывает payload из `_MEIPASS` в `~/.jev-consult/bundle`, запускает install.py `--source`; `<exe> script.py` — replay скриптов для хуков без Python |
 | `install.cmd` / `install.sh` | Обёртки: bootstrap Python (`py -3` → `python3` → `python`, иначе подсказка python.org), затем `install.py --setup` в интерактивном терминале (без TTY — `install.py` как раньше) |
@@ -252,97 +280,20 @@ weekly `live-eval` краснеет на корректных кейсах, и �
 
 ## Evidence
 
-Измерено на live-eval и накопленном `decisions.jsonl` — 3 раунда dogfood,
-433 записи кумулятивно (301 routing + 5 fill + 127 feedback):
+Прод-числа с weekly live-eval и накопленного `decisions.jsonl` — 3 раунда
+dogfood, 433 записи кумулятивно (301 routing + 5 fill + 127 feedback);
+детали и методика — `docs/evidence.md`:
 
-| Метрика | Значение | Где |
+| Метрика | Значение | Источник |
 |---|---|---|
 | live-eval корпус | **21/21 PASS** против гейта, diff против `eval-baseline.json` без регрессий | `compare.py --live --strict --diff` |
-| **Jev vs без Jev (A/B)** | mean delta **+0.46 noul**, 7 побед / 0 поражений на 7 scored-arms | `compare.py --ab` |
-| A/B по кейсам | off_track +0.94 · progress_accept +0.81 · forget +0.51 · unknown +0.49 · library +0.22 · stuck +0.19 · market_tools +0.07 | eval-live.json |
-| кумулятивный лог (r1+r2+r3) | 268 non-consult routing: pick 25.4%, applied 94.1%, override 1.5%, miss 56.7%, strong-pick accuracy 100% (55 пиков); escalate_reason = {no_candidates 55, none_pick 43, confidence_floor 31, need_gate 5}; p50/p95 100/143 ms | `decisions.py --acceptance` |
-| раунд 3 (с bypass, schema v2) | 76 non-consult routing (18 пиков, 79 вердиктов — 100% покрытие verdict-eligible): pick 23.7%, applied 94.4%, override 5.6%, miss 59.2%, strong-pick 100% (12); escalate_reason = {no_candidates 28, none_pick 20, confidence_floor 10}; p50/p95 100/132 ms | то же |
-| `route: explicit_consult` (считается отдельно, в pick-rate не входит) | 33/33 consult-запросов отроучены, jev-consult в шортлисте у всех 33, **0% false-trigger** на 10 негативах. Но **0 пиков**: Jev ответил `none` на 30/33 (none p=0.51–0.92 против jev-consult 0.08–0.34), 2 escalate по floor, 1 dedupe — floor-rescue не срабатывает, т.к. argmax выигрывает `none` | acceptance-ключ `explicit_consult` |
-| false-accept | негативные кейсы (`market_none`, `mechanical`) не роутятся в Jev — проверено реальным hook-routing (shortlist → chooser не вызывается), а не флагом фикстуры | `expect_call: false` + `routing_pool` в корпусе |
-| need-гейт | **СНЯТ** (с r2). `need_skill` остаётся вопросом и пишется телеметрией, но не роутит; маршрутизация = `strong_pick` + `confidence_floor` | `resolve_picker`, `decisions._replay` |
+| Jev vs без Jev (A/B) | mean delta **+0.46 noul**, 7 побед / 0 поражений на 7 scored-arms | `compare.py --ab` в `live-eval.yml` |
+| кумулятивный лог | pick 25.4% · applied 94.1% · override 1.5% · miss 56.7% · strong-pick accuracy 100% (55) · p50/p95 100/143 ms | `decisions.py --acceptance` |
+| consult-route | 33/33 consult-запросов дошли до Jev, **0% false-trigger** на негативах; `promoted: true` продвигает jev-consult над `none`-argmax при p ≥ `consult_min_conf` | `decisions.py --acceptance` (строка `explicit_consult`, `consult_promotions`) |
+| escalate_reason | no_candidates 55 · none_pick 43 · confidence_floor 31 · need_gate 5 (остаток r1-r2 до снятия гейта) | тот же лог |
+| false-accept | негативные кейсы (`market_none`, `mechanical`) не роутятся в Jev — проверено реальным hook-routing | `expect_call: false` в корпусе |
+| калибровка floor | применён 0.30 (вердикт-чистое окно (0.23, 0.38]); инструментальная рекомендация 0.15 отклонена — вытащила бы rejected-пик | `decisions.py --calibrate` |
 
-### Калибровка `confidence_floor` — раунд 3, применена
-
-Верbatim `--calibrate` на кумулятивном логе (433 записи, политика до правки):
-
-```text
-calibrate: 154 replayable entries (279 skipped, 0 health-excluded)
-threshold           current  recommended    delta
-confidence_floor     0.5500       0.1500  -0.4000
-strong_pick          0.8500       0.8500  +0.0000
-tight_gap            0.0800       0.7250  +0.6450
-rates under recommended: escalate=0.026 weak_winner=0.1818 strong_winner=0.3506 none=0.4416
-cost: current=0.2922 recommended=0.2078
-pick_confidence recorded on 115/154 entries — confidence_floor replayed against the real operand
-```
-
-Рекомендация инструмента (0.15) **отклонена**: cost-функция verdict-blind —
-минимизирует долю escalate+weak_winner и не различает, был ли подавленный
-пик нужен. При 0.15 всплыл бы verdicted-**rejected** пик `mcp_sqlite` на
-conf 0.23 («keep JSONL or move to sqlite?» — хотели jev-consult, не sqlite).
-По вердиктам 12 floor-suppressed записей r3 распадаются на два класса:
-
-- **item-suppressed (5)** — argmax был реальным скиллом/тулом: accepted
-  0.38 / 0.43 / 0.44 (jev-consult ×2, changelog-writer), rejected
-  0.07 / 0.23 (mcp_sqlite ×2). Вердикт-чистое окно — **(0.23, 0.38]**:
-  взяли **0.30** (max-margin), `escalate_if.confidence_below` синхронно
-  (правило P005).
-- **none-suppressed (7)** — argmax был `none` (низкоуверенный abstain):
-  1 accepted / 6 rejected. Пол корректно блокирует слабые abstains; то, что
-  на consult/decision-промптах сам abstain был неверным ответом — это
-  проблема стороны модели, не порога.
-
-Flips при 0.30 по кумулятивному логу: 23 записи — из них 11 всплывают
-item-пиками (3 verdicted-accepted + 8 unverdicted r2: jev-consult ×6,
-release-notes, mcp-jira) и 12 остаются `none` (argmax не меняется —
-прикладного пика не добавляют). Оба verdicted-rejected пика (0.07, 0.23)
-остаются под полом. `--acceptance` читает записанные статусы, поэтому
-после-правки цифры те же — дельта видна в replay-калибровке выше, а не в
-пересчёте старого лога.
-
-### Bypass: reach есть, pick нет — открытый вопрос
-
-Плумбинг `route: explicit_consult` работает механически идеально: все 33
-consult-запроса отроучены и дошли до Jev с jev-consult в шортлисте, негативы
-не триггерятся. Но **pick не гарантирован**: `none` выигрывает argmax
-(0.51–0.92 против 0.08–0.34 у jev-consult). Если дизайн-интент — «consult
-ask → jev-consult surfaces», нужен либо (a) winner-promotion на уровне
-роутинга для consult-route, либо (b) принятие `none` как честного ответа.
-**Намеренно не реализовано в этом PR** — зафиксировано как открытое
-решение; см. также 2 consult-escalate выше, где подавленный пик был
-jev-consult при p=0.30/0.38.
-
-### IDF-покрытие после расширения алиасов
-
-В `core_skill_tokens.jev-consult` добавлены только наблюдавшиеся промахи
-r2/r3: «torn between», «on the fence», «settle on», «debating whether»,
-«two paths», «hold or fold». Все 10 вербатим-промптов промахов теперь
-попадают в шортлист (parity-тест `test_observed_miss_phrases_surface`).
-Сознательно **не** алиасились «can» и «table» — поодиночке они тащили бы
-jev-consult в механические промпты (guard-тест
-`test_overbroad_constituents_stay_quiet`). По корпусу: из 100 записанных
-empty-shortlist записей 26 теперь резолвятся в jev-consult (часть — через
-старые алиасы: r1-лог предшествует alias-словарю); остаток —
-преимущественно механические промпты (корректное поведение) плюс хвост из
-~13 decision-ask формулировок без алиаса («make up my mind», «mixed
-feelings», «wondering if», «can't tell if», «unclear if», «do X belong in
-Y», «better to X than Y») — кандидаты на следующий раунд расширения;
-словарь растёт только по наблюдаемым промахам.
-
-Стоящее правило из #17 — перекалибровка после ~1 недели новых записей:
-следующий прогон `--calibrate` на свежем логе с feedback-вердиктами
-проверяет и floor, и рекомендацию инструмента по вердиктам, а не только
-по cost.
-
-A/B-метрика — главный аргумент: каждый кейс прогоняется дважды — состояние
-после пика Jev и то же состояние с baseline-пиком «кодер решил сам» —
-и судья сравнивает итоговый noul. Baseline-арм строится без Jev-evidence (строки `inspected` с упоминаниями Jev/`.jev-*` вырезаются — кодер-один их не видел бы); кейс может задать отдельное состояние полем `ab.state`. `--ab` включён в weekly `live-eval.yml`;
-артефакты прогона: `eval-live.json/md`, `eval-decisions.jsonl` (каждый
-eval-вызов пишется как routing-запись `harness=live-eval`),
-`eval-report.html` (одностраничный отчёт `decisions.py --html`: status mix,
-acceptance, latency, недельный дрейф).
+История мерджей пакета: #19 схема v2/IDF · #20 снятие need-гейта · #21
+bypass · #22 floor 0.30 · #23/#26 promotion · #24 i18n+ledger · #25
+dashboard/drift→PR.

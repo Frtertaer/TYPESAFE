@@ -33,6 +33,7 @@ PROGRESS_INTS = (
     "stall_limit", "max_evidence_chars", "max_checks", "max_items",
 )
 PROGRESS_TIMES = ("api_timeout_seconds", "command_timeout_seconds", "database_timeout_seconds")
+GIT_COMMAND_MIN_SECONDS = 30.0
 PROGRESS_PROBABILITIES = ("confidence_floor", "choice_gap")
 EVENT_KINDS = {"assessment", "invalidate", "restore", "review"}
 DIFF_FLAGS = ("--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--diff-algorithm=myers",
@@ -379,10 +380,20 @@ class GitEvidence:
         return {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
 
     def _git(self, args, settings, allowed=(0,)):
+        # command_timeout_seconds budgets the evidence commands, not git
+        # plumbing: a worktree add or status on a slow host legitimately
+        # takes longer and must not be killed at the evidence budget.
+        try:
+            git_timeout = float(settings.get("command_timeout_seconds"))
+        except (TypeError, ValueError):
+            git_timeout = 0.0
+        git_timeout = max(git_timeout, GIT_COMMAND_MIN_SECONDS)
+        if not math.isfinite(git_timeout):
+            git_timeout = None
         try:
             result = subprocess.run(
                 ["git", *GIT_FLAGS, "--no-pager", "-C", str(self.repo), *args], capture_output=True,
-                timeout=settings["command_timeout_seconds"], check=False, env=self._git_env(),
+                timeout=git_timeout, check=False, env=self._git_env(),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ProgressError("GIT_UNAVAILABLE", "Git command could not complete") from exc

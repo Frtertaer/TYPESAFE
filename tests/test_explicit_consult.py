@@ -679,6 +679,31 @@ class ConsultPromotionTests(unittest.TestCase):
         self.assertEqual(out["status"], "winner")
         self.assertTrue(out["promoted"])
 
+    def test_floor_escalate_with_uncertain_noul_still_promotes(self):
+        # live-call regression: need noul in the uncertain band adds
+        # "uncertain_noul" to reasons — it is telemetry-only and must not
+        # veto the consult rescue (promotion was unreachable otherwise).
+        decision = floor_escalate("none", top=0.7)
+        decision["reasons"] = ["low_confidence", "uncertain_noul"]
+        decision["picks"]["need_skill"] = 0.34
+        decision["probabilities"]["load_tools"]["skill_jev_consult"] = 0.3
+        out = inventory.resolve_picker(
+            [CONSULT, *PICKED], decision, PROMOTION_POLICY, consult=True
+        )
+        self.assertEqual(out["status"], "winner")
+        self.assertTrue(out["promoted"])
+
+    def test_other_reason_still_escalates_on_consult(self):
+        # non-floor reasons keep the escalate standing even on consult route
+        decision = floor_escalate("none", top=0.7)
+        decision["reasons"] = ["low_confidence", "malformed_score"]
+        decision["probabilities"]["load_tools"]["skill_jev_consult"] = 0.9
+        out = inventory.resolve_picker(
+            [CONSULT, *PICKED], decision, PROMOTION_POLICY, consult=True
+        )
+        self.assertEqual(out["status"], "escalate")
+        self.assertFalse(out.get("promoted", False))
+
     def test_floor_escalate_none_below_floor_stays_none(self):
         decision = floor_escalate("none", top=0.7)
         decision["probabilities"]["load_tools"]["skill_jev_consult"] = 0.02

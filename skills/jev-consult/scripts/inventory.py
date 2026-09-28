@@ -1535,8 +1535,10 @@ def resolve_picker(
     winner or a non-decision outcome the reason enum does not cover.
 
     With ``consult`` (the prompt matched explicit_consult_tokens — the user
-    asked for a consult outright) an escalate raised only on the confidence
-    floor surfaces the suppressed pick: decide() still returns it in
+    asked for a consult outright) an escalate raised only on floor-type
+    reasons (confidence floor, score floor, or an uncertain need noul —
+    need_skill is telemetry-only and cannot veto a consult ask) surfaces
+    the suppressed pick: decide() still returns it in
     ``picks.load_tools``, so the floor preempt resolves to a winner (or to
     ``none`` when the suppressed pick was none/unresolvable). Any other
     escalate reason keeps failing open.
@@ -1554,8 +1556,13 @@ def resolve_picker(
         reasons = decision.get("reasons")
         if not isinstance(reasons, list):
             reasons = []
-        floor_only = bool(reasons) and all(
-            r in ("low_confidence", "low_score_confidence") for r in reasons
+        # need_skill is telemetry-only since the gate was removed, so an
+        # uncertain noul riding alongside a floor reason must not veto the
+        # consult rescue; a noul-only escalate (no floor reason) still stands.
+        floor_reasons = ("low_confidence", "low_score_confidence")
+        consult_tolerable = (*floor_reasons, "uncertain_noul")
+        floor_only = any(r in floor_reasons for r in reasons) and all(
+            r in consult_tolerable for r in reasons
         )
         if consult and floor_only:
             load = (decision.get("picks") or {}).get("load_tools")

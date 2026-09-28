@@ -219,7 +219,11 @@ def pick_with_jev(
 
     ``consult`` marks an explicit-consult prompt (explicit_consult_tokens
     matched): the picker dict gets ``route: 'explicit_consult'`` and a pick
-    suppressed only by the confidence floor still routes to a winner."""
+    suppressed only by the confidence floor still routes to a winner. The
+    picker also carries ``promoted`` (a jev-consult win promoted over a
+    'none' argmax by ``consult_min_conf``) and ``model_top`` (the model's
+    raw load_tools answer) so the routing log keeps promotion evidence
+    separate from ordinary picks."""
     if timeout is None:
         timeout = hook_jev_timeout_seconds()
     if not picked:
@@ -263,6 +267,9 @@ def pick_with_jev(
     picker = resolve_picker(picked, decision, policy, consult=consult)
     if consult:
         picker["route"] = "explicit_consult"
+        picker["promoted"] = bool(picker.get("promoted"))
+        top = (decision.get("picks") or {}).get("load_tools") if isinstance(decision, dict) else None
+        picker["model_top"] = top if isinstance(top, str) and top else None
     picker["attempted"] = attempted
     if result.get("note"):
         picker["note"] = result["note"]
@@ -407,6 +414,9 @@ def handle(
         }
         if deduped.get("route"):
             extra["route"] = str(deduped["route"])
+        if str(deduped.get("route") or "") == "explicit_consult":
+            extra["promoted"] = bool(deduped.get("promoted"))
+            extra["model_top"] = deduped.get("model_top")
         winner_out = winner if isinstance(winner, dict) else None
         if extra["jev_status"] == "winner" and winner_out and winner_out.get("name"):
             extra["jev_pick"] = {"kind": winner_out.get("kind"), "name": winner_out.get("name")}
@@ -459,6 +469,9 @@ def handle(
             "stale_sidecar": False,
             "sidecar_age_s": sidecar_age_s,
         }
+        if str(deduped.get("route") or "") == "explicit_consult":
+            LAST_DECISION["promoted"] = bool(deduped.get("promoted"))
+            LAST_DECISION["model_top"] = deduped.get("model_top")
         if note_tag:
             LAST_DECISION["note"] = note_tag
         append_decision(LAST_DECISION)
@@ -531,6 +544,8 @@ def handle(
     if consult:
         extra["route"] = "explicit_consult"
         picker["route"] = "explicit_consult"
+        extra["promoted"] = bool(picker.get("promoted"))
+        extra["model_top"] = picker.get("model_top")
     if stale_match:
         extra["stale_sidecar"] = True
     if note_tag:
@@ -605,6 +620,10 @@ def handle(
         "stale_sidecar": stale_match,
         "sidecar_age_s": sidecar_age_s,
     }
+    if consult:
+        LAST_DECISION["promoted"] = bool(picker.get("promoted"))
+        _top = picker.get("model_top")
+        LAST_DECISION["model_top"] = _top if isinstance(_top, str) and _top else None
     if note_tag:
         LAST_DECISION["note"] = note_tag
     elif picker.get("note"):

@@ -47,6 +47,7 @@ REQUIRED_KEYS = (
     "question_hard_max",
     "choice_option_hard_max",
     "confidence_floor",
+    "consult_min_conf",
     "noul_yes",
     "noul_no",
     "noul_unsure",
@@ -63,6 +64,7 @@ REQUIRED_KEYS = (
 # probability-like fields: finite numbers inside [0, 1]
 PROB_FIELDS = (
     "confidence_floor",
+    "consult_min_conf",
     "miss_rate_max",
     "noul_yes",
     "noul_no",
@@ -152,6 +154,7 @@ INIT_POLICY = {
     "question_hard_max": 32,
     "choice_option_hard_max": 255,
     "confidence_floor": 0.55,
+    "consult_min_conf": 0.08,
     "noul_yes": 0.7,
     "noul_no": 0.3,
     "noul_unsure": 0.5,
@@ -195,7 +198,7 @@ RULES = {
     "P001": "missing required key; jev.py reads it and a fallback fires silently without it",
     "P002": "field has the wrong type or is out of range (probability in [0,1], positive int, non-empty string, boolean)",
     "P003": "a section that must be an object is not (escalate_if, templates)",
-    "P004": "threshold ordering violated (noul_no < noul_unsure < noul_yes, confidence_floor < strong_pick, soft_max <= hard_max, bands inside bands)",
+    "P004": "threshold ordering violated (noul_no < noul_unsure < noul_yes, confidence_floor < strong_pick, consult_min_conf < confidence_floor, soft_max <= hard_max, bands inside bands)",
     "P005": "duplicate thresholds disagree (escalate_if.confidence_below vs confidence_floor, choice_gap_below vs tight_gap)",
     "P006": "a kind is listed in both must_ask and never_ask",
     "P007": "template is malformed (not an object, missing instructions, instructions not a non-empty string)",
@@ -467,6 +470,15 @@ def lint_policy(policy) -> list[dict]:
     strong = policy.get("strong_pick")
     if _num(conf_floor) and _num(strong) and not conf_floor < strong:
         add("P004", "error", "strong_pick", "need confidence_floor < strong_pick (%.3g !< %.3g)" % (conf_floor, strong), "a strong pick must clear the escalate floor")
+    consult_min = policy.get("consult_min_conf")
+    if _num(consult_min) and _num(conf_floor) and not consult_min < conf_floor:
+        add(
+            "P004",
+            "error",
+            "consult_min_conf",
+            "need consult_min_conf < confidence_floor (%.3g !< %.3g)" % (consult_min, conf_floor),
+            "promotion is a sub-floor rescue; at/above the floor it rescues nothing",
+        )
     soft = policy.get("question_soft_max")
     hard = policy.get("question_hard_max")
     if _num(soft) and _num(hard) and not 0 < soft <= hard:

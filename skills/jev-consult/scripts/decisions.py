@@ -81,6 +81,8 @@ ENTRY_SCHEMA_ROWS = {
     "note": {"required": False, "type": "string, extra note tag (written only when set)"},
     "dedupe": {"required": False, "type": "bool, outcome reused from a fresh sidecar"},
     "route": {"required": False, "type": "string|null, routing branch that produced the record ('explicit_consult'); null on normal IDF routing"},
+    "promoted": {"required": False, "type": "bool, explicit_consult record whose winner was promoted past a 'none' argmax by consult_min_conf"},
+    "model_top": {"required": False, "type": "string|null, the model's raw load_tools answer on explicit_consult records ('none' when the argmax was none)"},
     "fill": {"required": False, "type": "string, fill writer (apply|catalog|peer) — fill entries only"},
     "outcome": {"required": False, "type": "string, first word of the fill result — fill entries only"},
 }
@@ -242,7 +244,7 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
     prompts: dict[str, int] = {}
     stamps: list[float] = []
     notes: dict[str, int] = {}
-    explicit = strong = 0
+    explicit = strong = promoted = 0
     by_route: dict[str, int] = {}
     for item in entries:
         status = str(item.get("jev_status") or "unknown")
@@ -262,6 +264,8 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
             explicit += 1
         if item.get("strong_pick"):
             strong += 1
+        if item.get("promoted"):
+            promoted += 1
         head = str(item.get("prompt_head") or "").strip()[:120]
         if head:
             prompts[head] = prompts.get(head, 0) + 1
@@ -305,6 +309,7 @@ def summarize(entries: list[dict], bad: int = 0) -> dict:
         ),
         "explicit": explicit,
         "strong_pick": strong,
+        "consult_promotions": promoted,
         "need_skill": {
             "n": len(needs),
             "mean": round(sum(needs) / len(needs), 4) if needs else None,
@@ -344,6 +349,11 @@ def format_stats(stats: dict) -> str:
         ),
         "explicit: %d  strong_pick: %d" % (stats["explicit"], stats["strong_pick"]),
     ]
+    if stats.get("consult_promotions"):
+        lines.append(
+            "consult_promotions: %d (explicit_consult 'none' argmax overruled by consult_min_conf)"
+            % stats["consult_promotions"]
+        )
     if stats.get("by_schema"):
         lines.append(
             "schema: "
@@ -963,6 +973,9 @@ def acceptance_report(
             "entries": len(consult),
             "picks": len(consult_picks),
         },
+        # Winner promotion is its own bucket, deliberately separate from the
+        # consult picks count and never mixed into pick_rate/strong_pick.
+        "consult_promotions": sum(1 for e in consult if e.get("promoted")),
         "feedback_records": len(feedback),
         "override_window": override_window,
     }
@@ -997,6 +1010,11 @@ def format_acceptance(data: dict) -> str:
         lines.append(
             "explicit_consult: %d routed (%d picks) - excluded from the rates above"
             % (consult.get("entries") or 0, consult.get("picks") or 0)
+        )
+    if data.get("consult_promotions"):
+        lines.append(
+            "consult_promotions: %d winners promoted over a 'none' argmax (consult_min_conf)"
+            % data["consult_promotions"]
         )
     lat = data.get("latency_ms") or {}
     if lat.get("n"):
@@ -1197,8 +1215,13 @@ td,th{border:1px solid #ddd;padding:.3em .5em;text-align:left}
         "routing": acceptance.get("routing_entries") or 0,
         "window": acceptance.get("override_window") or 0,
         "consult_note": (
-            "; explicit_consult route: %d (excluded from the rates)"
-            % (acceptance.get("explicit_consult") or {}).get("entries", 0)
+            "; explicit_consult route: %d (excluded from the rates%s)"
+            % (
+                (acceptance.get("explicit_consult") or {}).get("entries", 0),
+                "; %d promoted" % acceptance["consult_promotions"]
+                if acceptance.get("consult_promotions")
+                else "",
+            )
             if (acceptance.get("explicit_consult") or {}).get("entries")
             else ""
         ),
@@ -4112,6 +4135,8 @@ def main(argv: list[str] | None = None) -> int:
             "- entries: %(total)d (filtered: %(filtered)d, bad lines: %(bad_lines)d)" % stats,
             "- window: %s -> %s" % (stats.get("first_iso") or "-", stats.get("last_iso") or "-"),
             "- explicit: %d  strong_pick: %d" % (stats["explicit"], stats["strong_pick"]),
+            "- consult promotions: %d (explicit_consult 'none' argmax overruled by consult_min_conf)"
+            % stats.get("consult_promotions", 0),
             "",
             "## by status",
             "",

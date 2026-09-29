@@ -584,6 +584,13 @@ def _normalize_line(text: str) -> str:
     return "".join(out).strip()
 
 
+def _indent_width(text: str) -> int:
+    """Leading-whitespace width with tabs expanded — the line's indent
+    depth signature for indentation-sensitive languages."""
+    leading = text[: len(text) - len(text.lstrip(" \t"))]
+    return len(leading.expandtabs(8))
+
+
 def _norm_digest(text: str, context: str = "") -> str:
     """Path-free digest of a normalized line bound to a normalized
     neighbor context (context + hunk position): pure reformats and
@@ -638,12 +645,37 @@ def _diff_line_hashes(diff: str) -> dict:
         nonlocal hunk_lines
         context = fingerprint(sorted(text for kind, text in hunk_lines if kind == " "))
         norm_context = fingerprint(sorted(_normalize_line(text) for kind, text in hunk_lines if kind == " "))
+        # Indentation is semantics in Python/YAML, not style: bind the
+        # in-place digest to the line's indent depth relative to its hunk
+        # context (counts of context lines shallower/equal/deeper). A dedent
+        # out of a block changes the signature and loses credit; a uniform
+        # reindent shifts line and context together and keeps it. Hunks with
+        # no context lines stay indent-free — no structure is visible.
+        ctx_indents = [
+            _indent_width(text)
+            for kind, text in hunk_lines
+            # Blank context lines (including the split() artifact after a
+            # trailing newline) carry no structural indent to compare.
+            if kind == " " and text.strip(" \t")
+        ]
+
+        def indent_sig(text):
+            if not ctx_indents:
+                return ""
+            width = _indent_width(text)
+            return "\x00i:%d,%d,%d" % (
+                sum(1 for c in ctx_indents if c < width),
+                sum(1 for c in ctx_indents if c == width),
+                sum(1 for c in ctx_indents if c > width),
+            )
+
         for index, (kind, text) in enumerate(hunk_lines):
             if kind == "+":
                 digest = _line_digest(new_file, context + "\x00" + str(index) + "\x00" + text)
                 added.append(digest)
                 norms["added"][digest] = {
-                    "n": _norm_digest(text, new_file + "\x00" + norm_context + "\x00" + str(index)),
+                    "n": _norm_digest(text, new_file + "\x00" + norm_context + "\x00" + str(index) + indent_sig(text)),
+                    "n0": _norm_digest(text, new_file + "\x00" + norm_context + "\x00" + str(index)),
                     "p": new_file, "f": _norm_digest(text),
                 }
                 sections.setdefault(new_file, []).append(
@@ -653,7 +685,8 @@ def _diff_line_hashes(diff: str) -> dict:
                 digest = _line_digest(old_file, context + "\x00" + str(index) + "\x00" + text)
                 removed.append(digest)
                 norms["removed"][digest] = {
-                    "n": _norm_digest(text, old_file + "\x00" + norm_context + "\x00" + str(index)),
+                    "n": _norm_digest(text, old_file + "\x00" + norm_context + "\x00" + str(index) + indent_sig(text)),
+                    "n0": _norm_digest(text, old_file + "\x00" + norm_context + "\x00" + str(index)),
                     "p": old_file, "f": _norm_digest(text),
                 }
         hunk_lines = []
@@ -861,24 +894,50 @@ def _credited_retained(credit: dict, diff: str, wide_diff: str = None) -> bool:
         norms = credit.get(norm_key)
         if not isinstance(norms, dict):
             return False
-        present_n = Counter(
-            info["n"] for info in current[norm_key].values() if isinstance(info, dict)
-        )
+        # Match current lines, not digests: a new-format line carries `n`
+        # (indent-aware) and `n0` (indent-free). Credits written before
+        # indent binding stored the unsigned digest under "n" with no "n0"
+        # companion — resolve those against each line's "n0" channel. For
+        # new records only the signed "n" channel counts, so a dedented
+        # line cannot re-match through the indent-free digest.
+        present_lines = [
+            info
+            for info in current[norm_key].values()
+            if isinstance(info, dict)
+        ]
         for digest, short in missing.items():
             info = norms.get(digest)
             if not isinstance(info, dict):
                 return False
-            if info.get("n") and present_n[info["n"]] >= short:
-                present_n[info["n"]] -= short
+            want = info.get("n")
+            line_key = "n" if "n0" in info else "n0"
+            satisfied = 0
+            for _ in range(short):
+                hit = next(
+                    (
+                        line
+                        for line in present_lines
+                        if line.get(line_key) == want
+                    ),
+                    None,
+                )
+                if hit is None:
+                    break
+                present_lines.remove(hit)
+                satisfied += 1
+            if satisfied >= short:
                 continue
             path = info.get("p")
             if not path or path not in deleted_now or not info.get("f"):
                 return False
             if key == "removed":
-                # The file's deletion removes the line anew — the credited
-                # removal persists while the file stays deleted. A move
-                # destination that reintroduces the text is disqualified
-                # inside _move_destinations.
+                # The file's deletion removes the line anew only when a
+                # verified move destination still carries the file's
+                # remaining content; a file that is simply gone takes the
+                # removal credit with it. A destination that reintroduces
+                # the credited text is disqualified inside _move_destinations.
+                if not _move_destinations(wide, path, credit, current):
+                    return False
                 continue
             destinations = _move_destinations(wide, path, credit, current)
             pool = Counter(
@@ -886,7 +945,7 @@ def _credited_retained(credit: dict, diff: str, wide_diff: str = None) -> bool:
                 for dst in wide[norm_key].values()
                 if isinstance(dst, dict) and dst.get("p") in destinations
             )
-            if pool[info["f"]] < short:
+            if pool[info["f"]] < short - satisfied:
                 return False
     return True
 
@@ -1076,8 +1135,12 @@ def _credit_ok(credit) -> bool:
             isinstance(credit[key], dict)
             and all(
                 type(digest) is str and HEX64_RE.fullmatch(digest) is not None
-                and isinstance(info, dict) and set(info) <= {"n", "p", "f"}
+                and isinstance(info, dict) and set(info) <= {"n", "n0", "p", "f"}
                 and type(info.get("n")) is str and HEX64_RE.fullmatch(info["n"]) is not None
+                and (info.get("n0") is None or (
+                    type(info.get("n0")) is str
+                    and HEX64_RE.fullmatch(info["n0"]) is not None
+                ))
                 and type(info.get("p")) is str
                 and type(info.get("f")) is str and HEX64_RE.fullmatch(info["f"]) is not None
                 for digest, info in credit[key].items()
@@ -1708,7 +1771,13 @@ class Ledger:
                 _earned_credit(_diff_line_hashes(candidate["diff"]), credited, sections),
             ):
                 raise ProgressError("EVIDENCE_MISMATCH", "Recorded credit does not match the reconstructed change")
-        if event["kind"] == "restore" and not _credited_retained(metadata.get("credit") or {}, candidate["diff"]):
+        if event["kind"] == "restore" and not _credited_retained(
+            metadata.get("credit") or {},
+            candidate["diff"],
+            self.collector.diff(
+                stage["baseline"]["revision"], revision, stage["policy"]["progress"]
+            ),
+        ):
             raise ProgressError("EVIDENCE_MISMATCH", "Rebuilt evidence no longer retains the credited outcome")
         if event["kind"] == "assessment":
             questions = {"contribution": stage["policy"]["templates"]["contribution"]}
@@ -1837,7 +1906,12 @@ class Ledger:
                 raise ProgressError("NO_CURRENT_CHANGE", "A scope still at its baseline cannot recover contribution credit")
             award = next((e["data"] for e in events if e["kind"] == "assessment" and e["data"].get("item_id") == item_id and e["data"].get("points", 0) > 0), None)
             credit = (award or {}).get("credit")
-            if not isinstance(credit, dict) or not _credited_retained(credit, diff):
+            # Retention uses the unscoped diff like review does — a file
+            # moved outside the item's frozen paths is still present work.
+            wide = self.collector.diff(
+                stage["baseline"]["revision"], before["revision"], stage["policy"]["progress"]
+            )
+            if not isinstance(credit, dict) or not _credited_retained(credit, diff, wide):
                 raise ProgressError("RESTORE_MISMATCH", "The restored change must contain the originally credited outcome")
             if _credit_overlaps(credit, _credited_union(events)):
                 raise ProgressError("RESTORE_CONFLICT", "Another item now holds credit for those lines; resolve it before restoring")
